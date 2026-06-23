@@ -6,74 +6,74 @@
 # ============================================================
 
 # ── Core MT5 Integration ─────────────────────────────────────
-MetaTrader5==5.0.45
-pywin32==306
+MetaTrader5
+pywin32
 
 # ── Async Backend ────────────────────────────────────────────
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-websockets==12.0
-httpx==0.27.2
-python-multipart==0.0.9
+fastapi
+uvicorn[standard]
+websockets
+httpx
+python-multipart
 
 # ── Data & Analysis ──────────────────────────────────────────
-pandas==2.2.2
-numpy==1.26.4
-smartmoneyconcepts==1.0.0
-pandas-ta==0.3.14b
-scipy==1.14.0
+pandas
+numpy
+smartmoneyconcepts
+pandas-ta
+scipy
 
 # ── Database (PostgreSQL) ────────────────────────────────────
-sqlalchemy==2.0.31
-alembic==1.13.2
-asyncpg==0.29.0
-psycopg2-binary==2.9.9
+sqlalchemy
+alembic
+asyncpg
+psycopg2-binary
 
 # ── Cache / Pub-Sub ──────────────────────────────────────────
-redis[asyncio]==5.0.8
+redis[asyncio]
 
 # ── Chart Snapshots ──────────────────────────────────────────
-matplotlib==3.9.1
-mplfinance==0.12.10b0
-Pillow==10.4.0
+matplotlib
+mplfinance
+Pillow
 
 # ── Security & Crypto ────────────────────────────────────────
-cryptography==43.0.0
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
+cryptography
+python-jose[cryptography]
+passlib[bcrypt]
 
 # ── Config & Env ─────────────────────────────────────────────
-python-dotenv==1.0.1
-pydantic==2.8.2
-pydantic-settings==2.4.0
+python-dotenv
+pydantic
+pydantic-settings
 
 # ── Scheduling & Tasks ───────────────────────────────────────
-apscheduler==3.10.4
+apscheduler
 
 # ── Web Push Notifications (VAPID) ───────────────────────────
-pywebpush==2.0.0
+pywebpush
 
 # ── LLM Provider SDKs ────────────────────────────────────────
-anthropic==0.34.0
-openai==1.47.0
-google-generativeai==0.8.2
+anthropic
+openai
+google-generativeai
 
 # ── News / Calendar Feed ─────────────────────────────────────
-feedparser==6.0.11
-pytz==2024.1
+feedparser
+pytz
 
 # ── Logging & Monitoring ─────────────────────────────────────
-loguru==0.7.2
-rich==13.7.1
+loguru
+rich
 
 # ── Dev / Testing ────────────────────────────────────────────
-pytest==8.3.2
-pytest-asyncio==0.23.8
+pytest
+pytest-asyncio
 
 # ── AI/ML Extensions (Phase 2 — install separately) ──────────
-# stable-baselines3==2.3.2
-# gymnasium==0.29.1
-# torch==2.3.1
-# scikit-learn==1.5.1
-# hmmlearn==0.3.2
-# ollama==0.2.1
+# stable-baselines3
+# gymnasium
+# torch
+# scikit-learn
+# hmmlearn
+# ollama
