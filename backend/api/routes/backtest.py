@@ -12,6 +12,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
+from datetime import datetime
 
 from backend.data.database import get_db
 from backend.data.models import BacktestRun, BacktestTrade, User
@@ -28,6 +29,7 @@ class BacktestRequest(BaseModel):
     timeframe: str = "H1"
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    candle_count: int = 5000
     risk_config: Dict[str, Any] = {}
     initial_balance: float = 10000.0
 
@@ -35,6 +37,100 @@ class BacktestRequest(BaseModel):
 class SaveBacktestRequest(BaseModel):
     backtest_data: Dict[str, Any]
     save_mode: str = "FULL"  # "FULL" or "SUMMARY"
+
+
+def _generate_signals_from_candles(candles, symbol: str, timeframe: str) -> list:
+    """
+    Run a simplified SMC-style signal generation on historical candles.
+    Returns a list of signal dicts compatible with BacktestEngine.
+    Each signal has: time (bar index), symbol, direction, entry_price, stop_loss, confluence_score.
+    """
+    import pandas as pd
+    import numpy as np
+
+    signals = []
+    if len(candles) < 50:
+        return signals
+
+    # Use closing prices for structure detection
+    closes = candles['close'].values
+    highs = candles['high'].values
+    lows = candles['low'].values
+
+    swing_len = 5
+
+    for i in range(swing_len * 2 + 10, len(candles) - 1):
+        # Simple swing high/low detection
+        window_highs = highs[i - swing_len:i]
+        window_lows = lows[i - swing_len:i]
+
+        is_swing_high = highs[i - swing_len] == max(window_highs)
+        is_swing_low = lows[i - swing_len] == min(window_lows)
+
+        if not (is_swing_high or is_swing_low):
+            continue
+
+        # Determine bias from recent price action
+        recent_close = closes[i]
+        lookback_close = closes[i - 20]
+        bias = "BUY" if recent_close > lookback_close else "SELL"
+
+        # Check for order block (strong move away from zone)
+        body_sizes = abs(closes[i-3:i] - candles['open'].values[i-3:i])
+        avg_body = np.mean(body_sizes) if len(body_sizes) > 0 else 0
+
+        # Only take signals with reasonable candle bodies (filtering noise)
+        current_body = abs(closes[i] - candles['open'].values[i])
+        if avg_body == 0 or current_body < avg_body * 0.5:
+            continue
+
+        # Calculate entry, SL, TP
+        entry = closes[i]
+        atr_period = min(14, i)
+        atr = np.mean(highs[i-atr_period:i] - lows[i-atr_period:i])
+        if atr == 0:
+            continue
+
+        if bias == "BUY":
+            sl = entry - atr * 1.5
+            tp = entry + atr * 4.5  # 3R minimum
+        else:
+            sl = entry + atr * 1.5
+            tp = entry - atr * 4.5
+
+        # Confluence score (simplified)
+        score = 50
+        # Trend alignment
+        if bias == "BUY" and closes[i] > np.mean(closes[max(0,i-50):i]):
+            score += 15
+        elif bias == "SELL" and closes[i] < np.mean(closes[max(0,i-50):i]):
+            score += 15
+        # Swing structure
+        if is_swing_low and bias == "BUY":
+            score += 10
+        elif is_swing_high and bias == "SELL":
+            score += 10
+
+        # Only take high-confluence signals (avoid spam)
+        if score < 60:
+            continue
+
+        # Throttle: no signal within 5 bars of last one
+        if signals and i - signals[-1]["time"] < 5:
+            continue
+
+        signals.append({
+            "time": i,
+            "symbol": symbol,
+            "direction": bias,
+            "entry_price": float(entry),
+            "stop_loss": float(sl),
+            "take_profit": float(tp),
+            "confluence_score": score,
+        })
+
+    logger.info(f"Generated {len(signals)} signals from {len(candles)} candles for {symbol}")
+    return signals
 
 
 @router.post("/backtest")
@@ -49,23 +145,60 @@ async def run_backtest_endpoint(
     """
     from backend.backtester.runner import run_backtest
     from backend.mt5.data_fetcher import DataFetcher
+    from backend.services.bot_service import bot_service
+    import time as _time
 
-    candles = await DataFetcher.get_historical_data(req.symbol, req.timeframe, count=5000)
+    bt_start = _time.time()
+    logger.info(f"═══ BACKTEST START ═══ {req.symbol} {req.timeframe} | user={current_user.email}")
+    logger.info(f"  Config: balance=${req.initial_balance} | dates={req.start_date}→{req.end_date} | candles={req.candle_count}")
+    bot_service.log_system_event(f"Backtest started: {req.symbol} {req.timeframe}", category="BACKTEST")
+
+    # Fetch candles: use date range if provided, otherwise use candle_count
+    if req.start_date and req.end_date:
+        try:
+            start = datetime.fromisoformat(req.start_date)
+            end = datetime.fromisoformat(req.end_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD or ISO format.")
+        logger.info(f"  Fetching data range: {start} → {end}")
+        candles = await DataFetcher.get_data_range(req.symbol, req.timeframe, start, end)
+    else:
+        logger.info(f"  Fetching last {req.candle_count} candles")
+        candles = await DataFetcher.get_historical_data(req.symbol, req.timeframe, count=req.candle_count)
+
     if candles is None or candles.empty:
+        logger.warning(f"  No data available for {req.symbol} — aborting backtest")
         raise HTTPException(status_code=400, detail="No data available for backtest")
 
+    logger.info(f"  Fetched {len(candles)} candles")
+
+    # Generate signals from the SMC strategy engine on historical data
+    logger.info(f"  Generating signals from candle data...")
+    signals = _generate_signals_from_candles(candles, req.symbol, req.timeframe)
+    logger.info(f"  Generated {len(signals)} signals")
+
+    logger.info(f"  Running backtest engine...")
     results = await run_backtest(
         user_id=current_user.id,
         strategy_id=req.strategy_id,
         symbol=req.symbol,
         candles=candles,
-        signals=[],
+        signals=signals,
         risk_config=req.risk_config,
         initial_balance=req.initial_balance,
         save_mode="DISCARD",  # Never auto-save — user decides
     )
 
     report = results.get("report")
+    elapsed = (_time.time() - bt_start) * 1000
+    pnl = results.get('final_balance', 0) - req.initial_balance
+    wr = (report.win_rate if report else 0) * 100
+    logger.info(f"═══ BACKTEST COMPLETE ═══ {req.symbol} | {results['total_trades']} trades | "
+                f"P&L=${pnl:.2f} | WR={wr:.1f}% | {elapsed:.0f}ms")
+    bot_service.log_system_event(
+        f"Backtest complete: {req.symbol} | {results['total_trades']} trades | P&L=${pnl:.2f} | WR={wr:.1f}%",
+        category="BACKTEST"
+    )
 
     # Return full results for frontend display
     return {
@@ -116,8 +249,8 @@ async def save_backtest(
         user_id=current_user.id,
         strategy_id=data.get("strategy_id", "SMC_v1"),
         symbol=data.get("symbol", ""),
-        start_date=data.get("start_date"),
-        end_date=data.get("end_date"),
+        start_date=data.get("start_date") or datetime.now(),
+        end_date=data.get("end_date") or datetime.now(),
         params_snapshot=json.dumps(data.get("risk_config", {})),
         total_trades=data.get("total_trades", 0),
         win_rate=report.get("win_rate", 0),

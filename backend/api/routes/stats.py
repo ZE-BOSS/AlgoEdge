@@ -25,6 +25,7 @@ async def get_user_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """Get aggregate performance stats for the authenticated user."""
+    logger.info(f"Computing stats for {current_user.email}")
     # Try cached stats first
     result = await db.execute(
         select(PerformanceStats)
@@ -35,6 +36,7 @@ async def get_user_stats(
     cached = result.scalar_one_or_none()
 
     if cached:
+        logger.info(f"Returning cached stats for {current_user.email}: {cached.total_trades} trades, WR={cached.win_rate}")
         return {
             "total_trades": cached.total_trades,
             "win_rate": cached.win_rate,

@@ -1,9 +1,30 @@
-import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, TrendingDown, DollarSign, Target, Shield, Activity, AlertTriangle } from 'lucide-react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { TrendingUp, TrendingDown, DollarSign, Target, Shield, Activity, AlertTriangle, Play, Square, Eye, Loader2, Terminal, Trash2 } from 'lucide-react';
 import { useConnectionStore, useRiskStore, useAuthStore } from '../store';
-import { getStats, getPositions, getCompounding, getChartData } from '../services/api';
+import { getStats, getPositions, getCompounding, getChartData, getBotStatus, startBot, stopBot, getBotLogs } from '../services/api';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
+
+// ── Category color mapping for activity log ───────────────────────────────
+const CATEGORY_COLORS = {
+  BOT: '#3fb68b',
+  SCAN: '#58a6ff',
+  SIGNAL: '#f0883e',
+  DATA: '#8b949e',
+  STRATEGY: '#bc8cff',
+  BACKTEST: '#d29922',
+  CONFIG: '#79c0ff',
+  SYSTEM: '#8b949e',
+  ERROR: '#f85149',
+  WARN: '#d29922',
+};
+
+function getCategoryColor(evt) {
+  if (evt.level === 'ERROR') return CATEGORY_COLORS.ERROR;
+  if (evt.level === 'WARN') return CATEGORY_COLORS.WARN;
+  if (evt.level === 'SIGNAL') return CATEGORY_COLORS.SIGNAL;
+  return CATEGORY_COLORS[evt.category] || CATEGORY_COLORS.SYSTEM;
+}
 
 function MetricCard({ label, value, color = '', subtext = '', icon: Icon }) {
   return (
@@ -54,15 +75,17 @@ function LiveChart() {
     });
 
     if (chartData?.candles?.length) {
-      const mapped = chartData.candles.map(c => {
-        // Normalize time: lightweight-charts expects UNIX timestamps (seconds)
-        let t = c.time;
-        if (typeof t === 'string') {
-          t = Math.floor(new Date(t).getTime() / 1000);
-        }
-        return { time: t, open: c.open, high: c.high, low: c.low, close: c.close };
-      });
-      candleSeries.setData(mapped);
+      const mapped = chartData.candles
+        .map(c => {
+          let t = c.time;
+          if (typeof t === 'string') t = Math.floor(new Date(t).getTime() / 1000);
+          return { time: t, open: c.open, high: c.high, low: c.low, close: c.close };
+        })
+        .sort((a, b) => a.time - b.time)
+        .filter((c, i, arr) => i === 0 || c.time > arr[i - 1].time);
+      if (mapped.length > 0) {
+        candleSeries.setData(mapped);
+      }
     }
 
     chart.timeScale().fitContent();
@@ -98,6 +121,232 @@ function PositionCard({ position }) {
             TP{sp.tp_level}: {sp.take_profit} {sp.be_applied ? '(BE)' : ''}
           </span>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function BotControl() {
+  const { status: connStatus } = useConnectionStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const queryClient = useQueryClient();
+
+  const { data: botStatus } = useQuery({
+    queryKey: ['botStatus'],
+    queryFn: () => getBotStatus().then(r => r.data),
+    refetchInterval: 5000,
+    enabled: connStatus === 'ONLINE' && isAuthenticated,
+  });
+
+  const startMutation = useMutation({
+    mutationFn: () => startBot(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['botStatus'] }),
+  });
+
+  const stopMutation = useMutation({
+    mutationFn: () => stopBot(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['botStatus'] }),
+  });
+
+  const isRunning = botStatus?.running === true;
+  const isPending = startMutation.isPending || stopMutation.isPending;
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div className="card-header">
+        <span className="card-title">Bot Control</span>
+        <span className={`badge ${isRunning ? 'badge-green' : 'badge-red'}`}>
+          {isRunning ? '● Running' : '○ Stopped'}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={() => startMutation.mutate()}
+          disabled={isRunning || isPending || connStatus !== 'ONLINE'}
+        >
+          {startMutation.isPending ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
+          Start Bot
+        </button>
+        <button
+          className="btn btn-danger btn-sm"
+          onClick={() => stopMutation.mutate()}
+          disabled={!isRunning || isPending}
+        >
+          {stopMutation.isPending ? <Loader2 size={14} className="spin" /> : <Square size={14} />}
+          Stop Bot
+        </button>
+      </div>
+
+      {botStatus && (
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+          <div><strong>Symbols:</strong> {botStatus.symbols?.join(', ') || 'None configured'}</div>
+          {botStatus.last_scan && <div><strong>Last Scan:</strong> {new Date(botStatus.last_scan).toLocaleString()}</div>}
+          {botStatus.total_signals_today != null && <div><strong>Signals Today:</strong> {botStatus.total_signals_today}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── System-wide Activity Log ────────────────────────────────────────────────
+function ActivityLog() {
+  const { status: connStatus } = useConnectionStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const logContainerRef = useRef(null);
+  const [liveEvents, setLiveEvents] = useState([]);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [filter, setFilter] = useState('ALL');
+
+  // Poll backend logs (catches events from before WS connected)
+  const { data: botLogs } = useQuery({
+    queryKey: ['botLogs'],
+    queryFn: () => getBotLogs(100).then(r => r.data),
+    refetchInterval: 3000,
+    enabled: connStatus === 'ONLINE' && isAuthenticated,
+  });
+
+  // Listen for real-time WebSocket events
+  useEffect(() => {
+    const handler = (e) => {
+      const data = e.detail;
+      if (data?.type === 'activity_log' && data?.event) {
+        setLiveEvents(prev => {
+          const next = [data.event, ...prev];
+          // Keep max 300 in memory
+          return next.slice(0, 300);
+        });
+      }
+    };
+    window.addEventListener('ws-message', handler);
+    return () => window.removeEventListener('ws-message', handler);
+  }, []);
+
+  // Merge polled logs with live WS events, dedup by time+message
+  const mergedEvents = useCallback(() => {
+    const polled = botLogs?.events || [];
+    const all = [...liveEvents, ...polled];
+    // Dedup by time+message
+    const seen = new Set();
+    const deduped = [];
+    for (const evt of all) {
+      const key = `${evt.time}|${evt.message}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(evt);
+      }
+    }
+    // Sort newest first
+    deduped.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+
+    // Apply filter
+    if (filter === 'ALL') return deduped;
+    return deduped.filter(evt => {
+      if (filter === 'ERRORS') return evt.level === 'ERROR' || evt.level === 'WARN';
+      if (filter === 'SIGNALS') return evt.level === 'SIGNAL' || evt.category === 'SIGNAL';
+      return (evt.category || '').toUpperCase() === filter;
+    });
+  }, [botLogs, liveEvents, filter])();
+
+  // Auto-scroll to top when new events arrive
+  useEffect(() => {
+    if (autoScroll && logContainerRef.current) {
+      logContainerRef.current.scrollTop = 0;
+    }
+  }, [mergedEvents.length, autoScroll]);
+
+  const clearLive = () => setLiveEvents([]);
+
+  const categories = ['ALL', 'BOT', 'SCAN', 'SIGNALS', 'BACKTEST', 'CONFIG', 'ERRORS'];
+
+  return (
+    <div className="card" style={{ marginTop: 20 }}>
+      <div className="card-header">
+        <span className="card-title">
+          <Terminal size={12} style={{ marginRight: 4, display: 'inline' }} />
+          System Activity Log
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+            {mergedEvents.length} events
+          </span>
+          <button className="btn btn-secondary btn-sm" onClick={clearLive} title="Clear live events">
+            <Trash2 size={10} />
+          </button>
+        </div>
+      </div>
+
+      {/* Filter tabs */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
+        {categories.map(cat => (
+          <button
+            key={cat}
+            className={`btn btn-sm ${filter === cat ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setFilter(cat)}
+            style={{ padding: '2px 8px', fontSize: '0.65rem' }}
+          >
+            {cat === 'ERRORS' ? '⚠ Errors' : cat === 'SIGNALS' ? '🎯 Signals' : cat}
+          </button>
+        ))}
+      </div>
+
+      {/* Log entries — terminal-style */}
+      <div
+        ref={logContainerRef}
+        style={{
+          maxHeight: 320,
+          overflow: 'auto',
+          background: '#0d1117',
+          borderRadius: 'var(--radius-xs)',
+          padding: '8px 12px',
+          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+          fontSize: '0.72rem',
+          lineHeight: 1.7,
+          border: '1px solid var(--border)',
+        }}
+      >
+        {mergedEvents.length ? mergedEvents.map((evt, i) => {
+          const color = getCategoryColor(evt);
+          const time = evt.time ? new Date(evt.time).toLocaleTimeString() : '';
+          const cat = evt.category || evt.level || 'SYS';
+          return (
+            <div
+              key={`${evt.time}-${i}`}
+              style={{
+                padding: '2px 0',
+                borderBottom: '1px solid #21262d',
+                display: 'flex',
+                gap: 8,
+                alignItems: 'flex-start',
+                opacity: evt.level === 'ERROR' ? 1 : 0.9,
+              }}
+            >
+              <span style={{ color: '#484f58', flexShrink: 0, minWidth: 65 }}>{time}</span>
+              <span style={{
+                color,
+                fontWeight: 600,
+                flexShrink: 0,
+                minWidth: 65,
+                textTransform: 'uppercase',
+                fontSize: '0.65rem',
+              }}>
+                [{cat}]
+              </span>
+              <span style={{
+                color: evt.level === 'ERROR' ? '#f85149' : evt.level === 'SIGNAL' ? '#f0883e' : '#c9d1d9',
+                wordBreak: 'break-word',
+              }}>
+                {evt.message}
+              </span>
+            </div>
+          );
+        }) : (
+          <div style={{ padding: 20, textAlign: 'center', color: '#484f58' }}>
+            <Terminal size={20} style={{ marginBottom: 8, opacity: 0.3 }} />
+            <div>No activity yet. Start the bot or run a backtest to see live logs.</div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -171,6 +420,8 @@ export default function Dashboard() {
         </div>
 
         <div>
+          <BotControl />
+
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-header">
               <span className="card-title">Open Positions</span>
@@ -182,7 +433,7 @@ export default function Dashboard() {
               <div className="empty-state">
                 <Activity />
                 <h3>No Open Positions</h3>
-                <p>Waiting for signals...</p>
+                <p>Start the bot to begin scanning for trade setups</p>
               </div>
             )}
           </div>
@@ -204,6 +455,9 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Full-width System Activity Log */}
+      <ActivityLog />
     </>
   );
 }

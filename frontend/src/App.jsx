@@ -5,7 +5,7 @@ import {
   LayoutDashboard, BookOpen, FlaskConical, BarChart3,
   Zap, Settings, Wifi, WifiOff, Loader2, LogOut
 } from 'lucide-react';
-import { useBackendConnection } from './hooks/useBackendConnection';
+import { useBackendConnection, useWebSocket } from './hooks/useBackendConnection';
 import { useConnectionStore, useAuthStore } from './store';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import Login from './pages/Login';
@@ -90,6 +90,7 @@ function Sidebar() {
 
 function AppContent() {
   useBackendConnection();
+  useWebSocket();
 
   return (
     <div className="app-layout">

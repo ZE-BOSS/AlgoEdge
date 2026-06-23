@@ -11,12 +11,14 @@ from pydantic import BaseModel
 
 class TradeSignal(BaseModel):
     """Standardized output from any strategy."""
-    strategy_id: str
+    strategy_id: str = "SMC_v1"
     symbol: str
-    direction: str  # "BULLISH" or "BEARISH"
+    direction: str  # "BUY" or "SELL"
+    signal_type: str = "OB_ENTRY"  # OB_ENTRY, FVG_ENTRY, BOS, CHOCH
     timeframe: str
-    entry_zone_top: float
-    entry_zone_bottom: float
+    entry_price: float
+    entry_zone_top: float = 0.0
+    entry_zone_bottom: float = 0.0
     stop_loss: float
     take_profit: float
     confluence_score: int

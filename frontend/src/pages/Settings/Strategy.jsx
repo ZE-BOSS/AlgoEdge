@@ -1,7 +1,15 @@
-import { useState } from 'react';
-import { Sliders, Save } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Sliders, Save, Loader2, Check } from 'lucide-react';
+import { getConfig, updateConfig } from '../../services/api';
+import { useConnectionStore, useAuthStore } from '../../store';
 
 export default function StrategySettings() {
+  const { status } = useConnectionStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const queryClient = useQueryClient();
+  const [saved, setSaved] = useState(false);
+
   const [config, setConfig] = useState({
     symbols: ['XAUUSD', 'EURUSD', 'GBPUSD'],
     htf_timeframe: 'H4',
@@ -17,9 +25,46 @@ export default function StrategySettings() {
     news_filter: true,
   });
 
+  // Load current config from backend
+  const { data: remoteConfig } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => getConfig().then(r => r.data),
+    enabled: status === 'ONLINE' && isAuthenticated,
+  });
+
+  useEffect(() => {
+    if (remoteConfig?.config) {
+      setConfig(prev => ({
+        ...prev,
+        ...Object.fromEntries(
+          Object.entries(remoteConfig.config).filter(([k]) => k in prev)
+        ),
+      }));
+    }
+  }, [remoteConfig]);
+
+  const mutation = useMutation({
+    mutationFn: (newConfig) => updateConfig({ config: newConfig }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config'] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    },
+  });
+
   const update = (key, val) => setConfig({ ...config, [key]: val });
 
-  const allSymbols = ['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'US30', 'BTCUSD', 'Volatility 75 Index', 'Volatility 100 Index', 'Volatility 50 Index', 'Volatility 25 Index', 'Boom 1000 Index', 'Crash 1000 Index'];
+  const handleSave = () => mutation.mutate(config);
+
+  const allSymbols = [
+    'XAUUSD','EURUSD','GBPUSD','USDJPY','US30','BTCUSD',
+    'Volatility 10 Index','Volatility 25 Index','Volatility 50 Index',
+    'Volatility 75 Index','Volatility 100 Index','Volatility 150 Index','Volatility 250 Index',
+    'Boom 300 Index','Boom 500 Index','Boom 1000 Index',
+    'Crash 300 Index','Crash 500 Index','Crash 1000 Index',
+    'Jump 10 Index','Jump 25 Index','Jump 50 Index','Jump 75 Index','Jump 100 Index',
+    'Step Index','Range Break 100 Index','Range Break 200 Index',
+  ];
 
   const toggleSymbol = (sym) => {
     if (config.symbols.includes(sym)) {
@@ -99,9 +144,15 @@ export default function StrategySettings() {
         </div>
       </div>
 
-      <button className="btn btn-primary" style={{ justifySelf: 'start' }}>
-        <Save size={14} /> Save Strategy Configuration
+      <button className="btn btn-primary" style={{ justifySelf: 'start' }} onClick={handleSave} disabled={mutation.isPending}>
+        {mutation.isPending ? <Loader2 size={14} className="spin" /> : saved ? <Check size={14} /> : <Save size={14} />}
+        {mutation.isPending ? 'Saving...' : saved ? 'Saved!' : 'Save Strategy Configuration'}
       </button>
+      {mutation.isError && (
+        <div style={{ color: 'var(--red)', fontSize: '0.8rem' }}>
+          Failed to save: {mutation.error?.response?.data?.detail || mutation.error?.message}
+        </div>
+      )}
     </div>
   );
 }

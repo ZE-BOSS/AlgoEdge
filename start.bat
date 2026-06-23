@@ -90,7 +90,7 @@ if !errorlevel! EQU 0 (
     goto skip_backend
 )
 
-start "AlgoEdge Backend" cmd /k "%VENV_DIR%\Scripts\python.exe" -m uvicorn backend.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%
+start "AlgoEdge Backend [port %BACKEND_PORT%]" cmd /k "title AlgoEdge Backend && color 0A && echo. && echo ══════════════════════════════════════════ && echo   AlgoEdge Backend - Live Terminal Log && echo ══════════════════════════════════════════ && echo. && %VENV_DIR%\Scripts\python.exe -m uvicorn backend.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT% --log-level info"
 
 echo      Waiting for health check (max %HEALTH_TIMEOUT%s)...
 set READY=0

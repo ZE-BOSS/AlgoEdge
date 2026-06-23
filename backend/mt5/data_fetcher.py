@@ -63,8 +63,23 @@ def _generate_mock_data(symbol: str, count: int) -> pd.DataFrame:
         "real_volume": np.zeros(count)
     })
     
-    # Cast to MT5 standard columns
-    df['time'] = df['time'].astype(int) // 10**9 # unix epoch
+    # Convert to unix epoch seconds, sort ascending, remove duplicates
+    df['time'] = df['time'].astype('int64') // 10**9
+    df = df.sort_values('time').drop_duplicates(subset=['time'], keep='last').reset_index(drop=True)
+    return df
+
+
+def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize a candle DataFrame: convert time to epoch seconds, sort, dedup."""
+    if df.empty:
+        return df
+    # Convert datetime to epoch seconds if needed
+    if pd.api.types.is_datetime64_any_dtype(df['time']):
+        df['time'] = df['time'].astype('int64') // 10**9
+    elif not pd.api.types.is_integer_dtype(df['time']):
+        df['time'] = pd.to_datetime(df['time']).astype('int64') // 10**9
+    # Sort ascending by time and remove any duplicate timestamps
+    df = df.sort_values('time').drop_duplicates(subset=['time'], keep='last').reset_index(drop=True)
     return df
 
 
@@ -98,9 +113,7 @@ class DataFetcher:
             return pd.DataFrame()
             
         df = pd.DataFrame(rates)
-        # MT5 time is in seconds
-        df['time'] = pd.to_datetime(df['time'], unit='s')
-        return df
+        return _normalize_df(df)
 
     @staticmethod
     async def get_data_range(
@@ -127,5 +140,4 @@ class DataFetcher:
             return pd.DataFrame()
             
         df = pd.DataFrame(rates)
-        df['time'] = pd.to_datetime(df['time'], unit='s')
-        return df
+        return _normalize_df(df)

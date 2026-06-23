@@ -176,4 +176,11 @@ export const getUsers = () => api.get('/admin/users');
 
 export const subscribePush = (data) => api.post('/push/subscribe', data);
 
+// ── Bot Control ─────────────────────────────────────────────────────────────
+
+export const startBot = (data) => api.post('/bot/start', data || {});
+export const stopBot = () => api.post('/bot/stop');
+export const getBotStatus = () => api.get('/bot/status');
+export const getBotLogs = (limit = 50) => api.get('/bot/logs', { params: { limit } });
+
 export default api;

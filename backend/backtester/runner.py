@@ -46,8 +46,21 @@ async def run_backtest(
     backtest_id = results["backtest_id"]
     report = results["report"]
 
-    start_date = candles.index[0] if len(candles) > 0 else datetime.now()
-    end_date = candles.index[-1] if len(candles) > 0 else datetime.now()
+    # Extract date range from candle data (time column is epoch seconds)
+    if len(candles) > 0:
+        if 'time' in candles.columns:
+            from datetime import timezone
+            start_date = datetime.fromtimestamp(int(candles['time'].iloc[0]), tz=timezone.utc)
+            end_date = datetime.fromtimestamp(int(candles['time'].iloc[-1]), tz=timezone.utc)
+        elif hasattr(candles.index[0], 'timestamp'):
+            start_date = candles.index[0]
+            end_date = candles.index[-1]
+        else:
+            start_date = datetime.now()
+            end_date = datetime.now()
+    else:
+        start_date = datetime.now()
+        end_date = datetime.now()
 
     run = BacktestRun(
         id=backtest_id,

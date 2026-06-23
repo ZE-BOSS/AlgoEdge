@@ -57,7 +57,13 @@ class BacktestEngine:
 
         for i in range(len(candles)):
             bar = candles.iloc[i]
-            current_time = bar.name if hasattr(bar.name, 'timestamp') else i
+            # Use 'time' column if available, otherwise fall back to index
+            if 'time' in candles.columns:
+                current_time = bar['time']
+            elif hasattr(bar.name, 'timestamp'):
+                current_time = bar.name
+            else:
+                current_time = i
             current_price = bar["close"]
             high = bar["high"]
             low = bar["low"]

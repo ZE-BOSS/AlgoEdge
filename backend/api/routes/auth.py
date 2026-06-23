@@ -111,6 +111,11 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     await db.refresh(user)
 
     logger.info(f"User registered: {user.email} ({user.id})")
+    try:
+        from backend.services.bot_service import bot_service
+        bot_service.log_system_event(f"New user registered: {user.email}", category="SYSTEM")
+    except Exception:
+        pass
 
     # Generate tokens
     access_token = create_token(user_id, "access")
@@ -147,6 +152,11 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
         )
 
     logger.info(f"User logged in: {user.email}")
+    try:
+        from backend.services.bot_service import bot_service
+        bot_service.log_system_event(f"User logged in: {user.email}", category="SYSTEM")
+    except Exception:
+        pass
 
     access_token = create_token(user.id, "access")
     refresh_token = create_token(user.id, "refresh")

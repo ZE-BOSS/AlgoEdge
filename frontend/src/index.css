@@ -323,6 +323,17 @@ tr:hover td {
   border-color: var(--red);
 }
 
+.btn-danger:hover {
+  background: #f8514930;
+  box-shadow: 0 0 12px var(--red-dim);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .btn-sm {
   padding: 4px 10px;
   font-size: 0.75rem;

@@ -30,6 +30,7 @@ async def get_signals(
     db: AsyncSession = Depends(get_db),
 ):
     """List signals for the authenticated user with optional filters."""
+    logger.info(f"Fetching signals for {current_user.email} | status={status} symbol={symbol}")
     query = select(Signal).where(Signal.user_id == current_user.id)
 
     if symbol:

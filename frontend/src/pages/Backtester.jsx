@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { FlaskConical, Play, Trash2, Eye, Save, X, Download, ChevronDown, ChevronRight } from 'lucide-react';
+import { FlaskConical, Play, Trash2, Eye, Save, X, Download, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { runBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest } from '../services/api';
 import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from 'recharts';
@@ -126,9 +126,9 @@ function BacktestResults({ result, onSave, onDismiss, isSaving }) {
                     <td>{i+1}</td>
                     <td><strong>{t.symbol}</strong></td>
                     <td><span className={`badge ${t.direction==='BUY'?'badge-green':'badge-red'}`}>{t.direction==='BUY'?'▲':'▼'}</span></td>
-                    <td>{t.entry_price}</td>
-                    <td>{t.exit_price}</td>
-                    <td>{t.stop_loss}</td>
+                    <td>{typeof t.entry_price === 'number' ? t.entry_price.toFixed(2) : t.entry_price}</td>
+                    <td>{typeof t.exit_price === 'number' ? t.exit_price.toFixed(2) : t.exit_price}</td>
+                    <td>{typeof t.stop_loss === 'number' ? t.stop_loss.toFixed(2) : t.stop_loss}</td>
                     <td>{t.exit_reason}</td>
                     <td style={{ color: (t.pnl||0) >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
                       ${(t.pnl||0).toFixed(2)}
@@ -152,6 +152,7 @@ export default function Backtester() {
   const [form, setForm] = useState({
     symbol: 'XAUUSD', timeframe: 'H1', initial_balance: 10000,
     risk_per_trade_pct: 1.0, min_rr: 3.0,
+    start_date: '', end_date: '', candle_count: 5000,
   });
   const [result, setResult] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -167,6 +168,9 @@ export default function Backtester() {
       symbol: form.symbol,
       timeframe: form.timeframe,
       initial_balance: form.initial_balance,
+      start_date: form.start_date || undefined,
+      end_date: form.end_date || undefined,
+      candle_count: form.candle_count,
       risk_config: { risk_per_trade_pct: form.risk_per_trade_pct, min_rr: form.min_rr },
     }),
     onSuccess: (res) => setResult(res.data),
@@ -213,12 +217,34 @@ export default function Backtester() {
                 {['M5','M15','H1','H4','D1'].map(tf => <option key={tf} value={tf}>{tf}</option>)}
               </select>
             </div>
+
+            {/* Date Range */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label>Start Date</label>
+                <input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} />
+              </div>
+              <div>
+                <label>End Date</label>
+                <input type="date" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} />
+              </div>
+            </div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: -8 }}>
+              Leave dates empty to use the last N candles instead.
+            </div>
+
+            <div><label>Candle Count (if no dates)</label><input type="number" value={form.candle_count} onChange={e => setForm({ ...form, candle_count: +e.target.value })} min={100} max={10000} /></div>
             <div><label>Initial Balance ($)</label><input type="number" value={form.initial_balance} onChange={e => setForm({ ...form, initial_balance: +e.target.value })} /></div>
             <div><label>Risk Per Trade (%)</label><input type="number" step="0.1" value={form.risk_per_trade_pct} onChange={e => setForm({ ...form, risk_per_trade_pct: +e.target.value })} /></div>
             <div><label>Minimum R:R</label><input type="number" step="0.5" value={form.min_rr} onChange={e => setForm({ ...form, min_rr: +e.target.value })} /></div>
             <button className="btn btn-primary" onClick={() => mutation.mutate()} disabled={mutation.isPending || status !== 'ONLINE'} style={{ width: '100%' }}>
-              <Play size={16} /> {mutation.isPending ? 'Running...' : 'Run Backtest'}
+              {mutation.isPending ? <><Loader2 size={16} className="spin" /> Running Backtest...</> : <><Play size={16} /> Run Backtest</>}
             </button>
+            {mutation.isError && (
+              <div style={{ color: 'var(--red)', fontSize: '0.8rem' }}>
+                Error: {mutation.error?.response?.data?.detail || mutation.error?.message || 'Backtest failed'}
+              </div>
+            )}
           </div>
         </div>
 

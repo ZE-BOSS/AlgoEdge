@@ -1,7 +1,15 @@
-import { useState } from 'react';
-import { Shield, Save } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Shield, Save, Loader2, Check } from 'lucide-react';
+import { getConfig, updateConfig } from '../../services/api';
+import { useConnectionStore, useAuthStore } from '../../store';
 
 export default function RiskSettings() {
+  const { status } = useConnectionStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const queryClient = useQueryClient();
+  const [saved, setSaved] = useState(false);
+
   const [config, setConfig] = useState({
     risk_per_trade_pct: 1.0,
     max_daily_loss_pct: 5.0,
@@ -22,7 +30,37 @@ export default function RiskSettings() {
     compounding_enabled: false,
   });
 
+  // Load current config from backend
+  const { data: remoteConfig } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => getConfig().then(r => r.data),
+    enabled: status === 'ONLINE' && isAuthenticated,
+  });
+
+  useEffect(() => {
+    if (remoteConfig?.config) {
+      // Merge remote config with defaults (only override keys that exist)
+      setConfig(prev => ({
+        ...prev,
+        ...Object.fromEntries(
+          Object.entries(remoteConfig.config).filter(([k]) => k in prev)
+        ),
+      }));
+    }
+  }, [remoteConfig]);
+
+  const mutation = useMutation({
+    mutationFn: (newConfig) => updateConfig({ config: newConfig }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config'] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    },
+  });
+
   const update = (key, val) => setConfig({ ...config, [key]: val });
+
+  const handleSave = () => mutation.mutate(config);
 
   return (
     <div style={{ display: 'grid', gap: 20, maxWidth: 800 }}>
@@ -97,9 +135,15 @@ export default function RiskSettings() {
         )}
       </div>
 
-      <button className="btn btn-primary" style={{ justifySelf: 'start' }}>
-        <Save size={14} /> Save Risk Configuration
+      <button className="btn btn-primary" style={{ justifySelf: 'start' }} onClick={handleSave} disabled={mutation.isPending}>
+        {mutation.isPending ? <Loader2 size={14} className="spin" /> : saved ? <Check size={14} /> : <Save size={14} />}
+        {mutation.isPending ? 'Saving...' : saved ? 'Saved!' : 'Save Risk Configuration'}
       </button>
+      {mutation.isError && (
+        <div style={{ color: 'var(--red)', fontSize: '0.8rem' }}>
+          Failed to save: {mutation.error?.response?.data?.detail || mutation.error?.message}
+        </div>
+      )}
     </div>
   );
 }

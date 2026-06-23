@@ -31,6 +31,7 @@ async def get_trades(
     db: AsyncSession = Depends(get_db),
 ):
     """Get trade history with optional filters."""
+    logger.info(f"Fetching trades for {current_user.email} | symbol={symbol} status={status} limit={limit}")
     query = select(Trade).where(Trade.user_id == current_user.id)
 
     if symbol:
@@ -41,6 +42,7 @@ async def get_trades(
     query = query.order_by(desc(Trade.created_at)).limit(limit).offset(offset)
     result = await db.execute(query)
     trades = result.scalars().all()
+    logger.info(f"Returning {len(trades)} trades for {current_user.email}")
 
     return [{
         "id": t.id,
@@ -70,6 +72,7 @@ async def get_open_positions(
     db: AsyncSession = Depends(get_db),
 ):
     """Get current open positions with sub-position details (N+1 fix: uses selectinload)."""
+    logger.info(f"Fetching open positions for {current_user.email}")
     query = (
         select(Trade)
         .options(selectinload(Trade.positions))

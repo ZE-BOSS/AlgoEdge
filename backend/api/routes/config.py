@@ -32,12 +32,15 @@ async def get_user_config(
     db: AsyncSession = Depends(get_db),
 ):
     """Get user strategy + risk configuration."""
+    logger.info(f"Loading config for user {current_user.email}")
     result = await db.execute(
         select(UserConfigModel).where(UserConfigModel.user_id == current_user.id)
     )
     config = result.scalar_one_or_none()
     if not config:
+        logger.info(f"No saved config for {current_user.email} — returning defaults")
         return {"config": {}, "preset_name": None}
+    logger.info(f"Config loaded for {current_user.email}: preset={config.preset_name}")
     return {"config": json.loads(config.config_json), "preset_name": config.preset_name}
 
 
@@ -48,6 +51,7 @@ async def update_user_config(
     db: AsyncSession = Depends(get_db),
 ):
     """Update user strategy config. Takes effect on next signal evaluation."""
+    from backend.services.bot_service import bot_service
     result = await db.execute(
         select(UserConfigModel).where(UserConfigModel.user_id == current_user.id)
     )
@@ -56,6 +60,7 @@ async def update_user_config(
     if config:
         config.config_json = json.dumps(req.config)
         config.preset_name = req.preset_name
+        logger.info(f"Config updated for {current_user.email}: {list(req.config.keys())}")
     else:
         config = UserConfigModel(
             user_id=current_user.id,
@@ -63,5 +68,7 @@ async def update_user_config(
             preset_name=req.preset_name,
         )
         db.add(config)
+        logger.info(f"Config created for {current_user.email}: {list(req.config.keys())}")
 
+    bot_service.log_system_event(f"Config saved: {', '.join(list(req.config.keys())[:5])}", category="CONFIG")
     return {"updated": True}
