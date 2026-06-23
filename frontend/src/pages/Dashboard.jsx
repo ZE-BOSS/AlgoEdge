@@ -54,13 +54,14 @@ function LiveChart() {
     });
 
     if (chartData?.candles?.length) {
-      const mapped = chartData.candles.map(c => ({
-        time: c.time,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      }));
+      const mapped = chartData.candles.map(c => {
+        // Normalize time: lightweight-charts expects UNIX timestamps (seconds)
+        let t = c.time;
+        if (typeof t === 'string') {
+          t = Math.floor(new Date(t).getTime() / 1000);
+        }
+        return { time: t, open: c.open, high: c.high, low: c.low, close: c.close };
+      });
       candleSeries.setData(mapped);
     }
 

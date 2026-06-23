@@ -26,5 +26,15 @@ async def get_chart_data(
     if df is None or df.empty:
         return {"candles": []}
 
-    candles = df.to_dict(orient="records")
+    # lightweight-charts expects UNIX timestamps (seconds), not ISO strings.
+    # pd.to_datetime produces Timestamp objects that serialize as ISO strings
+    # (e.g. "2026-06-10T22:00:00") which lightweight-charts cannot parse.
+    import pandas as pd
+    if pd.api.types.is_datetime64_any_dtype(df["time"]):
+        df["time"] = df["time"].astype("int64") // 10**9
+    elif not pd.api.types.is_integer_dtype(df["time"]):
+        # Fallback: try to convert whatever format to epoch seconds
+        df["time"] = pd.to_datetime(df["time"]).astype("int64") // 10**9
+
+    candles = df[["time", "open", "high", "low", "close"]].to_dict(orient="records")
     return {"symbol": symbol, "timeframe": timeframe, "count": len(candles), "candles": candles}
