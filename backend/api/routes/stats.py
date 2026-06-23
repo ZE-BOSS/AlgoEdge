@@ -1,0 +1,66 @@
+"""
+backend/api/routes/stats.py
+
+Performance analytics API.
+Source: TradingBot_MasterPlan-2.md Section 6
+"""
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from backend.data.database import get_db
+from backend.data.models import PerformanceStats, Trade, User
+from backend.api.deps import get_current_user
+from backend.analytics.metrics import compute_portfolio_stats
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
+router = APIRouter(prefix="/api", tags=["stats"])
+
+
+@router.get("/stats")
+async def get_user_stats(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get aggregate performance stats for the authenticated user."""
+    # Try cached stats first
+    result = await db.execute(
+        select(PerformanceStats)
+        .where(PerformanceStats.user_id == current_user.id)
+        .order_by(PerformanceStats.updated_at.desc())
+        .limit(1)
+    )
+    cached = result.scalar_one_or_none()
+
+    if cached:
+        return {
+            "total_trades": cached.total_trades,
+            "win_rate": cached.win_rate,
+            "total_pnl": cached.total_pnl,
+            "max_drawdown": cached.max_drawdown,
+            "sharpe_ratio": cached.sharpe_ratio,
+            "profit_factor": cached.profit_factor,
+            "avg_rr": cached.avg_rr,
+            "tp1_hit_rate": cached.tp1_hit_rate,
+            "tp2_hit_rate": cached.tp2_hit_rate,
+            "tp3_hit_rate": cached.tp3_hit_rate,
+            "tp4_hit_rate": cached.tp4_hit_rate,
+            "tp5_hit_rate": cached.tp5_hit_rate,
+            "max_consec_wins": cached.max_consec_wins,
+            "max_consec_losses": cached.max_consec_losses,
+        }
+
+    # Compute live from trades
+    trades_result = await db.execute(
+        select(Trade).where(Trade.user_id == current_user.id, Trade.status == "CLOSED")
+    )
+    trades = trades_result.scalars().all()
+    trade_dicts = [{
+        "pnl": t.pnl,
+        "exit_reason": t.exit_reason,
+        "be_applied": False,
+    } for t in trades]
+
+    return compute_portfolio_stats(trade_dicts)

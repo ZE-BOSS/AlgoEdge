@@ -1,0 +1,125 @@
+"""
+backend/strategies/smc/signals.py
+
+Trade signal generation and validation gates.
+Source: SMC_Strategy-1.md Section 14
+Source: RiskManagement_Spec.md Section 6
+"""
+
+from typing import Dict, Any, Optional
+from backend.strategies.smc.params import SMCParams
+from backend.strategies.base_strategy import TradeSignal
+from backend.utils.timeutils import is_kill_zone
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class TradeGate:
+    """All checks must return True. Any False = trade rejected."""
+
+    def __init__(self, params: SMCParams):
+        self.params = params
+
+    def validate_all(self, context: Dict[str, Any]) -> tuple[bool, str]:
+        """Run all safety gates. Returns (passed, rejection_reason)."""
+
+        direction = context.get("signal_direction", "")
+
+        # Gate 1: HTF bias must be confirmed (not NEUTRAL)
+        htf_bias = context.get("htf_bias", "NEUTRAL")
+        if htf_bias == "NEUTRAL":
+            return False, "HTF bias is NEUTRAL — no directional conviction"
+        if htf_bias != direction:
+            return False, f"HTF bias {htf_bias} conflicts with signal {direction}"
+
+        # Gate 2: Liquidity must have been swept
+        sweep = context.get("liquidity_sweep")
+        if sweep is None:
+            return False, "No liquidity sweep detected before entry"
+
+        # Gate 3: Price must be at a POI (OB or FVG zone)
+        fresh_ob = context.get("fresh_ob")
+        active_fvgs = context.get("active_fvgs", [])
+        if fresh_ob is None and len(active_fvgs) == 0:
+            return False, "Price is not at any POI (no OB or FVG)"
+
+        # Gate 4: Minimum RR must be met
+        entry = context.get("entry_price", 0)
+        sl = context.get("stop_loss", 0)
+        tp1 = context.get("tp1_price", 0)
+        if sl != 0 and entry != 0:
+            risk = abs(entry - sl)
+            reward = abs(tp1 - entry)
+            rr = reward / risk if risk > 0 else 0
+            if rr < self.params.min_rr:
+                return False, f"RR {rr:.1f} below minimum {self.params.min_rr}"
+
+        # Gate 5: Spread must be acceptable
+        current_spread = context.get("current_spread_pips", 0)
+        if current_spread > self.params.max_spread_pips:
+            return False, f"Spread {current_spread} pips exceeds max {self.params.max_spread_pips}"
+
+        # Gate 6: Must be in active session (if session filter enabled)
+        if self.params.session_filter_enabled:
+            if not context.get("in_kill_zone", False):
+                return False, "Outside active kill zone session"
+
+        # Gate 7: Must not be blocked by high-impact news
+        if self.params.news_filter_enabled:
+            if context.get("news_blocked", False):
+                return False, "Blocked by high-impact news event"
+
+        # Gate 8: Confluence score must meet minimum
+        score = context.get("confluence_score", 0)
+        if score < self.params.min_signal_score:
+            return False, f"Confluence score {score} below minimum {self.params.min_signal_score}"
+
+        return True, "ALL_GATES_PASSED"
+
+
+class SignalGenerator:
+    """Generates TradeSignal objects if validation passes."""
+
+    def __init__(self, params: SMCParams):
+        self.params = params
+        self.gate = TradeGate(params)
+
+    def generate(self, context: Dict[str, Any], score: int) -> Optional[TradeSignal]:
+        """Attempt to generate a signal from current context."""
+
+        context["confluence_score"] = score
+
+        passed, reason = self.gate.validate_all(context)
+        if not passed:
+            logger.debug(f"Signal rejected: {reason}")
+            return None
+
+        direction = context.get("signal_direction", "")
+        symbol = context.get("symbol", "")
+        entry = context.get("entry_price", 0.0)
+        sl = context.get("stop_loss", 0.0)
+        tp1 = context.get("tp1_price", 0.0)
+
+        signal = TradeSignal(
+            symbol=symbol,
+            direction=direction,
+            entry_price=entry,
+            stop_loss=sl,
+            take_profit=tp1,
+            timeframe=context.get("entry_timeframe", "M5"),
+            confluence_score=score,
+            signal_type=context.get("signal_type", "OB_ENTRY"),
+            metadata={
+                "htf_bias": context.get("htf_bias"),
+                "ob": context.get("fresh_ob"),
+                "fvg": context.get("active_fvgs"),
+                "sweep": context.get("liquidity_sweep"),
+                "candle_tier": context.get("candle_tier"),
+                "session": context.get("current_session"),
+                "ipdm_phase": context.get("ipdm_phase"),
+            }
+        )
+
+        logger.info(f"Signal generated: {direction} {symbol} @ {entry} | Score: {score}")
+        return signal
