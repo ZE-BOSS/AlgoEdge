@@ -90,8 +90,7 @@ if !errorlevel! EQU 0 (
     goto skip_backend
 )
 
-start "AlgoEdge Backend" /min cmd /k ^
-"%VENV_DIR%\Scripts\python.exe -m uvicorn backend.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT% 2>&1 | tee logs\backend.log"
+start "AlgoEdge Backend" cmd /k "%VENV_DIR%\Scripts\python.exe" -m uvicorn backend.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%
 
 echo      Waiting for health check (max %HEALTH_TIMEOUT%s)...
 set READY=0
@@ -126,7 +125,7 @@ if !errorlevel! EQU 0 (
     goto skip_frontend
 )
 
-start "AlgoEdge Frontend" /min cmd /k "cd frontend && npm run dev"
+start "AlgoEdge Frontend" cmd /k "cd frontend && npm run dev"
 
 timeout /t 3 /nobreak >nul
 echo [OK] Frontend started.
