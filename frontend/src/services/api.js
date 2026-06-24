@@ -157,7 +157,7 @@ export const getSignalDetail = (id) => api.get(`/signals/${id}`);
 
 // ── Backtest ────────────────────────────────────────────────────────────────
 
-export const runBacktest = (data) => api.post('/backtest', data);
+export const runBacktest = (data) => api.post('/backtest', data, { timeout: 120000 });
 export const saveBacktest = (id, data) => api.post(`/backtests/${id}/save`, data);
 export const getBacktests = () => api.get('/backtests');
 export const getBacktest = (id) => api.get(`/backtests/${id}`);

@@ -66,7 +66,10 @@ async def run_backtest(
         "message": f"Processing {len(candles)} candles with {len(signals)} signals...",
     })
 
-    results = engine.run(candles, signals, initial_balance)
+    # Run CPU-bound engine in a thread pool so it doesn't block the event loop
+    # (without this, ALL other API requests hang until the backtest finishes)
+    import asyncio
+    results = await asyncio.to_thread(engine.run, candles, signals, initial_balance)
 
     # Broadcast: engine complete
     await _broadcast_progress(user_id, {

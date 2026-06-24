@@ -102,6 +102,45 @@ class BacktestEngine:
 
         signal_idx = 0
 
+        # ── Pre-compute ATR array (vectorized, O(n)) ──
+        highs_arr = candles["high"].values.astype(float)
+        lows_arr = candles["low"].values.astype(float)
+        closes_arr = candles["close"].values.astype(float)
+        atr_period = 14
+
+        prev_closes = np.roll(closes_arr, 1)
+        prev_closes[0] = closes_arr[0]
+        tr_all = np.maximum(
+            highs_arr - lows_arr,
+            np.maximum(np.abs(highs_arr - prev_closes), np.abs(lows_arr - prev_closes))
+        )
+        # Rolling mean ATR
+        atr_array = np.zeros(len(candles))
+        for i in range(atr_period, len(candles)):
+            atr_array[i] = np.mean(tr_all[i - atr_period:i])
+
+        # ── Pre-compute swing point cache ──
+        sw_len = self.risk_config.get("swing_length", 5)
+        swing_lookback = 20
+        swing_cache = {}
+        for i in range(swing_lookback, len(candles)):
+            points = []
+            for j in range(max(sw_len, i - swing_lookback), i - sw_len):
+                if j - sw_len < 0:
+                    continue
+                window_h = highs_arr[j - sw_len:j + 1]
+                window_l = lows_arr[j - sw_len:j + 1]
+                if highs_arr[j] == window_h.max():
+                    points.append({"type": "HIGH", "price": float(highs_arr[j])})
+                if lows_arr[j] == window_l.min():
+                    points.append({"type": "LOW", "price": float(lows_arr[j])})
+            if points:
+                swing_cache[i] = points
+
+        # ── In backtesting, auto-reset circuit breaker streak so it doesn't block all trades ──
+        # The circuit breaker requires "manual re-enable" in live — but in backtest we auto-reset
+        original_max_losses = self.risk_engine.circuit.max_consecutive_losses
+
         for i in range(len(candles)):
             bar = candles.iloc[i]
             if 'time' in candles.columns:
@@ -114,33 +153,9 @@ class BacktestEngine:
             high = bar["high"]
             low = bar["low"]
 
-            # ── Compute ATR at current bar for trailing stops ──
-            atr_period = 14
-            if i >= atr_period:
-                tr_vals = []
-                for j in range(max(0, i - atr_period), i):
-                    b = candles.iloc[j]
-                    prev_close = candles.iloc[j-1]["close"] if j > 0 else b["close"]
-                    tr = max(b["high"] - b["low"],
-                             abs(b["high"] - prev_close),
-                             abs(b["low"] - prev_close))
-                    tr_vals.append(tr)
-                current_atr = float(np.mean(tr_vals))
-            else:
-                current_atr = 0.0
-
-            # ── Build swing points for structure trail ──
-            swing_points = []
-            swing_lookback = 20
-            sw_len = self.risk_config.get("swing_length", 5)
-            if i >= swing_lookback:
-                for j in range(max(sw_len, i - swing_lookback), i - sw_len):
-                    window_h = candles.iloc[j-sw_len:j+1]["high"].values
-                    window_l = candles.iloc[j-sw_len:j+1]["low"].values
-                    if len(window_h) > 0 and candles.iloc[j]["high"] == max(window_h):
-                        swing_points.append({"type": "HIGH", "price": float(candles.iloc[j]["high"])})
-                    if len(window_l) > 0 and candles.iloc[j]["low"] == min(window_l):
-                        swing_points.append({"type": "LOW", "price": float(candles.iloc[j]["low"])})
+            # Look up pre-computed ATR and swing points
+            current_atr = atr_array[i] if i < len(atr_array) else 0.0
+            swing_points = swing_cache.get(i, [])
 
             # 1. Manage existing open positions
             closed_this_bar = []
@@ -272,6 +287,10 @@ class BacktestEngine:
                 if sig_time > i:
                     break
                 signal_idx += 1
+
+                # In backtest: auto-reset circuit breaker if it paused due to streak
+                if self.risk_engine.circuit.is_paused and "consecutive" in self.risk_engine.circuit.pause_reason.lower():
+                    self.risk_engine.circuit.manual_resume()
 
                 # Evaluate signal through RiskEngine
                 approved, reason, tp_levels = self.risk_engine.evaluate_signal(
