@@ -32,6 +32,8 @@ class BacktestRequest(BaseModel):
     candle_count: int = 5000
     risk_config: Dict[str, Any] = {}
     initial_balance: float = 10000.0
+    tp_count: int = 3                    # How many TPs (1-5)
+    session_filter_enabled: bool = True   # Enable/disable session filter
 
 
 class SaveBacktestRequest(BaseModel):
@@ -144,27 +146,32 @@ async def run_backtest_endpoint(
     User decides to save or dismiss after reviewing.
     """
     from backend.backtester.runner import run_backtest
-    from backend.mt5.data_fetcher import DataFetcher
+    from backend.mt5.data_fetcher import DataFetcher, DataFetchError
     from backend.services.bot_service import bot_service
     import time as _time
 
     bt_start = _time.time()
     logger.info(f"═══ BACKTEST START ═══ {req.symbol} {req.timeframe} | user={current_user.email}")
-    logger.info(f"  Config: balance=${req.initial_balance} | dates={req.start_date}→{req.end_date} | candles={req.candle_count}")
+    logger.info(f"  Config: balance=${req.initial_balance} | dates={req.start_date}→{req.end_date} | candles={req.candle_count} | tp_count={req.tp_count} | session_filter={req.session_filter_enabled}")
     bot_service.log_system_event(f"Backtest started: {req.symbol} {req.timeframe}", category="BACKTEST")
 
     # Fetch candles: use date range if provided, otherwise use candle_count
-    if req.start_date and req.end_date:
-        try:
-            start = datetime.fromisoformat(req.start_date)
-            end = datetime.fromisoformat(req.end_date)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD or ISO format.")
-        logger.info(f"  Fetching data range: {start} → {end}")
-        candles = await DataFetcher.get_data_range(req.symbol, req.timeframe, start, end)
-    else:
-        logger.info(f"  Fetching last {req.candle_count} candles")
-        candles = await DataFetcher.get_historical_data(req.symbol, req.timeframe, count=req.candle_count)
+    try:
+        if req.start_date and req.end_date:
+            try:
+                start = datetime.fromisoformat(req.start_date)
+                end = datetime.fromisoformat(req.end_date)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD or ISO format.")
+            logger.info(f"  Fetching data range: {start} → {end}")
+            candles = await DataFetcher.get_data_range(req.symbol, req.timeframe, start, end)
+        else:
+            logger.info(f"  Fetching last {req.candle_count} candles")
+            candles = await DataFetcher.get_historical_data(req.symbol, req.timeframe, count=req.candle_count)
+    except DataFetchError as e:
+        logger.error(f"  Data fetch failed: {e}")
+        bot_service.log_system_event(f"Backtest data fetch failed: {e.reason}", category="BACKTEST", level="ERROR")
+        raise HTTPException(status_code=400, detail=str(e))
 
     if candles is None or candles.empty:
         logger.warning(f"  No data available for {req.symbol} — aborting backtest")
@@ -177,6 +184,13 @@ async def run_backtest_endpoint(
     signals = _generate_signals_from_candles(candles, req.symbol, req.timeframe)
     logger.info(f"  Generated {len(signals)} signals")
 
+    # Merge tp_count and session_filter into risk_config
+    merged_risk_config = {
+        **req.risk_config,
+        "tp_count": req.tp_count,
+        "session_filter_enabled": req.session_filter_enabled,
+    }
+
     logger.info(f"  Running backtest engine...")
     results = await run_backtest(
         user_id=current_user.id,
@@ -184,7 +198,7 @@ async def run_backtest_endpoint(
         symbol=req.symbol,
         candles=candles,
         signals=signals,
-        risk_config=req.risk_config,
+        risk_config=merged_risk_config,
         initial_balance=req.initial_balance,
         save_mode="DISCARD",  # Never auto-save — user decides
     )

@@ -149,6 +149,8 @@ class BotService:
                         try:
                             from backend.strategies.smc.engine import SMCEngine
                             from backend.strategies.smc.params import UserConfig
+                            from backend.risk.engine import RiskEngine
+                            from backend.mt5.order_manager import OrderManager
                             config = UserConfig()
                             engine = SMCEngine(config)
 
@@ -169,6 +171,99 @@ class BotService:
                                     f"| SL: {signal.stop_loss} | Score: {signal.confluence_score}",
                                     "SIGNAL", "SIGNAL"
                                 )
+
+                                # === Execute trade via RiskEngine ===
+                                try:
+                                    # Get account balance (from MT5 or default)
+                                    account_balance = 10000.0
+                                    try:
+                                        from backend.mt5.bridge import bridge
+                                        if bridge.account_info:
+                                            account_balance = bridge.account_info.balance
+                                    except Exception:
+                                        pass
+
+                                    risk_config = {
+                                        "risk_per_trade_pct": config.risk.risk_per_trade_pct,
+                                        "min_rr": config.risk.min_rr,
+                                        "tp1_rr": config.risk.tp1_rr,
+                                        "tp2_rr": config.risk.tp2_rr,
+                                        "tp3_rr": config.risk.tp3_rr,
+                                        "tp_count": config.risk.tp_count if hasattr(config.risk, 'tp_count') else 3,
+                                        "tp_splits": config.risk.tp_splits if hasattr(config.risk, 'tp_splits') else [40, 35, 25],
+                                        "multi_position_mode": True,
+                                        "max_daily_loss_pct": config.risk.max_daily_loss_pct,
+                                        "max_concurrent_positions": config.risk.max_concurrent_positions,
+                                        "be_trigger_rr": config.risk.be_trigger_rr,
+                                        "be_buffer_pips": config.risk.be_buffer_pips,
+                                        "trail_method_tp2": config.risk.trail_method_tp2 if hasattr(config.risk, 'trail_method_tp2') else "ATR_TRAIL",
+                                        "trail_method_tp3": config.risk.trail_method_tp3 if hasattr(config.risk, 'trail_method_tp3') else "STRUCTURE_TRAIL",
+                                    }
+                                    risk_engine = RiskEngine(risk_config)
+
+                                    signal_data = {
+                                        "symbol": signal.symbol,
+                                        "direction": signal.direction,
+                                        "entry_price": signal.entry_price,
+                                        "stop_loss": signal.stop_loss,
+                                        "take_profit": signal.take_profit,
+                                    }
+
+                                    approved, reason, tp_levels = risk_engine.evaluate_signal(
+                                        signal_data, account_balance
+                                    )
+
+                                    if approved:
+                                        # Filter to immediate TPs only
+                                        immediate_tps = [tp for tp in tp_levels if not tp.deferred]
+
+                                        self._log_event(
+                                            f"Trade approved: {len(immediate_tps)} positions "
+                                            f"({len(tp_levels) - len(immediate_tps)} deferred)",
+                                            "INFO", "TRADE"
+                                        )
+
+                                        # Place orders via OrderManager
+                                        for tp in immediate_tps:
+                                            try:
+                                                result = await OrderManager.place_market_order(
+                                                    symbol=signal.symbol,
+                                                    direction=signal.direction,
+                                                    volume=tp.volume,
+                                                    sl=signal.stop_loss,
+                                                    tp=tp.tp_price,
+                                                    magic=1001 + (tp.level * 10),
+                                                    comment=f"AE_TP{tp.level}",
+                                                )
+                                                if result.get("success"):
+                                                    self._log_event(
+                                                        f"Order placed: TP{tp.level} | "
+                                                        f"{tp.volume} lots @ {signal.entry_price} "
+                                                        f"→ TP: {tp.tp_price:.5f}",
+                                                        "INFO", "TRADE"
+                                                    )
+                                                else:
+                                                    self._log_event(
+                                                        f"Order failed: TP{tp.level} — {result.get('error', 'unknown')}",
+                                                        "ERROR", "TRADE"
+                                                    )
+                                            except Exception as order_err:
+                                                self._log_event(
+                                                    f"Order placement error: {str(order_err)[:100]}",
+                                                    "ERROR", "TRADE"
+                                                )
+                                    else:
+                                        self._log_event(
+                                            f"Trade rejected by risk engine: {reason}",
+                                            "WARN", "RISK"
+                                        )
+
+                                except Exception as exec_err:
+                                    self._log_event(
+                                        f"Execution error: {str(exec_err)[:150]}",
+                                        "ERROR", "TRADE"
+                                    )
+
                             else:
                                 self._log_event(f"No setup found for {symbol}", category="SCAN")
                         except Exception as e:

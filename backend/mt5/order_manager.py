@@ -39,8 +39,8 @@ class OrderManager:
             logger.info("MOCK MODE: Order placed successfully.")
             return {"success": True, "ticket": 12345}
             
-        action = mt5.ORDER_TYPE_BUY if direction == "BULLISH" else mt5.ORDER_TYPE_SELL
-        price = mt5.symbol_info_tick(symbol).ask if direction == "BULLISH" else mt5.symbol_info_tick(symbol).bid
+        action = mt5.ORDER_TYPE_BUY if direction.upper() in ("BUY", "BULLISH") else mt5.ORDER_TYPE_SELL
+        price = mt5.symbol_info_tick(symbol).ask if direction.upper() in ("BUY", "BULLISH") else mt5.symbol_info_tick(symbol).bid
         
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -135,8 +135,8 @@ class OrderManager:
             
         position = position[0]
         symbol = position.symbol
-        direction = "BEARISH" if position.type == mt5.ORDER_TYPE_BUY else "BULLISH" # opposite to close
-        action = mt5.ORDER_TYPE_SELL if direction == "BEARISH" else mt5.ORDER_TYPE_BUY
+        direction = "SELL" if position.type == mt5.ORDER_TYPE_BUY else "BUY" # opposite to close
+        action = mt5.ORDER_TYPE_SELL if direction == "SELL" else mt5.ORDER_TYPE_BUY
         price = mt5.symbol_info_tick(symbol).bid if action == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
         
         request = {

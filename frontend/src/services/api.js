@@ -183,4 +183,13 @@ export const stopBot = () => api.post('/bot/stop');
 export const getBotStatus = () => api.get('/bot/status');
 export const getBotLogs = (limit = 50) => api.get('/bot/logs', { params: { limit } });
 
+// ── Broker Configuration ────────────────────────────────────────────────────
+
+export const saveBrokerStandard = (data) => api.post('/broker/standard', data);
+export const saveBrokerDeriv = (data) => api.post('/broker/deriv', data);
+export const getBrokerStatus = () => api.get('/broker/status');
+export const testBrokerConnection = (data) => api.post('/broker/test', data);
+export const removeBrokerStandard = () => api.delete('/broker/standard');
+export const removeBrokerDeriv = () => api.delete('/broker/deriv');
+
 export default api;

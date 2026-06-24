@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { FlaskConical, Play, Trash2, Eye, Save, X, Download, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield } from 'lucide-react';
 import { runBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest } from '../services/api';
 import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from 'recharts';
@@ -17,11 +17,99 @@ const SYMBOLS = [
 
 const PIE_COLORS = ['#3fb68b','#58a6ff','#d29922','#f0883e','#bc8cff','#f85149','#8b949e','#79c0ff'];
 
+function formatTime(val) {
+  if (!val) return '—';
+  if (typeof val === 'string' && val.includes('T')) {
+    const d = new Date(val);
+    return d.toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  }
+  if (typeof val === 'number' && val > 1e9) {
+    const d = new Date(val * 1000);
+    return d.toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  }
+  return String(val);
+}
+
+function formatDuration(mins) {
+  if (!mins || mins <= 0) return '—';
+  if (mins < 60) return `${mins.toFixed(0)}m`;
+  if (mins < 1440) return `${(mins/60).toFixed(1)}h`;
+  return `${(mins/1440).toFixed(1)}d`;
+}
+
+function ProgressBar({ progress }) {
+  if (!progress || progress.pct === undefined) return null;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 4 }}>
+        <span>{progress.message || progress.stage}</span>
+        <span>{progress.pct}%</span>
+      </div>
+      <div style={{ height: 6, borderRadius: 3, background: 'var(--bg-tertiary)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${progress.pct}%`, background: 'linear-gradient(90deg, var(--blue), var(--green))', borderRadius: 3, transition: 'width 0.3s ease' }} />
+      </div>
+    </div>
+  );
+}
+
+function ExpandableTradeRow({ trade, index }) {
+  const [open, setOpen] = useState(false);
+  const pnl = trade.pnl || 0;
+  const isWin = pnl >= 0;
+
+  return (
+    <>
+      <tr onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
+        <td>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
+        <td>{index + 1}</td>
+        <td><strong>{trade.symbol}</strong></td>
+        <td><span className={`badge ${trade.direction === 'BUY' ? 'badge-green' : 'badge-red'}`}>{trade.direction === 'BUY' ? '▲' : '▼'}</span></td>
+        <td>{typeof trade.entry_price === 'number' ? trade.entry_price.toFixed(5) : trade.entry_price}</td>
+        <td>{typeof trade.exit_price === 'number' ? trade.exit_price.toFixed(5) : trade.exit_price}</td>
+        <td><span className="badge badge-blue">{trade.exit_reason}</span></td>
+        <td style={{ color: isWin ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>${pnl.toFixed(2)}</td>
+        <td>{formatDuration(trade.duration_minutes)}</td>
+        <td>{trade.session || '—'}</td>
+      </tr>
+      {open && (
+        <tr>
+          <td colSpan={10} style={{ padding: 0, border: 'none' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: '12px 16px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)', margin: '4px 8px' }}>
+              <div>
+                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Entry Confirmations</div>
+                {(trade.entry_confirmations || []).map((c, i) => (
+                  <div key={i} style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', padding: '2px 0', borderBottom: '1px solid var(--border)' }}>{c}</div>
+                ))}
+                {(!trade.entry_confirmations || !trade.entry_confirmations.length) && (
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>No confirmation data</div>
+                )}
+                <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  <Clock size={10} style={{ display: 'inline', marginRight: 4 }} />Entry: {formatTime(trade.entry_time_iso || trade.entry_time)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Exit Confirmations</div>
+                {(trade.exit_confirmations || []).map((c, i) => (
+                  <div key={i} style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', padding: '2px 0', borderBottom: '1px solid var(--border)' }}>{c}</div>
+                ))}
+                {(!trade.exit_confirmations || !trade.exit_confirmations.length) && (
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>No confirmation data</div>
+                )}
+                <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  <Clock size={10} style={{ display: 'inline', marginRight: 4 }} />Exit: {formatTime(trade.exit_time_iso || trade.exit_time)}
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 function BacktestResults({ result, onSave, onDismiss, isSaving }) {
-  const [expandedTrade, setExpandedTrade] = useState(new Set());
   const report = result.report || {};
   const trades = result.trades || [];
-
   const equityData = (result.equity_curve || []).map((val, i) => ({ bar: i, equity: val }));
 
   const tpDist = Object.entries(report).filter(([k]) => k.endsWith('_hit_rate') || k === 'sl_hit_rate')
@@ -48,14 +136,21 @@ function BacktestResults({ result, onSave, onDismiss, isSaving }) {
         </div>
       </div>
 
+      {/* Metadata */}
+      {(result.invalid_signals > 0 || result.deferred_activations > 0) && (
+        <div style={{ display: 'flex', gap: 12, marginBottom: 12, fontSize: '0.8rem' }}>
+          {result.invalid_signals > 0 && (
+            <span style={{ color: 'var(--yellow)' }}><Shield size={12} style={{ display: 'inline', marginRight: 4 }} />{result.invalid_signals} invalid signals rejected</span>
+          )}
+          {result.deferred_activations > 0 && (
+            <span style={{ color: 'var(--blue)' }}><Target size={12} style={{ display: 'inline', marginRight: 4 }} />{result.deferred_activations} deferred TPs activated</span>
+          )}
+        </div>
+      )}
+
       {/* Summary Metrics */}
       <div className="metrics-grid" style={{ marginBottom: 16 }}>
-        <div className="metric-card">
-          <div className="metric-label">Final Balance</div>
-          <div className={`metric-value ${result.final_balance >= result.initial_balance ? 'green' : 'red'}`}>
-            ${result.final_balance?.toFixed(2)}
-          </div>
-        </div>
+        <div className="metric-card"><div className="metric-label">Final Balance</div><div className={`metric-value ${result.final_balance >= result.initial_balance ? 'green' : 'red'}`}>${result.final_balance?.toFixed(2)}</div></div>
         <div className="metric-card"><div className="metric-label">Trades</div><div className="metric-value blue">{result.total_trades}</div></div>
         <div className="metric-card"><div className="metric-label">Win Rate</div><div className={`metric-value ${report.win_rate >= 0.55 ? 'green' : 'yellow'}`}>{((report.win_rate||0)*100).toFixed(1)}%</div></div>
         <div className="metric-card"><div className="metric-label">Sharpe</div><div className="metric-value blue">{(report.sharpe_ratio||0).toFixed(2)}</div></div>
@@ -106,37 +201,22 @@ function BacktestResults({ result, onSave, onDismiss, isSaving }) {
         </div>
       </div>
 
-      {/* Trade List */}
+      {/* Trade List — Expandable */}
       {trades.length > 0 && (
         <>
           <div className="card-header" style={{ marginTop: 8 }}>
             <span className="card-title">All Trades ({trades.length})</span>
           </div>
-          <div className="table-wrapper" style={{ maxHeight: 400, overflow: 'auto' }}>
+          <div className="table-wrapper" style={{ maxHeight: 500, overflow: 'auto' }}>
             <table>
               <thead>
                 <tr>
-                  <th>#</th><th>Symbol</th><th>Dir</th><th>Entry</th><th>Exit</th>
-                  <th>SL</th><th>TP Hit</th><th>P&L</th><th>Exit</th><th>Session</th>
+                  <th style={{width:24}}></th><th>#</th><th>Symbol</th><th>Dir</th><th>Entry</th><th>Exit</th>
+                  <th>Result</th><th>P&L</th><th>Duration</th><th>Session</th>
                 </tr>
               </thead>
               <tbody>
-                {trades.map((t, i) => (
-                  <tr key={i}>
-                    <td>{i+1}</td>
-                    <td><strong>{t.symbol}</strong></td>
-                    <td><span className={`badge ${t.direction==='BUY'?'badge-green':'badge-red'}`}>{t.direction==='BUY'?'▲':'▼'}</span></td>
-                    <td>{typeof t.entry_price === 'number' ? t.entry_price.toFixed(2) : t.entry_price}</td>
-                    <td>{typeof t.exit_price === 'number' ? t.exit_price.toFixed(2) : t.exit_price}</td>
-                    <td>{typeof t.stop_loss === 'number' ? t.stop_loss.toFixed(2) : t.stop_loss}</td>
-                    <td>{t.exit_reason}</td>
-                    <td style={{ color: (t.pnl||0) >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
-                      ${(t.pnl||0).toFixed(2)}
-                    </td>
-                    <td><span className="badge badge-blue">{t.exit_reason}</span></td>
-                    <td>{t.session || '—'}</td>
-                  </tr>
-                ))}
+                {trades.map((t, i) => <ExpandableTradeRow key={i} trade={t} index={i} />)}
               </tbody>
             </table>
           </div>
@@ -151,11 +231,31 @@ export default function Backtester() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [form, setForm] = useState({
     symbol: 'XAUUSD', timeframe: 'H1', initial_balance: 10000,
-    risk_per_trade_pct: 1.0, min_rr: 3.0,
+    risk_per_trade_pct: 1.0, min_rr: 3.0, tp_count: 3,
+    session_filter_enabled: true,
     start_date: '', end_date: '', candle_count: 5000,
   });
   const [result, setResult] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [progress, setProgress] = useState(null);
+
+  // Listen for WebSocket backtest progress events
+  useEffect(() => {
+    const handleWsMessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'backtest_progress') {
+          setProgress(msg);
+          if (msg.stage === 'complete') setTimeout(() => setProgress(null), 2000);
+        }
+      } catch {}
+    };
+    // Attach to existing WS if available
+    if (window._algoEdgeWs) {
+      window._algoEdgeWs.addEventListener('message', handleWsMessage);
+      return () => window._algoEdgeWs?.removeEventListener('message', handleWsMessage);
+    }
+  }, []);
 
   const { data: backtests, refetch } = useQuery({
     queryKey: ['backtests'],
@@ -171,9 +271,12 @@ export default function Backtester() {
       start_date: form.start_date || undefined,
       end_date: form.end_date || undefined,
       candle_count: form.candle_count,
-      risk_config: { risk_per_trade_pct: form.risk_per_trade_pct, min_rr: form.min_rr },
+      tp_count: form.tp_count,
+      session_filter_enabled: form.session_filter_enabled,
+      risk_config: { risk_per_trade_pct: form.risk_per_trade_pct, min_rr: form.min_rr, tp_count: form.tp_count },
     }),
-    onSuccess: (res) => setResult(res.data),
+    onSuccess: (res) => { setResult(res.data); setProgress(null); },
+    onError: () => setProgress(null),
   });
 
   const handleSave = async () => {
@@ -190,7 +293,6 @@ export default function Backtester() {
   };
 
   const handleDismiss = () => setResult(null);
-
   const handleDelete = async (id) => { await deleteBacktest(id); refetch(); };
   const handleView = async (id) => { const res = await getBacktest(id); setResult({ ...res.data.run, trades: res.data.trades, equity_curve: res.data.equity_curve, report: res.data.run }); };
 
@@ -220,26 +322,48 @@ export default function Backtester() {
 
             {/* Date Range */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label>Start Date</label>
-                <input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} />
-              </div>
-              <div>
-                <label>End Date</label>
-                <input type="date" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} />
-              </div>
+              <div><label>Start Date</label><input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} /></div>
+              <div><label>End Date</label><input type="date" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} /></div>
             </div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: -8 }}>
-              Leave dates empty to use the last N candles instead.
-            </div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: -8 }}>Leave dates empty to use the last N candles instead.</div>
 
             <div><label>Candle Count (if no dates)</label><input type="number" value={form.candle_count} onChange={e => setForm({ ...form, candle_count: +e.target.value })} min={100} max={10000} /></div>
             <div><label>Initial Balance ($)</label><input type="number" value={form.initial_balance} onChange={e => setForm({ ...form, initial_balance: +e.target.value })} /></div>
-            <div><label>Risk Per Trade (%)</label><input type="number" step="0.1" value={form.risk_per_trade_pct} onChange={e => setForm({ ...form, risk_per_trade_pct: +e.target.value })} /></div>
-            <div><label>Minimum R:R</label><input type="number" step="0.5" value={form.min_rr} onChange={e => setForm({ ...form, min_rr: +e.target.value })} /></div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label>Risk Per Trade (%)</label><input type="number" step="0.1" value={form.risk_per_trade_pct} onChange={e => setForm({ ...form, risk_per_trade_pct: +e.target.value })} /></div>
+              <div><label>Minimum R:R</label><input type="number" step="0.5" value={form.min_rr} onChange={e => setForm({ ...form, min_rr: +e.target.value })} /></div>
+            </div>
+
+            {/* TP Count + Session Filter */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label>TP Count</label>
+                <select value={form.tp_count} onChange={e => setForm({ ...form, tp_count: +e.target.value })}>
+                  {[1,2,3,4,5].map(n => <option key={n} value={n}>{n} TP{n > 1 ? 's' : ''}</option>)}
+                </select>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                  {form.tp_count <= 2 ? 'All at entry' : `TP1-2 at entry, TP3${form.tp_count > 3 ? '-'+form.tp_count : ''} deferred`}
+                </div>
+              </div>
+              <div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={form.session_filter_enabled} onChange={e => setForm({ ...form, session_filter_enabled: e.target.checked })} style={{ width: 14, height: 14 }} />
+                  Session Filter
+                </label>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                  {form.session_filter_enabled ? 'London/NY only' : 'All sessions'}
+                </div>
+              </div>
+            </div>
+
             <button className="btn btn-primary" onClick={() => mutation.mutate()} disabled={mutation.isPending || status !== 'ONLINE'} style={{ width: '100%' }}>
               {mutation.isPending ? <><Loader2 size={16} className="spin" /> Running Backtest...</> : <><Play size={16} /> Run Backtest</>}
             </button>
+
+            {/* Progress Bar */}
+            {(mutation.isPending || progress) && <ProgressBar progress={progress} />}
+
             {mutation.isError && (
               <div style={{ color: 'var(--red)', fontSize: '0.8rem' }}>
                 Error: {mutation.error?.response?.data?.detail || mutation.error?.message || 'Backtest failed'}

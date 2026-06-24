@@ -19,15 +19,19 @@ export default function RiskSettings() {
     min_rr: 3.0,
     be_trigger_rr: 1.0,
     be_buffer_pips: 2.0,
+    tp_count: 3,
     tp1_rr: 3.0,
     tp2_rr: 5.0,
     tp3_rr: 7.0,
-    tp_splits: '40,35,25',
+    tp4_rr: 10.0,
+    tp5_rr: 15.0,
+    tp_splits: '30,25,20,15,10',
     trail_method_tp2: 'ATR_TRAIL',
     trail_method_tp3: 'STRUCTURE_TRAIL',
     atr_trail_multiplier: 1.5,
     trail_pips: 15,
     compounding_enabled: false,
+    session_filter_enabled: true,
   });
 
   // Load current config from backend
@@ -85,10 +89,29 @@ export default function RiskSettings() {
       <div className="card">
         <div className="card-header"><span className="card-title">Take Profit & Break-Even</span></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div>
+            <label>Active TP Count</label>
+            <select value={config.tp_count} onChange={e => update('tp_count', +e.target.value)}>
+              <option value={1}>1 TP</option>
+              <option value={2}>2 TPs</option>
+              <option value={3}>3 TPs (default)</option>
+              <option value={4}>4 TPs</option>
+              <option value={5}>5 TPs</option>
+            </select>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              {config.tp_count <= 2 ? 'All TPs open at entry' : `TP1-2 at entry, TP3${config.tp_count > 3 ? '-' + config.tp_count : ''} deferred`}
+            </div>
+          </div>
           <div><label>TP1 R:R</label><input type="number" step="0.5" value={config.tp1_rr} onChange={e => update('tp1_rr', +e.target.value)} /></div>
           <div><label>TP2 R:R</label><input type="number" step="0.5" value={config.tp2_rr} onChange={e => update('tp2_rr', +e.target.value)} /></div>
           <div><label>TP3 R:R</label><input type="number" step="0.5" value={config.tp3_rr} onChange={e => update('tp3_rr', +e.target.value)} /></div>
-          <div><label>TP Volume Split</label><input type="text" value={config.tp_splits} onChange={e => update('tp_splits', e.target.value)} placeholder="40,35,25" /></div>
+          {config.tp_count >= 4 && (
+            <div><label>TP4 R:R</label><input type="number" step="0.5" value={config.tp4_rr} onChange={e => update('tp4_rr', +e.target.value)} /></div>
+          )}
+          {config.tp_count >= 5 && (
+            <div><label>TP5 R:R</label><input type="number" step="0.5" value={config.tp5_rr} onChange={e => update('tp5_rr', +e.target.value)} /></div>
+          )}
+          <div><label>TP Volume Split</label><input type="text" value={config.tp_splits} onChange={e => update('tp_splits', e.target.value)} placeholder="30,25,20,15,10" /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Comma-separated % per TP level (must sum to 100)</div></div>
           <div><label>BE Trigger (R)</label><input type="number" step="0.5" value={config.be_trigger_rr} onChange={e => update('be_trigger_rr', +e.target.value)} /></div>
           <div><label>BE Buffer (pips)</label><input type="number" value={config.be_buffer_pips} onChange={e => update('be_buffer_pips', +e.target.value)} /></div>
         </div>
@@ -133,6 +156,22 @@ export default function RiskSettings() {
             When enabled, the bot uses the 18-step compounding plan from CompoundingPlan_Spec.md instead of percentage-based risk.
           </div>
         )}
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Session Filter</span></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
+            <input type="checkbox" checked={config.session_filter_enabled} onChange={e => update('session_filter_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
+            Enable Session Filter (London/NY Kill Zones only)
+          </label>
+        </div>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 8 }}>
+          {config.session_filter_enabled
+            ? 'Only trading during London and NY kill zones. Asian session signals are blocked.'
+            : 'Trading during all sessions including Asian session (22:00–06:00 GMT).'
+          }
+        </div>
       </div>
 
       <button className="btn btn-primary" style={{ justifySelf: 'start' }} onClick={handleSave} disabled={mutation.isPending}>

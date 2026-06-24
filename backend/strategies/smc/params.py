@@ -51,13 +51,20 @@ class RiskParams:
     False = single position, single TP (simpler).
     """
 
-    tp_levels: int = 3
-    """Number of TP levels to use. 1, 2, or 3."""
+    tp_levels: int = 5
+    """Maximum number of TP levels supported (infrastructure). Range: 1–5."""
 
-    tp_splits: List[float] = field(default_factory=lambda: [40.0, 35.0, 25.0])
+    tp_count: int = 3
+    """How many TP levels to actively use. User-configurable from frontend.
+    If tp_count <= 2: all TPs open at entry.
+    If tp_count > 2: TP1+TP2 at entry, TP3–5 deferred (conviction-based).
+    Range: 1–5."""
+
+    tp_splits: List[float] = field(default_factory=lambda: [30.0, 25.0, 20.0, 15.0, 10.0])
     """
     Percentage of total lot allocated to each TP level.
-    Must sum to 100. Example: [40, 35, 25] → TP1=40%, TP2=35%, TP3=25%.
+    Must sum to 100. Length should match tp_count.
+    Default for 5 TPs: [30, 25, 20, 15, 10].
     """
 
     # ── Take Profit Levels (RR Multipliers) ──────────────────────────
@@ -69,6 +76,12 @@ class RiskParams:
 
     tp3_rr: float = 7.0
     """TP3 Risk:Reward multiplier. Extended: 7.0 or 10.0 (1:7 / 1:10 RR)."""
+
+    tp4_rr: float = 10.0
+    """TP4 Risk:Reward multiplier. High-conviction runner. (1:10 RR)."""
+
+    tp5_rr: float = 15.0
+    """TP5 Risk:Reward multiplier. Maximum swing target. (1:15 RR)."""
 
     tp3_use_liquidity_target: bool = True
     """
