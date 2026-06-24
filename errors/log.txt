@@ -1,37 +1,119 @@
+2026-06-24 14:24:35,916 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:64999 - "POST /api/backtest HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\encoders.py", line 345, in jsonable_encoder
+    data = dict(obj)
+           ^^^^^^^^^
+TypeError: 'numpy.bool' object is not iterable
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\encoders.py", line 350, in jsonable_encoder
+    data = vars(obj)
+           ^^^^^^^^^
+TypeError: vars() argument must have __dict__ attribute
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 421, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 62, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\applications.py", line 1163, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\middleware\base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Desktop\AlgoEdge\backend\main.py", line 124, in log_requests
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\middleware\cors.py", line 96, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\middleware\cors.py", line 154, in simple_response
+    await self.app(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\routing.py", line 2531, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\routing.py", line 1700, in handle
+    await self.original_router.handle(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\routing.py", line 2586, in handle
+    await included_router._handle_selected(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\routing.py", line 1720, in _handle_selected
+    await original_route.handle(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\routing.py", line 1239, in handle
+    await app(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\routing.py", line 150, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\routing.py", line 136, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\routing.py", line 711, in app
+    content = await serialize_response(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\routing.py", line 333, in serialize_response
+    return jsonable_encoder(response_content)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\encoders.py", line 306, in jsonable_encoder
+    encoded_value = jsonable_encoder(
+                    ^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\encoders.py", line 320, in jsonable_encoder
+    jsonable_encoder(
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\encoders.py", line 306, in jsonable_encoder
+    encoded_value = jsonable_encoder(
+                    ^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Desktop\AlgoEdge\.venv\Lib\site-packages\fastapi\encoders.py", line 353, in jsonable_encoder
+    raise ValueError(errors) from e
+ValueError: [TypeError("'numpy.bool' object is not iterable"), TypeError('vars() argument must have __dict__ attribute')]
+INFO:     127.0.0.1:65006 - "GET /api/health HTTP/1.1" 200 OK
+2026-06-24 14:24:37,729 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-24 14:24:37,729 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.password_hash, users.name, users.mt5_account, users.mt5_password_encrypted, users.mt5_server, users.mt5_path, users.deriv_mt5_account, users.deriv_mt5_password_encrypted, users.deriv_mt5_server, users.deriv_mt5_path, users.active_strategy, users.risk_per_trade, users.max_daily_loss, users.allowed_symbols, users.is_active, users.created_at
+FROM users
 WHERE users.id = $1::VARCHAR
-2026-06-24 14:10:21,923 INFO sqlalchemy.engine.Engine [cached since 154.7s ago] ('5821fd1a-aead-439e-b36e-8011aee1d772',)
-INFO:     127.0.0.1:64407 - "GET /api/health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64407 - "GET /api/health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64407 - "GET /api/health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64407 - "GET /api/health HTTP/1.1" 200 OK
-14:10:22 | INFO     | backend.api.routes.backtest:run_backtest_endpoint | ═══ BACKTEST START ═══ XAUUSD M15 | user=ikchristo19@gmail.com
-14:10:22 | INFO     | backend.api.routes.backtest:run_backtest_endpoint |   Config: balance=$1000.0 | dates=2026-01-01→2026-06-24 | candles=5000 | tp_count=3 | session_filter=False
-14:10:22 | INFO     | backend.services.bot_service:_log_event | [BACKTEST] Backtest started: XAUUSD M15
-14:10:22 | INFO     | backend.api.routes.backtest:run_backtest_endpoint |   Fetching data range: 2026-01-01 00:00:00 → 2026-06-24 00:00:00
-14:10:22 | INFO     | backend.mt5.data_fetcher:get_data_range | Fetching data range for XAUUSD M15: 2026-01-01 00:00:00 → 2026-06-24 00:00:00
-14:10:22 | INFO     | backend.mt5.data_fetcher:get_data_range | Fetched 11160 candles for XAUUSD M15 (2026-01-01 → 2026-06-24)
-14:10:22 | INFO     | backend.api.routes.backtest:run_backtest_endpoint |   Fetched 11160 candles
-14:10:22 | INFO     | backend.api.routes.backtest:run_backtest_endpoint |   Generating signals (threshold=60, fvg_min=5.0, liq_min=5.0, ob_impulse=2.0)...
-14:10:23 | INFO     | backend.api.routes.backtest:_generate_signals_from_candles | Generated 15 signals from 11160 candles for XAUUSD
-14:10:23 | INFO     | backend.api.routes.backtest:run_backtest_endpoint |   Generated 15 signals
-14:10:23 | INFO     | backend.api.routes.backtest:run_backtest_endpoint |   Running backtest engine...
-14:10:24 | DEBUG    | backend.risk.multi_tp:calculate_tp_levels | TP levels: 3 | dir=BUY | entry=4370.5 | risk=9.18643 | tp_count=3
-14:10:24 | INFO     | backend.risk.engine:evaluate_signal | Trade approved: BUY XAUUSD @ 4370.5 | 3 TP levels | Lots: 0.11
-14:10:28 | DEBUG    | backend.risk.multi_tp:calculate_tp_levels | TP levels: 3 | dir=SELL | entry=4412.33 | risk=9.34500 | tp_count=3
-14:10:28 | INFO     | backend.risk.engine:evaluate_signal | Trade approved: SELL XAUUSD @ 4412.33 | 3 TP levels | Lots: 0.1
-14:10:30 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:10:30 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:10:36 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:10:44 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:10:56 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:10:57 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:11:05 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:11:10 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:11:16 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:11:16 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:11:21 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:11:49 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-14:12:07 | WARNING  | backend.risk.engine:evaluate_signal | Circuit breaker blocked trade: 6 consecutive losses — manual re-enable required
-
-
-Also on trigger backtest,  endpoint times out, with: "Error: timeout of 15000ms exceeded" and all other requests starts timing out and are unable to reach backend, so I don't get log and result from backtest.
+2026-06-24 14:24:37,744 INFO sqlalchemy.engine.Engine [cached since 113.7s ago] ('5821fd1a-aead-439e-b36e-8011aee1d772',)
+INFO:     127.0.0.1:64922 - "GET /api/bot/logs?limit=50 HTTP/1.1" 200 OK
+2026-06-24 14:24:38,465 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:64922 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64922 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65006 - "GET /api/health HTTP/1.1" 200 OK
+2026-06-24 14:24:41,420 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-24 14:24:41,421 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.password_hash, users.name, users.mt5_account, users.mt5_password_encrypted, users.mt5_server, users.mt5_path, users.deriv_mt5_account, users.deriv_mt5_password_encrypted, users.deriv_mt5_server, users.deriv_mt5_path, users.active_strategy, users.risk_per_trade, users.max_daily_loss, users.allowed_symbols, users.is_active, users.created_at
+FROM users
+WHERE users.id = $1::VARCHAR
+2026-06-24 14:24:41,422 INFO sqlalchemy.engine.Engine [cached since 117.4s ago] ('5821fd1a-aead-439e-b36e-8011aee1d772',)
+INFO:     127.0.0.1:64922 - "GET /api/bot/logs?limit=50 HTTP/1.1" 200 OK
+2026-06-24 14:24:42,027 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:64922 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65006 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65006 - "GET /api/health HTTP/1.1" 200 OK
+2026-06-24 14:24:45,081 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-24 14:24:45,086 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.password_hash, users.name, users.mt5_account, users.mt5_password_encrypted, users.mt5_server, users.mt5_path, users.deriv_mt5_account, users.deriv_mt5_password_encrypted, users.deriv_mt5_server, users.deriv_mt5_path, users.active_strategy, users.risk_per_trade, users.max_daily_loss, users.allowed_symbols, users.is_active, users.created_at
+FROM users
+WHERE users.id = $1::VARCHAR
