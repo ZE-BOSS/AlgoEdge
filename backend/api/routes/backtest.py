@@ -126,6 +126,8 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
     confirmed_at = [False] * n
     current_trend = "NEUTRAL"
     consecutive_bos = 0
+    last_sh_idx = -1
+    last_sl_idx = -1
 
     sh_idx = 0  # pointer into swing_highs
     sl_idx = 0  # pointer into swing_lows
@@ -137,7 +139,12 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
         while sl_idx < len(swing_lows) - 1 and swing_lows[sl_idx + 1][0] < i:
             sl_idx += 1
 
-        if sh_idx >= 2 and sl_idx >= 2:
+        # Only re-evaluate when a NEW swing appears
+        new_swing = (sh_idx != last_sh_idx or sl_idx != last_sl_idx)
+        if new_swing and sh_idx >= 1 and sl_idx >= 1:
+            last_sh_idx = sh_idx
+            last_sl_idx = sl_idx
+
             curr_sh = swing_highs[sh_idx][1]
             prev_sh = swing_highs[sh_idx - 1][1]
             curr_sl = swing_lows[sl_idx][1]
@@ -148,18 +155,20 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
             lh = curr_sh < prev_sh
             ll = curr_sl < prev_sl
 
-            if hh and hl:
-                if current_trend != "BULLISH":
-                    consecutive_bos = 1
-                else:
+            # Bullish: HH or HL (either is a bullish structural shift)
+            if hh or hl:
+                if current_trend == "BULLISH":
                     consecutive_bos += 1
-                current_trend = "BULLISH"
-            elif lh and ll:
-                if current_trend != "BEARISH":
-                    consecutive_bos = 1
                 else:
+                    current_trend = "BULLISH"
+                    consecutive_bos = 1
+            # Bearish: LH or LL
+            elif lh or ll:
+                if current_trend == "BEARISH":
                     consecutive_bos += 1
-                current_trend = "BEARISH"
+                else:
+                    current_trend = "BEARISH"
+                    consecutive_bos = 1
 
         trend_at[i] = current_trend
         bos_count_at[i] = consecutive_bos
@@ -357,6 +366,12 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
             "has_liquidity_sweep": bool(has_sweep),
         })
 
+    # Diagnostics: how many bars had confirmed trend
+    n_confirmed = sum(1 for x in confirmed_at if x)
+    n_bullish = sum(1 for x in trend_at if x == "BULLISH")
+    n_bearish = sum(1 for x in trend_at if x == "BEARISH")
+    logger.info(f"Signal pre-compute: {len(swing_highs)} swing highs, {len(swing_lows)} swing lows, "
+                f"bullish_bars={n_bullish}, bearish_bars={n_bearish}, confirmed_bars={n_confirmed}")
     logger.info(f"Generated {len(signals)} signals from {len(candles)} candles for {symbol} "
                 f"(threshold={confluence_threshold}, filtered: no_trend={_diag_no_trend}, "
                 f"no_bos={_diag_no_bos}, score={_diag_score_reject}, throttle={_diag_throttle})")
