@@ -178,27 +178,31 @@ export default function Backtester() {
   const queryClient = useQueryClient();
   const { status } = useConnectionStore();
   const isAuth = useAuthStore(s=>s.isAuthenticated);
-  const [form, setForm] = useState({
-    symbol:'XAUUSD',timeframe:'H1',initial_balance:10000,
-    start_date:'',end_date:'',candle_count:5000,
-    // Strategy
-    confluence_threshold:55,swing_length:5,ob_impulse_ratio:1.5,
-    fvg_min_gap_pips:3.0,liq_sweep_min_pips:2.0,max_spread_pips:3.0,
-    session_filter_enabled:true,news_filter_enabled:true,
-    // Risk
-    risk_per_trade_pct:1.0,min_rr:3.0,
-    max_daily_loss_pct:5.0,max_weekly_loss_pct:10.0,
-    max_consecutive_losses:5,max_concurrent_positions:3,
-    // TP
-    tp_count:3,tp1_rr:3.0,tp2_rr:5.0,tp3_rr:7.0,tp4_rr:10.0,tp5_rr:15.0,
-    tp_splits:'30,25,20,15,10',
-    be_trigger_rr:1.0,be_buffer_pips:2.0,
-    // Trail
-    trail_method_tp2:'ATR_TRAIL',trail_method_tp3:'STRUCTURE_TRAIL',
-    trail_method_tp4:'ATR_TRAIL',trail_method_tp5:'STRUCTURE_TRAIL',
-    atr_trail_multiplier:1.5,trail_pips:15,
-    // Compounding
-    compounding_enabled:false,
+  const STORAGE_KEY = 'algoedge_bt_config';
+
+  const [form, setForm] = useState(() => {
+    // Restore last saved config from localStorage
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      symbol:'XAUUSD',timeframe:'H1',initial_balance:10000,
+      start_date:'',end_date:'',candle_count:5000,
+      confluence_threshold:55,swing_length:5,ob_impulse_ratio:1.5,
+      fvg_min_gap_pips:3.0,liq_sweep_min_pips:2.0,max_spread_pips:3.0,
+      session_filter_enabled:true,news_filter_enabled:true,
+      risk_per_trade_pct:1.0,min_rr:3.0,
+      max_daily_loss_pct:5.0,max_weekly_loss_pct:10.0,
+      max_consecutive_losses:5,max_concurrent_positions:3,
+      tp_count:3,tp1_rr:3.0,tp2_rr:5.0,tp3_rr:7.0,tp4_rr:10.0,tp5_rr:15.0,
+      tp_splits:'30,25,20,15,10',
+      be_trigger_rr:1.0,be_buffer_pips:2.0,
+      trail_method_tp2:'ATR_TRAIL',trail_method_tp3:'STRUCTURE_TRAIL',
+      trail_method_tp4:'ATR_TRAIL',trail_method_tp5:'STRUCTURE_TRAIL',
+      atr_trail_multiplier:1.5,trail_pips:15,
+      compounding_enabled:false,
+    };
   });
   const [result, setResult] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -206,14 +210,19 @@ export default function Backtester() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [configLoaded, setConfigLoaded] = useState(false);
 
-  // Load defaults from user's live config
+  // Auto-save config to localStorage on every change
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(form)); } catch {}
+  }, [form]);
+
+  // Load defaults from user's live config (only on first load if no saved config)
   const { data: userCfg } = useQuery({ queryKey:['config'], queryFn:()=>getConfig().then(r=>r.data), enabled:status==='ONLINE'&&isAuth });
   useEffect(()=>{
-    if(userCfg?.config && !configLoaded){
+    if(userCfg?.config && !configLoaded && !localStorage.getItem(STORAGE_KEY)){
       const c = userCfg.config;
       setForm(prev=>({...prev,...Object.fromEntries(Object.entries(c).filter(([k])=>k in prev))}));
-      setConfigLoaded(true);
     }
+    if(userCfg) setConfigLoaded(true);
   },[userCfg,configLoaded]);
 
   useEffect(()=>{
@@ -319,9 +328,14 @@ export default function Backtester() {
             </div>
           </div>)}
 
-          <button className="btn btn-primary" onClick={()=>mutation.mutate()} disabled={isRunning||status!=='ONLINE'} style={{width:'100%'}}>
-            {isRunning?<><Loader2 size={16} className="spin"/> Running...</>:<><Play size={16}/> Run Backtest</>}
-          </button>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-primary" onClick={()=>mutation.mutate()} disabled={isRunning||status!=='ONLINE'} style={{flex:1}}>
+              {isRunning?<><Loader2 size={16} className="spin"/> Running...</>:<><Play size={16}/> Run Backtest</>}
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={()=>{localStorage.removeItem(STORAGE_KEY);location.reload();}} title="Reset to defaults" style={{whiteSpace:'nowrap'}}>
+              <X size={14}/> Reset
+            </button>
+          </div>
           {(isRunning||progress)&&<ProgressBar progress={progress}/>}
           {mutation.isError&&<div style={{color:'var(--red)',fontSize:'0.8rem'}}>Error: {mutation.error?.response?.data?.detail||mutation.error?.message||'Failed'}</div>}
         </div>

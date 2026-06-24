@@ -103,9 +103,13 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
     lows = candles['low'].values
     opens = candles['open'].values
 
-    swing_len = 5
     # Calculate rolling ATR for proper SL distance
     atr_period = 14
+    # Diagnostic counters
+    _diag_swing = 0
+    _diag_body_filter = 0
+    _diag_score_reject = 0
+    _diag_throttle = 0
 
     for i in range(max(swing_len * 2 + 10, atr_period + 5), len(candles) - 1):
         # Calculate ATR at this bar
@@ -129,6 +133,7 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
         is_swing_low = lows[i - swing_len] == min(window_lows)
 
         if not (is_swing_high or is_swing_low):
+            _diag_swing += 1
             continue
 
         # Determine bias from recent price action
@@ -143,6 +148,7 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
         # Only take signals with reasonable candle bodies (filtering noise)
         current_body = abs(closes[i] - opens[i])
         if avg_body == 0 or current_body < avg_body * 0.3:
+            _diag_body_filter += 1
             continue
 
         # Calculate entry, SL with MINIMUM distance enforcement
@@ -309,16 +315,50 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
                 score_breakdown.append("Order Block: +0 (none found)")
                 confirmations.append(f"✗ Order Block: None with impulse >= {ob_impulse}x avg body")
 
+        # 7. Volume Confirmation (relative volume)
+        if i >= 20:
+            recent_volumes = candles['tick_volume'].values[i-20:i] if 'tick_volume' in candles.columns else None
+            if recent_volumes is not None and len(recent_volumes) > 0:
+                avg_vol = np.mean(recent_volumes)
+                curr_vol = candles['tick_volume'].values[i] if 'tick_volume' in candles.columns else 0
+                if avg_vol > 0 and curr_vol > avg_vol * 1.2:
+                    score += 10
+                    score_breakdown.append(f"Volume: +10 (current {curr_vol:.0f} vs avg {avg_vol:.0f} = {curr_vol/avg_vol:.1f}x)")
+                    confirmations.append(f"✓ Volume: {curr_vol/avg_vol:.1f}x average volume")
+                else:
+                    score_breakdown.append("Volume: +0 (below 1.2x average)")
+                    confirmations.append("✗ Volume: Below average")
+            else:
+                score_breakdown.append("Volume: +0 (no data)")
+
+        # 8. Momentum (RSI-like: percentage of up closes in last 14 bars)
+        if i >= 14:
+            up_count = sum(1 for j in range(i-14, i) if closes[j] > closes[j-1])
+            rsi_approx = (up_count / 14) * 100
+            if bias == "BUY" and 30 < rsi_approx < 60:  # Oversold recovering
+                score += 10
+                score_breakdown.append(f"Momentum: +10 (RSI~{rsi_approx:.0f}, oversold recovery)")
+                confirmations.append(f"✓ Momentum: RSI~{rsi_approx:.0f} — oversold recovery")
+            elif bias == "SELL" and 40 < rsi_approx < 70:  # Overbought declining
+                score += 10
+                score_breakdown.append(f"Momentum: +10 (RSI~{rsi_approx:.0f}, overbought decline)")
+                confirmations.append(f"✓ Momentum: RSI~{rsi_approx:.0f} — overbought decline")
+            else:
+                score_breakdown.append(f"Momentum: +0 (RSI~{rsi_approx:.0f})")
+                confirmations.append(f"✗ Momentum: RSI~{rsi_approx:.0f} — not in ideal zone")
+
         # Total score requirement — uses configurable confluence_threshold
         if score < confluence_threshold:
+            _diag_score_reject += 1
             continue
 
         # Throttle: no signal within 3 bars of last one
         if signals and i - signals[-1]["time"] < 3:
+            _diag_throttle += 1
             continue
 
         # Build final confirmation summary
-        confirmations.insert(0, f"═══ Confluence Score: {score}/75 ═══")
+        confirmations.insert(0, f"═══ Confluence Score: {score}/95 ═══")
         confirmations.append(f"── Score Breakdown ──")
         confirmations.extend(score_breakdown)
         confirmations.append(f"ATR(14): {atr:.5f} | SL Distance: {sl_distance:.5f}")
@@ -337,7 +377,9 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
             "has_liquidity_sweep": bool(has_sweep),
         })
 
-    logger.info(f"Generated {len(signals)} signals from {len(candles)} candles for {symbol}")
+    logger.info(f"Generated {len(signals)} signals from {len(candles)} candles for {symbol} "
+                f"(threshold={confluence_threshold}, filtered: swing={_diag_swing}, "
+                f"body={_diag_body_filter}, score={_diag_score_reject}, throttle={_diag_throttle})")
     return signals
 
 
