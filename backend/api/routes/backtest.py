@@ -78,17 +78,11 @@ class SaveBacktestRequest(BaseModel):
 def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
                                     strategy_config: dict = None) -> list:
     """
-    SMC signal generation using the 4-layer model with actual SMC modules.
-    Replaces the old momentum-heuristic approach.
+    SMC signal generation — O(n) single-pass approach.
+    Runs structure detection once on full dataset, then scans for entries.
     """
     import numpy as np
     from backend.risk.position_sizer import get_pip_size
-    from backend.strategies.smc.market_structure import MarketStructureDetector
-    from backend.strategies.smc.order_blocks import OrderBlockDetector
-    from backend.strategies.smc.fvg import FVGDetector
-    from backend.strategies.smc.liquidity import LiquidityMapper
-    from backend.strategies.smc.ipdm import IPDMDetector
-    from backend.strategies.smc.candlestick import detect_confirmation_pattern
 
     cfg = strategy_config or {}
     confluence_threshold = cfg.get("confluence_threshold", 55)
@@ -101,161 +95,222 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
     if len(candles) < 100:
         return signals
 
-    closes = candles['close'].values
-    highs = candles['high'].values
-    lows = candles['low'].values
-    opens = candles['open'].values
+    closes = candles['close'].values.astype(float)
+    highs = candles['high'].values.astype(float)
+    lows = candles['low'].values.astype(float)
+    opens = candles['open'].values.astype(float)
+    n = len(candles)
 
-    # Initialize SMC modules
-    structure = MarketStructureDetector(swing_length=swing_len, min_bos_count=2)
-    ob_detector = OrderBlockDetector()
-    fvg_detector = FVGDetector(fvg_min_pips)
-    liq_mapper = LiquidityMapper(liq_min_pips)
-    ipdm = IPDMDetector()
-
-    # Pre-compute ATR array
+    # ── PRE-COMPUTE: ATR array (vectorized) ──
     atr_period = 14
-    atr_array = np.zeros(len(candles))
-    for i in range(atr_period + 1, len(candles)):
-        tr_vals = []
-        for j in range(i - atr_period, i):
-            tr = max(highs[j] - lows[j],
-                     abs(highs[j] - closes[j-1]) if j > 0 else highs[j] - lows[j],
-                     abs(lows[j] - closes[j-1]) if j > 0 else highs[j] - lows[j])
-            tr_vals.append(tr)
-        atr_array[i] = np.mean(tr_vals)
+    prev_c = np.roll(closes, 1); prev_c[0] = closes[0]
+    tr_all = np.maximum(highs - lows, np.maximum(np.abs(highs - prev_c), np.abs(lows - prev_c)))
+    atr_array = np.zeros(n)
+    for i in range(atr_period, n):
+        atr_array[i] = np.mean(tr_all[i - atr_period:i])
 
-    # Sliding window analysis
-    window_size = 100
+    # ── PRE-COMPUTE: Swing points ──
+    swing_highs = []  # (index, price)
+    swing_lows = []   # (index, price)
+    for i in range(swing_len, n - swing_len):
+        window_h = highs[i - swing_len:i + swing_len + 1]
+        window_l = lows[i - swing_len:i + swing_len + 1]
+        if highs[i] == window_h.max():
+            swing_highs.append((i, float(highs[i])))
+        if lows[i] == window_l.min():
+            swing_lows.append((i, float(lows[i])))
+
+    # ── PRE-COMPUTE: Trend at each bar (BOS tracking) ──
+    trend_at = ["NEUTRAL"] * n
+    bos_count_at = [0] * n
+    confirmed_at = [False] * n
+    current_trend = "NEUTRAL"
+    consecutive_bos = 0
+
+    sh_idx = 0  # pointer into swing_highs
+    sl_idx = 0  # pointer into swing_lows
+
+    for i in range(swing_len * 3, n):
+        # Advance swing pointers to swings before bar i
+        while sh_idx < len(swing_highs) - 1 and swing_highs[sh_idx + 1][0] < i:
+            sh_idx += 1
+        while sl_idx < len(swing_lows) - 1 and swing_lows[sl_idx + 1][0] < i:
+            sl_idx += 1
+
+        if sh_idx >= 2 and sl_idx >= 2:
+            curr_sh = swing_highs[sh_idx][1]
+            prev_sh = swing_highs[sh_idx - 1][1]
+            curr_sl = swing_lows[sl_idx][1]
+            prev_sl = swing_lows[sl_idx - 1][1]
+
+            hh = curr_sh > prev_sh
+            hl = curr_sl > prev_sl
+            lh = curr_sh < prev_sh
+            ll = curr_sl < prev_sl
+
+            if hh and hl:
+                if current_trend != "BULLISH":
+                    consecutive_bos = 1
+                else:
+                    consecutive_bos += 1
+                current_trend = "BULLISH"
+            elif lh and ll:
+                if current_trend != "BEARISH":
+                    consecutive_bos = 1
+                else:
+                    consecutive_bos += 1
+                current_trend = "BEARISH"
+
+        trend_at[i] = current_trend
+        bos_count_at[i] = consecutive_bos
+        confirmed_at[i] = consecutive_bos >= 2
+
+    # ── PRE-COMPUTE: Simple OB, FVG, Liquidity checks (vectorized where possible) ──
+    # FVG: gap between candle i low and candle i-2 high (bullish) or vice versa
+    fvg_bull = np.zeros(n, dtype=bool)
+    fvg_bear = np.zeros(n, dtype=bool)
+    for i in range(3, n):
+        if lows[i] > highs[i-2]:
+            gap = (lows[i] - highs[i-2]) / pip_size if pip_size > 0 else 0
+            if gap >= fvg_min_pips:
+                fvg_bull[i] = True
+        if highs[i] < lows[i-2]:
+            gap = (lows[i-2] - highs[i]) / pip_size if pip_size > 0 else 0
+            if gap >= fvg_min_pips:
+                fvg_bear[i] = True
+
+    # ── SIGNAL SCAN (O(n)) ──
     _diag_no_trend = 0
     _diag_no_bos = 0
     _diag_score_reject = 0
     _diag_throttle = 0
 
-    for i in range(window_size, len(candles) - 1):
+    for i in range(max(50, swing_len * 3), n - 1):
         atr = atr_array[i]
         if atr == 0:
             continue
 
-        # Run structure detection on sliding window
-        window = candles.iloc[max(0, i - window_size):i + 1].copy()
-        ms = structure.update(window)
-
-        trend = ms.get("trend", "NEUTRAL")
+        trend = trend_at[i]
         if trend == "NEUTRAL":
             _diag_no_trend += 1
             continue
 
-        # Need 2+ BOS confirmed
-        if not ms.get("trend_confirmed", False):
+        if not confirmed_at[i]:
             _diag_no_bos += 1
             continue
 
         bias = "BUY" if trend == "BULLISH" else "SELL"
 
-        # Run sub-modules on window
-        obs = ob_detector.update(window)
-        fvgs = fvg_detector.update(window)
-        swings = ms.get("swings", [])
-        liq = liq_mapper.update(window, swings)
-        high_swings = [s for s in swings if s["type"] == "HIGH"]
-        low_swings = [s for s in swings if s["type"] == "LOW"]
-        ipdm_result = ipdm.update(window, high_swings, low_swings)
-
-        # IPDM gate: skip accumulation/active manipulation
-        phase = ipdm_result.get("phase", "UNKNOWN")
-        if phase == "ACCUMULATION":
-            continue
-        if phase == "MANIPULATION" and not ipdm_result.get("manipulation_completed", False):
-            continue
-
-        # Score confluence
+        # ── Score confluence ──
         score = 0
         score_breakdown = []
         confirmations = []
 
         # +15: Trend confirmed (2+ BOS)
         score += 15
-        score_breakdown.append(f"Trend: +15 ({trend}, {ms.get('consecutive_bos',0)} BOS)")
-        confirmations.append(f"✓ Trend: {trend} — {ms.get('consecutive_bos',0)} consecutive BOS confirmed")
+        bos_n = bos_count_at[i]
+        score_breakdown.append(f"Trend: +15 ({trend}, {bos_n} BOS)")
+        confirmations.append(f"✓ Trend: {trend} — {bos_n} consecutive BOS")
 
-        # +15: Liquidity sweep
-        sweep = liq.get("recent_sweep") if isinstance(liq, dict) else None
-        if sweep:
-            score += 15
-            score_breakdown.append("Liquidity Sweep: +15")
-            confirmations.append(f"✓ Liquidity: Sweep detected")
-        else:
-            score_breakdown.append("Liquidity Sweep: +0")
+        # +15: Liquidity sweep (wick through recent swing then close back)
+        has_sweep = False
+        if i >= 10:
+            recent_low = np.min(lows[i-10:i-1])
+            recent_high = np.max(highs[i-10:i-1])
+            if bias == "BUY" and lows[i-1] < recent_low and closes[i] > opens[i]:
+                sweep_size = (recent_low - lows[i-1]) / pip_size if pip_size > 0 else 0
+                if sweep_size >= liq_min_pips:
+                    has_sweep = True
+                    score += 15
+                    score_breakdown.append(f"Liquidity: +15 (SSL sweep {sweep_size:.1f} pips)")
+                    confirmations.append(f"✓ Liquidity: SSL swept {sweep_size:.1f} pips")
+            elif bias == "SELL" and highs[i-1] > recent_high and closes[i] < opens[i]:
+                sweep_size = (highs[i-1] - recent_high) / pip_size if pip_size > 0 else 0
+                if sweep_size >= liq_min_pips:
+                    has_sweep = True
+                    score += 15
+                    score_breakdown.append(f"Liquidity: +15 (BSL sweep {sweep_size:.1f} pips)")
+                    confirmations.append(f"✓ Liquidity: BSL swept {sweep_size:.1f} pips")
+        if not has_sweep:
+            score_breakdown.append("Liquidity: +0")
             confirmations.append("✗ Liquidity: No sweep")
 
-        # +15: Fresh Order Block
-        fresh_ob = None
-        for ob in reversed(obs if isinstance(obs, list) else []):
-            if ob.get("type") == trend and ob.get("touches", 99) == 0:
-                fresh_ob = ob
-                break
-        if fresh_ob:
-            score += 15
-            score_breakdown.append("Order Block: +15 (fresh OB)")
-            confirmations.append("✓ Order Block: Fresh unmitigated OB found")
-        else:
-            score_breakdown.append("Order Block: +0")
-            confirmations.append("✗ Order Block: None found")
+        # +15: Order Block (strong impulse away from zone)
+        ob_found = False
+        if i >= 5:
+            avg_body = np.mean(np.abs(closes[i-5:i] - opens[i-5:i]))
+            for k in range(i-5, i-1):
+                impulse = abs(closes[k+1] - opens[k+1])
+                if bias == "BUY" and closes[k] < opens[k] and closes[k+1] > opens[k+1] and closes[k+1] > highs[k]:
+                    if avg_body > 0 and impulse >= avg_body * 1.5:
+                        ob_found = True
+                        score += 15
+                        score_breakdown.append(f"OB: +15 (bullish, {impulse/avg_body:.1f}x)")
+                        confirmations.append(f"✓ Order Block: Bullish OB")
+                        break
+                elif bias == "SELL" and closes[k] > opens[k] and closes[k+1] < opens[k+1] and closes[k+1] < lows[k]:
+                    if avg_body > 0 and impulse >= avg_body * 1.5:
+                        ob_found = True
+                        score += 15
+                        score_breakdown.append(f"OB: +15 (bearish, {impulse/avg_body:.1f}x)")
+                        confirmations.append(f"✓ Order Block: Bearish OB")
+                        break
+        if not ob_found:
+            score_breakdown.append("OB: +0")
+            confirmations.append("✗ Order Block: None")
 
-        # +10: FVG inside OB
-        fvg_inside = False
-        if fresh_ob and isinstance(fvgs, list) and fvgs:
-            ob_h = fresh_ob.get("high", 0)
-            ob_l = fresh_ob.get("low", 0)
-            for fvg in fvgs:
-                mid = (fvg.get("high", 0) + fvg.get("low", 0)) / 2
-                if ob_l <= mid <= ob_h:
-                    fvg_inside = True
-                    break
-        if fvg_inside:
+        # +10: FVG present
+        has_fvg = (bias == "BUY" and fvg_bull[i]) or (bias == "SELL" and fvg_bear[i])
+        if has_fvg:
             score += 10
-            score_breakdown.append("FVG+OB: +10")
-            confirmations.append("✓ FVG inside Order Block — high probability")
-        elif isinstance(fvgs, list) and fvgs:
-            score += 5
-            score_breakdown.append("FVG: +5 (present, not in OB)")
-            confirmations.append("△ FVG: Present but not inside OB")
+            score_breakdown.append("FVG: +10")
+            confirmations.append("✓ FVG: Fair Value Gap detected")
+        else:
+            score_breakdown.append("FVG: +0")
+            confirmations.append("✗ FVG: None")
 
-        # +10: Candlestick pattern
-        try:
-            pattern = detect_confirmation_pattern(window, bias=trend)
-            if pattern:
-                tier = getattr(pattern, 'tier', 0)
-                if isinstance(tier, str):
-                    tier = {"TIER_1": 1, "TIER_2": 2, "TIER_3": 3}.get(tier, 0)
-                pts = {1: 15, 2: 10, 3: 5}.get(tier, 5)
-                score += pts
-                pname = getattr(pattern, 'name', str(pattern))
-                score_breakdown.append(f"Candle: +{pts} ({pname})")
-                confirmations.append(f"✓ Candlestick: {pname}")
-            else:
-                score_breakdown.append("Candle: +0")
-                confirmations.append("✗ Candlestick: No pattern")
-        except Exception:
-            score_breakdown.append("Candle: +0 (error)")
+        # +15/+10/+5: Candlestick pattern
+        body = abs(closes[i] - opens[i])
+        upper_wick = highs[i] - max(opens[i], closes[i])
+        lower_wick = min(opens[i], closes[i]) - lows[i]
+        total_range = highs[i] - lows[i] if highs[i] != lows[i] else 0.0001
+        avg_body = np.mean(np.abs(closes[max(0,i-5):i] - opens[max(0,i-5):i])) if i >= 5 else body
+        pattern_name = "None"
+        candle_pts = 0
 
-        # +5: IPDM Expansion phase
-        if phase == "EXPANSION":
-            score += 5
-            score_breakdown.append("IPDM: +5 (Expansion)")
-            confirmations.append("✓ IPDM: Expansion phase")
+        if bias == "BUY" and lower_wick > body * 2 and upper_wick < body * 0.5:
+            pattern_name = "Bullish Pin Bar"
+            candle_pts = 15
+        elif bias == "SELL" and upper_wick > body * 2 and lower_wick < body * 0.5:
+            pattern_name = "Bearish Pin Bar"
+            candle_pts = 15
+        elif bias == "BUY" and closes[i] > opens[i] and body > avg_body * 1.5:
+            pattern_name = "Bullish Engulfing"
+            candle_pts = 10
+        elif bias == "SELL" and closes[i] < opens[i] and body > avg_body * 1.5:
+            pattern_name = "Bearish Engulfing"
+            candle_pts = 10
+        elif body < total_range * 0.15 and (lower_wick > body * 2 or upper_wick > body * 2):
+            pattern_name = "Doji"
+            candle_pts = 5
 
-        # +10: Kill zone
-        try:
-            from backend.utils.timeutils import detect_session
-            session = detect_session()
-            if session in ("LONDON", "NY", "LONDON/NY"):
+        if candle_pts > 0:
+            score += candle_pts
+            score_breakdown.append(f"Candle: +{candle_pts} ({pattern_name})")
+            confirmations.append(f"✓ Candlestick: {pattern_name}")
+        else:
+            score_breakdown.append("Candle: +0")
+            confirmations.append("✗ Candlestick: No pattern")
+
+        # +10: Volume (if available)
+        if 'tick_volume' in candles.columns and i >= 20:
+            vols = candles['tick_volume'].values[i-20:i].astype(float)
+            avg_vol = np.mean(vols) if len(vols) > 0 else 0
+            curr_vol = float(candles['tick_volume'].values[i])
+            if avg_vol > 0 and curr_vol > avg_vol * 1.2:
                 score += 10
-                score_breakdown.append(f"Session: +10 ({session})")
-                confirmations.append(f"✓ Session: {session} kill zone")
-        except Exception:
-            pass
+                score_breakdown.append(f"Volume: +10 ({curr_vol/avg_vol:.1f}x)")
+                confirmations.append(f"✓ Volume: {curr_vol/avg_vol:.1f}x average")
 
         # Check threshold
         if score < confluence_threshold:
@@ -267,17 +322,19 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
             _diag_throttle += 1
             continue
 
-        # Calculate entry + SL from structure
+        # Calculate SL from swing structure
         entry = float(closes[i])
-        # SL from swing extreme + buffer
         sl_buffer = atr * 0.3
         if bias == "BUY":
-            swing_low = min(s["price"] for s in low_swings[-3:]) if low_swings else entry - atr * 1.5
+            # Find nearest swing low
+            nearby_lows = [p for idx, p in swing_lows if idx < i and idx > i - 30]
+            swing_low = min(nearby_lows) if nearby_lows else entry - atr * 1.5
             sl = swing_low - sl_buffer
             if sl >= entry:
                 sl = entry - atr * 1.5
         else:
-            swing_high = max(s["price"] for s in high_swings[-3:]) if high_swings else entry + atr * 1.5
+            nearby_highs = [p for idx, p in swing_highs if idx < i and idx > i - 30]
+            swing_high = max(nearby_highs) if nearby_highs else entry + atr * 1.5
             sl = swing_high + sl_buffer
             if sl <= entry:
                 sl = entry + atr * 1.5
@@ -285,7 +342,7 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
         confirmations.insert(0, f"═══ Confluence Score: {score}/100 ═══")
         confirmations.append("── Score Breakdown ──")
         confirmations.extend(score_breakdown)
-        confirmations.append(f"ATR(14): {atr:.5f} | IPDM: {phase}")
+        confirmations.append(f"ATR(14): {atr:.5f} | SL: {abs(entry - sl):.5f}")
 
         signals.append({
             "time": i,
@@ -295,17 +352,15 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
             "stop_loss": float(sl),
             "confluence_score": int(score),
             "confirmations": confirmations,
-            "pattern": "SMC",
-            "has_fvg": bool(fvg_inside or (isinstance(fvgs, list) and len(fvgs) > 0)),
-            "has_liquidity_sweep": bool(sweep),
+            "pattern": pattern_name,
+            "has_fvg": bool(has_fvg),
+            "has_liquidity_sweep": bool(has_sweep),
         })
 
     logger.info(f"Generated {len(signals)} signals from {len(candles)} candles for {symbol} "
+                f"(threshold={confluence_threshold}, filtered: no_trend={_diag_no_trend}, "
                 f"no_bos={_diag_no_bos}, score={_diag_score_reject}, throttle={_diag_throttle})")
     return signals
-
-
-
 
 
 @router.post("/backtest")
@@ -364,7 +419,11 @@ async def run_backtest_endpoint(
     logger.info(f"  Generating signals (threshold={req.confluence_threshold}, "
                 f"fvg_min={req.fvg_min_gap_pips}, liq_min={req.liq_sweep_min_pips}, "
                 f"ob_impulse={req.ob_impulse_ratio})...")
-    signals = _generate_signals_from_candles(candles, req.symbol, req.timeframe, strategy_config)
+    # Run in thread pool to prevent blocking the event loop (Fix: server-wide block)
+    import asyncio
+    signals = await asyncio.to_thread(
+        _generate_signals_from_candles, candles, req.symbol, req.timeframe, strategy_config
+    )
     logger.info(f"  Generated {len(signals)} signals")
 
     # Build merged risk config with ALL override fields from the backtest form
