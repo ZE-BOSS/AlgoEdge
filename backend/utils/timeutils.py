@@ -32,7 +32,8 @@ def get_utc_now() -> datetime:
 
 def get_current_session(dt: Optional[datetime] = None) -> Optional[str]:
     """
-    Returns the active session name ('LONDON', 'NY', 'OVERLAP') or None.
+    Returns the active session name ('LONDON', 'NY', 'LONDON/NY') or None.
+    When London and NY overlap (12:00-15:00 GMT), returns 'LONDON/NY'.
     """
     dt = dt or get_utc_now()
     hour = dt.hour
@@ -41,7 +42,7 @@ def get_current_session(dt: Optional[datetime] = None) -> Optional[str]:
     in_ny = SESSIONS["NY"]["start"] <= hour < SESSIONS["NY"]["end"]
 
     if in_london and in_ny:
-        return "OVERLAP"
+        return "LONDON/NY"
     elif in_london:
         return "LONDON"
     elif in_ny:

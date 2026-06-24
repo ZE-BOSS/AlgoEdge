@@ -30,10 +30,22 @@ class BacktestRequest(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     candle_count: int = 5000
-    risk_config: Dict[str, Any] = {}
     initial_balance: float = 10000.0
-    tp_count: int = 3                    # How many TPs (1-5)
-    session_filter_enabled: bool = True   # Enable/disable session filter
+    # ── Risk Config Overrides (independent from live settings) ──
+    risk_config: Dict[str, Any] = {}
+    tp_count: int = 3
+    session_filter_enabled: bool = True
+    risk_per_trade_pct: float = 1.0
+    min_rr: float = 3.0
+    tp1_rr: float = 3.0
+    tp2_rr: float = 5.0
+    tp3_rr: float = 7.0
+    tp4_rr: float = 10.0
+    tp5_rr: float = 15.0
+    be_trigger_rr: float = 1.0
+    be_buffer_pips: float = 2.0
+    trail_method_tp2: str = "ATR_TRAIL"
+    trail_method_tp3: str = "STRUCTURE_TRAIL"
 
 
 class SaveBacktestRequest(BaseModel):
@@ -45,7 +57,7 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str) -> list
     """
     Run a simplified SMC-style signal generation on historical candles.
     Returns a list of signal dicts compatible with BacktestEngine.
-    Each signal has: time (bar index), symbol, direction, entry_price, stop_loss, confluence_score.
+    Enforces minimum SL distance and validates SL/TP direction.
     """
     import pandas as pd
     import numpy as np
@@ -54,14 +66,29 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str) -> list
     if len(candles) < 50:
         return signals
 
-    # Use closing prices for structure detection
     closes = candles['close'].values
     highs = candles['high'].values
     lows = candles['low'].values
+    opens = candles['open'].values
 
     swing_len = 5
+    # Calculate rolling ATR for proper SL distance
+    atr_period = 14
 
-    for i in range(swing_len * 2 + 10, len(candles) - 1):
+    for i in range(max(swing_len * 2 + 10, atr_period + 5), len(candles) - 1):
+        # Calculate ATR at this bar
+        tr_values = []
+        for j in range(max(0, i - atr_period), i):
+            tr = max(
+                highs[j] - lows[j],
+                abs(highs[j] - closes[j-1]) if j > 0 else highs[j] - lows[j],
+                abs(lows[j] - closes[j-1]) if j > 0 else highs[j] - lows[j],
+            )
+            tr_values.append(tr)
+        atr = np.mean(tr_values) if tr_values else 0
+        if atr == 0:
+            continue
+
         # Simple swing high/low detection
         window_highs = highs[i - swing_len:i]
         window_lows = lows[i - swing_len:i]
@@ -78,48 +105,169 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str) -> list
         bias = "BUY" if recent_close > lookback_close else "SELL"
 
         # Check for order block (strong move away from zone)
-        body_sizes = abs(closes[i-3:i] - candles['open'].values[i-3:i])
+        body_sizes = abs(closes[i-3:i] - opens[i-3:i])
         avg_body = np.mean(body_sizes) if len(body_sizes) > 0 else 0
 
         # Only take signals with reasonable candle bodies (filtering noise)
-        current_body = abs(closes[i] - candles['open'].values[i])
-        if avg_body == 0 or current_body < avg_body * 0.5:
+        current_body = abs(closes[i] - opens[i])
+        if avg_body == 0 or current_body < avg_body * 0.3:
             continue
 
-        # Calculate entry, SL, TP
+        # Calculate entry, SL with MINIMUM distance enforcement
         entry = closes[i]
-        atr_period = min(14, i)
-        atr = np.mean(highs[i-atr_period:i] - lows[i-atr_period:i])
-        if atr == 0:
-            continue
+        sl_distance = max(atr * 1.5, entry * 0.002)  # At least 1.5×ATR or 0.2% of price
 
         if bias == "BUY":
-            sl = entry - atr * 1.5
-            tp = entry + atr * 4.5  # 3R minimum
+            sl = entry - sl_distance
+            # Validate: SL must be below entry
+            if sl >= entry:
+                continue
         else:
-            sl = entry + atr * 1.5
-            tp = entry - atr * 4.5
+            sl = entry + sl_distance
+            # Validate: SL must be above entry
+            if sl <= entry:
+                continue
 
-        # Confluence score (simplified)
-        score = 50
-        # Trend alignment
-        if bias == "BUY" and closes[i] > np.mean(closes[max(0,i-50):i]):
+        # ── Detailed SMC Confirmation Analysis ──
+        score = 0
+        confirmations = []
+        score_breakdown = []
+
+        # 1. Trend Alignment (SMA50)
+        sma50 = np.mean(closes[max(0,i-50):i])
+        if bias == "BUY" and closes[i] > sma50:
             score += 15
-        elif bias == "SELL" and closes[i] < np.mean(closes[max(0,i-50):i]):
+            score_breakdown.append("Trend Alignment: +15 (price above SMA50)")
+            confirmations.append(f"✓ Trend: BULLISH — Price {closes[i]:.2f} above SMA50 {sma50:.2f}")
+        elif bias == "SELL" and closes[i] < sma50:
             score += 15
-        # Swing structure
+            score_breakdown.append("Trend Alignment: +15 (price below SMA50)")
+            confirmations.append(f"✓ Trend: BEARISH — Price {closes[i]:.2f} below SMA50 {sma50:.2f}")
+        else:
+            score_breakdown.append("Trend Alignment: +0 (counter-trend)")
+            confirmations.append(f"✗ Trend: Counter-trend signal")
+
+        # 2. Swing Structure
         if is_swing_low and bias == "BUY":
-            score += 10
+            score += 15
+            score_breakdown.append("Swing Structure: +15 (swing low + BUY)")
+            confirmations.append(f"✓ Structure: Swing Low at {lows[i-swing_len]:.2f} — demand zone")
         elif is_swing_high and bias == "SELL":
+            score += 15
+            score_breakdown.append("Swing Structure: +15 (swing high + SELL)")
+            confirmations.append(f"✓ Structure: Swing High at {highs[i-swing_len]:.2f} — supply zone")
+        else:
+            score += 5
+            score_breakdown.append("Swing Structure: +5 (swing present, direction mismatch)")
+            confirmations.append(f"△ Structure: Swing detected but not aligned with {bias}")
+
+        # 3. Fair Value Gap (FVG) Detection
+        has_fvg = False
+        if i >= 3:
+            if bias == "BUY" and lows[i] > highs[i-2]:
+                has_fvg = True
+                score += 10
+                score_breakdown.append("FVG: +10 (bullish gap detected)")
+                confirmations.append(f"✓ FVG: Bullish gap — Low {lows[i]:.2f} > High[-2] {highs[i-2]:.2f}")
+            elif bias == "SELL" and highs[i] < lows[i-2]:
+                has_fvg = True
+                score += 10
+                score_breakdown.append("FVG: +10 (bearish gap detected)")
+                confirmations.append(f"✓ FVG: Bearish gap — High {highs[i]:.2f} < Low[-2] {lows[i-2]:.2f}")
+            else:
+                score_breakdown.append("FVG: +0 (no gap)")
+                confirmations.append("✗ FVG: No fair value gap detected")
+
+        # 4. Liquidity Sweep Detection
+        has_sweep = False
+        if i >= 10:
+            recent_low = min(lows[i-10:i-1])
+            recent_high = max(highs[i-10:i-1])
+            if bias == "BUY" and lows[i-1] < recent_low and closes[i] > opens[i]:
+                has_sweep = True
+                score += 15
+                score_breakdown.append("Liquidity Sweep: +15 (swept lows, reclaimed)")
+                confirmations.append(f"✓ Liquidity: Swept low {recent_low:.2f} then reclaimed — buy-side liquidity taken")
+            elif bias == "SELL" and highs[i-1] > recent_high and closes[i] < opens[i]:
+                has_sweep = True
+                score += 15
+                score_breakdown.append("Liquidity Sweep: +15 (swept highs, reclaimed)")
+                confirmations.append(f"✓ Liquidity: Swept high {recent_high:.2f} then reclaimed — sell-side liquidity taken")
+            else:
+                score_breakdown.append("Liquidity Sweep: +0 (no sweep)")
+                confirmations.append("✗ Liquidity: No sweep detected in last 10 bars")
+
+        # 5. Candlestick Pattern
+        pattern_name = "None"
+        c_open, c_close, c_high, c_low = opens[i], closes[i], highs[i], lows[i]
+        body = abs(c_close - c_open)
+        upper_wick = c_high - max(c_open, c_close)
+        lower_wick = min(c_open, c_close) - c_low
+        total_range = c_high - c_low if c_high != c_low else 0.0001
+
+        if body < total_range * 0.1 and lower_wick > body * 2:
+            pattern_name = "Doji / Hammer"
+            score += 5
+            score_breakdown.append(f"Candle Pattern: +5 ({pattern_name})")
+        elif bias == "BUY" and lower_wick > body * 2 and upper_wick < body * 0.5:
+            pattern_name = "Bullish Pin Bar"
             score += 10
+            score_breakdown.append(f"Candle Pattern: +10 ({pattern_name})")
+        elif bias == "SELL" and upper_wick > body * 2 and lower_wick < body * 0.5:
+            pattern_name = "Bearish Pin Bar"
+            score += 10
+            score_breakdown.append(f"Candle Pattern: +10 ({pattern_name})")
+        elif bias == "BUY" and c_close > c_open and body > avg_body * 1.5:
+            pattern_name = "Bullish Engulfing"
+            score += 10
+            score_breakdown.append(f"Candle Pattern: +10 ({pattern_name})")
+        elif bias == "SELL" and c_close < c_open and body > avg_body * 1.5:
+            pattern_name = "Bearish Engulfing"
+            score += 10
+            score_breakdown.append(f"Candle Pattern: +10 ({pattern_name})")
+        elif current_body > avg_body * 1.5:
+            pattern_name = "Strong Momentum Candle"
+            score += 5
+            score_breakdown.append(f"Candle Pattern: +5 ({pattern_name})")
+        else:
+            score_breakdown.append("Candle Pattern: +0 (no significant pattern)")
 
-        # Only take high-confluence signals (avoid spam)
-        if score < 60:
+        confirmations.append(f"{'✓' if pattern_name != 'None' else '✗'} Candlestick: {pattern_name}")
+
+        # 6. Order Block Check
+        if i >= 5:
+            ob_found = False
+            for k in range(i-5, i-1):
+                if bias == "BUY" and closes[k] < opens[k] and closes[k+1] > opens[k+1] and closes[k+1] > highs[k]:
+                    ob_found = True
+                    score += 10
+                    score_breakdown.append("Order Block: +10 (bullish OB detected)")
+                    confirmations.append(f"✓ Order Block: Bullish OB at bar {k} — bearish candle followed by engulf")
+                    break
+                elif bias == "SELL" and closes[k] > opens[k] and closes[k+1] < opens[k+1] and closes[k+1] < lows[k]:
+                    ob_found = True
+                    score += 10
+                    score_breakdown.append("Order Block: +10 (bearish OB detected)")
+                    confirmations.append(f"✓ Order Block: Bearish OB at bar {k} — bullish candle followed by engulf")
+                    break
+            if not ob_found:
+                score_breakdown.append("Order Block: +0 (none found)")
+                confirmations.append("✗ Order Block: None detected in last 5 bars")
+
+        # Total score requirement
+        if score < 40:
             continue
 
-        # Throttle: no signal within 5 bars of last one
-        if signals and i - signals[-1]["time"] < 5:
+        # Throttle: no signal within 3 bars of last one
+        if signals and i - signals[-1]["time"] < 3:
             continue
+
+        # Build final confirmation summary
+        confirmations.insert(0, f"═══ Confluence Score: {score}/75 ═══")
+        confirmations.append(f"── Score Breakdown ──")
+        confirmations.extend(score_breakdown)
+        confirmations.append(f"ATR(14): {atr:.5f} | SL Distance: {sl_distance:.5f}")
+        confirmations.append(f"Risk: {sl_distance:.2f} pips | Min SL enforced: max(1.5×ATR, 0.2% price)")
 
         signals.append({
             "time": i,
@@ -127,8 +275,11 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str) -> list
             "direction": bias,
             "entry_price": float(entry),
             "stop_loss": float(sl),
-            "take_profit": float(tp),
             "confluence_score": score,
+            "confirmations": confirmations,
+            "pattern": pattern_name,
+            "has_fvg": has_fvg,
+            "has_liquidity_sweep": has_sweep,
         })
 
     logger.info(f"Generated {len(signals)} signals from {len(candles)} candles for {symbol}")
@@ -184,11 +335,23 @@ async def run_backtest_endpoint(
     signals = _generate_signals_from_candles(candles, req.symbol, req.timeframe)
     logger.info(f"  Generated {len(signals)} signals")
 
-    # Merge tp_count and session_filter into risk_config
+    # Build merged risk config with all override fields from the backtest form
     merged_risk_config = {
-        **req.risk_config,
+        "risk_per_trade_pct": req.risk_per_trade_pct,
+        "min_rr": req.min_rr,
         "tp_count": req.tp_count,
+        "tp1_rr": req.tp1_rr,
+        "tp2_rr": req.tp2_rr,
+        "tp3_rr": req.tp3_rr,
+        "tp4_rr": req.tp4_rr,
+        "tp5_rr": req.tp5_rr,
+        "be_trigger_rr": req.be_trigger_rr,
+        "be_buffer_pips": req.be_buffer_pips,
+        "trail_method_tp2": req.trail_method_tp2,
+        "trail_method_tp3": req.trail_method_tp3,
         "session_filter_enabled": req.session_filter_enabled,
+        "multi_position_mode": req.tp_count > 1,
+        **req.risk_config,  # Any extra overrides from risk_config dict
     }
 
     logger.info(f"  Running backtest engine...")
@@ -220,8 +383,11 @@ async def run_backtest_endpoint(
         "initial_balance": results["initial_balance"],
         "final_balance": results["final_balance"],
         "total_trades": results["total_trades"],
+        "total_signals": results.get("total_signals", 0),
+        "invalid_signals": results.get("invalid_signals", 0),
         "equity_curve": results.get("equity_curve", []),
         "trades": results.get("trades", []),
+        "grouped_trades": results.get("grouped_trades", []),
         "report": {
             "win_rate": report.win_rate if report else 0,
             "profit_factor": report.profit_factor if report else 0,
@@ -304,6 +470,7 @@ async def save_backtest(
             )
             db.add(bt_trade)
 
+    await db.commit()
     logger.info(f"Backtest saved: {backtest_id} ({req.save_mode})")
     return {"saved": True, "backtest_id": backtest_id}
 

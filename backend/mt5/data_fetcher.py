@@ -42,19 +42,29 @@ def _get_timeframe_code(tf_str: str):
     return mapping.get(tf_str.upper(), mt5.TIMEFRAME_H1)
 
 
-def _generate_mock_data(symbol: str, count: int, timeframe: str = "H1") -> pd.DataFrame:
+def _generate_mock_data(symbol: str, count: int, timeframe: str = "H1",
+                        start_date: datetime = None, end_date: datetime = None) -> pd.DataFrame:
     """
     Generate realistic mock OHLCV data when MT5 is not available.
     Uses symbol-specific base prices and volatility profiles.
+    If start_date and end_date are provided, generates data spanning that range.
     """
     # Determine candle interval based on timeframe
     freq_map = {
         "M1": "1min", "M5": "5min", "M15": "15min", "M30": "30min",
-        "H1": "1h", "H4": "4h", "D1": "1D", "W1": "1W", "MN1": "1M",
+        "H1": "1h", "H4": "4h", "D1": "1D", "W1": "1W", "MN1": "1ME",
     }
     freq = freq_map.get(timeframe.upper(), "1h")
     
-    dates = pd.date_range(end=datetime.now(), periods=count, freq=freq)
+    # Use date range if provided, otherwise use count from now
+    if start_date and end_date:
+        dates = pd.date_range(start=start_date, end=end_date, freq=freq)
+        count = len(dates)
+        if count < 10:
+            dates = pd.date_range(start=start_date, periods=max(100, count), freq=freq)
+            count = len(dates)
+    else:
+        dates = pd.date_range(end=datetime.now(), periods=count, freq=freq)
     
     # Symbol-specific base prices and volatility
     sym_upper = symbol.upper()
@@ -89,13 +99,30 @@ def _generate_mock_data(symbol: str, count: int, timeframe: str = "H1") -> pd.Da
         base_price = 100.0
         volatility = 0.002
     
-    # Random walk with mean reversion
-    np.random.seed(None)  # Different each call
-    returns = np.random.randn(count) * volatility
+    # Generate price with trend phases and pullbacks (more realistic than pure random walk)
+    np.random.seed(None)
+    # Create trend regime changes every ~200 bars
+    regime_length = max(50, count // 10)
+    n_regimes = max(1, count // regime_length)
+    trends = []
+    for _ in range(n_regimes):
+        # Each regime: trend direction + strength
+        trend_dir = np.random.choice([-1, 1])
+        trend_strength = np.random.uniform(0.0001, 0.0005) * trend_dir
+        noise = np.random.randn(regime_length) * volatility
+        segment = noise + trend_strength
+        trends.extend(segment.tolist())
+    
+    # Trim or extend to match count
+    returns = np.array(trends[:count])
+    if len(returns) < count:
+        extra = np.random.randn(count - len(returns)) * volatility
+        returns = np.concatenate([returns, extra])
+    
     closes = base_price * np.exp(np.cumsum(returns))
     
-    # Generate realistic OHLC from close
-    candle_range = volatility * base_price * 0.5
+    # Generate realistic OHLC from close with proper candle structure
+    candle_range = volatility * base_price * 0.8
     highs = closes + np.abs(np.random.randn(count)) * candle_range
     lows = closes - np.abs(np.random.randn(count)) * candle_range
     opens = np.roll(closes, 1)
@@ -230,8 +257,8 @@ class DataFetcher:
             candles_per_hour = {"M1": 60, "M5": 12, "M15": 4, "M30": 2, "H1": 1, "H4": 0.25, "D1": 1/24}
             multiplier = candles_per_hour.get(timeframe.upper(), 1)
             estimated_count = max(100, int(range_hours * multiplier))
-            logger.info(f"MT5 not available — generating {estimated_count} mock candles")
-            return _generate_mock_data(symbol, estimated_count, timeframe)
+            logger.info(f"MT5 not available — generating {estimated_count} mock candles for date range")
+            return _generate_mock_data(symbol, estimated_count, timeframe, start_date=start, end_date=end)
             
         tf_code = _get_timeframe_code(timeframe)
         

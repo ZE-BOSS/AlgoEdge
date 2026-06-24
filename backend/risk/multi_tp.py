@@ -4,10 +4,9 @@ backend/risk/multi_tp.py
 Multi-position TP1/TP2/TP3/TP4/TP5 orchestration.
 Source: RiskManagement_Spec.md Section 2
 
-Supports configurable TP count (1–5) and deferred TP stacking:
-  - If tp_count <= 2: all TPs open at entry
-  - If tp_count > 2: TP1+TP2 open at entry, TP3–5 deferred until
-    candlestick + volume conviction criteria are met.
+All TP positions open at entry. No deferred stacking.
+When TP1 hits, all remaining positions move to break-even.
+User configures tp_count (1-5) and RR per level.
 """
 
 from typing import List, Dict, Any, Optional
@@ -37,7 +36,7 @@ class TPLevel:
     tp_price: float
     volume: float
     trail_method: Optional[str]  # None for TP1, ATR_TRAIL for TP2, etc.
-    deferred: bool = False       # True = opens later based on conviction, not at entry
+    deferred: bool = False       # Always False — all TPs open at entry
 
 
 class MultiTPManager:
@@ -50,8 +49,7 @@ class MultiTPManager:
         self.tp4_rr = config.get("tp4_rr", 10.0)
         self.tp5_rr = config.get("tp5_rr", 15.0)
         self.tp_splits = config.get("tp_splits", [30, 25, 20, 15, 10])
-        self.tp_levels_count = config.get("tp_levels", 5)
-        self.tp_count = config.get("tp_count", 3)  # User-configurable: how many TPs to use (1–5)
+        self.tp_count = config.get("tp_count", 3)  # User-configurable: how many TPs (1–5)
         self.min_rr = config.get("min_rr", 3.0)
         self.multi_position_mode = config.get("multi_position_mode", True)
 
@@ -74,13 +72,9 @@ class MultiTPManager:
     ) -> List[TPLevel]:
         """
         Calculate TP prices and volume splits for up to 5 levels.
-        Source: RiskManagement_Spec.md Section 2.2 and 2.3
+        ALL TPs open at entry (deferred=False always).
 
         Direction accepts both conventions: "BUY"/"SELL" or "BULLISH"/"BEARISH".
-
-        Deferred stacking logic:
-          - If tp_count <= 2: all TPs are immediate (deferred=False)
-          - If tp_count > 2:  TP1+TP2 open at entry, TP3–5 are deferred
         """
         risk = abs(entry - sl)
         if risk == 0:
@@ -120,38 +114,29 @@ class MultiTPManager:
             self._validate_tp(tp, entry, direction)
             return [tp]
 
-        # Build TP levels with volume splits
+        # Build TP levels with volume splits — ALL immediate
         levels = []
 
         # Normalize splits to match active_count
         splits = self.tp_splits[:active_count]
-        # If splits don't sum to 100, redistribute equally
         total_split = sum(splits)
         if total_split == 0:
             splits = [100 // active_count] * active_count
             total_split = sum(splits)
 
         for i in range(active_count):
-            # Get split percentage
             if i < len(splits):
-                split_pct = splits[i] / total_split  # Normalize to sum to 1.0
+                split_pct = splits[i] / total_split
             else:
                 split_pct = 0.0
 
             vol = round(total_volume * split_pct, 2)
-
-            # Skip TP levels with calculated RR below minimum (except TP1)
-            if i > 0 and rr_multipliers[i] < self.min_rr:
-                continue
 
             # Skip if volume is too small
             if vol < 0.01:
                 continue
 
             trail = self.trail_methods[i] if i < len(self.trail_methods) else None
-
-            # Deferred stacking: if user wants > 2 TPs, TP3–5 are deferred
-            is_deferred = (active_count > 2 and i >= 2)
 
             levels.append(TPLevel(
                 level=i + 1,
@@ -160,7 +145,7 @@ class MultiTPManager:
                 tp_price=tp_prices[i],
                 volume=vol,
                 trail_method=trail,
-                deferred=is_deferred,
+                deferred=False,  # ALL TPs open at entry
             ))
 
         # If only TP1 is viable, put all volume there
@@ -173,27 +158,16 @@ class MultiTPManager:
             self._validate_tp(tp, entry, direction)
 
         logger.debug(
-            f"TP levels calculated: {len(levels)} levels | "
-            f"direction={direction} | entry={entry} | "
-            f"immediate={sum(1 for l in levels if not l.deferred)} | "
-            f"deferred={sum(1 for l in levels if l.deferred)}"
+            f"TP levels: {len(levels)} | dir={direction} | entry={entry} | "
+            f"risk={risk:.5f} | tp_count={active_count}"
         )
 
         return levels
 
-    def get_immediate_levels(self, levels: List[TPLevel]) -> List[TPLevel]:
-        """Return only the non-deferred TP levels (for immediate entry)."""
-        return [tp for tp in levels if not tp.deferred]
-
-    def get_deferred_levels(self, levels: List[TPLevel]) -> List[TPLevel]:
-        """Return only the deferred TP levels (for conviction-based re-entry)."""
-        return [tp for tp in levels if tp.deferred]
-
     def _validate_tp(self, tp: TPLevel, entry: float, direction: str):
         """
         Post-calculation sanity check: TP must be on the correct side of entry.
-        Raises ValueError if a TP is placed on the wrong side — this is a
-        critical logic error that must be caught immediately.
+        Raises ValueError if a TP is placed on the wrong side.
         """
         if _is_buy(direction) and tp.tp_price <= entry:
             raise ValueError(

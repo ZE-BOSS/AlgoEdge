@@ -139,7 +139,7 @@ function BotControl() {
   });
 
   const startMutation = useMutation({
-    mutationFn: () => startBot(),
+    mutationFn: () => startBot({ symbols: ['XAUUSD', 'EURUSD', 'GBPUSD'], scan_interval: 60 }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['botStatus'] }),
   });
 
@@ -181,7 +181,7 @@ function BotControl() {
 
       {botStatus && (
         <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-          <div><strong>Symbols:</strong> {botStatus.symbols?.join(', ') || 'None configured'}</div>
+          <div><strong>Symbols:</strong> {botStatus.symbols?.length ? botStatus.symbols.join(', ') : 'XAUUSD, EURUSD, GBPUSD (defaults)'}</div>
           {botStatus.last_scan && <div><strong>Last Scan:</strong> {new Date(botStatus.last_scan).toLocaleString()}</div>}
           {botStatus.total_signals_today != null && <div><strong>Signals Today:</strong> {botStatus.total_signals_today}</div>}
         </div>

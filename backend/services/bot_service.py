@@ -214,17 +214,14 @@ class BotService:
                                     )
 
                                     if approved:
-                                        # Filter to immediate TPs only
-                                        immediate_tps = [tp for tp in tp_levels if not tp.deferred]
-
+                                        # Place ALL TP positions at entry (no deferred stacking)
                                         self._log_event(
-                                            f"Trade approved: {len(immediate_tps)} positions "
-                                            f"({len(tp_levels) - len(immediate_tps)} deferred)",
+                                            f"Trade approved: {len(tp_levels)} positions — all at entry",
                                             "INFO", "TRADE"
                                         )
 
                                         # Place orders via OrderManager
-                                        for tp in immediate_tps:
+                                        for tp in tp_levels:
                                             try:
                                                 result = await OrderManager.place_market_order(
                                                     symbol=signal.symbol,
