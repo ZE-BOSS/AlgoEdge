@@ -452,8 +452,27 @@ async def run_backtest_endpoint(
         category="BACKTEST"
     )
 
+    # ── Sanitize numpy types to native Python for JSON serialization ──
+    import numpy as _np
+
+    def _sanitize(obj):
+        """Recursively convert numpy types to native Python types."""
+        if isinstance(obj, dict):
+            return {k: _sanitize(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [_sanitize(v) for v in obj]
+        elif isinstance(obj, (_np.bool_, bool)):
+            return bool(obj)
+        elif isinstance(obj, (_np.integer,)):
+            return int(obj)
+        elif isinstance(obj, (_np.floating,)):
+            return float(obj)
+        elif isinstance(obj, _np.ndarray):
+            return obj.tolist()
+        return obj
+
     # Return full results for frontend display
-    return {
+    response = {
         "backtest_id": results["backtest_id"],
         "initial_balance": results["initial_balance"],
         "final_balance": results["final_balance"],
@@ -486,6 +505,8 @@ async def run_backtest_endpoint(
             "max_consecutive_losses": report.max_consecutive_losses if report else 0,
         },
     }
+
+    return _sanitize(response)
 
 
 @router.post("/backtests/{backtest_id}/save")
