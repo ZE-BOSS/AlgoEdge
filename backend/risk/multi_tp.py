@@ -48,7 +48,16 @@ class MultiTPManager:
         self.tp3_rr = config.get("tp3_rr", 7.0)
         self.tp4_rr = config.get("tp4_rr", 10.0)
         self.tp5_rr = config.get("tp5_rr", 15.0)
-        self.tp_splits = config.get("tp_splits", [30, 25, 20, 15, 10])
+        raw_splits = config.get("tp_splits", [30, 25, 20, 15, 10])
+        if isinstance(raw_splits, str):
+            try:
+                self.tp_splits = [int(x.strip()) for x in raw_splits.split(",") if x.strip()]
+            except ValueError:
+                self.tp_splits = [30, 25, 20, 15, 10]
+        elif isinstance(raw_splits, list):
+            self.tp_splits = [int(x) for x in raw_splits]
+        else:
+            self.tp_splits = [30, 25, 20, 15, 10]
         self.tp_count = config.get("tp_count", 3)  # User-configurable: how many TPs (1–5)
         self.min_rr = config.get("min_rr", 3.0)
         self.multi_position_mode = config.get("multi_position_mode", True)
