@@ -53,7 +53,7 @@ class MultiTPManager:
         self.min_rr = config.get("min_rr", 3.0)
         self.multi_position_mode = config.get("multi_position_mode", True)
 
-        # Trail methods per TP level
+        # Trail methods per TP level (all configurable)
         self.trail_methods = [
             None,                                               # TP1: no trail
             config.get("trail_method_tp2", "ATR_TRAIL"),       # TP2

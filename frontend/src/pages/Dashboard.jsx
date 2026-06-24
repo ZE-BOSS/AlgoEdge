@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, DollarSign, Target, Shield, Activity, AlertTriangle, Play, Square, Eye, Loader2, Terminal, Trash2 } from 'lucide-react';
 import { useConnectionStore, useRiskStore, useAuthStore } from '../store';
-import { getStats, getPositions, getCompounding, getChartData, getBotStatus, startBot, stopBot, getBotLogs } from '../services/api';
+import { getStats, getPositions, getCompounding, getChartData, getBotStatus, startBot, stopBot, getBotLogs, getConfig, getBrokerStatus } from '../services/api';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
 
 // ── Category color mapping for activity log ───────────────────────────────
@@ -130,6 +130,7 @@ function BotControl() {
   const { status: connStatus } = useConnectionStore();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const queryClient = useQueryClient();
+  const [startError, setStartError] = useState(null);
 
   const { data: botStatus } = useQuery({
     queryKey: ['botStatus'],
@@ -138,9 +139,37 @@ function BotControl() {
     enabled: connStatus === 'ONLINE' && isAuthenticated,
   });
 
+  // Load user config to get configured symbols
+  const { data: userConfig } = useQuery({
+    queryKey: ['userConfig'],
+    queryFn: () => getConfig().then(r => r.data),
+    enabled: connStatus === 'ONLINE' && isAuthenticated,
+  });
+
+  // Load broker connection status
+  const { data: brokerStatus } = useQuery({
+    queryKey: ['brokerStatus'],
+    queryFn: () => getBrokerStatus().then(r => r.data),
+    enabled: connStatus === 'ONLINE' && isAuthenticated,
+  });
+
+  // Get symbols from config, or defaults
+  const configSymbols = userConfig?.config?.watched_symbols || userConfig?.config?.symbols || ['XAUUSD', 'EURUSD', 'GBPUSD'];
+
   const startMutation = useMutation({
-    mutationFn: () => startBot({ symbols: ['XAUUSD', 'EURUSD', 'GBPUSD'], scan_interval: 60 }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['botStatus'] }),
+    mutationFn: () => startBot({ symbols: configSymbols, scan_interval: 60 }),
+    onSuccess: () => {
+      setStartError(null);
+      queryClient.invalidateQueries({ queryKey: ['botStatus'] });
+    },
+    onError: (err) => {
+      const detail = err?.response?.data?.detail;
+      if (detail?.missing_brokers) {
+        setStartError(detail.missing_brokers);
+      } else {
+        setStartError([typeof detail === 'string' ? detail : err.message || 'Failed to start bot']);
+      }
+    },
   });
 
   const stopMutation = useMutation({
@@ -150,6 +179,8 @@ function BotControl() {
 
   const isRunning = botStatus?.running === true;
   const isPending = startMutation.isPending || stopMutation.isPending;
+  const hasStandard = brokerStatus?.standard?.configured;
+  const hasDeriv = brokerStatus?.deriv?.configured;
 
   return (
     <div className="card" style={{ marginBottom: 20 }}>
@@ -179,9 +210,39 @@ function BotControl() {
         </button>
       </div>
 
+      {/* Broker connection status */}
+      {brokerStatus && (
+        <div style={{ display: 'flex', gap: 12, marginBottom: 12, fontSize: '0.78rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: hasStandard ? 'var(--green)' : 'var(--red)', display: 'inline-block' }} />
+            <span>MT5 {hasStandard ? `(${brokerStatus.standard.server || 'Connected'})` : '(Not configured)'}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: hasDeriv ? 'var(--green)' : 'var(--red)', display: 'inline-block' }} />
+            <span>Deriv {hasDeriv ? `(${brokerStatus.deriv.server || 'Connected'})` : '(Not configured)'}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Start error with broker details */}
+      {startError && (
+        <div style={{ background: 'rgba(248,81,73,0.1)', border: '1px solid var(--red)', borderRadius: 'var(--radius-xs)', padding: '8px 12px', marginBottom: 12 }}>
+          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>
+            <AlertTriangle size={14} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
+            Cannot start bot
+          </div>
+          {startError.map((msg, i) => (
+            <div key={i} style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: '2px 0' }}>• {msg}</div>
+          ))}
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>
+            Go to Settings → Broker to configure your MT5 credentials.
+          </div>
+        </div>
+      )}
+
       {botStatus && (
         <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-          <div><strong>Symbols:</strong> {botStatus.symbols?.length ? botStatus.symbols.join(', ') : 'XAUUSD, EURUSD, GBPUSD (defaults)'}</div>
+          <div><strong>Symbols:</strong> {botStatus.symbols?.length ? botStatus.symbols.join(', ') : configSymbols.join(', ')}</div>
           {botStatus.last_scan && <div><strong>Last Scan:</strong> {new Date(botStatus.last_scan).toLocaleString()}</div>}
           {botStatus.total_signals_today != null && <div><strong>Signals Today:</strong> {botStatus.total_signals_today}</div>}
         </div>

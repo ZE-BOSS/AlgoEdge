@@ -31,21 +31,43 @@ class BacktestRequest(BaseModel):
     end_date: Optional[str] = None
     candle_count: int = 5000
     initial_balance: float = 10000.0
-    # ── Risk Config Overrides (independent from live settings) ──
     risk_config: Dict[str, Any] = {}
-    tp_count: int = 3
+    # ── Strategy Params ──
+    confluence_threshold: int = 55
+    swing_length: int = 5
+    ob_impulse_ratio: float = 1.5
+    fvg_min_gap_pips: float = 3.0
+    liq_sweep_min_pips: float = 2.0
+    max_spread_pips: float = 3.0
     session_filter_enabled: bool = True
+    news_filter_enabled: bool = True
+    # ── Risk Params ──
     risk_per_trade_pct: float = 1.0
     min_rr: float = 3.0
+    max_daily_loss_pct: float = 5.0
+    max_weekly_loss_pct: float = 10.0
+    max_consecutive_losses: int = 5
+    max_concurrent_positions: int = 3
+    # ── TP Config ──
+    tp_count: int = 3
     tp1_rr: float = 3.0
     tp2_rr: float = 5.0
     tp3_rr: float = 7.0
     tp4_rr: float = 10.0
     tp5_rr: float = 15.0
+    tp_splits: str = "30,25,20,15,10"
+    # ── Break-Even ──
     be_trigger_rr: float = 1.0
     be_buffer_pips: float = 2.0
+    # ── Trailing Stops ──
     trail_method_tp2: str = "ATR_TRAIL"
     trail_method_tp3: str = "STRUCTURE_TRAIL"
+    trail_method_tp4: str = "ATR_TRAIL"
+    trail_method_tp5: str = "STRUCTURE_TRAIL"
+    atr_trail_multiplier: float = 1.5
+    trail_pips: float = 15.0
+    # ── Compounding ──
+    compounding_enabled: bool = False
 
 
 class SaveBacktestRequest(BaseModel):
@@ -53,14 +75,24 @@ class SaveBacktestRequest(BaseModel):
     save_mode: str = "FULL"  # "FULL" or "SUMMARY"
 
 
-def _generate_signals_from_candles(candles, symbol: str, timeframe: str) -> list:
+def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
+                                    strategy_config: dict = None) -> list:
     """
-    Run a simplified SMC-style signal generation on historical candles.
-    Returns a list of signal dicts compatible with BacktestEngine.
-    Enforces minimum SL distance and validates SL/TP direction.
+    SMC signal generation using configurable strategy parameters.
+    Uses confluence_threshold, fvg_min_gap_pips, liq_sweep_min_pips,
+    ob_impulse_ratio from strategy_config.
     """
     import pandas as pd
     import numpy as np
+    from backend.risk.position_sizer import get_pip_size
+
+    cfg = strategy_config or {}
+    confluence_threshold = cfg.get("confluence_threshold", 55)
+    swing_len = cfg.get("swing_length", 5)
+    ob_impulse = cfg.get("ob_impulse_ratio", 1.5)
+    fvg_min_pips = cfg.get("fvg_min_gap_pips", 3.0)
+    liq_min_pips = cfg.get("liq_sweep_min_pips", 2.0)
+    pip_size = get_pip_size(symbol)
 
     signals = []
     if len(candles) < 50:
@@ -161,38 +193,58 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str) -> list
             score_breakdown.append("Swing Structure: +5 (swing present, direction mismatch)")
             confirmations.append(f"△ Structure: Swing detected but not aligned with {bias}")
 
-        # 3. Fair Value Gap (FVG) Detection
+        # 3. Fair Value Gap (FVG) Detection — with minimum gap size
         has_fvg = False
         if i >= 3:
             if bias == "BUY" and lows[i] > highs[i-2]:
-                has_fvg = True
-                score += 10
-                score_breakdown.append("FVG: +10 (bullish gap detected)")
-                confirmations.append(f"✓ FVG: Bullish gap — Low {lows[i]:.2f} > High[-2] {highs[i-2]:.2f}")
+                gap_size = (lows[i] - highs[i-2]) / pip_size
+                if gap_size >= fvg_min_pips:
+                    has_fvg = True
+                    score += 10
+                    score_breakdown.append(f"FVG: +10 (bullish gap {gap_size:.1f} pips)")
+                    confirmations.append(f"✓ FVG: Bullish gap {gap_size:.1f} pips (min: {fvg_min_pips})")
+                else:
+                    score_breakdown.append(f"FVG: +0 (gap {gap_size:.1f} < min {fvg_min_pips} pips)")
+                    confirmations.append(f"✗ FVG: Gap too small ({gap_size:.1f} < {fvg_min_pips} pips)")
             elif bias == "SELL" and highs[i] < lows[i-2]:
-                has_fvg = True
-                score += 10
-                score_breakdown.append("FVG: +10 (bearish gap detected)")
-                confirmations.append(f"✓ FVG: Bearish gap — High {highs[i]:.2f} < Low[-2] {lows[i-2]:.2f}")
+                gap_size = (lows[i-2] - highs[i]) / pip_size
+                if gap_size >= fvg_min_pips:
+                    has_fvg = True
+                    score += 10
+                    score_breakdown.append(f"FVG: +10 (bearish gap {gap_size:.1f} pips)")
+                    confirmations.append(f"✓ FVG: Bearish gap {gap_size:.1f} pips (min: {fvg_min_pips})")
+                else:
+                    score_breakdown.append(f"FVG: +0 (gap {gap_size:.1f} < min {fvg_min_pips} pips)")
+                    confirmations.append(f"✗ FVG: Gap too small ({gap_size:.1f} < {fvg_min_pips} pips)")
             else:
                 score_breakdown.append("FVG: +0 (no gap)")
                 confirmations.append("✗ FVG: No fair value gap detected")
 
-        # 4. Liquidity Sweep Detection
+        # 4. Liquidity Sweep Detection — with minimum sweep size
         has_sweep = False
         if i >= 10:
             recent_low = min(lows[i-10:i-1])
             recent_high = max(highs[i-10:i-1])
             if bias == "BUY" and lows[i-1] < recent_low and closes[i] > opens[i]:
-                has_sweep = True
-                score += 15
-                score_breakdown.append("Liquidity Sweep: +15 (swept lows, reclaimed)")
-                confirmations.append(f"✓ Liquidity: Swept low {recent_low:.2f} then reclaimed — buy-side liquidity taken")
+                sweep_size = (recent_low - lows[i-1]) / pip_size
+                if sweep_size >= liq_min_pips:
+                    has_sweep = True
+                    score += 15
+                    score_breakdown.append(f"Liquidity Sweep: +15 (swept {sweep_size:.1f} pips below)")
+                    confirmations.append(f"✓ Liquidity: Swept low by {sweep_size:.1f} pips then reclaimed")
+                else:
+                    score_breakdown.append(f"Liquidity Sweep: +0 (sweep {sweep_size:.1f} < min {liq_min_pips})")
+                    confirmations.append(f"✗ Liquidity: Sweep too small ({sweep_size:.1f} < {liq_min_pips} pips)")
             elif bias == "SELL" and highs[i-1] > recent_high and closes[i] < opens[i]:
-                has_sweep = True
-                score += 15
-                score_breakdown.append("Liquidity Sweep: +15 (swept highs, reclaimed)")
-                confirmations.append(f"✓ Liquidity: Swept high {recent_high:.2f} then reclaimed — sell-side liquidity taken")
+                sweep_size = (highs[i-1] - recent_high) / pip_size
+                if sweep_size >= liq_min_pips:
+                    has_sweep = True
+                    score += 15
+                    score_breakdown.append(f"Liquidity Sweep: +15 (swept {sweep_size:.1f} pips above)")
+                    confirmations.append(f"✓ Liquidity: Swept high by {sweep_size:.1f} pips then reclaimed")
+                else:
+                    score_breakdown.append(f"Liquidity Sweep: +0 (sweep {sweep_size:.1f} < min {liq_min_pips})")
+                    confirmations.append(f"✗ Liquidity: Sweep too small ({sweep_size:.1f} < {liq_min_pips} pips)")
             else:
                 score_breakdown.append("Liquidity Sweep: +0 (no sweep)")
                 confirmations.append("✗ Liquidity: No sweep detected in last 10 bars")
@@ -234,28 +286,31 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str) -> list
 
         confirmations.append(f"{'✓' if pattern_name != 'None' else '✗'} Candlestick: {pattern_name}")
 
-        # 6. Order Block Check
+        # 6. Order Block Check — with impulse ratio validation
         if i >= 5:
             ob_found = False
             for k in range(i-5, i-1):
+                impulse_body = abs(closes[k+1] - opens[k+1])
                 if bias == "BUY" and closes[k] < opens[k] and closes[k+1] > opens[k+1] and closes[k+1] > highs[k]:
-                    ob_found = True
-                    score += 10
-                    score_breakdown.append("Order Block: +10 (bullish OB detected)")
-                    confirmations.append(f"✓ Order Block: Bullish OB at bar {k} — bearish candle followed by engulf")
-                    break
+                    if avg_body > 0 and impulse_body >= avg_body * ob_impulse:
+                        ob_found = True
+                        score += 10
+                        score_breakdown.append(f"Order Block: +10 (bullish OB, impulse {impulse_body/avg_body:.1f}x)")
+                        confirmations.append(f"✓ Order Block: Bullish OB — impulse {impulse_body/avg_body:.1f}x avg body")
+                        break
                 elif bias == "SELL" and closes[k] > opens[k] and closes[k+1] < opens[k+1] and closes[k+1] < lows[k]:
-                    ob_found = True
-                    score += 10
-                    score_breakdown.append("Order Block: +10 (bearish OB detected)")
-                    confirmations.append(f"✓ Order Block: Bearish OB at bar {k} — bullish candle followed by engulf")
-                    break
+                    if avg_body > 0 and impulse_body >= avg_body * ob_impulse:
+                        ob_found = True
+                        score += 10
+                        score_breakdown.append(f"Order Block: +10 (bearish OB, impulse {impulse_body/avg_body:.1f}x)")
+                        confirmations.append(f"✓ Order Block: Bearish OB — impulse {impulse_body/avg_body:.1f}x avg body")
+                        break
             if not ob_found:
                 score_breakdown.append("Order Block: +0 (none found)")
-                confirmations.append("✗ Order Block: None detected in last 5 bars")
+                confirmations.append(f"✗ Order Block: None with impulse >= {ob_impulse}x avg body")
 
-        # Total score requirement
-        if score < 40:
+        # Total score requirement — uses configurable confluence_threshold
+        if score < confluence_threshold:
             continue
 
         # Throttle: no signal within 3 bars of last one
@@ -275,11 +330,11 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str) -> list
             "direction": bias,
             "entry_price": float(entry),
             "stop_loss": float(sl),
-            "confluence_score": score,
+            "confluence_score": int(score),
             "confirmations": confirmations,
             "pattern": pattern_name,
-            "has_fvg": has_fvg,
-            "has_liquidity_sweep": has_sweep,
+            "has_fvg": bool(has_fvg),
+            "has_liquidity_sweep": bool(has_sweep),
         })
 
     logger.info(f"Generated {len(signals)} signals from {len(candles)} candles for {symbol}")
@@ -331,11 +386,21 @@ async def run_backtest_endpoint(
     logger.info(f"  Fetched {len(candles)} candles")
 
     # Generate signals from the SMC strategy engine on historical data
-    logger.info(f"  Generating signals from candle data...")
-    signals = _generate_signals_from_candles(candles, req.symbol, req.timeframe)
+    strategy_config = {
+        "confluence_threshold": req.confluence_threshold,
+        "swing_length": req.swing_length,
+        "ob_impulse_ratio": req.ob_impulse_ratio,
+        "fvg_min_gap_pips": req.fvg_min_gap_pips,
+        "liq_sweep_min_pips": req.liq_sweep_min_pips,
+        "max_spread_pips": req.max_spread_pips,
+    }
+    logger.info(f"  Generating signals (threshold={req.confluence_threshold}, "
+                f"fvg_min={req.fvg_min_gap_pips}, liq_min={req.liq_sweep_min_pips}, "
+                f"ob_impulse={req.ob_impulse_ratio})...")
+    signals = _generate_signals_from_candles(candles, req.symbol, req.timeframe, strategy_config)
     logger.info(f"  Generated {len(signals)} signals")
 
-    # Build merged risk config with all override fields from the backtest form
+    # Build merged risk config with ALL override fields from the backtest form
     merged_risk_config = {
         "risk_per_trade_pct": req.risk_per_trade_pct,
         "min_rr": req.min_rr,
@@ -345,12 +410,22 @@ async def run_backtest_endpoint(
         "tp3_rr": req.tp3_rr,
         "tp4_rr": req.tp4_rr,
         "tp5_rr": req.tp5_rr,
+        "tp_splits": req.tp_splits,
         "be_trigger_rr": req.be_trigger_rr,
         "be_buffer_pips": req.be_buffer_pips,
         "trail_method_tp2": req.trail_method_tp2,
         "trail_method_tp3": req.trail_method_tp3,
+        "trail_method_tp4": req.trail_method_tp4,
+        "trail_method_tp5": req.trail_method_tp5,
+        "atr_trail_multiplier": req.atr_trail_multiplier,
+        "trail_pips": req.trail_pips,
         "session_filter_enabled": req.session_filter_enabled,
         "multi_position_mode": req.tp_count > 1,
+        "max_daily_loss_pct": req.max_daily_loss_pct,
+        "max_weekly_loss_pct": req.max_weekly_loss_pct,
+        "max_consecutive_losses": req.max_consecutive_losses,
+        "max_concurrent_positions": req.max_concurrent_positions,
+        "compounding_enabled": req.compounding_enabled,
         **req.risk_config,  # Any extra overrides from risk_config dict
     }
 

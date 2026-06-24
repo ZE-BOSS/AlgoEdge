@@ -28,8 +28,11 @@ export default function RiskSettings() {
     tp_splits: '30,25,20,15,10',
     trail_method_tp2: 'ATR_TRAIL',
     trail_method_tp3: 'STRUCTURE_TRAIL',
+    trail_method_tp4: 'ATR_TRAIL',
+    trail_method_tp5: 'STRUCTURE_TRAIL',
     atr_trail_multiplier: 1.5,
     trail_pips: 15,
+    trail_pct: 0.5,
     compounding_enabled: false,
     session_filter_enabled: true,
   });
@@ -99,7 +102,7 @@ export default function RiskSettings() {
               <option value={5}>5 TPs</option>
             </select>
             <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>
-              {config.tp_count <= 2 ? 'All TPs open at entry' : `TP1-2 at entry, TP3${config.tp_count > 3 ? '-' + config.tp_count : ''} deferred`}
+              All TPs open at entry. TP1 hit → move remaining to break-even.
             </div>
           </div>
           <div><label>TP1 R:R</label><input type="number" step="0.5" value={config.tp1_rr} onChange={e => update('tp1_rr', +e.target.value)} /></div>
@@ -138,8 +141,31 @@ export default function RiskSettings() {
               <option value="PCT_TRAIL">Percentage Trail</option>
             </select>
           </div>
+          {config.tp_count >= 4 && (
+            <div>
+              <label>TP4 Trail Method</label>
+              <select value={config.trail_method_tp4} onChange={e => update('trail_method_tp4', e.target.value)}>
+                <option value="ATR_TRAIL">ATR Trail</option>
+                <option value="STRUCTURE_TRAIL">Structure Trail</option>
+                <option value="FIXED_PIPS">Fixed Pips</option>
+                <option value="PCT_TRAIL">Percentage Trail</option>
+              </select>
+            </div>
+          )}
+          {config.tp_count >= 5 && (
+            <div>
+              <label>TP5 Trail Method</label>
+              <select value={config.trail_method_tp5} onChange={e => update('trail_method_tp5', e.target.value)}>
+                <option value="STRUCTURE_TRAIL">Structure Trail</option>
+                <option value="ATR_TRAIL">ATR Trail</option>
+                <option value="FIXED_PIPS">Fixed Pips</option>
+                <option value="PCT_TRAIL">Percentage Trail</option>
+              </select>
+            </div>
+          )}
           <div><label>ATR Multiplier</label><input type="number" step="0.1" value={config.atr_trail_multiplier} onChange={e => update('atr_trail_multiplier', +e.target.value)} /></div>
           <div><label>Fixed Trail Pips</label><input type="number" value={config.trail_pips} onChange={e => update('trail_pips', +e.target.value)} /></div>
+          <div><label>Trail % (for PCT_TRAIL)</label><input type="number" step="0.1" value={config.trail_pct} onChange={e => update('trail_pct', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>% of price as trail distance</div></div>
         </div>
       </div>
 

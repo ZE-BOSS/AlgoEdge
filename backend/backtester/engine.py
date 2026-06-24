@@ -114,22 +114,56 @@ class BacktestEngine:
             high = bar["high"]
             low = bar["low"]
 
+            # ── Compute ATR at current bar for trailing stops ──
+            atr_period = 14
+            if i >= atr_period:
+                tr_vals = []
+                for j in range(max(0, i - atr_period), i):
+                    b = candles.iloc[j]
+                    prev_close = candles.iloc[j-1]["close"] if j > 0 else b["close"]
+                    tr = max(b["high"] - b["low"],
+                             abs(b["high"] - prev_close),
+                             abs(b["low"] - prev_close))
+                    tr_vals.append(tr)
+                current_atr = float(np.mean(tr_vals))
+            else:
+                current_atr = 0.0
+
+            # ── Build swing points for structure trail ──
+            swing_points = []
+            swing_lookback = 20
+            sw_len = self.risk_config.get("swing_length", 5)
+            if i >= swing_lookback:
+                for j in range(max(sw_len, i - swing_lookback), i - sw_len):
+                    window_h = candles.iloc[j-sw_len:j+1]["high"].values
+                    window_l = candles.iloc[j-sw_len:j+1]["low"].values
+                    if len(window_h) > 0 and candles.iloc[j]["high"] == max(window_h):
+                        swing_points.append({"type": "HIGH", "price": float(candles.iloc[j]["high"])})
+                    if len(window_l) > 0 and candles.iloc[j]["low"] == min(window_l):
+                        swing_points.append({"type": "LOW", "price": float(candles.iloc[j]["low"])})
+
             # 1. Manage existing open positions
             closed_this_bar = []
             tp1_hit_groups = set()  # Track which groups had TP1 hit this bar
 
             for pos in self.open_positions[:]:
+                # Update highest/lowest price tracking for trailing
+                if pos["direction"] == "BUY":
+                    pos["highest_price"] = max(pos.get("highest_price", pos["entry_price"]), high)
+                else:
+                    pos["lowest_price"] = min(pos.get("lowest_price", pos["entry_price"]), low)
+
                 # Check SL hit
                 if pos["direction"] == "BUY" and low <= pos["stop_loss"]:
                     pos["exit_price"] = pos["stop_loss"]
-                    pos["exit_reason"] = "SL"
+                    pos["exit_reason"] = "BE_SL" if pos.get("be_applied") else "SL"
                     contract = self._get_contract_size(pos.get("symbol", ""))
                     pos["pnl"] = (pos["exit_price"] - pos["entry_price"]) * pos["volume"] * contract
                     closed_this_bar.append(pos)
                     continue
                 elif pos["direction"] == "SELL" and high >= pos["stop_loss"]:
                     pos["exit_price"] = pos["stop_loss"]
-                    pos["exit_reason"] = "SL"
+                    pos["exit_reason"] = "BE_SL" if pos.get("be_applied") else "SL"
                     contract = self._get_contract_size(pos.get("symbol", ""))
                     pos["pnl"] = (pos["entry_price"] - pos["exit_price"]) * pos["volume"] * contract
                     closed_this_bar.append(pos)
@@ -167,13 +201,20 @@ class BacktestEngine:
                 pos["mae_pips"] = max(pos.get("mae_pips", 0), adverse / pip_size if pip_size else 0)
                 pos["mfe_pips"] = max(pos.get("mfe_pips", 0), favorable / pip_size if pip_size else 0)
 
-                # Run BE/trailing checks via RiskEngine
-                actions = self.risk_engine.manage_open_position(pos, current_price)
+                # Run BE/trailing checks via RiskEngine — WITH ATR + swing data
+                actions = self.risk_engine.manage_open_position(
+                    pos, current_price,
+                    atr_value=current_atr,
+                    swing_points=swing_points,
+                )
                 for action in actions:
                     if action["action"] == "MODIFY_SL":
+                        old_sl = pos["stop_loss"]
                         pos["stop_loss"] = action["new_sl"]
                         if action.get("reason") == "BREAKEVEN":
                             pos["be_applied"] = True
+                        elif action.get("reason") == "TRAIL":
+                            pos["trail_applied"] = True
 
             # ── CRITICAL: When TP1 hits, move ALL siblings to break-even ──
             if tp1_hit_groups:

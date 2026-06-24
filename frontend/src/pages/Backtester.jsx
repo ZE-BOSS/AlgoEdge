@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2 } from 'lucide-react';
-import { runBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs } from '../services/api';
+import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap } from 'lucide-react';
+import { runBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig } from '../services/api';
 import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
@@ -70,32 +70,52 @@ function GroupedTradeRow({ group, index }) {
       <td><strong>{group.symbol}</strong></td>
       <td><span className={`badge ${group.direction==='BUY'?'badge-green':'badge-red'}`}>{group.direction==='BUY'?'▲ BUY':'▼ SELL'}</span></td>
       <td>{typeof group.entry_price==='number'?group.entry_price.toFixed(2):group.entry_price}</td>
+      <td>{fmt(group.entry_time_iso)}</td>
+      <td>{fmt(group.exit_time_iso)}</td>
+      <td>{fmtDur(group.duration_minutes)}</td>
       <td>{group.tp_count} TPs ({group.tp_wins}W/{group.tp_losses}L)</td>
       <td style={{color:pnl>=0?'var(--green)':'var(--red)',fontWeight:600}}>${pnl.toFixed(2)}</td>
-      <td>{fmtDur(group.duration_minutes)}</td>
       <td><span className="badge badge-blue">{group.entry_session||'—'}</span>{group.exit_session&&group.exit_session!==group.entry_session&&<span className="badge badge-blue" style={{marginLeft:4}}>→{group.exit_session}</span>}</td>
     </tr>
     {open && group.sub_trades?.map((t,j)=>(
       <tr key={j} style={{background:'var(--bg-tertiary)',fontSize:'0.8rem'}}>
         <td></td><td></td>
-        <td colSpan={2}><span className={`badge ${t.exit_reason?.startsWith('TP')?'badge-green':'badge-red'}`}>TP{t.tp_level} → {t.exit_reason}</span></td>
-        <td>{typeof t.entry_price==='number'?t.entry_price.toFixed(2):t.entry_price} → {typeof t.exit_price==='number'?t.exit_price.toFixed(2):t.exit_price}</td>
-        <td>Vol: {t.volume} | BE: {t.be_applied?'✓':'✗'}</td>
-        <td style={{color:(t.pnl||0)>=0?'var(--green)':'var(--red)'}}>${(t.pnl||0).toFixed(2)}</td>
+        <td colSpan={2}><span className={`badge ${t.exit_reason?.startsWith('TP')?'badge-green':t.exit_reason==='BE_SL'?'badge-blue':'badge-red'}`}>TP{t.tp_level} → {t.exit_reason}</span></td>
+        <td colSpan={2} style={{fontSize:'0.72rem'}}>{fmt(t.entry_time_iso)} → {fmt(t.exit_time_iso)}</td>
         <td>{fmtDur(t.duration_minutes)}</td>
+        <td style={{fontSize:'0.72rem'}}>Vol: {t.volume} | BE: {t.be_applied?'✓':'✗'}{t.trail_applied?' | Trail: ✓':''}</td>
+        <td style={{fontSize:'0.72rem'}}>MAE: {(t.mae_pips||0).toFixed(1)}p | MFE: {(t.mfe_pips||0).toFixed(1)}p</td>
+        <td style={{color:(t.pnl||0)>=0?'var(--green)':'var(--red)'}}>
+          ${(t.pnl||0).toFixed(2)}
+        </td>
         <td>{t.session||'—'}</td>
       </tr>
     ))}
     {open && group.sub_trades?.[0]?.entry_confirmations && (
-      <tr><td colSpan={9} style={{padding:0,border:'none'}}>
+      <tr><td colSpan={11} style={{padding:0,border:'none'}}>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,padding:'12px 16px',background:'var(--bg-tertiary)',margin:'4px 8px',borderRadius:'var(--radius-xs)'}}>
           <div>
-            <div style={{fontSize:'0.7rem',textTransform:'uppercase',color:'var(--text-muted)',marginBottom:6,fontWeight:600}}>Entry Confirmations</div>
-            {(group.sub_trades[0].entry_confirmations||[]).map((c,i)=><div key={i} style={{fontSize:'0.75rem',color:'var(--text-secondary)',padding:'2px 0',borderBottom:'1px solid var(--border)'}}>{c}</div>)}
+            <div style={{fontSize:'0.7rem',textTransform:'uppercase',color:'var(--text-muted)',marginBottom:6,fontWeight:600}}>Entry Confirmations (Score: {group.sub_trades[0].confluence_score || '—'})</div>
+            {(group.sub_trades[0].entry_confirmations||[]).map((c,i)=>{
+              const isHeader = c.startsWith('═') || c.startsWith('──');
+              const isPass = c.startsWith('✓');
+              const isFail = c.startsWith('✗');
+              const isMixed = c.startsWith('△');
+              return <div key={i} style={{
+                fontSize: isHeader ? '0.72rem' : '0.75rem',
+                fontWeight: isHeader ? 700 : 400,
+                color: isHeader ? 'var(--blue)' : isPass ? 'var(--green)' : isFail ? 'var(--text-muted)' : isMixed ? 'var(--yellow)' : 'var(--text-secondary)',
+                padding: '3px 0',
+                borderBottom: isHeader ? 'none' : '1px solid var(--border)',
+                marginTop: isHeader ? 8 : 0,
+              }}>{c}</div>;
+            })}
           </div>
           <div>
-            <div style={{fontSize:'0.7rem',textTransform:'uppercase',color:'var(--text-muted)',marginBottom:6,fontWeight:600}}>Exit Confirmations</div>
-            {(group.sub_trades[0].exit_confirmations||[]).map((c,i)=><div key={i} style={{fontSize:'0.75rem',color:'var(--text-secondary)',padding:'2px 0',borderBottom:'1px solid var(--border)'}}>{c}</div>)}
+            <div style={{fontSize:'0.7rem',textTransform:'uppercase',color:'var(--text-muted)',marginBottom:6,fontWeight:600}}>Exit Info</div>
+            {(group.sub_trades[0].exit_confirmations||[]).map((c,i)=>
+              <div key={i} style={{fontSize:'0.75rem',color:'var(--text-secondary)',padding:'3px 0',borderBottom:'1px solid var(--border)'}}>{c}</div>
+            )}
           </div>
         </div>
       </td></tr>
@@ -128,6 +148,11 @@ function BacktestResults({ result, onSave, onDismiss, isSaving }) {
       <div className="metric-card"><div className="metric-label">Expectancy (R)</div><div className="metric-value blue">{(report.expectancy_r||0).toFixed(2)}</div></div>
       <div className="metric-card"><div className="metric-label">Sortino</div><div className="metric-value blue">{(report.sortino_ratio||0).toFixed(2)}</div></div>
     </div>
+    <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:16}}>
+      {[1,2,3,4,5].map(n=>{const rate=report[`tp${n}_hit_rate`]; return rate!=null && rate>0 ? <div key={n} className="badge badge-green" style={{padding:'4px 10px',fontSize:'0.75rem'}}>TP{n}: {(rate*100).toFixed(0)}%</div> : null;})}
+      {report.sl_hit_rate!=null && <div className="badge badge-red" style={{padding:'4px 10px',fontSize:'0.75rem'}}>SL: {(report.sl_hit_rate*100).toFixed(0)}%</div>}
+      {report.trail_hit_rate!=null && report.trail_hit_rate>0 && <div className="badge badge-blue" style={{padding:'4px 10px',fontSize:'0.75rem'}}>Trail Exit: {(report.trail_hit_rate*100).toFixed(0)}%</div>}
+    </div>
     <div className="grid-2" style={{marginBottom:16}}>
       {eqData.length>1&&(<div className="card" style={{padding:12}}><h4 style={{marginBottom:8}}>Equity Curve</h4>
         <ResponsiveContainer width="100%" height={200}><AreaChart data={eqData}><XAxis dataKey="bar" hide/><YAxis domain={['auto','auto']} fontSize={10}/><Tooltip formatter={v=>`$${v.toFixed(2)}`}/><Area type="monotone" dataKey="equity" stroke="#3fb68b" fill="#3fb68b20" strokeWidth={2}/></AreaChart></ResponsiveContainer>
@@ -139,7 +164,7 @@ function BacktestResults({ result, onSave, onDismiss, isSaving }) {
     {grouped.length>0&&(<>
       <div className="card-header"><span className="card-title">Trade Groups ({grouped.length})</span></div>
       <div className="table-wrapper" style={{maxHeight:500,overflow:'auto'}}>
-        <table><thead><tr><th style={{width:24}}></th><th>#</th><th>Symbol</th><th>Dir</th><th>Entry</th><th>TPs</th><th>Net P&L</th><th>Duration</th><th>Session</th></tr></thead>
+        <table><thead><tr><th style={{width:24}}></th><th>#</th><th>Symbol</th><th>Dir</th><th>Entry</th><th>Entry Time</th><th>Exit Time</th><th>Duration</th><th>TPs</th><th>Net P&L</th><th>Session</th></tr></thead>
           <tbody>{grouped.map((g,i)=><GroupedTradeRow key={g.group_id||i} group={g} index={i}/>)}</tbody>
         </table>
       </div>
@@ -147,22 +172,49 @@ function BacktestResults({ result, onSave, onDismiss, isSaving }) {
   </div>);
 }
 
+const TRAIL_METHODS = [{v:'ATR_TRAIL',l:'ATR Trail'},{v:'FIXED_PIPS',l:'Fixed Pips'},{v:'STRUCTURE_TRAIL',l:'Structure Trail'},{v:'PCT_TRAIL',l:'% Trail'}];
+
 export default function Backtester() {
   const queryClient = useQueryClient();
   const { status } = useConnectionStore();
   const isAuth = useAuthStore(s=>s.isAuthenticated);
   const [form, setForm] = useState({
     symbol:'XAUUSD',timeframe:'H1',initial_balance:10000,
-    risk_per_trade_pct:1.0,min_rr:3.0,tp_count:3,
-    tp1_rr:3.0,tp2_rr:5.0,tp3_rr:7.0,tp4_rr:10.0,tp5_rr:15.0,
-    be_trigger_rr:1.0,be_buffer_pips:2.0,
-    session_filter_enabled:true,
     start_date:'',end_date:'',candle_count:5000,
+    // Strategy
+    confluence_threshold:55,swing_length:5,ob_impulse_ratio:1.5,
+    fvg_min_gap_pips:3.0,liq_sweep_min_pips:2.0,max_spread_pips:3.0,
+    session_filter_enabled:true,news_filter_enabled:true,
+    // Risk
+    risk_per_trade_pct:1.0,min_rr:3.0,
+    max_daily_loss_pct:5.0,max_weekly_loss_pct:10.0,
+    max_consecutive_losses:5,max_concurrent_positions:3,
+    // TP
+    tp_count:3,tp1_rr:3.0,tp2_rr:5.0,tp3_rr:7.0,tp4_rr:10.0,tp5_rr:15.0,
+    tp_splits:'30,25,20,15,10',
+    be_trigger_rr:1.0,be_buffer_pips:2.0,
+    // Trail
+    trail_method_tp2:'ATR_TRAIL',trail_method_tp3:'STRUCTURE_TRAIL',
+    trail_method_tp4:'ATR_TRAIL',trail_method_tp5:'STRUCTURE_TRAIL',
+    atr_trail_multiplier:1.5,trail_pips:15,
+    // Compounding
+    compounding_enabled:false,
   });
   const [result, setResult] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [progress, setProgress] = useState(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [configLoaded, setConfigLoaded] = useState(false);
+
+  // Load defaults from user's live config
+  const { data: userCfg } = useQuery({ queryKey:['config'], queryFn:()=>getConfig().then(r=>r.data), enabled:status==='ONLINE'&&isAuth });
+  useEffect(()=>{
+    if(userCfg?.config && !configLoaded){
+      const c = userCfg.config;
+      setForm(prev=>({...prev,...Object.fromEntries(Object.entries(c).filter(([k])=>k in prev))}));
+      setConfigLoaded(true);
+    }
+  },[userCfg,configLoaded]);
 
   useEffect(()=>{
     const h=e=>{try{const m=JSON.parse(e.data);if(m.type==='backtest_progress'){setProgress(m);if(m.stage==='complete')setTimeout(()=>setProgress(null),2000);}}catch{}};
@@ -172,15 +224,7 @@ export default function Backtester() {
   const { data: backtests, refetch } = useQuery({ queryKey:['backtests'], queryFn:()=>getBacktests().then(r=>r.data), enabled:status==='ONLINE'&&isAuth });
 
   const mutation = useMutation({
-    mutationFn: () => runBacktest({
-      symbol:form.symbol, timeframe:form.timeframe, initial_balance:form.initial_balance,
-      start_date:form.start_date||undefined, end_date:form.end_date||undefined, candle_count:form.candle_count,
-      tp_count:form.tp_count, session_filter_enabled:form.session_filter_enabled,
-      risk_per_trade_pct:form.risk_per_trade_pct, min_rr:form.min_rr,
-      tp1_rr:form.tp1_rr, tp2_rr:form.tp2_rr, tp3_rr:form.tp3_rr, tp4_rr:form.tp4_rr, tp5_rr:form.tp5_rr,
-      be_trigger_rr:form.be_trigger_rr, be_buffer_pips:form.be_buffer_pips,
-      risk_config:{},
-    }),
+    mutationFn: () => runBacktest({...form, start_date:form.start_date||undefined, end_date:form.end_date||undefined, risk_config:{}}),
     onSuccess: res => { setResult(res.data); setProgress(null); },
     onError: () => setProgress(null),
   });
@@ -200,6 +244,7 @@ export default function Backtester() {
   const handleView = async id => { const res = await getBacktest(id); setResult({...res.data.run, trades:res.data.trades, equity_curve:res.data.equity_curve, report:res.data.run, grouped_trades:res.data.grouped_trades||[]}); };
 
   const isRunning = mutation.isPending;
+  const u = (k,v) => setForm({...form,[k]:v});
 
   return (<>
     <div className="page-header"><h2><FlaskConical size={22} style={{display:'inline',marginRight:8}}/>Backtester</h2><p>Test strategies with independent risk parameters</p></div>
@@ -223,21 +268,54 @@ export default function Backtester() {
             <div><label>Min R:R</label><input type="number" step="0.5" value={form.min_rr} onChange={e=>setForm({...form,min_rr:+e.target.value})}/></div>
             <div><label>TP Count</label><select value={form.tp_count} onChange={e=>setForm({...form,tp_count:+e.target.value})}>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n} TP{n>1?'s':''}</option>)}</select></div>
           </div>
-          <div><label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}}><input type="checkbox" checked={form.session_filter_enabled} onChange={e=>setForm({...form,session_filter_enabled:e.target.checked})} style={{width:14,height:14}}/> Session Filter ({form.session_filter_enabled?'London/NY only':'All sessions'})</label></div>
+          <div style={{display:'flex',gap:12}}>
+            <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',flex:1}}><input type="checkbox" checked={form.session_filter_enabled} onChange={e=>u('session_filter_enabled',e.target.checked)} style={{width:14,height:14}}/> Session Filter</label>
+            <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',flex:1}}><input type="checkbox" checked={form.news_filter_enabled} onChange={e=>u('news_filter_enabled',e.target.checked)} style={{width:14,height:14}}/> News Filter</label>
+            <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',flex:1}}><input type="checkbox" checked={form.compounding_enabled} onChange={e=>u('compounding_enabled',e.target.checked)} style={{width:14,height:14}}/> Compounding</label>
+          </div>
 
-          {/* Advanced Parameters Toggle */}
           <button className="btn btn-secondary btn-sm" onClick={()=>setShowAdvanced(!showAdvanced)} style={{width:'100%'}}><Settings2 size={14}/> {showAdvanced?'Hide':'Show'} Advanced Parameters</button>
-          {showAdvanced && (<div style={{display:'grid',gap:12,padding:12,background:'var(--bg-tertiary)',borderRadius:'var(--radius-xs)'}}>
-            <div style={{fontSize:'0.75rem',fontWeight:600,color:'var(--text-secondary)'}}>TP R:R Multipliers</div>
+          {showAdvanced && (<div style={{display:'grid',gap:14,padding:14,background:'var(--bg-tertiary)',borderRadius:'var(--radius-xs)'}}>
+            {/* SMC Strategy */}
+            <div style={{fontSize:'0.75rem',fontWeight:700,color:'var(--blue)'}}>━ SMC Strategy</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
+              <div><label style={{fontSize:'0.7rem'}}>Confluence Threshold</label><input type="number" value={form.confluence_threshold} onChange={e=>u('confluence_threshold',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>Swing Length</label><input type="number" value={form.swing_length} onChange={e=>u('swing_length',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>OB Impulse Ratio</label><input type="number" step="0.1" value={form.ob_impulse_ratio} onChange={e=>u('ob_impulse_ratio',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>FVG Min Gap (pips)</label><input type="number" value={form.fvg_min_gap_pips} onChange={e=>u('fvg_min_gap_pips',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>Liq Sweep Min (pips)</label><input type="number" value={form.liq_sweep_min_pips} onChange={e=>u('liq_sweep_min_pips',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>Max Spread (pips)</label><input type="number" value={form.max_spread_pips} onChange={e=>u('max_spread_pips',+e.target.value)}/></div>
+            </div>
+            {/* Circuit Breakers */}
+            <div style={{fontSize:'0.75rem',fontWeight:700,color:'var(--yellow)'}}>━ Circuit Breakers</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:8}}>
+              <div><label style={{fontSize:'0.7rem'}}>Max Daily Loss %</label><input type="number" step="0.5" value={form.max_daily_loss_pct} onChange={e=>u('max_daily_loss_pct',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>Max Weekly Loss %</label><input type="number" step="0.5" value={form.max_weekly_loss_pct} onChange={e=>u('max_weekly_loss_pct',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>Max Consec. Losses</label><input type="number" value={form.max_consecutive_losses} onChange={e=>u('max_consecutive_losses',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>Max Open Positions</label><input type="number" value={form.max_concurrent_positions} onChange={e=>u('max_concurrent_positions',+e.target.value)}/></div>
+            </div>
+            {/* TP R:R + Volume Split */}
+            <div style={{fontSize:'0.75rem',fontWeight:700,color:'var(--green)'}}>━ Take Profit</div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8}}>
               {[1,2,3,4,5].filter(n=>n<=form.tp_count).map(n=>(
-                <div key={n}><label style={{fontSize:'0.7rem'}}>TP{n}</label><input type="number" step="0.5" value={form[`tp${n}_rr`]} onChange={e=>setForm({...form,[`tp${n}_rr`]:+e.target.value})} style={{fontSize:'0.8rem'}}/></div>
+                <div key={n}><label style={{fontSize:'0.7rem'}}>TP{n} R:R</label><input type="number" step="0.5" value={form[`tp${n}_rr`]} onChange={e=>u(`tp${n}_rr`,+e.target.value)}/></div>
               ))}
             </div>
-            <div style={{fontSize:'0.75rem',fontWeight:600,color:'var(--text-secondary)',marginTop:4}}>Break-Even Settings</div>
+            <div><label style={{fontSize:'0.7rem'}}>TP Volume Split (%)</label><input type="text" value={form.tp_splits} onChange={e=>u('tp_splits',e.target.value)} placeholder="30,25,20,15,10"/><div style={{fontSize:'0.65rem',color:'var(--text-muted)'}}>Comma-separated % per TP (must sum to 100)</div></div>
+            {/* Break-Even */}
+            <div style={{fontSize:'0.75rem',fontWeight:700,color:'var(--purple)'}}>━ Break-Even</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-              <div><label style={{fontSize:'0.7rem'}}>BE Trigger (R)</label><input type="number" step="0.1" value={form.be_trigger_rr} onChange={e=>setForm({...form,be_trigger_rr:+e.target.value})}/></div>
-              <div><label style={{fontSize:'0.7rem'}}>BE Buffer (pips)</label><input type="number" step="0.5" value={form.be_buffer_pips} onChange={e=>setForm({...form,be_buffer_pips:+e.target.value})}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>BE Trigger (R)</label><input type="number" step="0.1" value={form.be_trigger_rr} onChange={e=>u('be_trigger_rr',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>BE Buffer (pips)</label><input type="number" step="0.5" value={form.be_buffer_pips} onChange={e=>u('be_buffer_pips',+e.target.value)}/></div>
+            </div>
+            {/* Trailing Stops */}
+            <div style={{fontSize:'0.75rem',fontWeight:700,color:'var(--red)'}}>━ Trailing Stops</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+              {[2,3,4,5].filter(n=>n<=form.tp_count).map(n=>(
+                <div key={n}><label style={{fontSize:'0.7rem'}}>TP{n} Trail</label><select value={form[`trail_method_tp${n}`]} onChange={e=>u(`trail_method_tp${n}`,e.target.value)}>{TRAIL_METHODS.map(m=><option key={m.v} value={m.v}>{m.l}</option>)}</select></div>
+              ))}
+              <div><label style={{fontSize:'0.7rem'}}>ATR Multiplier</label><input type="number" step="0.1" value={form.atr_trail_multiplier} onChange={e=>u('atr_trail_multiplier',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>Fixed Trail Pips</label><input type="number" value={form.trail_pips} onChange={e=>u('trail_pips',+e.target.value)}/></div>
             </div>
           </div>)}
 
@@ -249,26 +327,29 @@ export default function Backtester() {
         </div>
       </div>
 
-      {/* Right panel: Live logs while running, saved backtests otherwise */}
+      {/* Right panel: Live logs always visible */}
       <div className="card">
-        {isRunning ? (<>
-          <div className="card-header"><span className="card-title"><Terminal size={14} style={{display:'inline',marginRight:6}}/>Live Backtest Logs</span></div>
-          <LiveLogPanel />
-        </>) : (<>
-          <div className="card-header"><span className="card-title">Saved Backtests</span><span className="badge badge-blue">{backtests?.length||0}</span></div>
-          <div className="table-wrapper">
-            <table><thead><tr><th>Symbol</th><th>Trades</th><th>Win Rate</th><th>P&L</th><th></th></tr></thead>
-              <tbody>{backtests?.length ? backtests.map(bt=>(
-                <tr key={bt.id}><td><strong>{bt.symbol}</strong></td><td>{bt.total_trades}</td><td>{((bt.win_rate||0)*100).toFixed(0)}%</td>
-                  <td style={{color:bt.total_pnl>=0?'var(--green)':'var(--red)'}}>${(bt.total_pnl||0).toFixed(2)}</td>
-                  <td><div style={{display:'flex',gap:4}}><button className="btn btn-secondary btn-sm" onClick={()=>handleView(bt.id)}><Eye size={12}/></button><button className="btn btn-danger btn-sm" onClick={()=>handleDelete(bt.id)}><Trash2 size={12}/></button></div></td>
-                </tr>
-              )) : (<tr><td colSpan={5}><div className="empty-state"><FlaskConical/><h3>No saved backtests</h3></div></td></tr>)}</tbody>
-            </table>
-          </div>
-        </>)}
+        <div className="card-header"><span className="card-title"><Terminal size={14} style={{display:'inline',marginRight:6}}/>Live Logs</span></div>
+        <LiveLogPanel />
       </div>
     </div>
+
+    {/* Results */}
     {result && <BacktestResults result={result} onSave={handleSave} onDismiss={handleDismiss} isSaving={isSaving}/>}
+
+    {/* Saved Backtests — always visible at bottom */}
+    <div className="card" style={{marginTop:20}}>
+      <div className="card-header"><span className="card-title">Saved Backtests</span><span className="badge badge-blue">{backtests?.length||0}</span></div>
+      <div className="table-wrapper">
+        <table><thead><tr><th>Symbol</th><th>Trades</th><th>Win Rate</th><th>P&L</th><th></th></tr></thead>
+          <tbody>{backtests?.length ? backtests.map(bt=>(
+            <tr key={bt.id}><td><strong>{bt.symbol}</strong></td><td>{bt.total_trades}</td><td>{((bt.win_rate||0)*100).toFixed(0)}%</td>
+              <td style={{color:bt.total_pnl>=0?'var(--green)':'var(--red)'}}>${(bt.total_pnl||0).toFixed(2)}</td>
+              <td><div style={{display:'flex',gap:4}}><button className="btn btn-secondary btn-sm" onClick={()=>handleView(bt.id)}><Eye size={12}/></button><button className="btn btn-danger btn-sm" onClick={()=>handleDelete(bt.id)}><Trash2 size={12}/></button></div></td>
+            </tr>
+          )) : (<tr><td colSpan={5}><div className="empty-state"><FlaskConical/><h3>No saved backtests</h3></div></td></tr>)}</tbody>
+        </table>
+      </div>
+    </div>
   </>);
 }
