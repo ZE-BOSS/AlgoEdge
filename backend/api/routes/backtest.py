@@ -12,7 +12,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.data.database import get_db
 from backend.data.models import BacktestRun, BacktestTrade, User
@@ -44,15 +44,15 @@ class BacktestRequest(BaseModel):
     # ── Risk Params ──
     risk_per_trade_pct: float = 1.0
     min_rr: float = 3.0
-    max_daily_loss_pct: float = 5.0
-    max_weekly_loss_pct: float = 10.0
+    max_daily_consecutive_losses: int = 3
+    max_weekly_consecutive_losses: int = 5
     max_consecutive_losses: int = 5
     max_concurrent_positions: int = 3
-    # ── TP Config ──
+    # ── TP Config (defaults per spec: TP1=1:1, TP2=3:1, TP3=5:1) ──
     tp_count: int = 3
-    tp1_rr: float = 3.0
-    tp2_rr: float = 5.0
-    tp3_rr: float = 7.0
+    tp1_rr: float = 1.0
+    tp2_rr: float = 3.0
+    tp3_rr: float = 5.0
     tp4_rr: float = 10.0
     tp5_rr: float = 15.0
     tp_splits: str = "30,25,20,15,10"
@@ -78,24 +78,27 @@ class SaveBacktestRequest(BaseModel):
 def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
                                     strategy_config: dict = None) -> list:
     """
-    SMC signal generation using configurable strategy parameters.
-    Uses confluence_threshold, fvg_min_gap_pips, liq_sweep_min_pips,
-    ob_impulse_ratio from strategy_config.
+    SMC signal generation using the 4-layer model with actual SMC modules.
+    Replaces the old momentum-heuristic approach.
     """
-    import pandas as pd
     import numpy as np
     from backend.risk.position_sizer import get_pip_size
+    from backend.strategies.smc.market_structure import MarketStructureDetector
+    from backend.strategies.smc.order_blocks import OrderBlockDetector
+    from backend.strategies.smc.fvg import FVGDetector
+    from backend.strategies.smc.liquidity import LiquidityMapper
+    from backend.strategies.smc.ipdm import IPDMDetector
+    from backend.strategies.smc.candlestick import detect_confirmation_pattern
 
     cfg = strategy_config or {}
     confluence_threshold = cfg.get("confluence_threshold", 55)
     swing_len = cfg.get("swing_length", 5)
-    ob_impulse = cfg.get("ob_impulse_ratio", 1.5)
     fvg_min_pips = cfg.get("fvg_min_gap_pips", 3.0)
     liq_min_pips = cfg.get("liq_sweep_min_pips", 2.0)
     pip_size = get_pip_size(symbol)
 
     signals = []
-    if len(candles) < 50:
+    if len(candles) < 100:
         return signals
 
     closes = candles['close'].values
@@ -103,284 +106,206 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
     lows = candles['low'].values
     opens = candles['open'].values
 
-    # Calculate rolling ATR for proper SL distance
+    # Initialize SMC modules
+    structure = MarketStructureDetector(swing_length=swing_len, min_bos_count=2)
+    ob_detector = OrderBlockDetector()
+    fvg_detector = FVGDetector(fvg_min_pips)
+    liq_mapper = LiquidityMapper(liq_min_pips)
+    ipdm = IPDMDetector()
+
+    # Pre-compute ATR array
     atr_period = 14
-    # Diagnostic counters
-    _diag_swing = 0
-    _diag_body_filter = 0
+    atr_array = np.zeros(len(candles))
+    for i in range(atr_period + 1, len(candles)):
+        tr_vals = []
+        for j in range(i - atr_period, i):
+            tr = max(highs[j] - lows[j],
+                     abs(highs[j] - closes[j-1]) if j > 0 else highs[j] - lows[j],
+                     abs(lows[j] - closes[j-1]) if j > 0 else highs[j] - lows[j])
+            tr_vals.append(tr)
+        atr_array[i] = np.mean(tr_vals)
+
+    # Sliding window analysis
+    window_size = 100
+    _diag_no_trend = 0
+    _diag_no_bos = 0
     _diag_score_reject = 0
     _diag_throttle = 0
 
-    for i in range(max(swing_len * 2 + 10, atr_period + 5), len(candles) - 1):
-        # Calculate ATR at this bar
-        tr_values = []
-        for j in range(max(0, i - atr_period), i):
-            tr = max(
-                highs[j] - lows[j],
-                abs(highs[j] - closes[j-1]) if j > 0 else highs[j] - lows[j],
-                abs(lows[j] - closes[j-1]) if j > 0 else highs[j] - lows[j],
-            )
-            tr_values.append(tr)
-        atr = np.mean(tr_values) if tr_values else 0
+    for i in range(window_size, len(candles) - 1):
+        atr = atr_array[i]
         if atr == 0:
             continue
 
-        # Simple swing high/low detection
-        window_highs = highs[i - swing_len:i]
-        window_lows = lows[i - swing_len:i]
+        # Run structure detection on sliding window
+        window = candles.iloc[max(0, i - window_size):i + 1].copy()
+        ms = structure.update(window)
 
-        is_swing_high = highs[i - swing_len] == max(window_highs)
-        is_swing_low = lows[i - swing_len] == min(window_lows)
-
-        if not (is_swing_high or is_swing_low):
-            _diag_swing += 1
+        trend = ms.get("trend", "NEUTRAL")
+        if trend == "NEUTRAL":
+            _diag_no_trend += 1
             continue
 
-        # Determine bias from recent price action
-        recent_close = closes[i]
-        lookback_close = closes[i - 20]
-        bias = "BUY" if recent_close > lookback_close else "SELL"
-
-        # Check for order block (strong move away from zone)
-        body_sizes = abs(closes[i-3:i] - opens[i-3:i])
-        avg_body = np.mean(body_sizes) if len(body_sizes) > 0 else 0
-
-        # Only take signals with reasonable candle bodies (filtering noise)
-        current_body = abs(closes[i] - opens[i])
-        if avg_body == 0 or current_body < avg_body * 0.3:
-            _diag_body_filter += 1
+        # Need 2+ BOS confirmed
+        if not ms.get("trend_confirmed", False):
+            _diag_no_bos += 1
             continue
 
-        # Calculate entry, SL with MINIMUM distance enforcement
-        entry = closes[i]
-        sl_distance = max(atr * 1.5, entry * 0.002)  # At least 1.5×ATR or 0.2% of price
+        bias = "BUY" if trend == "BULLISH" else "SELL"
 
-        if bias == "BUY":
-            sl = entry - sl_distance
-            # Validate: SL must be below entry
-            if sl >= entry:
-                continue
-        else:
-            sl = entry + sl_distance
-            # Validate: SL must be above entry
-            if sl <= entry:
-                continue
+        # Run sub-modules on window
+        obs = ob_detector.update(window)
+        fvgs = fvg_detector.update(window)
+        swings = ms.get("swings", [])
+        liq = liq_mapper.update(window, swings)
+        high_swings = [s for s in swings if s["type"] == "HIGH"]
+        low_swings = [s for s in swings if s["type"] == "LOW"]
+        ipdm_result = ipdm.update(window, high_swings, low_swings)
 
-        # ── Detailed SMC Confirmation Analysis ──
+        # IPDM gate: skip accumulation/active manipulation
+        phase = ipdm_result.get("phase", "UNKNOWN")
+        if phase == "ACCUMULATION":
+            continue
+        if phase == "MANIPULATION" and not ipdm_result.get("manipulation_completed", False):
+            continue
+
+        # Score confluence
         score = 0
-        confirmations = []
         score_breakdown = []
+        confirmations = []
 
-        # 1. Trend Alignment (SMA50)
-        sma50 = np.mean(closes[max(0,i-50):i])
-        if bias == "BUY" and closes[i] > sma50:
+        # +15: Trend confirmed (2+ BOS)
+        score += 15
+        score_breakdown.append(f"Trend: +15 ({trend}, {ms.get('consecutive_bos',0)} BOS)")
+        confirmations.append(f"✓ Trend: {trend} — {ms.get('consecutive_bos',0)} consecutive BOS confirmed")
+
+        # +15: Liquidity sweep
+        sweep = liq.get("recent_sweep") if isinstance(liq, dict) else None
+        if sweep:
             score += 15
-            score_breakdown.append("Trend Alignment: +15 (price above SMA50)")
-            confirmations.append(f"✓ Trend: BULLISH — Price {closes[i]:.2f} above SMA50 {sma50:.2f}")
-        elif bias == "SELL" and closes[i] < sma50:
-            score += 15
-            score_breakdown.append("Trend Alignment: +15 (price below SMA50)")
-            confirmations.append(f"✓ Trend: BEARISH — Price {closes[i]:.2f} below SMA50 {sma50:.2f}")
+            score_breakdown.append("Liquidity Sweep: +15")
+            confirmations.append(f"✓ Liquidity: Sweep detected")
         else:
-            score_breakdown.append("Trend Alignment: +0 (counter-trend)")
-            confirmations.append(f"✗ Trend: Counter-trend signal")
+            score_breakdown.append("Liquidity Sweep: +0")
+            confirmations.append("✗ Liquidity: No sweep")
 
-        # 2. Swing Structure
-        if is_swing_low and bias == "BUY":
+        # +15: Fresh Order Block
+        fresh_ob = None
+        for ob in reversed(obs if isinstance(obs, list) else []):
+            if ob.get("type") == trend and ob.get("touches", 99) == 0:
+                fresh_ob = ob
+                break
+        if fresh_ob:
             score += 15
-            score_breakdown.append("Swing Structure: +15 (swing low + BUY)")
-            confirmations.append(f"✓ Structure: Swing Low at {lows[i-swing_len]:.2f} — demand zone")
-        elif is_swing_high and bias == "SELL":
-            score += 15
-            score_breakdown.append("Swing Structure: +15 (swing high + SELL)")
-            confirmations.append(f"✓ Structure: Swing High at {highs[i-swing_len]:.2f} — supply zone")
+            score_breakdown.append("Order Block: +15 (fresh OB)")
+            confirmations.append("✓ Order Block: Fresh unmitigated OB found")
         else:
+            score_breakdown.append("Order Block: +0")
+            confirmations.append("✗ Order Block: None found")
+
+        # +10: FVG inside OB
+        fvg_inside = False
+        if fresh_ob and isinstance(fvgs, list) and fvgs:
+            ob_h = fresh_ob.get("high", 0)
+            ob_l = fresh_ob.get("low", 0)
+            for fvg in fvgs:
+                mid = (fvg.get("high", 0) + fvg.get("low", 0)) / 2
+                if ob_l <= mid <= ob_h:
+                    fvg_inside = True
+                    break
+        if fvg_inside:
+            score += 10
+            score_breakdown.append("FVG+OB: +10")
+            confirmations.append("✓ FVG inside Order Block — high probability")
+        elif isinstance(fvgs, list) and fvgs:
             score += 5
-            score_breakdown.append("Swing Structure: +5 (swing present, direction mismatch)")
-            confirmations.append(f"△ Structure: Swing detected but not aligned with {bias}")
+            score_breakdown.append("FVG: +5 (present, not in OB)")
+            confirmations.append("△ FVG: Present but not inside OB")
 
-        # 3. Fair Value Gap (FVG) Detection — with minimum gap size
-        has_fvg = False
-        if i >= 3:
-            if bias == "BUY" and lows[i] > highs[i-2]:
-                gap_size = (lows[i] - highs[i-2]) / pip_size
-                if gap_size >= fvg_min_pips:
-                    has_fvg = True
-                    score += 10
-                    score_breakdown.append(f"FVG: +10 (bullish gap {gap_size:.1f} pips)")
-                    confirmations.append(f"✓ FVG: Bullish gap {gap_size:.1f} pips (min: {fvg_min_pips})")
-                else:
-                    score_breakdown.append(f"FVG: +0 (gap {gap_size:.1f} < min {fvg_min_pips} pips)")
-                    confirmations.append(f"✗ FVG: Gap too small ({gap_size:.1f} < {fvg_min_pips} pips)")
-            elif bias == "SELL" and highs[i] < lows[i-2]:
-                gap_size = (lows[i-2] - highs[i]) / pip_size
-                if gap_size >= fvg_min_pips:
-                    has_fvg = True
-                    score += 10
-                    score_breakdown.append(f"FVG: +10 (bearish gap {gap_size:.1f} pips)")
-                    confirmations.append(f"✓ FVG: Bearish gap {gap_size:.1f} pips (min: {fvg_min_pips})")
-                else:
-                    score_breakdown.append(f"FVG: +0 (gap {gap_size:.1f} < min {fvg_min_pips} pips)")
-                    confirmations.append(f"✗ FVG: Gap too small ({gap_size:.1f} < {fvg_min_pips} pips)")
+        # +10: Candlestick pattern
+        try:
+            pattern = detect_confirmation_pattern(window, bias=trend)
+            if pattern:
+                tier = getattr(pattern, 'tier', 0)
+                if isinstance(tier, str):
+                    tier = {"TIER_1": 1, "TIER_2": 2, "TIER_3": 3}.get(tier, 0)
+                pts = {1: 15, 2: 10, 3: 5}.get(tier, 5)
+                score += pts
+                pname = getattr(pattern, 'name', str(pattern))
+                score_breakdown.append(f"Candle: +{pts} ({pname})")
+                confirmations.append(f"✓ Candlestick: {pname}")
             else:
-                score_breakdown.append("FVG: +0 (no gap)")
-                confirmations.append("✗ FVG: No fair value gap detected")
+                score_breakdown.append("Candle: +0")
+                confirmations.append("✗ Candlestick: No pattern")
+        except Exception:
+            score_breakdown.append("Candle: +0 (error)")
 
-        # 4. Liquidity Sweep Detection — with minimum sweep size
-        has_sweep = False
-        if i >= 10:
-            recent_low = min(lows[i-10:i-1])
-            recent_high = max(highs[i-10:i-1])
-            if bias == "BUY" and lows[i-1] < recent_low and closes[i] > opens[i]:
-                sweep_size = (recent_low - lows[i-1]) / pip_size
-                if sweep_size >= liq_min_pips:
-                    has_sweep = True
-                    score += 15
-                    score_breakdown.append(f"Liquidity Sweep: +15 (swept {sweep_size:.1f} pips below)")
-                    confirmations.append(f"✓ Liquidity: Swept low by {sweep_size:.1f} pips then reclaimed")
-                else:
-                    score_breakdown.append(f"Liquidity Sweep: +0 (sweep {sweep_size:.1f} < min {liq_min_pips})")
-                    confirmations.append(f"✗ Liquidity: Sweep too small ({sweep_size:.1f} < {liq_min_pips} pips)")
-            elif bias == "SELL" and highs[i-1] > recent_high and closes[i] < opens[i]:
-                sweep_size = (highs[i-1] - recent_high) / pip_size
-                if sweep_size >= liq_min_pips:
-                    has_sweep = True
-                    score += 15
-                    score_breakdown.append(f"Liquidity Sweep: +15 (swept {sweep_size:.1f} pips above)")
-                    confirmations.append(f"✓ Liquidity: Swept high by {sweep_size:.1f} pips then reclaimed")
-                else:
-                    score_breakdown.append(f"Liquidity Sweep: +0 (sweep {sweep_size:.1f} < min {liq_min_pips})")
-                    confirmations.append(f"✗ Liquidity: Sweep too small ({sweep_size:.1f} < {liq_min_pips} pips)")
-            else:
-                score_breakdown.append("Liquidity Sweep: +0 (no sweep)")
-                confirmations.append("✗ Liquidity: No sweep detected in last 10 bars")
-
-        # 5. Candlestick Pattern
-        pattern_name = "None"
-        c_open, c_close, c_high, c_low = opens[i], closes[i], highs[i], lows[i]
-        body = abs(c_close - c_open)
-        upper_wick = c_high - max(c_open, c_close)
-        lower_wick = min(c_open, c_close) - c_low
-        total_range = c_high - c_low if c_high != c_low else 0.0001
-
-        if body < total_range * 0.1 and lower_wick > body * 2:
-            pattern_name = "Doji / Hammer"
+        # +5: IPDM Expansion phase
+        if phase == "EXPANSION":
             score += 5
-            score_breakdown.append(f"Candle Pattern: +5 ({pattern_name})")
-        elif bias == "BUY" and lower_wick > body * 2 and upper_wick < body * 0.5:
-            pattern_name = "Bullish Pin Bar"
-            score += 10
-            score_breakdown.append(f"Candle Pattern: +10 ({pattern_name})")
-        elif bias == "SELL" and upper_wick > body * 2 and lower_wick < body * 0.5:
-            pattern_name = "Bearish Pin Bar"
-            score += 10
-            score_breakdown.append(f"Candle Pattern: +10 ({pattern_name})")
-        elif bias == "BUY" and c_close > c_open and body > avg_body * 1.5:
-            pattern_name = "Bullish Engulfing"
-            score += 10
-            score_breakdown.append(f"Candle Pattern: +10 ({pattern_name})")
-        elif bias == "SELL" and c_close < c_open and body > avg_body * 1.5:
-            pattern_name = "Bearish Engulfing"
-            score += 10
-            score_breakdown.append(f"Candle Pattern: +10 ({pattern_name})")
-        elif current_body > avg_body * 1.5:
-            pattern_name = "Strong Momentum Candle"
-            score += 5
-            score_breakdown.append(f"Candle Pattern: +5 ({pattern_name})")
-        else:
-            score_breakdown.append("Candle Pattern: +0 (no significant pattern)")
+            score_breakdown.append("IPDM: +5 (Expansion)")
+            confirmations.append("✓ IPDM: Expansion phase")
 
-        confirmations.append(f"{'✓' if pattern_name != 'None' else '✗'} Candlestick: {pattern_name}")
-
-        # 6. Order Block Check — with impulse ratio validation
-        if i >= 5:
-            ob_found = False
-            for k in range(i-5, i-1):
-                impulse_body = abs(closes[k+1] - opens[k+1])
-                if bias == "BUY" and closes[k] < opens[k] and closes[k+1] > opens[k+1] and closes[k+1] > highs[k]:
-                    if avg_body > 0 and impulse_body >= avg_body * ob_impulse:
-                        ob_found = True
-                        score += 10
-                        score_breakdown.append(f"Order Block: +10 (bullish OB, impulse {impulse_body/avg_body:.1f}x)")
-                        confirmations.append(f"✓ Order Block: Bullish OB — impulse {impulse_body/avg_body:.1f}x avg body")
-                        break
-                elif bias == "SELL" and closes[k] > opens[k] and closes[k+1] < opens[k+1] and closes[k+1] < lows[k]:
-                    if avg_body > 0 and impulse_body >= avg_body * ob_impulse:
-                        ob_found = True
-                        score += 10
-                        score_breakdown.append(f"Order Block: +10 (bearish OB, impulse {impulse_body/avg_body:.1f}x)")
-                        confirmations.append(f"✓ Order Block: Bearish OB — impulse {impulse_body/avg_body:.1f}x avg body")
-                        break
-            if not ob_found:
-                score_breakdown.append("Order Block: +0 (none found)")
-                confirmations.append(f"✗ Order Block: None with impulse >= {ob_impulse}x avg body")
-
-        # 7. Volume Confirmation (relative volume)
-        if i >= 20:
-            recent_volumes = candles['tick_volume'].values[i-20:i] if 'tick_volume' in candles.columns else None
-            if recent_volumes is not None and len(recent_volumes) > 0:
-                avg_vol = np.mean(recent_volumes)
-                curr_vol = candles['tick_volume'].values[i] if 'tick_volume' in candles.columns else 0
-                if avg_vol > 0 and curr_vol > avg_vol * 1.2:
-                    score += 10
-                    score_breakdown.append(f"Volume: +10 (current {curr_vol:.0f} vs avg {avg_vol:.0f} = {curr_vol/avg_vol:.1f}x)")
-                    confirmations.append(f"✓ Volume: {curr_vol/avg_vol:.1f}x average volume")
-                else:
-                    score_breakdown.append("Volume: +0 (below 1.2x average)")
-                    confirmations.append("✗ Volume: Below average")
-            else:
-                score_breakdown.append("Volume: +0 (no data)")
-
-        # 8. Momentum (RSI-like: percentage of up closes in last 14 bars)
-        if i >= 14:
-            up_count = sum(1 for j in range(i-14, i) if closes[j] > closes[j-1])
-            rsi_approx = (up_count / 14) * 100
-            if bias == "BUY" and 30 < rsi_approx < 60:  # Oversold recovering
+        # +10: Kill zone
+        try:
+            from backend.utils.timeutils import detect_session
+            session = detect_session()
+            if session in ("LONDON", "NY", "LONDON/NY"):
                 score += 10
-                score_breakdown.append(f"Momentum: +10 (RSI~{rsi_approx:.0f}, oversold recovery)")
-                confirmations.append(f"✓ Momentum: RSI~{rsi_approx:.0f} — oversold recovery")
-            elif bias == "SELL" and 40 < rsi_approx < 70:  # Overbought declining
-                score += 10
-                score_breakdown.append(f"Momentum: +10 (RSI~{rsi_approx:.0f}, overbought decline)")
-                confirmations.append(f"✓ Momentum: RSI~{rsi_approx:.0f} — overbought decline")
-            else:
-                score_breakdown.append(f"Momentum: +0 (RSI~{rsi_approx:.0f})")
-                confirmations.append(f"✗ Momentum: RSI~{rsi_approx:.0f} — not in ideal zone")
+                score_breakdown.append(f"Session: +10 ({session})")
+                confirmations.append(f"✓ Session: {session} kill zone")
+        except Exception:
+            pass
 
-        # Total score requirement — uses configurable confluence_threshold
+        # Check threshold
         if score < confluence_threshold:
             _diag_score_reject += 1
             continue
 
-        # Throttle: no signal within 3 bars of last one
-        if signals and i - signals[-1]["time"] < 3:
+        # Throttle: no signal within 5 bars of last
+        if signals and i - signals[-1]["time"] < 5:
             _diag_throttle += 1
             continue
 
-        # Build final confirmation summary
-        confirmations.insert(0, f"═══ Confluence Score: {score}/95 ═══")
-        confirmations.append(f"── Score Breakdown ──")
+        # Calculate entry + SL from structure
+        entry = float(closes[i])
+        # SL from swing extreme + buffer
+        sl_buffer = atr * 0.3
+        if bias == "BUY":
+            swing_low = min(s["price"] for s in low_swings[-3:]) if low_swings else entry - atr * 1.5
+            sl = swing_low - sl_buffer
+            if sl >= entry:
+                sl = entry - atr * 1.5
+        else:
+            swing_high = max(s["price"] for s in high_swings[-3:]) if high_swings else entry + atr * 1.5
+            sl = swing_high + sl_buffer
+            if sl <= entry:
+                sl = entry + atr * 1.5
+
+        confirmations.insert(0, f"═══ Confluence Score: {score}/100 ═══")
+        confirmations.append("── Score Breakdown ──")
         confirmations.extend(score_breakdown)
-        confirmations.append(f"ATR(14): {atr:.5f} | SL Distance: {sl_distance:.5f}")
-        confirmations.append(f"Risk: {sl_distance:.2f} pips | Min SL enforced: max(1.5×ATR, 0.2% price)")
+        confirmations.append(f"ATR(14): {atr:.5f} | IPDM: {phase}")
 
         signals.append({
             "time": i,
             "symbol": symbol,
             "direction": bias,
-            "entry_price": float(entry),
+            "entry_price": entry,
             "stop_loss": float(sl),
             "confluence_score": int(score),
             "confirmations": confirmations,
-            "pattern": pattern_name,
-            "has_fvg": bool(has_fvg),
-            "has_liquidity_sweep": bool(has_sweep),
+            "pattern": "SMC",
+            "has_fvg": bool(fvg_inside or (isinstance(fvgs, list) and len(fvgs) > 0)),
+            "has_liquidity_sweep": bool(sweep),
         })
 
     logger.info(f"Generated {len(signals)} signals from {len(candles)} candles for {symbol} "
-                f"(threshold={confluence_threshold}, filtered: swing={_diag_swing}, "
-                f"body={_diag_body_filter}, score={_diag_score_reject}, throttle={_diag_throttle})")
+                f"no_bos={_diag_no_bos}, score={_diag_score_reject}, throttle={_diag_throttle})")
     return signals
+
+
+
 
 
 @router.post("/backtest")
@@ -463,8 +388,8 @@ async def run_backtest_endpoint(
         "trail_pips": req.trail_pips,
         "session_filter_enabled": req.session_filter_enabled,
         "multi_position_mode": req.tp_count > 1,
-        "max_daily_loss_pct": req.max_daily_loss_pct,
-        "max_weekly_loss_pct": req.max_weekly_loss_pct,
+        "max_daily_consecutive_losses": req.max_daily_consecutive_losses,
+        "max_weekly_consecutive_losses": req.max_weekly_consecutive_losses,
         "max_consecutive_losses": req.max_consecutive_losses,
         "max_concurrent_positions": req.max_concurrent_positions,
         "compounding_enabled": req.compounding_enabled,
@@ -559,6 +484,20 @@ async def save_backtest(
     db: AsyncSession = Depends(get_db),
 ):
     """User explicitly saves a backtest after reviewing results."""
+
+    def _epoch_to_dt(val):
+        """Convert epoch int/float to datetime, pass through datetime/None."""
+        if val is None:
+            return None
+        if isinstance(val, (int, float)):
+            return datetime.fromtimestamp(val, tz=timezone.utc)
+        if isinstance(val, str):
+            try:
+                return datetime.fromisoformat(val.replace('Z', '+00:00'))
+            except ValueError:
+                return None
+        return val
+
     data = req.backtest_data
     report = data.get("report", {})
 
@@ -567,8 +506,8 @@ async def save_backtest(
         user_id=current_user.id,
         strategy_id=data.get("strategy_id", "SMC_v1"),
         symbol=data.get("symbol", ""),
-        start_date=data.get("start_date") or datetime.now(),
-        end_date=data.get("end_date") or datetime.now(),
+        start_date=_epoch_to_dt(data.get("start_date")) or datetime.now(timezone.utc),
+        end_date=_epoch_to_dt(data.get("end_date")) or datetime.now(timezone.utc),
         params_snapshot=json.dumps(data.get("risk_config", {})),
         total_trades=data.get("total_trades", 0),
         win_rate=report.get("win_rate", 0),
@@ -595,8 +534,8 @@ async def save_backtest(
                 entry_price=trade_data.get("entry_price"),
                 exit_price=trade_data.get("exit_price"),
                 stop_loss=trade_data.get("stop_loss"),
-                entry_time=trade_data.get("entry_time"),
-                exit_time=trade_data.get("exit_time"),
+                entry_time=_epoch_to_dt(trade_data.get("entry_time")),
+                exit_time=_epoch_to_dt(trade_data.get("exit_time")),
                 tp_level_hit=trade_data.get("tp_level"),
                 exit_reason=trade_data.get("exit_reason"),
                 pnl=trade_data.get("pnl"),

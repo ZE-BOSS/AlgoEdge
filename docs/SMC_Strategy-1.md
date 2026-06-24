@@ -1209,5 +1209,102 @@ Log to database + broadcast via WebSocket
 
 ---
 
-*Document Version 1.0 | AlgoEdge SMC Strategy Specification | June 2026*
+## Appendix C — Definitive 4-Layer Execution Model (v2.0)
+
+> **Supersedes:** Section 10 (Sniper Entry Model) for production execution. This appendix reflects the finalized multi-timeframe flow as confirmed during the June 2026 engine audit.
+
+### Timeframe Assignments
+
+| Layer | Timeframe | Purpose |
+|-------|-----------|---------|
+| 1 | H4 | Bias determination (HH/HL or LH/LL) |
+| 2 | H1 | BOS identification + bias double-confirm + rejection zone mapping for TPs |
+| IPDM | H1 | Phase filter (Accumulation/Manipulation/Expansion gate) |
+| 3 | M15 | ChoCH detection (2+ swing breaks, full body close) + OB/FVG/Fib zones |
+| 4 | M5 | Candlestick confirmation (reversal/continuation patterns) |
+
+### Key Rule Updates (v2.0)
+
+1. **ChoCH validation:** Must break past **2+ previous swing highs/lows** with a **FULL BODY candle close** — wicks do NOT count.
+
+2. **BOS timeframe:** BOS is spotted on **H1** (not H4). H4 is used only for directional bias.
+
+3. **H1 Bias Double-Confirm:** H1 structure must **agree** with H4 bias. If H4 says BULLISH but H1 is BEARISH → NO TRADE.
+
+4. **Fibonacci Zones (two tiers):**
+   - **PRIMARY:** 50.0%–61.8% retracement (highest priority fib zone)
+   - **SECONDARY:** 61.8%–78.6% retracement (OTE zone)
+
+5. **IPDM Phase Gate:**
+   - ACCUMULATION → WAIT (SM building positions)
+   - MANIPULATION → DO NOT ENTER (SM trapping retail)
+   - EXPANSION → ENTRY ALLOWED (real move beginning)
+
+6. **Zone-Based Take Profits:**
+   - Scan H1 for rejection zones (previous swing highs/lows, S/D zones, strong wick areas)
+   - TP1 = First H1 rejection zone (~1:1 R:R)
+   - TP2 = Next H1 rejection zone (≥3:1 R:R)
+   - TP3/Final = ChoCH reversal point — where market reversed after breaking 2+ swing highs/lows
+   - Between entry and final TP: any H1 rejection zone can be an intermediate TP
+
+7. **Candlestick confirmation on M5:** Mostly reversal (Engulfing, Hammer, Morning/Evening Star) or continuation patterns. Must appear AT the entry zone (OB/FVG/Fib/S&D).
+
+### 4-Layer Flow Diagram
+
+```
+LAYER 1 (H4): Is market bullish or bearish?
+    └─ HH/HL = BULLISH | LH/LL = BEARISH | Mixed = NO TRADE
+
+LAYER 2 (H1): Does H1 agree? Are there 2+ BOS?
+    └─ H1 bias must match H4
+    └─ 2+ consecutive BOS confirmed → trend valid
+    └─ Map rejection zones on H1 → these become TP targets
+    └─ Wait for price to PULL BACK to last BOS level
+
+IPDM GATE (H1): Is the pullback in the right phase?
+    └─ Accumulation (tight range) → WAIT
+    └─ Manipulation (liq sweep + wick rejection) → DON'T ENTER
+    └─ Expansion (momentum after sweep) → PROCEED
+
+LAYER 3 (M15): Has ChoCH confirmed the pullback is ending?
+    └─ ChoCH = break past 2+ M15 swing highs/lows
+    └─ FULL BODY CLOSE required (not wick)
+    └─ Find entry: OB → FVG → Fib 50-61.8% → Fib 61.8-78.6% → S/D zone
+
+LAYER 4 (M5): Does a candlestick pattern confirm?
+    └─ Reversal or continuation pattern AT the entry zone
+    └─ Score confluence ≥ 65 → EXECUTE TRADE
+    └─ Place SL beyond M15 swing extreme + buffer
+    └─ Place TPs at H1 rejection zones
+```
+
+### Updated Parameters (v2.0)
+
+```python
+SMC_PARAMS_V2 = {
+    # Fibonacci Zones (updated)
+    "fib_primary_min": 0.500,       # 50.0% retracement (primary zone start)
+    "fib_primary_max": 0.618,       # 61.8% retracement (primary zone end)
+    "ote_entry_min_fib": 0.618,     # 61.8% retracement (OTE start)
+    "ote_entry_max_fib": 0.786,     # 78.6% retracement (OTE end)
+    
+    # TP defaults (updated to spec)
+    "tp1_rr": 1.0,                  # TP1 at 1:1 RR (was 3.0)
+    "tp2_rr": 3.0,                  # TP2 at 3:1 RR (was 5.0)
+    "tp3_rr": 5.0,                  # TP3 at 5:1 RR (was 7.0)
+    
+    # BOS requirements
+    "min_bos_count": 2,             # Minimum consecutive BOS to confirm trend
+    
+    # Circuit Breaker (updated to trade counts)
+    "max_daily_consecutive_losses": 3,    # Was max_daily_loss_pct: 5.0
+    "max_weekly_consecutive_losses": 5,   # Was max_weekly_loss_pct: 10.0
+}
+```
+
+---
+
+*Document Version 2.0 | AlgoEdge SMC Strategy Specification | June 2026*
 *Based on: Mind of the Market (Pamela Donald), ICT Concepts, SMC Research 2024–2026*
+*Updated: Multi-TF model finalized, IPDM gate added, ChoCH rules tightened, zone-based TPs*
+

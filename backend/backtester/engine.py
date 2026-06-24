@@ -172,15 +172,13 @@ class BacktestEngine:
                 if pos["direction"] == "BUY" and low <= pos["stop_loss"]:
                     pos["exit_price"] = pos["stop_loss"]
                     pos["exit_reason"] = "BE_SL" if pos.get("be_applied") else "SL"
-                    contract = self._get_contract_size(pos.get("symbol", ""))
-                    pos["pnl"] = (pos["exit_price"] - pos["entry_price"]) * pos["volume"] * contract
+                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
                     closed_this_bar.append(pos)
                     continue
                 elif pos["direction"] == "SELL" and high >= pos["stop_loss"]:
                     pos["exit_price"] = pos["stop_loss"]
                     pos["exit_reason"] = "BE_SL" if pos.get("be_applied") else "SL"
-                    contract = self._get_contract_size(pos.get("symbol", ""))
-                    pos["pnl"] = (pos["entry_price"] - pos["exit_price"]) * pos["volume"] * contract
+                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
                     closed_this_bar.append(pos)
                     continue
 
@@ -188,8 +186,7 @@ class BacktestEngine:
                 if pos["direction"] == "BUY" and high >= pos["take_profit"]:
                     pos["exit_price"] = pos["take_profit"]
                     pos["exit_reason"] = f"TP{pos.get('tp_level', 1)}"
-                    contract = self._get_contract_size(pos.get("symbol", ""))
-                    pos["pnl"] = (pos["exit_price"] - pos["entry_price"]) * pos["volume"] * contract
+                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
                     closed_this_bar.append(pos)
                     if pos.get("tp_level") == 1:
                         tp1_hit_groups.add(pos.get("group_id"))
@@ -197,8 +194,7 @@ class BacktestEngine:
                 elif pos["direction"] == "SELL" and low <= pos["take_profit"]:
                     pos["exit_price"] = pos["take_profit"]
                     pos["exit_reason"] = f"TP{pos.get('tp_level', 1)}"
-                    contract = self._get_contract_size(pos.get("symbol", ""))
-                    pos["pnl"] = (pos["entry_price"] - pos["exit_price"]) * pos["volume"] * contract
+                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
                     closed_this_bar.append(pos)
                     if pos.get("tp_level") == 1:
                         tp1_hit_groups.add(pos.get("group_id"))
@@ -323,11 +319,7 @@ class BacktestEngine:
         last_price = candles.iloc[-1]["close"] if len(candles) > 0 else 0
         last_time = candles.iloc[-1].get("time", len(candles) - 1) if len(candles) > 0 else 0
         for pos in self.open_positions[:]:
-            contract = self._get_contract_size(pos.get("symbol", ""))
-            if pos["direction"] == "BUY":
-                pos["pnl"] = (last_price - pos["entry_price"]) * pos["volume"] * contract
-            else:
-                pos["pnl"] = (pos["entry_price"] - last_price) * pos["volume"] * contract
+            pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], last_price, pos["volume"], pos.get("symbol", ""))
             pos["exit_price"] = last_price
             pos["exit_reason"] = "END_OF_DATA"
             pos["exit_time"] = last_time
@@ -475,17 +467,24 @@ class BacktestEngine:
 
         return list(groups.values())
 
-    def _get_contract_size(self, symbol: str) -> float:
-        """Get contract size for P&L calculation."""
-        try:
-            profile = get_instrument_profile(symbol)
-            return profile.get("contract_size", 1.0)
-        except Exception:
-            sym = symbol.upper()
-            if "XAU" in sym or "GOLD" in sym:
-                return 100.0  # 1 lot = 100 oz
-            if "US30" in sym or "DJ" in sym:
-                return 1.0
-            if "BTC" in sym:
-                return 1.0
-            return 100000.0  # Standard forex
+    def _calc_pnl(self, direction: str, entry: float, exit_price: float, volume: float, symbol: str) -> float:
+        """
+        Calculate P&L using InstrumentProfile point-value model.
+        Formula: pnl = (price_diff / point_size) * point_value_per_lot * volume
+        Fixes Issue #1: was using contract_size which gives wildly wrong results for synthetics.
+        """
+        profile = get_instrument_profile(symbol)
+        if profile:
+            price_diff = exit_price - entry
+            points = price_diff / profile.point_size if profile.point_size else 0
+            raw_pnl = points * profile.point_value_per_lot * volume
+        else:
+            # Fallback for unknown symbols: assume standard forex
+            pip_size = get_pip_size(symbol)
+            price_diff = exit_price - entry
+            pips = price_diff / pip_size if pip_size else 0
+            # Standard forex: 1 pip = $10 per standard lot
+            raw_pnl = pips * 10.0 * volume
+            logger.warning(f"No InstrumentProfile for '{symbol}', using forex fallback")
+
+        return raw_pnl if direction == "BUY" else -raw_pnl

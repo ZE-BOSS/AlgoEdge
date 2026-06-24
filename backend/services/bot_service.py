@@ -192,7 +192,7 @@ class BotService:
                                         "tp_count": config.risk.tp_count if hasattr(config.risk, 'tp_count') else 3,
                                         "tp_splits": config.risk.tp_splits if hasattr(config.risk, 'tp_splits') else [40, 35, 25],
                                         "multi_position_mode": True,
-                                        "max_daily_loss_pct": config.risk.max_daily_loss_pct,
+                                        "max_daily_consecutive_losses": config.risk.max_daily_consecutive_losses,
                                         "max_concurrent_positions": config.risk.max_concurrent_positions,
                                         "be_trigger_rr": config.risk.be_trigger_rr,
                                         "be_buffer_pips": config.risk.be_buffer_pips,

@@ -85,18 +85,27 @@ def generate_risk_report(trades: List[Dict[str, Any]]) -> RiskReport:
     for t in trades:
         entry = t.get("entry_price", 0)
         sl = t.get("stop_loss", 0)
-        pnl = t.get("pnl", 0)
-        risk = abs(entry - sl) if sl else 1
-        r_val = pnl / risk if risk > 0 else 0
+        exit_p = t.get("exit_price", 0)
+        direction = t.get("direction", "BUY")
+        risk_distance = abs(entry - sl) if sl else 0
+
+        if risk_distance > 0 and entry > 0:
+            # R = directional price move / risk distance (units cancel)
+            if direction == "BUY":
+                r_val = (exit_p - entry) / risk_distance
+            else:
+                r_val = (entry - exit_p) / risk_distance
+        else:
+            r_val = 0
         r_values.append(r_val)
 
     win_r = [r for r in r_values if r > 0]
     loss_r = [r for r in r_values if r <= 0]
 
-    # Session breakdown
+    # Session breakdown (detect_session returns "LONDON/NY" for overlap)
     london_trades = [t for t in trades if t.get("session") == "LONDON"]
     ny_trades = [t for t in trades if t.get("session") == "NY"]
-    overlap_trades = [t for t in trades if t.get("session") == "OVERLAP"]
+    overlap_trades = [t for t in trades if t.get("session") in ("OVERLAP", "LONDON/NY")]
 
     def session_wr(session_trades):
         if not session_trades:

@@ -193,9 +193,9 @@ export default function Backtester() {
       fvg_min_gap_pips:3.0,liq_sweep_min_pips:2.0,max_spread_pips:3.0,
       session_filter_enabled:true,news_filter_enabled:true,
       risk_per_trade_pct:1.0,min_rr:3.0,
-      max_daily_loss_pct:5.0,max_weekly_loss_pct:10.0,
+      max_daily_consecutive_losses:3,max_weekly_consecutive_losses:5,
       max_consecutive_losses:5,max_concurrent_positions:3,
-      tp_count:3,tp1_rr:3.0,tp2_rr:5.0,tp3_rr:7.0,tp4_rr:10.0,tp5_rr:15.0,
+      tp_count:3,tp1_rr:1.0,tp2_rr:3.0,tp3_rr:5.0,tp4_rr:10.0,tp5_rr:15.0,
       tp_splits:'30,25,20,15,10',
       be_trigger_rr:1.0,be_buffer_pips:2.0,
       trail_method_tp2:'ATR_TRAIL',trail_method_tp3:'STRUCTURE_TRAIL',
@@ -298,8 +298,8 @@ export default function Backtester() {
             {/* Circuit Breakers */}
             <div style={{fontSize:'0.75rem',fontWeight:700,color:'var(--yellow)'}}>━ Circuit Breakers</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:8}}>
-              <div><label style={{fontSize:'0.7rem'}}>Max Daily Loss %</label><input type="number" step="0.5" value={form.max_daily_loss_pct} onChange={e=>u('max_daily_loss_pct',+e.target.value)}/></div>
-              <div><label style={{fontSize:'0.7rem'}}>Max Weekly Loss %</label><input type="number" step="0.5" value={form.max_weekly_loss_pct} onChange={e=>u('max_weekly_loss_pct',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>Max Daily Consec. Losses</label><input type="number" step="1" min="1" value={form.max_daily_consecutive_losses} onChange={e=>u('max_daily_consecutive_losses',+e.target.value)}/></div>
+              <div><label style={{fontSize:'0.7rem'}}>Max Weekly Consec. Losses</label><input type="number" step="1" min="1" value={form.max_weekly_consecutive_losses} onChange={e=>u('max_weekly_consecutive_losses',+e.target.value)}/></div>
               <div><label style={{fontSize:'0.7rem'}}>Max Consec. Losses</label><input type="number" value={form.max_consecutive_losses} onChange={e=>u('max_consecutive_losses',+e.target.value)}/></div>
               <div><label style={{fontSize:'0.7rem'}}>Max Open Positions</label><input type="number" value={form.max_concurrent_positions} onChange={e=>u('max_concurrent_positions',+e.target.value)}/></div>
             </div>

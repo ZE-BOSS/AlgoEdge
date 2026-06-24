@@ -68,8 +68,8 @@ class RiskParams:
     """
 
     # ── Take Profit Levels (RR Multipliers) ──────────────────────────
-    tp1_rr: float = 3.0
-    """TP1 Risk:Reward multiplier. Minimum allowed: 3.0 (1:3 RR)."""
+    tp1_rr: float = 1.0
+    """TP1 Risk:Reward multiplier. Default: 1.0 (1:1 RR per spec v2.0)."""
 
     tp2_rr: float = 5.0
     """TP2 Risk:Reward multiplier. Standard: 5.0 (1:5 RR)."""
@@ -171,16 +171,16 @@ class RiskParams:
     """Swing lookback for STRUCTURE_TRAIL method."""
 
     # ── Portfolio Circuit Breakers ────────────────────────────────────
-    max_daily_loss_pct: float = 5.0
+    max_daily_consecutive_losses: int = 3
     """
-    Strategy pauses and all positions close when daily loss hits this %.
-    Resets at 00:00 GMT. Range: 1–10%.
+    Strategy pauses when daily consecutive losses hit this count.
+    Resets at 00:00 GMT. Range: 1–10.
     """
 
-    max_weekly_loss_pct: float = 10.0
+    max_weekly_consecutive_losses: int = 5
     """
-    Strategy pauses for the week when weekly loss hits this %.
-    Resets Monday 00:01 GMT. Range: 3–20%.
+    Strategy pauses for the week when weekly consecutive losses hit this count.
+    Resets Monday 00:01 GMT. Range: 2–15.
     """
 
     max_consecutive_losses: int = 5
@@ -457,48 +457,48 @@ RISK_OPTIMIZATION_GRID = {
 RISK_PRESETS = {
     "conservative": RiskParams(
         risk_per_trade_pct=0.5,
-        tp1_rr=3.0, tp2_rr=5.0, tp3_rr=7.0,
+        tp1_rr=1.0, tp2_rr=3.0, tp3_rr=5.0,
         tp_splits=[50, 35, 15],
         min_rr=3.0,
         be_trigger_rr=0.75,
         trail_method_tp2="ATR_TRAIL",
         trail_method_tp3="STRUCTURE_TRAIL",
-        max_daily_loss_pct=3.0,
+        max_daily_consecutive_losses=2,
         max_concurrent_positions=2,
     ),
     "balanced": RiskParams(
         risk_per_trade_pct=1.0,
-        tp1_rr=3.0, tp2_rr=5.0, tp3_rr=7.0,
+        tp1_rr=1.0, tp2_rr=3.0, tp3_rr=5.0,
         tp_splits=[40, 35, 25],
         min_rr=3.0,
         be_trigger_rr=1.0,
         trail_method_tp2="ATR_TRAIL",
         trail_method_tp3="STRUCTURE_TRAIL",
-        max_daily_loss_pct=5.0,
+        max_daily_consecutive_losses=3,
         max_concurrent_positions=3,
     ),
     "aggressive": RiskParams(
         risk_per_trade_pct=1.5,
-        tp1_rr=3.0, tp2_rr=5.0, tp3_rr=10.0,
+        tp1_rr=1.0, tp2_rr=5.0, tp3_rr=10.0,
         tp_splits=[30, 35, 35],
         min_rr=3.0,
         be_trigger_rr=1.5,
         trail_method_tp2="STRUCTURE_TRAIL",
         trail_method_tp3="STRUCTURE_TRAIL",
         atr_trail_multiplier=2.0,
-        max_daily_loss_pct=7.0,
+        max_daily_consecutive_losses=5,
         max_concurrent_positions=5,
     ),
     "runner": RiskParams(
         risk_per_trade_pct=1.0,
-        tp1_rr=3.0, tp2_rr=7.0, tp3_rr=10.0,
+        tp1_rr=1.0, tp2_rr=5.0, tp3_rr=10.0,
         tp_splits=[25, 35, 40],
         min_rr=3.0,
         tp3_use_liquidity_target=True,
         be_trigger_rr=1.0,
         trail_method_tp2="ATR_TRAIL",
         trail_method_tp3="STRUCTURE_TRAIL",
-        max_daily_loss_pct=5.0,
+        max_daily_consecutive_losses=3,
         max_concurrent_positions=3,
     ),
 }
@@ -514,7 +514,7 @@ DEFAULT_USER_CONFIG = UserConfig()
 # ─────────────────────────────────────────────────────────────────────────────
 
 from typing import Literal as _Literal
-from compounding import CompoundingParams  # noqa: F401 — re-exported for UserConfig
+from backend.risk.compounding import CompoundingParams  # noqa: F401 — re-exported for UserConfig
 
 
 # ─────────────────────────────────────────────────────────────────────────────

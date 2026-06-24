@@ -219,6 +219,7 @@ class BacktestRun(Base):
     tp4_hit_rate = Column(Float)
     tp5_hit_rate = Column(Float)
     be_hit_rate = Column(Float)
+    sl_hit_rate = Column(Float)
     trail_hit_rate = Column(Float)
     notes = Column(Text)
     llm_analysis = Column(Text)

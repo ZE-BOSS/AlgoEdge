@@ -43,9 +43,9 @@ class MultiTPManager:
     """Calculates TP levels and splits volume across sub-positions."""
 
     def __init__(self, config: Dict[str, Any]):
-        self.tp1_rr = config.get("tp1_rr", 3.0)
-        self.tp2_rr = config.get("tp2_rr", 5.0)
-        self.tp3_rr = config.get("tp3_rr", 7.0)
+        self.tp1_rr = config.get("tp1_rr", 1.0)
+        self.tp2_rr = config.get("tp2_rr", 3.0)
+        self.tp3_rr = config.get("tp3_rr", 5.0)
         self.tp4_rr = config.get("tp4_rr", 10.0)
         self.tp5_rr = config.get("tp5_rr", 15.0)
         raw_splits = config.get("tp_splits", [30, 25, 20, 15, 10])

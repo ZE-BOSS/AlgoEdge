@@ -37,7 +37,7 @@ def get_pip_size(symbol: str) -> float:
 
 
 def get_symbol_info(symbol: str) -> dict:
-    """Get lot constraints from MT5 or use sensible defaults."""
+    """Get lot constraints from MT5, InstrumentProfile, or use sensible defaults."""
     if mt5:
         info = mt5.symbol_info(symbol)
         if info:
@@ -47,7 +47,20 @@ def get_symbol_info(symbol: str) -> dict:
                 "volume_step": info.volume_step,
                 "contract_size": info.trade_contract_size,
             }
-    # Sensible defaults
+    # Use InstrumentProfile for accurate per-instrument defaults
+    try:
+        from backend.risk.compounding import get_instrument_profile
+        profile = get_instrument_profile(symbol)
+        if profile:
+            return {
+                "volume_min": profile.lot_min,
+                "volume_max": profile.lot_max,
+                "volume_step": profile.lot_step,
+                "contract_size": profile.contract_size,
+            }
+    except ImportError:
+        pass
+    # Last resort: standard forex defaults
     return {
         "volume_min": 0.01,
         "volume_max": 100.0,
@@ -66,13 +79,32 @@ def calculate_lot_size(
     """
     Calculate lot size so that if SL is hit, loss = risk_pct% of balance.
     Formula: Lot = (Balance × Risk%) / (SL_distance_pips × pip_value_per_lot)
+    Uses InstrumentProfile.point_value_per_lot for accurate cross-instrument sizing.
     Source: RiskManagement_Spec.md Section 5.1
     """
     risk_amount = account_balance * (risk_pct / 100)
     sl_distance = abs(entry_price - stop_loss_price)
+
+    # Try InstrumentProfile first for accurate pip_value
+    try:
+        from backend.risk.compounding import get_instrument_profile
+        profile = get_instrument_profile(symbol)
+        if profile:
+            sl_pips = sl_distance / profile.point_size if profile.point_size else 0
+            pip_value = profile.point_value_per_lot
+            if sl_pips == 0 or pip_value == 0:
+                return 0.0
+            raw_lot = risk_amount / (sl_pips * pip_value)
+            clamped = max(profile.lot_min, min(profile.lot_max, raw_lot))
+            step = profile.lot_step
+            rounded = round(clamped / step) * step if step > 0 else clamped
+            return round(rounded, 3)
+    except ImportError:
+        pass
+
+    # Fallback: use pip_size × contract_size (original forex logic)
     pip_size = get_pip_size(symbol)
     sl_pips = sl_distance / pip_size if pip_size > 0 else 0
-
     info = get_symbol_info(symbol)
     pip_value = pip_size * info["contract_size"]
 
@@ -80,8 +112,6 @@ def calculate_lot_size(
         return 0.0
 
     raw_lot = risk_amount / (sl_pips * pip_value)
-
-    # Clamp and round to broker constraints
     clamped = max(info["volume_min"], min(info["volume_max"], raw_lot))
     step = info["volume_step"]
     rounded = round(clamped / step) * step if step > 0 else clamped
@@ -96,12 +126,31 @@ def calculate_lot_from_dollars(
 ) -> float:
     """
     Convert a fixed dollar risk amount to lots (for compounding plan).
+    Uses InstrumentProfile.point_value_per_lot for accurate sizing.
     Source: CompoundingPlan_Spec.md Section 2.5
     """
     sl_distance = abs(entry_price - stop_loss_price)
+
+    # Try InstrumentProfile first
+    try:
+        from backend.risk.compounding import get_instrument_profile
+        profile = get_instrument_profile(symbol)
+        if profile:
+            sl_pips = sl_distance / profile.point_size if profile.point_size else 0
+            pip_value = profile.point_value_per_lot
+            if sl_pips == 0 or pip_value == 0:
+                return 0.0
+            raw_lot = risk_dollars / (sl_pips * pip_value)
+            clamped = max(profile.lot_min, min(profile.lot_max, raw_lot))
+            step = profile.lot_step
+            rounded = round(clamped / step) * step if step > 0 else clamped
+            return round(rounded, 3)
+    except ImportError:
+        pass
+
+    # Fallback
     pip_size = get_pip_size(symbol)
     sl_pips = sl_distance / pip_size if pip_size > 0 else 0
-
     info = get_symbol_info(symbol)
     pip_value = pip_size * info["contract_size"]
 
@@ -109,7 +158,6 @@ def calculate_lot_from_dollars(
         return 0.0
 
     raw_lot = risk_dollars / (sl_pips * pip_value)
-
     clamped = max(info["volume_min"], min(info["volume_max"], raw_lot))
     step = info["volume_step"]
     rounded = round(clamped / step) * step if step > 0 else clamped

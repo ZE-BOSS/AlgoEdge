@@ -12,17 +12,17 @@ export default function RiskSettings() {
 
   const [config, setConfig] = useState({
     risk_per_trade_pct: 1.0,
-    max_daily_loss_pct: 5.0,
-    max_weekly_loss_pct: 10.0,
+    max_daily_consecutive_losses: 3,
+    max_weekly_consecutive_losses: 5,
     max_consecutive_losses: 5,
     max_concurrent_positions: 3,
     min_rr: 3.0,
     be_trigger_rr: 1.0,
     be_buffer_pips: 2.0,
     tp_count: 3,
-    tp1_rr: 3.0,
-    tp2_rr: 5.0,
-    tp3_rr: 7.0,
+    tp1_rr: 1.0,
+    tp2_rr: 3.0,
+    tp3_rr: 5.0,
     tp4_rr: 10.0,
     tp5_rr: 15.0,
     tp_splits: '30,25,20,15,10',
@@ -82,8 +82,8 @@ export default function RiskSettings() {
       <div className="card">
         <div className="card-header"><span className="card-title">Circuit Breakers</span></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Max Daily Loss (%)</label><input type="number" step="0.5" value={config.max_daily_loss_pct} onChange={e => update('max_daily_loss_pct', +e.target.value)} /></div>
-          <div><label>Max Weekly Loss (%)</label><input type="number" step="0.5" value={config.max_weekly_loss_pct} onChange={e => update('max_weekly_loss_pct', +e.target.value)} /></div>
+          <div><label>Max Daily Consec. Losses</label><input type="number" step="1" min="1" value={config.max_daily_consecutive_losses} onChange={e => update('max_daily_consecutive_losses', +e.target.value)} /></div>
+          <div><label>Max Weekly Consec. Losses</label><input type="number" step="1" min="1" value={config.max_weekly_consecutive_losses} onChange={e => update('max_weekly_consecutive_losses', +e.target.value)} /></div>
           <div><label>Max Consec. Losses</label><input type="number" value={config.max_consecutive_losses} onChange={e => update('max_consecutive_losses', +e.target.value)} /></div>
           <div><label>Max Open Positions</label><input type="number" value={config.max_concurrent_positions} onChange={e => update('max_concurrent_positions', +e.target.value)} /></div>
         </div>
