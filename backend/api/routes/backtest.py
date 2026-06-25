@@ -136,6 +136,13 @@ async def run_backtest_endpoint(
     from backend.strategies.smc.params import UserConfig
     
     config = UserConfig()
+    config.smc.min_signal_score = req.confluence_threshold
+    config.smc.swing_length_htf = req.swing_length
+    config.smc.ob_impulse_min_ratio = req.ob_impulse_ratio
+    config.smc.fvg_min_gap_pips = req.fvg_min_gap_pips
+    config.smc.liq_sweep_min_pips = req.liq_sweep_min_pips
+    config.smc.session_filter_enabled = req.session_filter_enabled
+    config.smc.news_filter_enabled = req.news_filter_enabled
     engine = SMCEngine(config)
 
     def _index_candles(df):

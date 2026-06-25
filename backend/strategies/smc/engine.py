@@ -165,7 +165,7 @@ class SMCEngine(BaseStrategy):
         if not h1.get("trend_confirmed", False):
             return None
 
-        # ── IPDM Phase Gate ──
+        # ── IPDM Phase Gate ── 
         ipdm = self.context.get("ipdm", {})
         ipdm_phase = ipdm.get("phase", "UNKNOWN")
         if ipdm_phase in ("ACCUMULATION", "MANIPULATION"):
@@ -255,10 +255,6 @@ class SMCEngine(BaseStrategy):
             if score >= self.smc_params.min_signal_score:
                 bot_service.log_system_event(f"[{symbol} M5] 🎯 SIGNAL VALIDATED! Score: {score}/100. Direction: {htf_bias}", "SIGNAL", "SMC")
                 return self.signal_gen.generate(scorer_context, score)
-            else:
-                # Log high-scoring rejections for debug
-                if score >= 40:
-                    bot_service.log_system_event(f"[{symbol} M5] Signal rejected. Score {score}/100 too low (Min: {self.smc_params.min_signal_score})", "WARN", "SMC")
 
         return None
 

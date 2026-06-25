@@ -120,6 +120,7 @@ class SignalGenerator:
                 "candle_tier": context.get("candle_tier"),
                 "session": context.get("current_session"),
                 "ipdm_phase": context.get("ipdm_phase"),
+                "score_breakdown": context.get("score_breakdown", {}),
             }
         )
 
