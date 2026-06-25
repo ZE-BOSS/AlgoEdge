@@ -193,6 +193,17 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
     _diag_no_bos = 0
     _diag_score_reject = 0
     _diag_throttle = 0
+    _diag_max_score = 0
+    _diag_score_samples = []  # log first 10 score breakdowns for debugging
+
+    logger.info(f"[SIGNAL] ═══ Pre-compute complete ═══")
+    logger.info(f"[SIGNAL] Bars: {n} | Swing Highs: {len(swing_highs)} | Swing Lows: {len(swing_lows)}")
+    logger.info(f"[SIGNAL] FVG Bull bars: {int(fvg_bull.sum())} | FVG Bear bars: {int(fvg_bear.sum())}")
+    n_confirmed = sum(1 for x in confirmed_at if x)
+    n_bullish = sum(1 for x in trend_at if x == "BULLISH")
+    n_bearish = sum(1 for x in trend_at if x == "BEARISH")
+    logger.info(f"[SIGNAL] Trend: bullish_bars={n_bullish}, bearish_bars={n_bearish}, confirmed_bars(BOS>=2)={n_confirmed}")
+    logger.info(f"[SIGNAL] Config: threshold={confluence_threshold}, swing_len={swing_len}, pip_size={pip_size}")
 
     for i in range(max(50, swing_len * 3), n - 1):
         atr = atr_array[i]
@@ -321,6 +332,11 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
                 score_breakdown.append(f"Volume: +10 ({curr_vol/avg_vol:.1f}x)")
                 confirmations.append(f"✓ Volume: {curr_vol/avg_vol:.1f}x average")
 
+        # Track max score seen & log sample breakdowns
+        _diag_max_score = max(_diag_max_score, score)
+        if len(_diag_score_samples) < 10:
+            _diag_score_samples.append(f"  Bar {i}: score={score}/{confluence_threshold} | {' | '.join(score_breakdown)}")
+
         # Check threshold
         if score < confluence_threshold:
             _diag_score_reject += 1
@@ -335,7 +351,6 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
         entry = float(closes[i])
         sl_buffer = atr * 0.3
         if bias == "BUY":
-            # Find nearest swing low
             nearby_lows = [p for idx, p in swing_lows if idx < i and idx > i - 30]
             swing_low = min(nearby_lows) if nearby_lows else entry - atr * 1.5
             sl = swing_low - sl_buffer
@@ -347,6 +362,8 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
             sl = swing_high + sl_buffer
             if sl <= entry:
                 sl = entry + atr * 1.5
+
+        logger.info(f"[SIGNAL] ✅ SIGNAL #{len(signals)+1} at bar {i}: {bias} @ {entry:.5f} | SL={sl:.5f} | score={score} | {pattern_name}")
 
         confirmations.insert(0, f"═══ Confluence Score: {score}/100 ═══")
         confirmations.append("── Score Breakdown ──")
@@ -366,15 +383,17 @@ def _generate_signals_from_candles(candles, symbol: str, timeframe: str,
             "has_liquidity_sweep": bool(has_sweep),
         })
 
-    # Diagnostics: how many bars had confirmed trend
-    n_confirmed = sum(1 for x in confirmed_at if x)
-    n_bullish = sum(1 for x in trend_at if x == "BULLISH")
-    n_bearish = sum(1 for x in trend_at if x == "BEARISH")
-    logger.info(f"Signal pre-compute: {len(swing_highs)} swing highs, {len(swing_lows)} swing lows, "
-                f"bullish_bars={n_bullish}, bearish_bars={n_bearish}, confirmed_bars={n_confirmed}")
-    logger.info(f"Generated {len(signals)} signals from {len(candles)} candles for {symbol} "
-                f"(threshold={confluence_threshold}, filtered: no_trend={_diag_no_trend}, "
-                f"no_bos={_diag_no_bos}, score={_diag_score_reject}, throttle={_diag_throttle})")
+    # ── Final diagnostic summary ──
+    logger.info(f"[SIGNAL] ═══ SIGNAL GENERATION COMPLETE ═══")
+    logger.info(f"[SIGNAL] Results: {len(signals)} signals from {n} candles")
+    logger.info(f"[SIGNAL] Filters: no_trend={_diag_no_trend} | no_bos={_diag_no_bos} | score_reject={_diag_score_reject} | throttle={_diag_throttle}")
+    logger.info(f"[SIGNAL] Max score seen: {_diag_max_score}/{confluence_threshold} threshold")
+    if _diag_score_samples:
+        logger.info(f"[SIGNAL] ─── Sample score breakdowns (first 10 bars that passed BOS gate) ───")
+        for sample in _diag_score_samples:
+            logger.info(f"[SIGNAL] {sample}")
+    if _diag_max_score < confluence_threshold:
+        logger.warning(f"[SIGNAL] ⚠️ MAX SCORE ({_diag_max_score}) IS BELOW THRESHOLD ({confluence_threshold})! No signal can ever pass. Lower threshold or check scoring.")
     return signals
 
 

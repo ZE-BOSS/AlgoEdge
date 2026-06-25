@@ -56,12 +56,13 @@ class RiskEngine:
         # 1. Circuit Breaker Check
         can_trade, reason = self.circuit.check_all(account_balance)
         if not can_trade:
-            logger.warning(f"Circuit breaker blocked trade: {reason}")
+            logger.warning(f"[RISK] Circuit breaker blocked: {reason}")
             return False, reason, []
 
         # 2. Minimum RR Check
         risk = abs(entry - sl)
         if risk == 0:
+            logger.warning(f"[RISK] Rejected: zero risk (entry={entry:.5f}, SL={sl:.5f})")
             return False, "Risk is zero (entry == SL)", []
 
         # 3. Position Sizing
@@ -75,6 +76,7 @@ class RiskEngine:
             )
 
         if total_lots < 0.01:
+            logger.warning(f"[RISK] Rejected: lot size {total_lots:.4f} below 0.01 min (balance=${account_balance:.2f}, risk_pct={self.risk_pct}%, risk={risk:.5f})")
             return False, "Lot size too small for broker minimum", []
 
         # 4. Multi-Position Splits (TP1/TP2/TP3)
@@ -91,10 +93,11 @@ class RiskEngine:
         tp1_reward = abs(tp1_price - entry)
         tp1_rr = tp1_reward / risk
         if tp1_rr < self.min_rr:
+            logger.warning(f"[RISK] Rejected: TP1 RR {tp1_rr:.1f} < min_rr {self.min_rr} (entry={entry:.5f}, SL={sl:.5f}, TP1={tp1_price:.5f})")
             return False, f"TP1 RR {tp1_rr:.1f} below minimum {self.min_rr}", []
 
         self.circuit.position_opened()
-        logger.info(f"Trade approved: {direction} {symbol} @ {entry} | {len(tp_levels)} TP levels | Lots: {total_lots}")
+        logger.info(f"[RISK] ✅ Trade approved: {direction} {symbol} @ {entry:.5f} | SL={sl:.5f} | risk={risk:.5f} | TP1_RR={tp1_rr:.1f} | {len(tp_levels)} TPs | Lots={total_lots:.4f}")
         return True, "APPROVED", tp_levels
 
     def manage_open_position(

@@ -100,6 +100,10 @@ class BacktestEngine:
         self.equity_curve = [balance]
         self.invalid_signals = 0
 
+        logger.info(f"[ENGINE] ═══ Starting backtest engine ═══")
+        logger.info(f"[ENGINE] Balance: ${initial_balance} | Signals: {len(signals)} | Candles: {len(candles)}")
+        logger.info(f"[ENGINE] Risk config: risk_pct={self.risk_config.get('risk_per_trade_pct')}% | min_rr={self.risk_config.get('min_rr')} | tp_count={self.risk_config.get('tp_count')}")
+
         signal_idx = 0
 
         # ── Pre-compute ATR array (vectorized, O(n)) ──
@@ -296,6 +300,7 @@ class BacktestEngine:
                 if approved:
                     # Generate a group_id to link all sub-positions from this signal
                     group_id = str(uuid.uuid4())[:8]
+                    logger.info(f"[ENGINE] ✅ Signal APPROVED at bar {i}: {sig.get('direction')} @ {sig.get('entry_price', current_price):.5f} | {len(tp_levels)} TP levels | balance=${balance:.2f}")
 
                     for tp in tp_levels:
                         # Validate before opening
@@ -306,12 +311,15 @@ class BacktestEngine:
                             tp.tp_price,
                         )
                         if not is_valid:
-                            logger.warning(f"Invalid position rejected: {err}")
+                            logger.warning(f"[ENGINE] ❌ Invalid position rejected: {err}")
                             self.invalid_signals += 1
                             continue
 
                         position = self._create_position(sig, tp, current_time, current_price, group_id)
                         self.open_positions.append(position)
+                        logger.debug(f"[ENGINE]   Position opened: TP{tp.tp_level} @ {tp.tp_price:.5f} | vol={tp.volume:.4f}")
+                else:
+                    logger.info(f"[ENGINE] ❌ Signal REJECTED at bar {i}: {reason}")
 
             self.equity_curve.append(balance)
 
@@ -340,6 +348,18 @@ class BacktestEngine:
         grouped_trades = self._group_trades(self.trades)
 
         report = generate_risk_report(self.trades)
+
+        # ── Engine completion summary ──
+        total_pnl = balance - initial_balance
+        wins = sum(1 for t in self.trades if t.get("pnl", 0) > 0)
+        losses = sum(1 for t in self.trades if t.get("pnl", 0) <= 0)
+        logger.info(f"[ENGINE] ═══ Backtest engine complete ═══")
+        logger.info(f"[ENGINE] Trades: {len(self.trades)} ({wins}W / {losses}L) | Invalid: {self.invalid_signals}")
+        logger.info(f"[ENGINE] P&L: ${total_pnl:.2f} | Final balance: ${balance:.2f}")
+        if self.trades:
+            best = max(t.get("pnl", 0) for t in self.trades)
+            worst = min(t.get("pnl", 0) for t in self.trades)
+            logger.info(f"[ENGINE] Best trade: ${best:.2f} | Worst trade: ${worst:.2f}")
 
         return {
             "backtest_id": str(uuid.uuid4()),
