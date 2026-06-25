@@ -45,23 +45,34 @@ class MarketStructureDetector:
         is_swing_low = candles['low'] == lows
 
         self.swings = []
-        for i in range(len(candles)):
-            if pd.isna(highs.iloc[i]):
-                continue
-            if is_swing_high.iloc[i]:
-                self.swings.append({
+        
+        # Vectorized extraction of swing points
+        import numpy as np
+        high_indices = np.where(is_swing_high)[0]
+        low_indices = np.where(is_swing_low)[0]
+        
+        swings_list = []
+        
+        for i in high_indices:
+            if not pd.isna(highs.iloc[i]):
+                swings_list.append({
                     "type": "HIGH",
                     "price": float(candles['high'].iloc[i]),
                     "index": candles.index[i],
                     "bar_idx": i,
                 })
-            if is_swing_low.iloc[i]:
-                self.swings.append({
+                
+        for i in low_indices:
+            if not pd.isna(lows.iloc[i]):
+                swings_list.append({
                     "type": "LOW",
                     "price": float(candles['low'].iloc[i]),
                     "index": candles.index[i],
                     "bar_idx": i,
                 })
+                
+        # Sort sequentially by bar index
+        self.swings = sorted(swings_list, key=lambda x: x["bar_idx"])
 
         last_bos = None
         last_choch = None
