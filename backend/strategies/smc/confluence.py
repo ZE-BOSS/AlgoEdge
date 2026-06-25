@@ -39,22 +39,33 @@ class ConfluenceScorer:
 
         # ENTRY ZONE CONFIRMATION (Max +20)
         zone_score = 0
-        zone_name = "None"
+        zone_names = []
+
         if context.get("fresh_ob") is not None:
-            zone_score = 20
-            zone_name = "Fresh OB"
-        elif context.get("fvg_inside_ob", False):
-            zone_score = 20
-            zone_name = "FVG inside OB"
-        elif context.get("in_ote_zone", False):
-            zone_score = 15
-            zone_name = "OTE Fib Zone"
-        elif context.get("in_sd_zone", False):
-            zone_score = 15
-            zone_name = "S&D Zone"
+            zone_score += 20
+            zone_names.append("Fresh OB")
+            
+        if context.get("fvg_inside_ob", False):
+            zone_score += 20
+            zone_names.append("FVG inside OB")
+        elif context.get("fvg_present", False):
+            zone_score += 15
+            zone_names.append("FVG")
+            
+        if context.get("in_ote_zone", False):
+            zone_score += 10
+            zone_names.append("OTE Fib")
+            
+        if context.get("in_sd_zone", False):
+            zone_score += 10
+            zone_names.append("S&D")
+
+        # Cap zone score at 20 to ensure max total score is 100
+        zone_score = min(zone_score, 20)
+        zone_name_str = " + ".join(zone_names) if zone_names else "None"
         
         score += zone_score
-        breakdown[f"entry_zone ({zone_name})"] = zone_score
+        breakdown[f"entry_zone ({zone_name_str})"] = zone_score
 
         # LIQUIDITY SWEEP (Max +10)
         sweep_score = 0
