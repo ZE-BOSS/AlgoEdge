@@ -161,6 +161,18 @@ class MultiTPManager:
         if len(levels) == 1:
             levels[0].volume = total_volume
             levels[0].volume_pct = 1.0
+            
+        # If no levels were created because volume was too small to split, fallback to a single TP1
+        if len(levels) == 0 and total_volume >= 0.01:
+            levels.append(TPLevel(
+                level=1,
+                rr_multiplier=rr_multipliers[0],
+                volume_pct=1.0,
+                tp_price=tp_prices[0],
+                volume=total_volume,
+                trail_method=self.trail_methods[0] if len(self.trail_methods) > 0 else None,
+                deferred=False,
+            ))
 
         # Sanity validation — catch direction bugs at the source
         for tp in levels:

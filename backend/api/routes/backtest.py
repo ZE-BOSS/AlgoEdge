@@ -162,6 +162,8 @@ async def run_backtest_endpoint(
             config.smc.liq_sweep_min_pips = req.liq_sweep_min_pips
             config.smc.session_filter_enabled = req.session_filter_enabled
             config.smc.news_filter_enabled = req.news_filter_enabled
+            config.risk.min_rr = req.min_rr
+            config.risk.max_spread_pips = req.max_spread_pips
             engine = SMCEngine(config)
             engine.is_backtesting = True
 
@@ -381,7 +383,8 @@ async def run_backtest_endpoint(
                 await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
             except: pass
 
-    background_tasks.add_task(_run_backtest_task)
+    import asyncio
+    asyncio.create_task(_run_backtest_task())
     return {"status": "started", "message": "Backtest queued and running in the background."}
 
 @router.get("/backtests")
