@@ -92,6 +92,11 @@ class SMCEngine(BaseStrategy):
 
         # State
         self.context: Dict[str, Any] = {}
+        
+        # State tracking for frontend logs to prevent log spam
+        self.last_logged_htf_bias = None
+        self.last_logged_h1_trend = None
+        self.last_logged_phase = None
 
     def log_event(self, message: str, level: str = "INFO", category: str = "SMC"):
         """Intercept logs. If backtesting, store them. Otherwise broadcast to bot_service."""
@@ -104,10 +109,6 @@ class SMCEngine(BaseStrategy):
             })
         else:
             bot_service.log_system_event(message, level, category)
-        # State tracking for frontend logs to prevent log spam
-        self.last_logged_htf_bias = None
-        self.last_logged_h1_trend = None
-        self.last_logged_phase = None
 
     def get_required_timeframes(self) -> List[str]:
         return ["H4", "H1", "M15", "M5"]
