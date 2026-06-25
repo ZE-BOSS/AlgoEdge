@@ -243,7 +243,7 @@ async def run_backtest_endpoint(
                         sig_dict = {
                             "symbol": sig.symbol,
                             "direction": sig.direction,
-                            "time": int(current_time.timestamp()),
+                            "time": i,
                             "entry_price": sig.entry_price,
                             "stop_loss": sig.stop_loss,
                             "take_profit": sig.take_profit,
