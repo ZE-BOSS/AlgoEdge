@@ -259,7 +259,7 @@ class SMCEngine(BaseStrategy):
                 return None
 
             # ── Build scorer context (Issue #19 fix) ──
-            scorer_context = self._build_scorer_context(htf_bias, pattern)
+            scorer_context = self._build_scorer_context(symbol, htf_bias, pattern)
             
             # ── Calculate Entry, SL, TP ──
             entry_price = float(candles['close'].iloc[-1])
@@ -352,7 +352,7 @@ class SMCEngine(BaseStrategy):
         """Optional intra-bar management (e.g. precise trailing)."""
         return []
 
-    def _build_scorer_context(self, bias: str, pattern) -> Dict[str, Any]:
+    def _build_scorer_context(self, symbol: str, bias: str, pattern) -> Dict[str, Any]:
         """
         Translate sub-module outputs into the exact keys ConfluenceScorer expects.
         Fixes Issue #12/#19: scorer was getting wrong keys and scoring near-zero.
@@ -370,16 +370,18 @@ class SMCEngine(BaseStrategy):
                 fresh_ob = ob
                 break
 
-        # Check if any FVG is inside an OB
+        # Check if any FVG in bias direction is present
+        fvg_present = False
         fvg_inside_ob = False
-        if fresh_ob and fvgs:
-            ob_high = fresh_ob.get("high", 0)
-            ob_low = fresh_ob.get("low", 0)
-            for fvg in fvgs:
-                fvg_mid = (fvg.get("high", 0) + fvg.get("low", 0)) / 2
-                if ob_low <= fvg_mid <= ob_high:
-                    fvg_inside_ob = True
-                    break
+        for fvg in fvgs:
+            if fvg.get("type") == bias:
+                fvg_present = True
+                if fresh_ob:
+                    ob_high = fresh_ob.get("high", 0)
+                    ob_low = fresh_ob.get("low", 0)
+                    fvg_mid = (fvg.get("high", 0) + fvg.get("low", 0)) / 2
+                    if ob_low <= fvg_mid <= ob_high:
+                        fvg_inside_ob = True
 
         # Kill zone check
         try:
@@ -400,13 +402,16 @@ class SMCEngine(BaseStrategy):
                 candle_tier = tier_obj
 
         return {
+            "symbol": symbol,
             "signal_direction": bias,
             "htf_bias": htf.get("trend", "NEUTRAL"),
             "h1_structure": h1.get("trend", "NEUTRAL"),
             "liquidity_sweep": liq.get("recent_sweep"),
             "fresh_ob": fresh_ob,
+            "fvg_present": fvg_present,
             "fvg_inside_ob": fvg_inside_ob,
             "in_ote_zone": self.context.get("in_ote_zone", False),
+            "in_sd_zone": self.context.get("in_sd_zone", False),
             "candle_tier": candle_tier,
             "ltf_choch": True,  # We only reach here if ChoCH was confirmed
             "in_kill_zone": in_kill_zone,
