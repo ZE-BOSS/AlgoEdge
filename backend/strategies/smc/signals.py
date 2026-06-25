@@ -33,11 +33,6 @@ class TradeGate:
         if htf_bias != direction:
             return False, f"HTF bias {htf_bias} conflicts with signal {direction}"
 
-        # Gate 2: Liquidity must have been swept
-        sweep = context.get("liquidity_sweep")
-        if sweep is None:
-            return False, "No liquidity sweep detected before entry"
-
         # Gate 3: Price must be at a POI (OB, FVG, Fib/OTE, or S&D)
         fresh_ob = context.get("fresh_ob")
         fvg_inside_ob = context.get("fvg_inside_ob", False)

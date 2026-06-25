@@ -40,6 +40,15 @@ async def init_db():
     """Create all tables if they don't exist."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Simple schema migrations for newly added columns
+        try:
+            from sqlalchemy import text
+            await conn.execute(text("ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS sl_hit_rate FLOAT;"))
+            await conn.execute(text("ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS trail_hit_rate FLOAT;"))
+        except Exception as e:
+            logger.warning(f"Simple migration failed (likely already applied): {e}")
+            
     logger.info("Database tables initialized")
 
 

@@ -11,6 +11,7 @@ Flow: H4 Bias → H1 BOS + Zones → M15 ChoCH → M5 Candlestick → Execute
 """
 
 import pandas as pd
+import asyncio
 from typing import Dict, Any, List, Optional
 
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal, TradeAction
@@ -300,10 +301,14 @@ class SMCEngine(BaseStrategy):
                     # Generate Base64 Snapshot
                     from backend.analytics.snapshots import generate_trade_snapshot_b64
                     try:
-                        b64 = generate_trade_snapshot_b64(
+                        # Slice to last 80 candles to prevent OOM / blocking warning
+                        snapshot_candles = candles.iloc[-80:].copy()
+                        
+                        b64 = await asyncio.to_thread(
+                            generate_trade_snapshot_b64,
                             symbol=symbol,
                             timeframe="M5",
-                            candles=candles,
+                            candles=snapshot_candles,
                             order_blocks=self.context.get("obs", []),
                             fvgs=self.context.get("fvgs", []),
                             entry_price=sig.entry_price,

@@ -6,7 +6,8 @@ Source: TradingBot_MasterPlan-2.md Section 6 — REST API
 """
 
 import json
-from fastapi import APIRouter, Depends, HTTPException
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload

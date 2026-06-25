@@ -235,15 +235,31 @@ export default function Backtester() {
   },[userCfg,configLoaded]);
 
   useEffect(()=>{
-    const h=e=>{try{const m=JSON.parse(e.data);if(m.type==='backtest_progress'){setProgress(m);if(m.stage==='complete')setTimeout(()=>setProgress(null),2000);}}catch{}};
+    const h=e=>{
+      try{
+        const m=JSON.parse(e.data);
+        if(m.type==='backtest_progress'){
+          setProgress(m);
+          if(m.stage==='complete'){
+            if (m.result) setResult(m.result);
+            setTimeout(()=>setProgress(null),2000);
+          }
+        }
+      }catch{}
+    };
     if(window._algoEdgeWs){window._algoEdgeWs.addEventListener('message',h);return()=>window._algoEdgeWs?.removeEventListener('message',h);}
   },[]);
 
   const { data: backtests, refetch } = useQuery({ queryKey:['backtests'], queryFn:()=>getBacktests().then(r=>r.data), enabled:status==='ONLINE'&&isAuth });
 
   const mutation = useMutation({
-    mutationFn: () => runBacktest({...form, start_date:form.start_date||undefined, end_date:form.end_date||undefined, risk_config:{}}),
-    onSuccess: res => { setResult(res.data); setProgress(null); },
+    mutationFn: () => {
+      setProgress({stage: 'starting', message: 'Initializing backtest request...', pct: 0});
+      return runBacktest({...form, start_date:form.start_date||undefined, end_date:form.end_date||undefined, risk_config:{}});
+    },
+    onSuccess: res => { 
+      // Do nothing, we wait for websocket 'complete' stage
+    },
     onError: () => setProgress(null),
   });
 
@@ -261,7 +277,7 @@ export default function Backtester() {
   const handleDelete = async id => { await deleteBacktest(id); refetch(); };
   const handleView = async id => { const res = await getBacktest(id); setResult({...res.data.run, trades:res.data.trades, equity_curve:res.data.equity_curve, report:res.data.run, grouped_trades:res.data.grouped_trades||[]}); };
 
-  const isRunning = mutation.isPending;
+  const isRunning = mutation.isPending || (progress !== null && progress.stage !== 'complete');
   const u = (k,v) => setForm({...form,[k]:v});
 
   return (<>
