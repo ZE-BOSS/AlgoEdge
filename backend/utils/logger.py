@@ -20,30 +20,21 @@ logger.add(
     colorize=True,
 )
 
-# File output — structured, rotated
+# File output for backend.log disabled as per request
 _LOG_DIR = Path(__file__).parent.parent.parent / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
+# logger.add(_LOG_DIR / "backend.log", ...)
 
-logger.add(
-    _LOG_DIR / "backend.log",
-    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
-    level="INFO",
-    rotation="10 MB",
-    retention="30 days",
-    compression="zip",
-    enqueue=True,
-)
-
-# Trade-specific log (high-value events only)
-logger.add(
-    _LOG_DIR / "trades.log",
-    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {message}",
-    level="INFO",
-    rotation="5 MB",
-    retention="90 days",
-    filter=lambda record: "trade" in record["extra"].get("category", ""),
-    enqueue=True,
-)
+# Trade-specific log (high-value events only) disabled as per request
+# logger.add(
+#     _LOG_DIR / "trades.log",
+#     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {message}",
+#     level="INFO",
+#     rotation="5 MB",
+#     retention="90 days",
+#     filter=lambda record: "trade" in record["extra"].get("category", ""),
+#     enqueue=True,
+# )
 
 
 def get_logger(name: str):
