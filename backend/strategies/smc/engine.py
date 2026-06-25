@@ -12,6 +12,7 @@ Flow: H4 Bias → H1 BOS + Zones → M15 ChoCH → M5 Candlestick → Execute
 
 import pandas as pd
 import asyncio
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal, TradeAction
@@ -56,6 +57,8 @@ class SMCEngine(BaseStrategy):
     def __init__(self, user_config: UserConfig):
         super().__init__(user_config)
         self.smc_params = user_config.smc
+        self.run_logs = []  # Store internal execution logs
+        self.is_backtesting = False
 
         swing_len_htf = self.smc_params.swing_length_htf
         swing_len_ltf = self.smc_params.swing_length_ltf
@@ -89,7 +92,18 @@ class SMCEngine(BaseStrategy):
 
         # State
         self.context: Dict[str, Any] = {}
-        
+
+    def log_event(self, message: str, level: str = "INFO", category: str = "SMC"):
+        """Intercept logs. If backtesting, store them. Otherwise broadcast to bot_service."""
+        if self.is_backtesting:
+            self.run_logs.append({
+                "time": datetime.now(timezone.utc).isoformat(),
+                "level": level,
+                "category": category,
+                "message": message
+            })
+        else:
+            bot_service.log_system_event(message, level, category)
         # State tracking for frontend logs to prevent log spam
         self.last_logged_htf_bias = None
         self.last_logged_h1_trend = None
@@ -118,13 +132,13 @@ class SMCEngine(BaseStrategy):
             last_bos = ms_h4.get("last_bos")
             last_choch = ms_h4.get("last_choch")
             if last_bos:
-                bot_service.log_system_event(f"[{symbol} H4] Break of Structure ({last_bos}) confirmed at {ms_h4.get('last_bos_level')} | BOS count: {ms_h4.get('consecutive_bos')}", "INFO", "SMC")
+                self.log_event(f"[{symbol} H4] Break of Structure ({last_bos}) confirmed at {ms_h4.get('last_bos_level')} | BOS count: {ms_h4.get('consecutive_bos')}", "INFO", "SMC")
             if last_choch:
-                bot_service.log_system_event(f"[{symbol} H4] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
+                self.log_event(f"[{symbol} H4] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
 
             # Log HTF Bias changes
             if self.bias != "NEUTRAL" and self.bias != self.last_logged_htf_bias:
-                bot_service.log_system_event(f"[{symbol} H4] HTF Bias shifted to {self.bias}", "INFO", "SMC")
+                self.log_event(f"[{symbol} H4] HTF Bias shifted to {self.bias}", "INFO", "SMC")
                 self.last_logged_htf_bias = self.bias
 
             return None
@@ -137,15 +151,15 @@ class SMCEngine(BaseStrategy):
             last_bos = ms_h1.get("last_bos")
             last_choch = ms_h1.get("last_choch")
             if last_bos:
-                bot_service.log_system_event(f"[{symbol} H1] Break of Structure ({last_bos}) confirmed at {ms_h1.get('last_bos_level')} | BOS count: {ms_h1.get('consecutive_bos')}", "INFO", "SMC")
+                self.log_event(f"[{symbol} H1] Break of Structure ({last_bos}) confirmed at {ms_h1.get('last_bos_level')} | BOS count: {ms_h1.get('consecutive_bos')}", "INFO", "SMC")
             if last_choch:
-                bot_service.log_system_event(f"[{symbol} H1] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
+                self.log_event(f"[{symbol} H1] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
 
             # Check if H1 trend aligns with H4
             h1_trend = ms_h1.get("trend", "NEUTRAL")
             if h1_trend != self.last_logged_h1_trend:
                 if h1_trend != "NEUTRAL" and h1_trend == self.bias:
-                    bot_service.log_system_event(f"[{symbol} H1] Structure aligned with H4 Bias ({self.bias})", "INFO", "SMC")
+                    self.log_event(f"[{symbol} H1] Structure aligned with H4 Bias ({self.bias})", "INFO", "SMC")
                 self.last_logged_h1_trend = h1_trend
             
             # Update IPDM on H1
@@ -158,9 +172,9 @@ class SMCEngine(BaseStrategy):
             current_phase = ipdm_state.get("phase", "UNKNOWN")
             if current_phase != self.last_logged_phase:
                 if current_phase == "EXPANSION":
-                    bot_service.log_system_event(f"[{symbol} IPDM] Entered EXPANSION phase! Hunting for entries...", "INFO", "SMC")
+                    self.log_event(f"[{symbol} IPDM] Entered EXPANSION phase! Hunting for entries...", "INFO", "SMC")
                 else:
-                    bot_service.log_system_event(f"[{symbol} IPDM] Entered {current_phase} phase. Waiting...", "INFO", "SMC")
+                    self.log_event(f"[{symbol} IPDM] Entered {current_phase} phase. Waiting...", "INFO", "SMC")
                 self.last_logged_phase = current_phase
 
             return None
@@ -199,9 +213,9 @@ class SMCEngine(BaseStrategy):
             last_bos = ms_m15.get("last_bos")
             last_choch = ms_m15.get("last_choch")
             if last_bos:
-                bot_service.log_system_event(f"[{symbol} M15] Break of Structure ({last_bos}) confirmed at {ms_m15.get('last_bos_level')} | BOS count: {ms_m15.get('consecutive_bos')}", "INFO", "SMC")
+                self.log_event(f"[{symbol} M15] Break of Structure ({last_bos}) confirmed at {ms_m15.get('last_bos_level')} | BOS count: {ms_m15.get('consecutive_bos')}", "INFO", "SMC")
             if last_choch:
-                bot_service.log_system_event(f"[{symbol} M15] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
+                self.log_event(f"[{symbol} M15] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
 
             # Check if M15 trend has shifted to align with H1 bias (ChoCH occurred)
             m15_trend = ms_m15.get("trend")
@@ -221,7 +235,7 @@ class SMCEngine(BaseStrategy):
                 ob_str = f"{len(obs)} Order Block(s)" if obs else ""
                 fvg_str = f"{len(fvgs)} FVG(s)" if fvgs else ""
                 zones = " and ".join(filter(None, [ob_str, fvg_str]))
-                bot_service.log_system_event(f"[{symbol} M15] Entry Zones Detected: {zones} identified near ChoCH.", "INFO", "SMC")
+                self.log_event(f"[{symbol} M15] Entry Zones Detected: {zones} identified near ChoCH.", "INFO", "SMC")
 
             # Check OTE zone if premium_discount module exists
             in_ote = False
@@ -294,11 +308,11 @@ class SMCEngine(BaseStrategy):
 
             # ── Generate signal if score meets threshold ──
             if score >= self.smc_params.min_signal_score:
-                bot_service.log_system_event(f"[{symbol} M5] Candlestick Confirmation: {pattern.name} (Tier {pattern.tier}) detected.", "INFO", "SMC")
+                self.log_event(f"[{symbol} M5] Candlestick Confirmation: {pattern.name} (Tier {pattern.tier}) detected.", "INFO", "SMC")
                 
                 breakdown = scorer_context.get("score_breakdown", {})
                 breakdown_str = ", ".join(f"{k}: {v}" for k, v in breakdown.items() if v > 0)
-                bot_service.log_system_event(f"[{symbol} M5] 🎯 SIGNAL VALIDATED! Score: {score}/100. Direction: {htf_bias} | Confluences: {breakdown_str}", "SIGNAL", "SMC")
+                self.log_event(f"[{symbol} M5] 🎯 SIGNAL VALIDATED! Score: {score}/100. Direction: {htf_bias} | Confluences: {breakdown_str}", "SIGNAL", "SMC")
                 
                 sig = self.signal_gen.generate(scorer_context, score)
                 if sig:

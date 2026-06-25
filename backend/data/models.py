@@ -223,6 +223,7 @@ class BacktestRun(Base):
     trail_hit_rate = Column(Float)
     notes = Column(Text)
     llm_analysis = Column(Text)
+    run_logs = Column(Text)  # JSON serialized logs
     created_at = Column(DateTime, server_default=func.now())
     trades = relationship("BacktestTrade", back_populates="backtest_run", cascade="all, delete-orphan")
 

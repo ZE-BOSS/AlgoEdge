@@ -145,6 +145,7 @@ async def run_backtest_endpoint(
     config.smc.session_filter_enabled = req.session_filter_enabled
     config.smc.news_filter_enabled = req.news_filter_enabled
     engine = SMCEngine(config)
+    engine.is_backtesting = True
 
     def _index_candles(df):
         if 'time' in df.columns:
@@ -324,6 +325,7 @@ async def run_backtest_endpoint(
         "equity_curve": results.get("equity_curve", []),
         "trades": results.get("trades", []),
         "grouped_trades": results.get("grouped_trades", []),
+        "run_logs": engine.run_logs,
         "report": {
             "win_rate": report.win_rate if report else 0,
             "profit_factor": report.profit_factor if report else 0,
@@ -397,6 +399,7 @@ async def save_backtest(
         tp5_hit_rate=report.get("tp5_hit_rate", 0),
         be_hit_rate=report.get("be_hit_rate", 0),
         trail_hit_rate=report.get("trail_hit_rate", 0),
+        run_logs=json.dumps(data.get("run_logs", [])),
     )
     db.add(run)
 
@@ -547,6 +550,7 @@ async def get_backtest(
         "equity_curve": equity_curve,
         "tp_distribution": tp_dist,
         "session_win_rates": session_win_rates,
+        "run_logs": json.loads(run.run_logs) if run.run_logs else [],
     }
 
 

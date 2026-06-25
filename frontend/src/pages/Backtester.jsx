@@ -39,14 +39,15 @@ function LiveLogPanel() {
   const { data: logs } = useQuery({ queryKey:['btLogs'], queryFn:()=>getBotLogs(50).then(r=>r.data), refetchInterval:2000, enabled: status==='ONLINE'&&isAuth });
 
   useEffect(()=>{
-    const h = e => { try { const m=JSON.parse(e.data); if(m.type==='activity_log'&&m.event) setEvents(p=>[m.event,...p].slice(0,200)); } catch{} };
-    if(window._algoEdgeWs){ window._algoEdgeWs.addEventListener('message',h); return ()=>window._algoEdgeWs?.removeEventListener('message',h); }
+    const h = e => { try { const m = e.detail; if(m.type==='activity_log'&&m.event) setEvents(p=>[m.event,...p].slice(0,200)); } catch{} };
+    window.addEventListener('ws-message',h);
+    return ()=>window.removeEventListener('ws-message',h);
   },[]);
 
   const merged = useCallback(()=>{
     const all=[...events,...(logs?.events||[])]; const seen=new Set(); const out=[];
     for(const e of all){ const k=`${e.time}|${e.message}`; if(!seen.has(k)){seen.add(k);out.push(e);} }
-    out.sort((a,b)=>(b.time||'').localeCompare(a.time||'')); return out.filter(e=>e.category==='BACKTEST'||e.category==='SIGNAL'||e.category==='TRADE'||e.level==='ERROR');
+    out.sort((a,b)=>(b.time||'').localeCompare(a.time||'')); return out.filter(e=>['BACKTEST','SIGNAL','TRADE','SMC'].includes(e.category)||e.level==='ERROR');
   },[logs,events])();
 
   return (<div style={{maxHeight:340,overflow:'auto',background:'#0d1117',borderRadius:'var(--radius-xs)',padding:'8px 12px',fontFamily:"'JetBrains Mono',monospace",fontSize:'0.72rem',lineHeight:1.7,border:'1px solid var(--border)'}}>
@@ -237,17 +238,21 @@ export default function Backtester() {
   useEffect(()=>{
     const h=e=>{
       try{
-        const m=JSON.parse(e.data);
+        const m = e.detail; // 'ws-message' event from useBackendConnection.js passes parsed data in detail
         if(m.type==='backtest_progress'){
           setProgress(m);
           if(m.stage==='complete'){
-            if (m.result) setResult(m.result);
+            if (m.result) {
+               setResult(m.result);
+               if (m.result.run_logs) setEvents(m.result.run_logs);
+            }
             setTimeout(()=>setProgress(null),2000);
           }
         }
       }catch{}
     };
-    if(window._algoEdgeWs){window._algoEdgeWs.addEventListener('message',h);return()=>window._algoEdgeWs?.removeEventListener('message',h);}
+    window.addEventListener('ws-message',h);
+    return()=>window.removeEventListener('ws-message',h);
   },[]);
 
   const { data: backtests, refetch } = useQuery({ queryKey:['backtests'], queryFn:()=>getBacktests().then(r=>r.data), enabled:status==='ONLINE'&&isAuth });
@@ -275,7 +280,11 @@ export default function Backtester() {
   };
   const handleDismiss = () => setResult(null);
   const handleDelete = async id => { await deleteBacktest(id); refetch(); };
-  const handleView = async id => { const res = await getBacktest(id); setResult({...res.data.run, trades:res.data.trades, equity_curve:res.data.equity_curve, report:res.data.run, grouped_trades:res.data.grouped_trades||[]}); };
+  const handleView = async id => { 
+      const res = await getBacktest(id); 
+      setResult({...res.data.run, trades:res.data.trades, equity_curve:res.data.equity_curve, report:res.data.run, grouped_trades:res.data.grouped_trades||[]}); 
+      if(res.data.run_logs) setEvents(res.data.run_logs);
+  };
 
   const isRunning = mutation.isPending || (progress !== null && progress.stage !== 'complete');
   const u = (k,v) => setForm({...form,[k]:v});

@@ -46,6 +46,7 @@ async def init_db():
             from sqlalchemy import text
             await conn.execute(text("ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS sl_hit_rate FLOAT;"))
             await conn.execute(text("ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS trail_hit_rate FLOAT;"))
+            await conn.execute(text("ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS run_logs TEXT;"))
         except Exception as e:
             logger.warning(f"Simple migration failed (likely already applied): {e}")
             
