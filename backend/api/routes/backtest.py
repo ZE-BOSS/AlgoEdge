@@ -154,28 +154,59 @@ async def run_backtest_endpoint(
     
     async def generate_signals_simulated():
         sigs = []
+        prev_h4_time = None
+        prev_h1_time = None
+        prev_m5_time = None
+        
+        import asyncio
+        
+        # Sort indices once just to be perfectly safe for .loc slicing
+        candles_h4_sorted = candles_h4_idx.sort_index()
+        candles_h1_sorted = candles_h1_idx.sort_index()
+        candles_m5_sorted = candles_m5_idx.sort_index()
+
         for i in range(100, len(candles_m15_idx)):
+            # Yield to event loop periodically to prevent blocking the server!
+            if i % 10 == 0:
+                await asyncio.sleep(0)
+
             current_time = candles_m15_idx.index[i]
             
             # Use rolling windows to prevent O(N^2) explosion during backtest
-            # 200 H4/H1 candles is enough for structure. For M15/M5, 500 is enough.
             start_h4 = current_time - pd.Timedelta(days=200)
             start_h1 = current_time - pd.Timedelta(days=50)
             start_m15_idx = max(0, i - 1000)
             start_m5 = current_time - pd.Timedelta(days=10)
             
-            slice_h4 = candles_h4_idx[(candles_h4_idx.index <= current_time) & (candles_h4_idx.index >= start_h4)]
-            slice_h1 = candles_h1_idx[(candles_h1_idx.index <= current_time) & (candles_h1_idx.index >= start_h1)]
+            # FAST SLICING using .loc on sorted datetime index
+            slice_h4 = candles_h4_sorted.loc[start_h4:current_time]
+            slice_h1 = candles_h1_sorted.loc[start_h1:current_time]
             slice_m15 = candles_m15_idx.iloc[start_m15_idx:i+1]
-            slice_m5 = candles_m5_idx[(candles_m5_idx.index <= current_time) & (candles_m5_idx.index >= start_m5)]
+            slice_m5 = candles_m5_sorted.loc[start_m5:current_time]
             
             if len(slice_h4) < 20 or len(slice_h1) < 20 or len(slice_m5) < 20:
                 continue
                 
-            await engine.on_bar(req.symbol, "H4", slice_h4)
-            await engine.on_bar(req.symbol, "H1", slice_h1)
+            # CACHING: Only evaluate HTF if a new HTF candle has appeared
+            last_h4_time = slice_h4.index[-1]
+            if last_h4_time != prev_h4_time:
+                await engine.on_bar(req.symbol, "H4", slice_h4)
+                prev_h4_time = last_h4_time
+                
+            last_h1_time = slice_h1.index[-1]
+            if last_h1_time != prev_h1_time:
+                await engine.on_bar(req.symbol, "H1", slice_h1)
+                prev_h1_time = last_h1_time
+                
+            # Primary timeframe updates every step
             await engine.on_bar(req.symbol, "M15", slice_m15)
-            sig = await engine.on_bar(req.symbol, "M5", slice_m5)
+            
+            # M5 updates
+            last_m5_time = slice_m5.index[-1]
+            sig = None
+            if last_m5_time != prev_m5_time:
+                sig = await engine.on_bar(req.symbol, "M5", slice_m5)
+                prev_m5_time = last_m5_time
             
             if sig:
                 sig_dict = {
