@@ -52,10 +52,13 @@ class IPDMDetector:
         if len(candles) < 65:
             return {"phase": self.current_phase, "manipulation_completed": self.manipulation_completed}
 
-        high = candles['high']
-        low = candles['low']
-        close = candles['close']
-        open_ = candles['open']
+        # OPTIMIZATION: We only need the last 70 candles to calculate a 50-period MA of a 14-period ATR.
+        # This prevents computing 1000-candle rolling averages on every single tick in a backtest.
+        recent_candles = candles.iloc[-70:]
+        high = recent_candles['high']
+        low = recent_candles['low']
+        close = recent_candles['close']
+        open_ = recent_candles['open']
 
         # True Range → ATR
         tr1 = high - low

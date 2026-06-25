@@ -51,24 +51,31 @@ class MarketStructureDetector:
         high_indices = np.where(is_swing_high)[0]
         low_indices = np.where(is_swing_low)[0]
         
+        # Extract raw numpy arrays for nanosecond access times (bypassing pandas Series creation overhead)
+        high_vals = candles['high'].values
+        low_vals = candles['low'].values
+        high_roll_vals = highs.values
+        low_roll_vals = lows.values
+        idx_vals = candles.index
+        
         swings_list = []
         
         for i in high_indices:
-            if not pd.isna(highs.iloc[i]):
+            if not pd.isna(high_roll_vals[i]):
                 swings_list.append({
                     "type": "HIGH",
-                    "price": float(candles['high'].iloc[i]),
-                    "index": candles.index[i],
-                    "bar_idx": i,
+                    "price": float(high_vals[i]),
+                    "index": idx_vals[i],
+                    "bar_idx": int(i),
                 })
                 
         for i in low_indices:
-            if not pd.isna(lows.iloc[i]):
+            if not pd.isna(low_roll_vals[i]):
                 swings_list.append({
                     "type": "LOW",
-                    "price": float(candles['low'].iloc[i]),
-                    "index": candles.index[i],
-                    "bar_idx": i,
+                    "price": float(low_vals[i]),
+                    "index": idx_vals[i],
+                    "bar_idx": int(i),
                 })
                 
         # Sort sequentially by bar index

@@ -11,7 +11,8 @@ Flow: H4 Bias → H1 BOS + Zones → M15 ChoCH → M5 Candlestick → Execute
 """
 
 import pandas as pd
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List, Optional
+
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal, TradeAction
 from backend.strategies.registry import register_strategy
 from backend.strategies.smc.params import UserConfig
@@ -26,6 +27,7 @@ from .candlestick import detect_confirmation_pattern
 from .ipdm import IPDMDetector
 
 from backend.utils.logger import get_logger
+from backend.services.bot_service import bot_service
 from backend.utils.timeutils import detect_session
 
 logger = get_logger(__name__)
@@ -86,6 +88,11 @@ class SMCEngine(BaseStrategy):
 
         # State
         self.context: Dict[str, Any] = {}
+        
+        # State tracking for frontend logs to prevent log spam
+        self.last_logged_htf_bias = None
+        self.last_logged_h1_trend = None
+        self.last_logged_phase = None
 
     def get_required_timeframes(self) -> List[str]:
         return ["H4", "H1", "M15", "M5"]
@@ -99,23 +106,50 @@ class SMCEngine(BaseStrategy):
 
         # This method expects to be called with the primary (M15) timeframe
         # HTF data should be pre-loaded into self.context by the caller
-        if timeframe not in ("M15", "M5"):
-            # Update HTF state
-            if timeframe == "H4":
-                self.context["htf"] = self.htf_structure.update(candles)
-                return None
-            elif timeframe == "H1":
-                self.context["h1"] = self.h1_structure.update(candles)
-                # Also update IPDM on H1
-                h1_swings = self.context["h1"].get("swings", [])
-                h1_highs = [s for s in h1_swings if s["type"] == "HIGH"]
-                h1_lows = [s for s in h1_swings if s["type"] == "LOW"]
-                self.context["ipdm"] = self.ipdm.update(candles, h1_highs, h1_lows)
-                return None
+        # ── Update HTF & Secondary Data Structures ──
+        if timeframe == "H4":
+            ms_h4 = self.htf_structure.update(candles)
+            self.context["htf"] = ms_h4
+            self.bias = ms_h4.get("trend", "NEUTRAL")
+            self.context["htf_bias"] = self.bias
+            
+            # Log HTF Bias changes
+            if self.bias != "NEUTRAL" and self.bias != self.last_logged_htf_bias:
+                bot_service.log_system_event(f"[{symbol} H4] HTF Bias shifted to {self.bias}", "INFO", "SMC")
+                self.last_logged_htf_bias = self.bias
+
+            return None
+            
+        elif timeframe == "H1":
+            ms_h1 = self.h1_structure.update(candles)
+            self.context["h1"] = ms_h1
+            
+            # Check if H1 trend aligns with H4
+            h1_trend = ms_h1.get("trend", "NEUTRAL")
+            if h1_trend != self.last_logged_h1_trend:
+                if h1_trend != "NEUTRAL" and h1_trend == self.bias:
+                    bot_service.log_system_event(f"[{symbol} H1] Structure aligned with H4 Bias ({self.bias})", "INFO", "SMC")
+                self.last_logged_h1_trend = h1_trend
+            
+            # Update IPDM on H1
+            h1_swings = ms_h1.get("swings", [])
+            h1_highs = [s for s in h1_swings if s["type"] == "HIGH"]
+            h1_lows = [s for s in h1_swings if s["type"] == "LOW"]
+            ipdm_state = self.ipdm.update(candles, h1_highs, h1_lows)
+            self.context["ipdm"] = ipdm_state
+            
+            current_phase = ipdm_state.get("phase", "UNKNOWN")
+            if current_phase != self.last_logged_phase:
+                if current_phase == "EXPANSION":
+                    bot_service.log_system_event(f"[{symbol} IPDM] Entered EXPANSION phase! Hunting for entries...", "INFO", "SMC")
+                else:
+                    bot_service.log_system_event(f"[{symbol} IPDM] Entered {current_phase} phase. Waiting...", "INFO", "SMC")
+                self.last_logged_phase = current_phase
+
+            return None
 
         # ── LAYER 1: Check H4 bias ──
-        htf = self.context.get("htf", {})
-        htf_bias = htf.get("trend", "NEUTRAL")
+        htf_bias = self.context.get("htf_bias", "NEUTRAL")
         if htf_bias == "NEUTRAL":
             return None
 
@@ -144,10 +178,10 @@ class SMCEngine(BaseStrategy):
             ms_m15 = self.ltf_structure.update(candles)
             self.context["ltf_structure"] = ms_m15
 
-            # Check for ChoCH in direction of H1 bias
-            choch = ms_m15.get("last_choch")
-            if choch != htf_bias:
-                return None  # No ChoCH in our direction
+            # Check if M15 trend has shifted to align with H1 bias (ChoCH occurred)
+            m15_trend = ms_m15.get("trend")
+            if m15_trend != htf_bias:
+                return None  # M15 structure not aligned yet
 
             # Update entry zone detectors on M15
             self.context["obs"] = self.order_blocks.update(candles)
@@ -219,7 +253,12 @@ class SMCEngine(BaseStrategy):
 
             # ── Generate signal if score meets threshold ──
             if score >= self.smc_params.min_signal_score:
+                bot_service.log_system_event(f"[{symbol} M5] 🎯 SIGNAL VALIDATED! Score: {score}/100. Direction: {htf_bias}", "SIGNAL", "SMC")
                 return self.signal_gen.generate(scorer_context, score)
+            else:
+                # Log high-scoring rejections for debug
+                if score >= 40:
+                    bot_service.log_system_event(f"[{symbol} M5] Signal rejected. Score {score}/100 too low (Min: {self.smc_params.min_signal_score})", "WARN", "SMC")
 
         return None
 
