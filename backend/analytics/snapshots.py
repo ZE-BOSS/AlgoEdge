@@ -128,15 +128,16 @@ def generate_trade_snapshot(
         except (KeyError, TypeError):
             pass
 
-    # Save to disk
-    snapshot_dir = settings.snapshots_dir / symbol
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
-    filepath = snapshot_dir / f"{trade_id}_{snapshot_type.lower()}.png"
-    fig.savefig(str(filepath), dpi=120, bbox_inches='tight')
-    plt.close(fig)
-
-    logger.info(f"Snapshot saved: {filepath}")
-    return str(filepath)
+    try:
+        # Save to disk
+        snapshot_dir = settings.snapshots_dir / symbol
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        filepath = snapshot_dir / f"{trade_id}_{snapshot_type.lower()}.png"
+        fig.savefig(str(filepath), dpi=120, bbox_inches='tight')
+        logger.info(f"Snapshot saved: {filepath}")
+        return str(filepath)
+    finally:
+        plt.close(fig)
 
 
 def generate_trade_snapshot_b64(
@@ -243,12 +244,13 @@ def generate_trade_snapshot_b64(
         except (KeyError, TypeError):
             pass
 
-    # Encode to base64 in-memory (no disk writes)
-    buf = BytesIO()
-    fig.savefig(buf, format='png', dpi=120, bbox_inches='tight')
-    plt.close(fig)
-    buf.seek(0)
-    b64_str = base64.b64encode(buf.read()).decode('utf-8')
-
-    logger.info(f"Snapshot generated (B64): {trade_id}_{snapshot_type} | {len(b64_str)} chars")
-    return b64_str
+    try:
+        # Encode to base64 in-memory (no disk writes)
+        buf = BytesIO()
+        fig.savefig(buf, format='png', dpi=120, bbox_inches='tight')
+        buf.seek(0)
+        img_b64 = base64.b64encode(buf.read()).decode('utf-8')
+        logger.info(f"Snapshot generated (B64): {snapshot_type} | {len(img_b64)} chars")
+        return f"data:image/png;base64,{img_b64}"
+    finally:
+        plt.close(fig)

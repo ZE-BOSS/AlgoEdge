@@ -31,6 +31,7 @@ logger.add(
     rotation="10 MB",
     retention="30 days",
     compression="zip",
+    enqueue=True,
 )
 
 # Trade-specific log (high-value events only)
@@ -41,6 +42,7 @@ logger.add(
     rotation="5 MB",
     retention="90 days",
     filter=lambda record: "trade" in record["extra"].get("category", ""),
+    enqueue=True,
 )
 
 
