@@ -81,12 +81,32 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-async def websocket_handler(websocket: WebSocket, user_id: str, redis_url: str = "redis://localhost:6379"):
+async def websocket_handler(websocket: WebSocket, user_id: str, token: str = None, redis_url: str = "redis://localhost:6379"):
     """
     WebSocket endpoint handler. Subscribes to Redis channels and forwards to client.
-    Falls back to keepalive-only mode when Redis is unavailable.
+    Enforces JWT authentication to prevent unauthorized stream interception.
     Source: TradingBot_MasterPlan-2.md Section 6
     """
+    if not token:
+        logger.warning(f"WebSocket connection rejected: Missing token for user {user_id}")
+        await websocket.close(code=1008)
+        return
+
+    from jose import jwt, JWTError
+    from backend.api.deps import JWT_SECRET_KEY, JWT_ALGORITHM
+
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        token_user_id = payload.get("sub")
+        if token_user_id != user_id:
+            logger.warning(f"WebSocket connection rejected: Token mismatch for user {user_id}")
+            await websocket.close(code=1008)
+            return
+    except JWTError:
+        logger.warning(f"WebSocket connection rejected: Invalid token for user {user_id}")
+        await websocket.close(code=1008)
+        return
+
     await manager.connect(websocket, user_id)
 
     if not HAS_REDIS:

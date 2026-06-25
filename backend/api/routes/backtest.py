@@ -20,9 +20,18 @@ from backend.data.models import BacktestRun, BacktestTrade, User
 from backend.api.deps import get_current_user
 from backend.utils.logger import get_logger
 
+try:
+    from redis.asyncio import Redis
+    HAS_REDIS = True
+except ImportError:
+    HAS_REDIS = False
+    Redis = None
+
+REDIS_URL = "redis://localhost:6379"
+
 logger = get_logger(__name__)
 
-USER_BACKTEST_STATE = {}  # In-memory persistence: user_id -> state
+USER_BACKTEST_STATE = {}  # Fallback in-memory persistence: user_id -> state
 router = APIRouter(prefix="/api", tags=["backtest"])
 
 
@@ -83,13 +92,24 @@ class SaveBacktestRequest(BaseModel):
 
 @router.get("/status")
 async def get_backtest_status(current_user: User = Depends(get_current_user)):
-    state = USER_BACKTEST_STATE.get(current_user.id, {"status": "idle", "progress": None})
-    return {"status": state["status"], "progress": state.get("progress")}
+    if HAS_REDIS:
+        async with Redis.from_url(REDIS_URL) as redis:
+            data = await redis.get(f"backtest_state:{current_user.id}")
+            state = json.loads(data) if data else {"status": "idle", "progress": None}
+    else:
+        state = USER_BACKTEST_STATE.get(current_user.id, {"status": "idle", "progress": None})
+    return {"status": state.get("status"), "progress": state.get("progress")}
 
 @router.get("/latest_result")
 async def get_backtest_latest_result(current_user: User = Depends(get_current_user)):
-    state = USER_BACKTEST_STATE.get(current_user.id)
-    if state and state["status"] == "complete":
+    if HAS_REDIS:
+        async with Redis.from_url(REDIS_URL) as redis:
+            data = await redis.get(f"backtest_state:{current_user.id}")
+            state = json.loads(data) if data else None
+    else:
+        state = USER_BACKTEST_STATE.get(current_user.id)
+        
+    if state and state.get("status") == "complete":
         return state.get("result", {})
     return {}
 
@@ -109,11 +129,28 @@ async def run_backtest_endpoint(
 
     async def _run_backtest_task():
         global USER_BACKTEST_STATE
-        USER_BACKTEST_STATE[current_user.id] = {
+        initial_state = {
             "status": "running",
             "progress": {"stage": "Fetching data...", "pct": 0},
             "result": None
         }
+        
+        async def _save_state(state):
+            if HAS_REDIS:
+                async with Redis.from_url(REDIS_URL) as redis:
+                    await redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
+            else:
+                USER_BACKTEST_STATE[current_user.id] = state
+
+        async def _get_state():
+            if HAS_REDIS:
+                async with Redis.from_url(REDIS_URL) as redis:
+                    data = await redis.get(f"backtest_state:{current_user.id}")
+                    return json.loads(data) if data else initial_state.copy()
+            else:
+                return USER_BACKTEST_STATE.get(current_user.id, initial_state.copy())
+
+        await _save_state(initial_state)
         try:
             from backend.backtester.runner import run_backtest
             from backend.mt5.data_fetcher import DataFetcher, DataFetchError
@@ -126,7 +163,9 @@ async def run_backtest_endpoint(
             bot_service.log_system_event(f"Backtest started: {req.symbol} {req.timeframe}", category="BACKTEST")
 
             try:
-                USER_BACKTEST_STATE[current_user.id]["progress"] = {"stage": "Fetching historical data...", "pct": 5}
+                current_state = await _get_state()
+                current_state["progress"] = {"stage": "Fetching historical data...", "pct": 5}
+                await _save_state(current_state)
                 if req.start_date and req.end_date:
                     start = datetime.fromisoformat(req.start_date)
                     end = datetime.fromisoformat(req.end_date)
@@ -198,7 +237,10 @@ async def run_backtest_endpoint(
                     if i % 200 == 0:
                         pct = int((i / len(candles_m15_idx)) * 80) + 10  # from 10% to 90%
                         progress_obj = {"stage": "Running simulation...", "pct": pct}
-                        USER_BACKTEST_STATE[current_user.id]["progress"] = progress_obj
+                        
+                        current_state = await _get_state()
+                        current_state["progress"] = progress_obj
+                        await _save_state(current_state)
                         try:
                             # Using fire-and-forget to avoid blocking
                             asyncio.create_task(ws_manager.broadcast_to_user(current_user.id, {
@@ -287,7 +329,9 @@ async def run_backtest_endpoint(
                 **req.risk_config,
             }
 
-            USER_BACKTEST_STATE[current_user.id]["progress"] = {"stage": "Finalizing backtest...", "pct": 95}
+            current_state = await _get_state()
+            current_state["progress"] = {"stage": "Finalizing backtest...", "pct": 95}
+            await _save_state(current_state)
             results = await run_backtest(
                 user_id=current_user.id,
                 strategy_id=req.strategy_id,
@@ -361,19 +405,20 @@ async def run_backtest_endpoint(
             }
             
             sanitized = _sanitize(response)
-            USER_BACKTEST_STATE[current_user.id] = {
-                "status": "complete",
-                "progress": {"stage": "complete", "pct": 100},
-                "result": sanitized
-            }
+            
+            current_state = await _get_state()
+            current_state["status"] = "complete"
+            current_state["progress"] = {"stage": "complete", "pct": 100}
+            current_state["result"] = sanitized
+            await _save_state(current_state)
             await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": sanitized})
             
         except Exception as e:
-            USER_BACKTEST_STATE[current_user.id] = {
-                "status": "error",
-                "progress": {"stage": "error", "message": str(e), "pct": 0},
-                "result": None
-            }
+            current_state = await _get_state()
+            current_state["status"] = "error"
+            current_state["progress"] = {"stage": "error", "message": str(e), "pct": 0}
+            current_state["result"] = None
+            await _save_state(current_state)
             import traceback
             logger.error(f"Backtest error: {e}\n{traceback.format_exc()}")
             from backend.api.websocket import manager as ws_manager

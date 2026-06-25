@@ -676,6 +676,16 @@ class CompoundingEngine:
         Update compounding state after a trade closes.
         Handles step advances, downgrades, and streak tracking.
         """
+        # Always update streaks first to prevent frozen state in LOSS_COUNT mode
+        if trade_won:
+            state.consecutive_wins   += 1
+            state.consecutive_losses  = 0
+            state.total_wins_at_level += 1
+        else:
+            state.consecutive_losses   += 1
+            state.consecutive_wins      = 0
+            state.total_losses_at_level += 1
+
         new_step = self.get_step_for_balance(new_balance)
 
         if new_step.step_number > state.current_step:
@@ -683,48 +693,38 @@ class CompoundingEngine:
             state.current_step            = new_step.step_number
             state.risk_amount             = new_step.risk_amount
             state.entry_balance           = new_balance
-            state.consecutive_wins        = 1 if trade_won else 0
-            state.consecutive_losses      = 0 if trade_won else 1
-            state.total_wins_at_level     = 1 if trade_won else 0
-            state.total_losses_at_level   = 0 if trade_won else 1
+            state.consecutive_wins        = 0
+            state.consecutive_losses      = 0
+            state.total_wins_at_level     = 0
+            state.total_losses_at_level   = 0
             state.last_step_change_reason = "ADVANCE"
             state.last_step_change_balance = new_balance
 
-        elif new_step.step_number < state.current_step:
+        elif new_step.step_number < state.current_step and self.config.downgrade_mode == "THRESHOLD":
             # STEP DOWN (downgrade due to balance drop)
-            if self.config.downgrade_mode == "THRESHOLD":
-                state.current_step            = new_step.step_number
-                state.risk_amount             = new_step.risk_amount
-                state.entry_balance           = new_balance
-                state.consecutive_wins        = 0
-                state.consecutive_losses      = 1 if not trade_won else 0
-                state.total_wins_at_level     = 0
-                state.total_losses_at_level   = 1 if not trade_won else 0
-                state.last_step_change_reason = "DOWNGRADE_THRESHOLD"
-                state.last_step_change_balance = new_balance
+            state.current_step            = new_step.step_number
+            state.risk_amount             = new_step.risk_amount
+            state.entry_balance           = new_balance
+            state.consecutive_wins        = 0
+            state.consecutive_losses      = 0
+            state.total_wins_at_level     = 0
+            state.total_losses_at_level   = 0
+            state.last_step_change_reason = "DOWNGRADE_THRESHOLD"
+            state.last_step_change_balance = new_balance
 
-        else:
-            # Same step — update streaks
-            if trade_won:
-                state.consecutive_wins   += 1
-                state.consecutive_losses  = 0
-                state.total_wins_at_level += 1
-            else:
-                state.consecutive_losses   += 1
-                state.consecutive_wins      = 0
-                state.total_losses_at_level += 1
-
-            # LOSS COUNT downgrade
-            if (self.config.downgrade_mode == "LOSS_COUNT" and
-                    state.consecutive_losses >= self.config.max_losses_before_downgrade):
-                new_idx = max(0, state.current_step - 2)
-                state.current_step             = self.steps[new_idx].step_number
-                state.risk_amount              = self.steps[new_idx].risk_amount
-                state.entry_balance            = new_balance
-                state.consecutive_losses       = 0
-                state.total_losses_at_level    = 0
-                state.last_step_change_reason  = "DOWNGRADE_LOSS_COUNT"
-                state.last_step_change_balance = new_balance
+        # LOSS COUNT downgrade
+        if (self.config.downgrade_mode == "LOSS_COUNT" and
+                state.consecutive_losses >= self.config.max_losses_before_downgrade):
+            new_idx = max(0, state.current_step - 2)
+            state.current_step             = self.steps[new_idx].step_number
+            state.risk_amount              = self.steps[new_idx].risk_amount
+            state.entry_balance            = new_balance
+            state.consecutive_wins         = 0
+            state.consecutive_losses       = 0
+            state.total_wins_at_level      = 0
+            state.total_losses_at_level    = 0
+            state.last_step_change_reason  = "DOWNGRADE_LOSS_COUNT"
+            state.last_step_change_balance = new_balance
 
         return state
 

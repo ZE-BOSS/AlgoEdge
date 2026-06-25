@@ -40,12 +40,13 @@ export function useWebSocket() {
   const { setWsConnected } = useConnectionStore();
   const { status } = useConnectionStore();
   const user = useAuthStore((s) => s.user);
+  const token = useAuthStore((s) => s.token);
 
   const connect = useCallback(() => {
-    if (status !== 'ONLINE' || !user?.id) return;
+    if (status !== 'ONLINE' || !user?.id || !token) return;
 
     const url = getBackendUrl().replace('http', 'ws');
-    const ws = new WebSocket(`${url}/ws/${user.id}`);
+    const ws = new WebSocket(`${url}/ws/${user.id}?token=${token}`);
     wsRef.current = ws;
 
     ws.onopen = () => {
