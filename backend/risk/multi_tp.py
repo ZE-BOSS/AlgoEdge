@@ -11,7 +11,9 @@ User configures tp_count (1-5) and RR per level.
 
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
+import math
 from backend.utils.logger import get_logger
+from backend.risk.position_sizer import get_symbol_info
 
 logger = get_logger(__name__)
 
@@ -77,6 +79,7 @@ class MultiTPManager:
         sl: float,
         direction: str,
         total_volume: float,
+        symbol: str,
         liquidity_target: Optional[float] = None,
     ) -> List[TPLevel]:
         """
@@ -133,16 +136,25 @@ class MultiTPManager:
             splits = [100 // active_count] * active_count
             total_split = sum(splits)
 
+        # Get exact lot constraints for rounding
+        info = get_symbol_info(symbol)
+        lot_step = info.get("volume_step", 0.01)
+        lot_min = info.get("volume_min", 0.01)
+
         for i in range(active_count):
             if i < len(splits):
                 split_pct = splits[i] / total_split
             else:
                 split_pct = 0.0
 
-            vol = round(total_volume * split_pct, 2)
+            raw_vol = total_volume * split_pct
+            # Round down to the nearest lot step
+            vol = math.floor(raw_vol / lot_step) * lot_step
+            # Fix floating point precision
+            vol = round(vol, 4)
 
-            # Skip if volume is too small
-            if vol < 0.01:
+            # Skip if volume is less than broker minimum
+            if vol < lot_min:
                 continue
 
             trail = self.trail_methods[i] if i < len(self.trail_methods) else None
@@ -163,7 +175,7 @@ class MultiTPManager:
             levels[0].volume_pct = 1.0
             
         # If no levels were created because volume was too small to split, fallback to a single TP1
-        if len(levels) == 0 and total_volume >= 0.01:
+        if len(levels) == 0 and total_volume >= lot_min:
             levels.append(TPLevel(
                 level=1,
                 rr_multiplier=rr_multipliers[0],

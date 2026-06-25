@@ -317,7 +317,7 @@ class BacktestEngine:
 
                         position = self._create_position(sig, tp, current_time, current_price, group_id)
                         self.open_positions.append(position)
-                        logger.debug(f"[ENGINE]   Position opened: TP{tp.tp_level} @ {tp.tp_price:.5f} | vol={tp.volume:.4f}")
+                        logger.debug(f"[ENGINE]   Position opened: TP{tp.level} @ {tp.tp_price:.5f} | vol={tp.volume:.4f}")
                 else:
                     logger.info(f"[ENGINE] ❌ Signal REJECTED at bar {i}: {reason}")
 

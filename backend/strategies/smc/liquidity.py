@@ -23,18 +23,27 @@ class LiquidityMapper:
         """
         recent_sweep = None
         
-        # Build map of BSL/SSL from swings
-        highs = [s["price"] for s in swings if s["type"] == "HIGH"]
-        lows = [s["price"] for s in swings if s["type"] == "LOW"]
+        # Build map of BSL/SSL from recent swings (e.g., last 3-5 swings)
+        highs = [s["price"] for s in swings if s["type"] == "HIGH"][-5:]
+        lows = [s["price"] for s in swings if s["type"] == "LOW"][-5:]
         
-        self.bsl_pools = []
-        self.ssl_pools = []
+        # Initialize pools if not present, retaining 'swept' state
+        current_bsl_levels = set(pool["level"] for pool in self.bsl_pools)
+        current_ssl_levels = set(pool["level"] for pool in self.ssl_pools)
         
-        # For simplicity, store the most prominent pools
-        if highs:
-            self.bsl_pools.append({"level": max(highs), "swept": False})
-        if lows:
-            self.ssl_pools.append({"level": min(lows), "swept": False})
+        for h in highs:
+            if h not in current_bsl_levels:
+                self.bsl_pools.append({"level": h, "swept": False})
+        
+        for l in lows:
+            if l not in current_ssl_levels:
+                self.ssl_pools.append({"level": l, "swept": False})
+                
+        # Optional: Prune old pools to prevent memory bloat
+        if len(self.bsl_pools) > 10:
+            self.bsl_pools = self.bsl_pools[-10:]
+        if len(self.ssl_pools) > 10:
+            self.ssl_pools = self.ssl_pools[-10:]
             
         if len(candles) > 0:
             latest = candles.iloc[-1]
@@ -52,6 +61,7 @@ class LiquidityMapper:
                     if latest["low"] < pool["level"] and latest["close"] > pool["level"]:
                         recent_sweep = {"type": "SSL", "level": pool["level"]}
                         pool["swept"] = True
+                        
         return {
             "bsl": self.bsl_pools,
             "ssl": self.ssl_pools,

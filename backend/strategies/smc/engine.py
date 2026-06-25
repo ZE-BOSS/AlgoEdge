@@ -391,9 +391,13 @@ class SMCEngine(BaseStrategy):
         # Candle tier from pattern
         candle_tier = 0
         if pattern:
-            candle_tier = getattr(pattern, 'tier', 0)
-            if isinstance(candle_tier, str):
-                candle_tier = {"TIER_1": 1, "TIER_2": 2, "TIER_3": 3}.get(candle_tier, 0)
+            tier_obj = getattr(pattern, 'tier', 0)
+            if hasattr(tier_obj, 'value'):
+                candle_tier = tier_obj.value
+            elif isinstance(tier_obj, str):
+                candle_tier = {"TIER_1": 1, "TIER_2": 2, "TIER_3": 3}.get(tier_obj, 0)
+            else:
+                candle_tier = tier_obj
 
         return {
             "signal_direction": bias,
