@@ -270,7 +270,9 @@ class SMCEngine(BaseStrategy):
                 # TP targets the H1 Swing High (origin of the ChoCH pullback)
                 h1_highs = [s for s in h1_swings if s["type"] == "HIGH"]
                 if h1_highs:
-                    tp = float(h1_highs[-1]["price"])
+                    struct_tp = float(h1_highs[-1]["price"])
+                    if struct_tp > entry_price:
+                        tp = struct_tp
             else:
                 # Find last swing high on M15 for SL
                 highs = [s for s in m15_swings if s["type"] == "HIGH"]
@@ -280,7 +282,9 @@ class SMCEngine(BaseStrategy):
                 # TP targets the H1 Swing Low
                 h1_lows = [s for s in h1_swings if s["type"] == "LOW"]
                 if h1_lows:
-                    tp = float(h1_lows[-1]["price"])
+                    struct_tp = float(h1_lows[-1]["price"])
+                    if struct_tp < entry_price:
+                        tp = struct_tp
                     
             scorer_context["stop_loss"] = sl
             scorer_context["tp1_price"] = tp

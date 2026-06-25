@@ -16,6 +16,8 @@ from backend.config import settings
 logger = get_logger(__name__)
 
 try:
+    import matplotlib
+    matplotlib.use('Agg')  # Must be called before pyplot
     import mplfinance as mpf
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
