@@ -172,6 +172,15 @@ class BacktestEngine:
                 else:
                     pos["lowest_price"] = min(pos.get("lowest_price", pos["entry_price"]), low)
 
+                # Check Max Holding Time (48 hours)
+                if isinstance(current_time, (int, float)) and isinstance(pos.get("entry_time"), (int, float)):
+                    if current_time - pos["entry_time"] >= 48 * 3600:
+                        pos["exit_price"] = current_price
+                        pos["exit_reason"] = "TIME_LIMIT_48H"
+                        pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
+                        closed_this_bar.append(pos)
+                        continue
+
                 # Check SL hit
                 if pos["direction"] == "BUY" and low <= pos["stop_loss"]:
                     pos["exit_price"] = pos["stop_loss"]

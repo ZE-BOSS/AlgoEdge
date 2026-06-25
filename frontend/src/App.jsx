@@ -8,6 +8,7 @@ import {
 import { useBackendConnection, useWebSocket } from './hooks/useBackendConnection';
 import { useConnectionStore, useAuthStore } from './store';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { NotificationContainer } from './components/NotificationToast';
 import Login from './pages/Login';
 import './index.css';
 
@@ -95,6 +96,7 @@ function AppContent() {
   return (
     <div className="app-layout">
       <Sidebar />
+      <NotificationContainer />
       <main className="main-content">
         <ErrorBoundary>
           <Suspense fallback={<PageLoader />}>

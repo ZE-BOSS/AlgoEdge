@@ -306,6 +306,23 @@ class SMCEngine(BaseStrategy):
             scorer_context["stop_loss"] = sl
             scorer_context["tp1_price"] = tp
 
+            # Calculate dynamic ATR for this symbol to pass into context
+            lookback = min(14, len(candles) - 1)
+            recent_candles = candles.iloc[-(lookback+1):]
+            tr_list = []
+            for i in range(1, len(recent_candles)):
+                c = recent_candles.iloc[i]
+                prev_c = recent_candles.iloc[i-1]
+                tr = max(
+                    c["high"] - c["low"],
+                    abs(c["high"] - prev_c["close"]),
+                    abs(c["low"] - prev_c["close"])
+                )
+                tr_list.append(tr)
+            
+            atr = sum(tr_list) / len(tr_list) if tr_list else (candles.iloc[-1]["high"] - candles.iloc[-1]["low"])
+            scorer_context["atr"] = atr
+
             # ── Score ──
             score = self.scorer.calculate_score(scorer_context)
 

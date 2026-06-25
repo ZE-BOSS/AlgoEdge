@@ -130,8 +130,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Volatility 75 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
-        point_value_per_lot=1.0,    # $1 per point per standard lot (approx)
-        lot_min=0.001,
+        point_value_per_lot=0.01,    # $1 per point per standard lot (approx)
+        lot_min=0.01,
         lot_max=10.0,
         lot_step=0.001,
         contract_size=1,
@@ -150,8 +150,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Volatility 25 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
-        point_value_per_lot=0.5,    # Lower volatility = lower point value
-        lot_min=0.001,
+        point_value_per_lot=0.01,    # Lower volatility = lower point value
+        lot_min=0.5,
         lot_max=50.0,
         lot_step=0.001,
         contract_size=1,
@@ -168,8 +168,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Volatility 50 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
-        point_value_per_lot=0.75,
-        lot_min=0.001,
+        point_value_per_lot=0.01,
+        lot_min=4.0,
         lot_max=20.0,
         lot_step=0.001,
         contract_size=1,
@@ -184,8 +184,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Volatility 100 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
-        point_value_per_lot=1.5,    # Higher volatility = higher point value
-        lot_min=0.001,
+        point_value_per_lot=0.01,    # Higher volatility = higher point value
+        lot_min=0.5,
         lot_max=5.0,
         lot_step=0.001,
         contract_size=1,
@@ -204,8 +204,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Boom 1000 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
-        point_value_per_lot=1.0,
-        lot_min=0.001,
+        point_value_per_lot=0.01,
+        lot_min=0.2,
         lot_max=10.0,
         lot_step=0.001,
         contract_size=1,
@@ -222,8 +222,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Crash 1000 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
-        point_value_per_lot=1.0,
-        lot_min=0.001,
+        point_value_per_lot=0.01,
+        lot_min=0.2,
         lot_max=10.0,
         lot_step=0.001,
         contract_size=1,
@@ -239,8 +239,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Volatility 10 Index",
         instrument_type="SYNTHETIC",
         point_size=0.001,
-        point_value_per_lot=0.25,   # Very low volatility
-        lot_min=0.001,
+        point_value_per_lot=0.001,   # Very low volatility
+        lot_min=0.5,
         lot_max=100.0,
         lot_step=0.001,
         contract_size=1,
@@ -256,14 +256,14 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
 
     "Volatility 150 Index": InstrumentProfile(
         symbol="Volatility 150 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=2.0, lot_min=0.001, lot_max=3.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.001, lot_max=3.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=3, swing_length_ltf_override=2,
         ob_impulse_ratio_override=2.0, sl_buffer_pips_override=5.0,
     ),
     "Volatility 250 Index": InstrumentProfile(
         symbol="Volatility 250 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=3.0, lot_min=0.001, lot_max=2.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.001, lot_max=2.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=3, swing_length_ltf_override=2,
         ob_impulse_ratio_override=2.5, sl_buffer_pips_override=8.0,
@@ -273,27 +273,27 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
 
     "Volatility 10 Index (1s)": InstrumentProfile(
         symbol="Volatility 10 Index (1s)", instrument_type="SYNTHETIC",
-        point_size=0.001, point_value_per_lot=0.25, lot_min=0.001, lot_max=100.0,
+        point_size=0.001, point_value_per_lot=0.25, lot_min=0.5, lot_max=100.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "Volatility 25 Index (1s)": InstrumentProfile(
         symbol="Volatility 25 Index (1s)", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=0.5, lot_min=0.001, lot_max=50.0,
+        point_size=0.01, point_value_per_lot=0.5, lot_min=0.005, lot_max=50.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "Volatility 50 Index (1s)": InstrumentProfile(
         symbol="Volatility 50 Index (1s)", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=0.75, lot_min=0.001, lot_max=20.0,
+        point_size=0.01, point_value_per_lot=0.75, lot_min=0.005, lot_max=20.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "Volatility 75 Index (1s)": InstrumentProfile(
         symbol="Volatility 75 Index (1s)", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.001, lot_max=10.0,
+        point_size=0.01, point_value_per_lot=1.0, lot_min=0.05, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "Volatility 100 Index (1s)": InstrumentProfile(
         symbol="Volatility 100 Index (1s)", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.5, lot_min=0.001, lot_max=5.0,
+        point_size=0.01, point_value_per_lot=1.5, lot_min=0.1, lot_max=5.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "Volatility 150 Index (1s)": InstrumentProfile(
@@ -311,49 +311,49 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
 
     "Boom 300 Index": InstrumentProfile(
         symbol="Boom 300 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.001, lot_max=10.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=1.0, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
     "Boom 500 Index": InstrumentProfile(
         symbol="Boom 500 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.001, lot_max=10.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.2, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
     "Boom 600 Index": InstrumentProfile(
         symbol="Boom 600 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.001, lot_max=10.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.001, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
     "Boom 900 Index": InstrumentProfile(
         symbol="Boom 900 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.001, lot_max=10.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.001, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
     "Crash 300 Index": InstrumentProfile(
         symbol="Crash 300 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.001, lot_max=10.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.5, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
     "Crash 500 Index": InstrumentProfile(
         symbol="Crash 500 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.001, lot_max=10.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.2, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
     "Crash 600 Index": InstrumentProfile(
         symbol="Crash 600 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.001, lot_max=10.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.001, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
     "Crash 900 Index": InstrumentProfile(
         symbol="Crash 900 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.001, lot_max=10.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.001, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
@@ -362,31 +362,31 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
 
     "Jump 10 Index": InstrumentProfile(
         symbol="Jump 10 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=0.5, lot_min=0.001, lot_max=50.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=50.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, sl_buffer_pips_override=5.0,
     ),
     "Jump 25 Index": InstrumentProfile(
         symbol="Jump 25 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=0.75, lot_min=0.001, lot_max=30.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=30.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, sl_buffer_pips_override=5.0,
     ),
     "Jump 50 Index": InstrumentProfile(
         symbol="Jump 50 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.001, lot_max=20.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=20.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, sl_buffer_pips_override=5.0,
     ),
     "Jump 75 Index": InstrumentProfile(
         symbol="Jump 75 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.25, lot_min=0.001, lot_max=15.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=15.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, sl_buffer_pips_override=5.0,
     ),
     "Jump 100 Index": InstrumentProfile(
         symbol="Jump 100 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.5, lot_min=0.001, lot_max=10.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, sl_buffer_pips_override=8.0,
     ),
@@ -401,13 +401,13 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     ),
     "Step Index 200": InstrumentProfile(
         symbol="Step Index 200", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=0.5, lot_min=0.01, lot_max=100.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=100.0,
         lot_step=0.01, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True,
     ),
     "Step Index 500": InstrumentProfile(
         symbol="Step Index 500", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=50.0,
         lot_step=0.01, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True,
     ),
@@ -416,13 +416,13 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
 
     "Range Break 100 Index": InstrumentProfile(
         symbol="Range Break 100 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=50.0,
         lot_step=0.01, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True,
     ),
     "Range Break 200 Index": InstrumentProfile(
         symbol="Range Break 200 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=0.5, lot_min=0.01, lot_max=100.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=100.0,
         lot_step=0.01, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True,
     ),
@@ -431,25 +431,25 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
 
     "DEX 600DN": InstrumentProfile(
         symbol="DEX 600DN", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=50.0,
         lot_step=0.01, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True,
     ),
     "DEX 600UP": InstrumentProfile(
         symbol="DEX 600UP", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=50.0,
         lot_step=0.01, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True,
     ),
     "DEX 900DN": InstrumentProfile(
         symbol="DEX 900DN", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=50.0,
         lot_step=0.01, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True,
     ),
     "DEX 900UP": InstrumentProfile(
         symbol="DEX 900UP", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0,
+        point_size=0.01, point_value_per_lot=0.01, lot_min=0.01, lot_max=50.0,
         lot_step=0.01, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True,
     ),
@@ -460,7 +460,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="XAUUSD",
         instrument_type="COMMODITY",
         point_size=0.01,
-        point_value_per_lot=100.0,  # $1 per 0.01 move per standard lot = $100/pip
+        point_value_per_lot=1.0,  # $1 per 0.01 move per standard lot = $100/pip
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
@@ -483,7 +483,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="EURUSD",
         instrument_type="FOREX",
         point_size=0.00001,
-        point_value_per_lot=10.0,   # $10 per pip per standard lot
+        point_value_per_lot=1.0,   # $10 per pip per standard lot
         lot_min=0.01,
         lot_max=100.0,
         lot_step=0.01,
@@ -497,7 +497,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="GBPUSD",
         instrument_type="FOREX",
         point_size=0.00001,
-        point_value_per_lot=10.0,
+        point_value_per_lot=1.0,
         lot_min=0.01,
         lot_max=100.0,
         lot_step=0.01,
@@ -513,7 +513,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="USDJPY",
         instrument_type="FOREX",
         point_size=0.001,
-        point_value_per_lot=6.8,    # Approx, varies with JPY rate
+        point_value_per_lot=100.0,    # Approx, varies with JPY rate
         lot_min=0.01,
         lot_max=100.0,
         lot_step=0.01,
@@ -548,7 +548,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="BTCUSD",
         instrument_type="CRYPTO",
         point_size=1.0,
-        point_value_per_lot=0.01,
+        point_value_per_lot=1.0,
         lot_min=0.001,
         lot_max=5.0,
         lot_step=0.001,

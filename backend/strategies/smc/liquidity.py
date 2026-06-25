@@ -11,8 +11,9 @@ from typing import List, Dict, Any
 class LiquidityMapper:
     """Maps liquidity pools and detects sweeps."""
 
-    def __init__(self, sweep_min_pips: float = 5.0, eq_tolerance_pips: float = 10.0):
-        self.sweep_min_pips = sweep_min_pips
+    def __init__(self, sweep_min_pips: float = 0.1, eq_tolerance_pips: float = 10.0):
+        # sweep_min_pips is repurposed as atr_multiplier
+        self.atr_multiplier = sweep_min_pips
         self.eq_tolerance_pips = eq_tolerance_pips
         self.bsl_pools = []
         self.ssl_pools = []
@@ -48,17 +49,34 @@ class LiquidityMapper:
         if len(candles) > 0:
             latest = candles.iloc[-1]
             
-            # Check BSL sweeps (wick above pool, close below)
+            # Calculate dynamic ATR for sweep depth
+            lookback = min(14, len(candles) - 1)
+            recent_candles = candles.iloc[-(lookback+1):]
+            tr_list = []
+            for i in range(1, len(recent_candles)):
+                c = recent_candles.iloc[i]
+                prev_c = recent_candles.iloc[i-1]
+                tr = max(
+                    c["high"] - c["low"],
+                    abs(c["high"] - prev_c["close"]),
+                    abs(c["low"] - prev_c["close"])
+                )
+                tr_list.append(tr)
+            
+            atr = sum(tr_list) / len(tr_list) if tr_list else (latest["high"] - latest["low"])
+            min_sweep_depth = self.atr_multiplier * atr
+            
+            # Check BSL sweeps (wick above pool by at least min_sweep_depth, close below)
             for pool in self.bsl_pools:
                 if not pool["swept"]:
-                    if latest["high"] > pool["level"] and latest["close"] < pool["level"]:
+                    if latest["high"] >= pool["level"] + min_sweep_depth and latest["close"] < pool["level"]:
                         recent_sweep = {"type": "BSL", "level": pool["level"]}
                         pool["swept"] = True
                         
-            # Check SSL sweeps (wick below pool, close above)
+            # Check SSL sweeps (wick below pool by at least min_sweep_depth, close above)
             for pool in self.ssl_pools:
                 if not pool["swept"]:
-                    if latest["low"] < pool["level"] and latest["close"] > pool["level"]:
+                    if latest["low"] <= pool["level"] - min_sweep_depth and latest["close"] > pool["level"]:
                         recent_sweep = {"type": "SSL", "level": pool["level"]}
                         pool["swept"] = True
                         

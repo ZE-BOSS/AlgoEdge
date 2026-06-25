@@ -16,7 +16,8 @@ class BreakevenManager:
 
     def __init__(self, config: Dict[str, Any]):
         self.be_trigger_rr = config.get("be_trigger_rr", 1.0)
-        self.be_buffer_pips = config.get("be_buffer_pips", 2.0)
+        # be_buffer_pips is repurposed as atr multiplier for safety buffer
+        self.be_atr_multiplier = config.get("be_buffer_pips", 0.1)
         self.be_on_tp1_hit = config.get("be_on_tp1_hit", True)
 
     def check_breakeven(
@@ -27,6 +28,8 @@ class BreakevenManager:
         stop_loss: float,
         direction: str,
         pip_value: float,
+        live_spread: float,
+        atr: float,
         be_already_applied: bool = False,
         tp1_hit: bool = False,
     ) -> Optional[float]:
@@ -62,8 +65,10 @@ class BreakevenManager:
         if not should_trigger:
             return None
 
-        # Calculate new SL at entry + buffer
-        buffer = self.be_buffer_pips * pip_value
+        # Calculate new SL at entry + max(live_spread, atr_buffer)
+        atr_buffer = self.be_atr_multiplier * atr
+        buffer = max(live_spread, atr_buffer)
+        
         if direction == "BUY":
             new_sl = entry_price + buffer
             # Only move SL in favorable direction

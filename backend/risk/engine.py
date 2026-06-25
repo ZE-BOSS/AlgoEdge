@@ -8,7 +8,7 @@ Source: RiskManagement_Spec.md
 """
 
 from typing import Dict, Any, List, Tuple, Optional
-from backend.risk.position_sizer import calculate_lot_size, calculate_lot_from_dollars, get_pip_size
+from backend.risk.position_sizer import calculate_lot_size, calculate_lot_from_dollars, get_pip_size, calculate_risk_dollars
 from backend.risk.multi_tp import MultiTPManager, TPLevel
 from backend.risk.breakeven_manager import BreakevenManager
 from backend.risk.trailing_manager import TrailingManager
@@ -67,17 +67,32 @@ class RiskEngine:
 
         # 3. Position Sizing
         if self.compounding_enabled and compounding_risk_dollars > 0:
+            requested_risk_dollars = compounding_risk_dollars
             total_lots = calculate_lot_from_dollars(
-                compounding_risk_dollars, entry, sl, symbol
+                requested_risk_dollars, entry, sl, symbol
             )
         else:
+            requested_risk_dollars = account_balance * (self.risk_pct / 100.0)
             total_lots = calculate_lot_size(
                 account_balance, self.risk_pct, entry, sl, symbol
             )
 
-        if total_lots < 0.01:
-            logger.warning(f"[RISK] Rejected: lot size {total_lots:.4f} below 0.01 min (balance=${account_balance:.2f}, risk_pct={self.risk_pct}%, risk={risk:.5f})")
-            return False, "Lot size too small for broker minimum", []
+        # Calculate actual dollar risk taken (after any Smart Clamping in the position sizer)
+        actual_risk_dollars = calculate_risk_dollars(total_lots, entry, sl, symbol)
+        
+        # Strict Risk Enforcement
+        # If the minimum broker lot size forces us to risk more than what was requested, REJECT outright.
+        # Adding a tiny 1% leniency buffer to account for MT5 precision floating point rounding.
+        if actual_risk_dollars > (requested_risk_dollars * 1.01):
+            logger.warning(
+                f"[RISK] Rejected: Broker minimum lot forces risk of ${actual_risk_dollars:.2f} "
+                f"which exceeds the requested risk of ${requested_risk_dollars:.2f}."
+            )
+            return False, f"Proposed risk (${requested_risk_dollars:.2f}) does not meet the broker minimum requirement (${actual_risk_dollars:.2f}) based on your capital. Please increase your risk percentage or capital to trade this setup.", []
+
+        if total_lots == 0.0:
+            logger.warning(f"[RISK] Rejected: lot size 0 (balance=${account_balance:.2f})")
+            return False, "Lot size calculation returned 0", []
 
         # 4. Multi-Position Splits (TP1/TP2/TP3)
         liquidity_target = signal_data.get("liquidity_target")

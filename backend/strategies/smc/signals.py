@@ -52,10 +52,15 @@ class TradeGate:
             if rr < self.config.risk.min_rr:
                 return False, f"RR {rr:.1f} below minimum {self.config.risk.min_rr}"
 
-        # Gate 5: Spread must be acceptable
+        # Gate 5: Spread must be acceptable (Dynamic ATR Check)
         current_spread = context.get("current_spread_pips", 0)
-        if current_spread > self.config.risk.max_spread_pips:
-            return False, f"Spread {current_spread} pips exceeds max {self.config.risk.max_spread_pips}"
+        atr = context.get("atr", 0)
+        
+        # We repurpose max_spread_pips to act as an ATR multiplier (e.g. 0.1)
+        max_allowed_spread = atr * self.config.risk.max_spread_pips if atr > 0 else self.config.risk.max_spread_pips
+        
+        if current_spread > max_allowed_spread:
+            return False, f"Spread ({current_spread}) exceeds maximum dynamic limit ({max_allowed_spread:.2f} based on ATR)"
 
         # Gate 6: Must be in active session (if session filter enabled)
         if self.config.smc.session_filter_enabled:

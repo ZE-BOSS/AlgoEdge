@@ -172,6 +172,34 @@ def calculate_lot_from_dollars(
     rounded = round(clamped / step) * step if step > 0 else clamped
     return round(rounded, 3)
 
+def calculate_risk_dollars(lots: float, entry_price: float, stop_loss_price: float, symbol: str) -> float:
+    """
+    Calculates the actual risk in dollars for a given lot size.
+    Used for the 15% Maximum Risk Circuit Breaker.
+    """
+    if lots == 0.0:
+        return 0.0
+
+    sl_distance = abs(entry_price - stop_loss_price)
+    
+    try:
+        from backend.risk.compounding import get_instrument_profile
+        profile = get_instrument_profile(symbol)
+        if profile:
+            sl_pips = sl_distance / profile.point_size if profile.point_size else 0
+            return lots * sl_pips * profile.point_value_per_lot
+    except ImportError:
+        pass
+
+    info = get_symbol_info(symbol)
+    tick_value = info.get("tick_value", 1.0)
+    tick_size = info.get("tick_size", 0.00001)
+    
+    if tick_size == 0:
+        return 0.0
+        
+    value_per_unit_move = tick_value / tick_size
+    return lots * sl_distance * value_per_unit_move
 
 def kelly_lot_size(
     win_rate: float,

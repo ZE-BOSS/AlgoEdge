@@ -42,3 +42,36 @@ export const useRiskStore = create((set) => ({
   setCircuitBreaker: (circuitBreaker) => set({ circuitBreaker }),
 }));
 
+export const useNotificationStore = create((set) => ({
+  notifications: [],
+  addNotification: (notification) => set((state) => {
+    // Add unique ID and default properties if not provided
+    const newNotif = {
+      id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+      duration: 5000,
+      ...notification
+    };
+    
+    // Automatically trigger Web Browser Notification
+    if (Notification.permission === "granted") {
+      new Notification(newNotif.title, {
+        body: newNotif.message,
+        icon: '/favicon.ico' // Assuming standard vite icon location
+      });
+    } else if (Notification.permission !== "denied") {
+      Notification.requestPermission().then(permission => {
+        if (permission === "granted") {
+          new Notification(newNotif.title, {
+            body: newNotif.message,
+            icon: '/favicon.ico'
+          });
+        }
+      });
+    }
+    
+    return { notifications: [newNotif, ...state.notifications] };
+  }),
+  removeNotification: (id) => set((state) => ({
+    notifications: state.notifications.filter(n => n.id !== id)
+  })),
+}));

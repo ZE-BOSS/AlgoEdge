@@ -45,7 +45,7 @@ class TrailingManager:
         elif method == "ATR_TRAIL":
             new_sl = self._atr_trail(direction, highest_price, lowest_price, atr_value)
         elif method == "STRUCTURE_TRAIL":
-            new_sl = self._structure_trail(direction, swing_points)
+            new_sl = self._structure_trail(direction, swing_points, atr_value)
         elif method == "PCT_TRAIL":
             new_sl = self._pct_trail(direction, current_price)
         else:
@@ -88,25 +88,28 @@ class TrailingManager:
         else:
             return lowest + trail_distance
 
-    def _structure_trail(self, direction: str, swing_points: Optional[List[Dict[str, Any]]]) -> Optional[float]:
+    def _structure_trail(self, direction: str, swing_points: Optional[List[Dict[str, Any]]], atr: float) -> Optional[float]:
         """
         Method 3: Trail to each confirmed swing point (SMC-native).
-        SL moves to below confirmed Higher Low (BUY) or above Lower High (SELL).
+        SL moves to below confirmed Higher Low (BUY) or above Lower High (SELL) plus an ATR safety buffer.
         Source: RiskManagement_Spec.md Section 3.3 — Method 3
         """
         if not swing_points:
+            # Fallback: Do not move SL if no structure exists
             return None
+            
+        atr_buffer = atr * 0.5  # Standard 0.5 ATR buffer behind structural liquidity
 
         if direction == "BUY":
             # Trail to below each confirmed Higher Low
             lows = [s["price"] for s in swing_points if s["type"] == "LOW"]
             if lows:
-                return lows[-1]  # Most recent swing low
+                return lows[-1] - atr_buffer  # Most recent swing low - buffer
         else:
             # Trail to above each confirmed Lower High
             highs = [s["price"] for s in swing_points if s["type"] == "HIGH"]
             if highs:
-                return highs[-1]  # Most recent swing high
+                return highs[-1] + atr_buffer  # Most recent swing high + buffer
 
         return None
 

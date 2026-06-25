@@ -208,15 +208,26 @@ def generate_trade_snapshot_b64(
 
     ax = axes[0]
 
+    # Helper to find x-index from timestamp
+    def get_x_idx(timestamp):
+        try:
+            ts = pd.to_datetime(timestamp, unit="s")
+            return df.index.get_loc(ts)
+        except KeyError:
+            return None
+
     # Draw Order Block rectangles
     for ob in order_blocks:
         try:
-            start = ob.get("start_idx", 0)
-            end = ob.get("end_idx", start + 3)
+            start = get_x_idx(ob.get("index"))
+            if start is None:
+                continue
+            end = start + 3  # Draw for 3 candles width
+            
             rect = mpatches.FancyBboxPatch(
-                (start, ob["bottom"]),
+                (start, ob.get("bottom", 0)),
                 end - start,
-                ob["top"] - ob["bottom"],
+                ob.get("top", 0) - ob.get("bottom", 0),
                 boxstyle="square,pad=0",
                 linewidth=1,
                 edgecolor='#2196F3' if ob.get("type") == "BULLISH" else '#F44336',
@@ -224,24 +235,27 @@ def generate_trade_snapshot_b64(
                 alpha=0.3,
             )
             ax.add_patch(rect)
-        except (KeyError, TypeError):
+        except Exception:
             pass
 
     # Draw FVG zones
     for fvg in fvgs:
         try:
-            start = fvg.get("start_idx", 0)
-            end = fvg.get("end_idx", start + 3)
+            start = get_x_idx(fvg.get("index"))
+            if start is None:
+                continue
+            end = start + 3
+            
             rect = mpatches.Rectangle(
                 (start, fvg.get("bottom", fvg.get("low", 0))),
                 end - start,
                 fvg.get("top", fvg.get("high", 0)) - fvg.get("bottom", fvg.get("low", 0)),
                 linewidth=0,
                 facecolor='#FFF9C4',
-                alpha=0.25,
+                alpha=0.4,
             )
             ax.add_patch(rect)
-        except (KeyError, TypeError):
+        except Exception:
             pass
 
     try:

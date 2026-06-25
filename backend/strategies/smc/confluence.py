@@ -37,35 +37,36 @@ class ConfluenceScorer:
         score = 40
         breakdown = {"base_structure": 40}
 
-        # ENTRY ZONE CONFIRMATION (Max +20)
+        # ENTRY ZONE CONFIRMATION (Max +35)
         zone_score = 0
         zone_names = []
 
         if context.get("fresh_ob") is not None:
-            zone_score += 20
+            zone_score += 25
             zone_names.append("Fresh OB")
             
-        if context.get("fvg_inside_ob", False):
-            zone_score += 20
-            zone_names.append("FVG inside OB")
-        elif context.get("fvg_present", False):
-            zone_score += 15
+        if context.get("fvg_inside_ob", False) or context.get("fvg_present", False):
+            # FVG gets points, whether inside OB or standalone
+            fvg_points = 15 if context.get("fvg_inside_ob", False) else 15
+            zone_score += fvg_points
             zone_names.append("FVG")
-            
-        if context.get("in_ote_zone", False):
-            zone_score += 10
-            zone_names.append("OTE Fib")
             
         if context.get("in_sd_zone", False):
             zone_score += 10
             zone_names.append("S&D")
 
-        # Cap zone score at 20 to ensure max total score is 100
-        zone_score = min(zone_score, 20)
-        zone_name_str = " + ".join(zone_names) if zone_names else "None"
+        # Cap primary zone score to ensure max total score is bounded appropriately
+        zone_score = min(zone_score, 35)
         
-        score += zone_score
-        breakdown[f"entry_zone ({zone_name_str})"] = zone_score
+        # SECONDARY CONFLUENCES
+        ote_score = 0
+        if context.get("in_ote_zone", False):
+            ote_score = 10
+            zone_names.append("OTE Fib")
+
+        zone_name_str = " + ".join(zone_names) if zone_names else "None"
+        score += zone_score + ote_score
+        breakdown[f"entry_zone ({zone_name_str})"] = zone_score + ote_score
 
         # LIQUIDITY SWEEP (Max +10)
         sweep_score = 0
@@ -78,26 +79,22 @@ class ConfluenceScorer:
         score += sweep_score
         breakdown["liquidity_sweep"] = sweep_score
 
-        # CANDLESTICK CONFIRMATION (Max +20)
+        # CANDLESTICK CONFIRMATION (Max +5)
         candle_score = 0
         candle_tier = context.get("candle_tier", 0)
         if candle_tier == 1:
-            candle_score = 20
+            candle_score = 5
         elif candle_tier == 2:
-            candle_score = 15
+            candle_score = 3
         elif candle_tier == 3:
-            candle_score = 10
+            candle_score = 1
             
         score += candle_score
         breakdown[f"candlestick (tier {candle_tier})"] = candle_score
 
-        # KILL ZONE / SESSION ALIGNMENT (Max +10)
+        # KILL ZONE / SESSION ALIGNMENT is now part of base or optional. Let's cap at 100.
+        # Max so far: Base (40) + Zones (35) + OTE (10) + Sweep (10) + Candle (5) = 100!
         kz_score = 0
-        if context.get("in_kill_zone", False):
-            kz_score = 10
-            
-        score += kz_score
-        breakdown["kill_zone"] = kz_score
         
         # Inject the breakdown directly into context so it can be logged
         context["score_breakdown"] = breakdown

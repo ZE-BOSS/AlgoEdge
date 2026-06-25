@@ -65,6 +65,22 @@ class BotService:
         except Exception:
             pass  # WebSocket may not be connected
 
+    async def _broadcast_notification(self, title: str, message: str, notification_type: str = "info"):
+        """Broadcast an explicit frontend/browser notification."""
+        try:
+            from backend.api.websocket import manager as ws_manager
+            await ws_manager.broadcast_all({
+                "type": "notification",
+                "payload": {
+                    "title": title,
+                    "message": message,
+                    "type": notification_type,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            })
+        except Exception:
+            pass
+
     def log_system_event(self, message: str, level: str = "INFO", category: str = "SYSTEM"):
         """Public method for other modules to log events visible on the frontend."""
         self._log_event(message, level, category)
@@ -246,6 +262,11 @@ class BotService:
                                                         f"→ TP: {tp.tp_price:.5f}",
                                                         "INFO", "TRADE"
                                                     )
+                                                    asyncio.ensure_future(self._broadcast_notification(
+                                                        "Trade Entered",
+                                                        f"BUY {signal.symbol} @ {signal.entry_price}",
+                                                        "success"
+                                                    ))
                                                 else:
                                                     self._log_event(
                                                         f"Order failed: TP{tp.level} — {result.get('error', 'unknown')}",
@@ -261,6 +282,13 @@ class BotService:
                                             f"Trade rejected by risk engine: {reason}",
                                             "WARN", "RISK"
                                         )
+                                        # Only trigger explicit popup for risk-based rejections, not basic RR rejections to avoid spam
+                                        if "Broker minimum lot forces risk" in reason or "Proposed risk" in reason:
+                                            asyncio.ensure_future(self._broadcast_notification(
+                                                "Trade Rejected (Risk Limit)",
+                                                reason,
+                                                "error"
+                                            ))
 
                                 except Exception as exec_err:
                                     self._log_event(

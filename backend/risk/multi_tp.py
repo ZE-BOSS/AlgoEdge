@@ -141,49 +141,61 @@ class MultiTPManager:
         lot_step = info.get("volume_step", 0.01)
         lot_min = info.get("volume_min", 0.01)
 
-        for i in range(active_count):
-            if i < len(splits):
+        # ── Dynamic TP Collapse ──
+        # If any sub-trade volume is < lot_min, drop the lowest priority TP and recalculate
+        volumes = []
+        while active_count > 0:
+            splits = self.tp_splits[:active_count]
+            total_split = sum(splits)
+            if total_split == 0:
+                splits = [100 // active_count] * active_count
+                total_split = sum(splits)
+            
+            valid = True
+            volumes = []
+            for i in range(active_count):
                 split_pct = splits[i] / total_split
-            else:
-                split_pct = 0.0
+                raw_vol = total_volume * split_pct
+                vol = math.floor(raw_vol / lot_step) * lot_step
+                vol = round(vol, 4)
+                volumes.append(vol)
+                if vol < lot_min:
+                    valid = False
+                    break
+            
+            if valid:
+                break
+            
+            active_count -= 1
 
-            raw_vol = total_volume * split_pct
-            # Round down to the nearest lot step
-            vol = math.floor(raw_vol / lot_step) * lot_step
-            # Fix floating point precision
-            vol = round(vol, 4)
+        # If all collapsed (total_volume was too small to split, or even for TP1), enforce Smart Clamping
+        if active_count == 0:
+            active_count = 1
+            splits = [100]
+            total_split = 100
+            clamped_vol = max(lot_min, math.floor(total_volume / lot_step) * lot_step)
+            volumes = [round(clamped_vol, 4)]
 
-            # Skip if volume is less than broker minimum
-            if vol < lot_min:
-                continue
+        # ── Remainder Sweep ──
+        # Any volume lost to rounding is swept into TP1 (if it fits the lot_step)
+        allocated_vol = round(sum(volumes), 4)
+        remainder = round(total_volume - allocated_vol, 4)
+        if remainder >= lot_step:
+            sweep_amount = math.floor(remainder / lot_step) * lot_step
+            volumes[0] = round(volumes[0] + sweep_amount, 4)
 
+        levels = []
+        for i in range(active_count):
+            split_pct = splits[i] / total_split
             trail = self.trail_methods[i] if i < len(self.trail_methods) else None
-
             levels.append(TPLevel(
                 level=i + 1,
                 rr_multiplier=rr_multipliers[i],
                 volume_pct=split_pct,
                 tp_price=tp_prices[i],
-                volume=vol,
+                volume=volumes[i],
                 trail_method=trail,
                 deferred=False,  # ALL TPs open at entry
-            ))
-
-        # If only TP1 is viable, put all volume there
-        if len(levels) == 1:
-            levels[0].volume = total_volume
-            levels[0].volume_pct = 1.0
-            
-        # If no levels were created because volume was too small to split, fallback to a single TP1
-        if len(levels) == 0 and total_volume >= lot_min:
-            levels.append(TPLevel(
-                level=1,
-                rr_multiplier=rr_multipliers[0],
-                volume_pct=1.0,
-                tp_price=tp_prices[0],
-                volume=total_volume,
-                trail_method=self.trail_methods[0] if len(self.trail_methods) > 0 else None,
-                deferred=False,
             ))
 
         # Sanity validation — catch direction bugs at the source

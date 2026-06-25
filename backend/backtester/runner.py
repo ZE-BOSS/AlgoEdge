@@ -32,6 +32,23 @@ async def _broadcast_progress(user_id: str, progress: dict):
     except Exception:
         pass  # WebSocket may not be connected
 
+async def _broadcast_notification(user_id: str, title: str, message: str, notification_type: str = "info"):
+    """Broadcast an explicit frontend/browser notification to a specific user."""
+    try:
+        from backend.api.websocket import manager as ws_manager
+        from datetime import datetime, timezone
+        await ws_manager.broadcast_to_user(user_id, {
+            "type": "notification",
+            "payload": {
+                "title": title,
+                "message": message,
+                "type": notification_type,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        })
+    except Exception:
+        pass
+
 
 async def run_backtest(
     user_id: str,
@@ -93,6 +110,13 @@ async def run_backtest(
             "message": "Backtest complete — results ready for review",
         })
         logger.info("Backtest completed — results discarded")
+        
+        asyncio.ensure_future(_broadcast_notification(
+            user_id,
+            "Backtest Complete",
+            f"Simulated {results.get('total_trades', 0)} trades. Final P&L: ${results.get('total_pnl', 0):.2f}.",
+            "success"
+        ))
         return results
 
     # Persist to database
@@ -173,4 +197,12 @@ async def run_backtest(
     })
 
     logger.info(f"Backtest saved: {backtest_id} ({save_mode})")
+    
+    import asyncio
+    asyncio.ensure_future(_broadcast_notification(
+        user_id,
+        "Backtest Complete",
+        f"Simulated {report.total_trades} trades. Final P&L: ${report.total_pnl:.2f}.",
+        "success"
+    ))
     return results
