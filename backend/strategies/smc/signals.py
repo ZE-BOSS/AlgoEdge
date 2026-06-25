@@ -7,7 +7,7 @@ Source: RiskManagement_Spec.md Section 6
 """
 
 from typing import Dict, Any, Optional
-from backend.strategies.smc.params import SMCParams
+from backend.strategies.smc.params import UserConfig
 from backend.strategies.base_strategy import TradeSignal
 from backend.utils.timeutils import is_kill_zone
 from backend.utils.logger import get_logger
@@ -18,8 +18,8 @@ logger = get_logger(__name__)
 class TradeGate:
     """All checks must return True. Any False = trade rejected."""
 
-    def __init__(self, params: SMCParams):
-        self.params = params
+    def __init__(self, config: UserConfig):
+        self.config = config
 
     def validate_all(self, context: Dict[str, Any]) -> tuple[bool, str]:
         """Run all safety gates. Returns (passed, rejection_reason)."""
@@ -54,28 +54,28 @@ class TradeGate:
             risk = abs(entry - sl)
             reward = abs(tp1 - entry)
             rr = reward / risk if risk > 0 else 0
-            if rr < self.params.min_rr:
-                return False, f"RR {rr:.1f} below minimum {self.params.min_rr}"
+            if rr < self.config.risk.min_rr:
+                return False, f"RR {rr:.1f} below minimum {self.config.risk.min_rr}"
 
         # Gate 5: Spread must be acceptable
         current_spread = context.get("current_spread_pips", 0)
-        if current_spread > self.params.max_spread_pips:
-            return False, f"Spread {current_spread} pips exceeds max {self.params.max_spread_pips}"
+        if current_spread > self.config.risk.max_spread_pips:
+            return False, f"Spread {current_spread} pips exceeds max {self.config.risk.max_spread_pips}"
 
         # Gate 6: Must be in active session (if session filter enabled)
-        if self.params.session_filter_enabled:
+        if self.config.smc.session_filter_enabled:
             if not context.get("in_kill_zone", False):
                 return False, "Outside active kill zone session"
 
         # Gate 7: Must not be blocked by high-impact news
-        if self.params.news_filter_enabled:
+        if self.config.smc.news_filter_enabled:
             if context.get("news_blocked", False):
                 return False, "Blocked by high-impact news event"
 
         # Gate 8: Confluence score must meet minimum
         score = context.get("confluence_score", 0)
-        if score < self.params.min_signal_score:
-            return False, f"Confluence score {score} below minimum {self.params.min_signal_score}"
+        if score < self.config.smc.min_signal_score:
+            return False, f"Confluence score {score} below minimum {self.config.smc.min_signal_score}"
 
         return True, "ALL_GATES_PASSED"
 
@@ -83,9 +83,9 @@ class TradeGate:
 class SignalGenerator:
     """Generates TradeSignal objects if validation passes."""
 
-    def __init__(self, params: SMCParams):
-        self.params = params
-        self.gate = TradeGate(params)
+    def __init__(self, config: UserConfig):
+        self.config = config
+        self.gate = TradeGate(config)
 
     def generate(self, context: Dict[str, Any], score: int) -> Optional[TradeSignal]:
         """Attempt to generate a signal from current context."""

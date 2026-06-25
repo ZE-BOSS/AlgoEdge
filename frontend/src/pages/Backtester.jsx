@@ -93,7 +93,7 @@ function GroupedTradeRow({ group, index }) {
     ))}
     {open && group.sub_trades?.[0]?.entry_confirmations && (
       <tr><td colSpan={11} style={{padding:0,border:'none'}}>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,padding:'12px 16px',background:'var(--bg-tertiary)',margin:'4px 8px',borderRadius:'var(--radius-xs)'}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1.5fr',gap:16,padding:'12px 16px',background:'var(--bg-tertiary)',margin:'4px 8px',borderRadius:'var(--radius-xs)'}}>
           <div>
             <div style={{fontSize:'0.7rem',textTransform:'uppercase',color:'var(--text-muted)',marginBottom:6,fontWeight:600}}>Entry Confirmations (Score: {group.sub_trades[0].confluence_score || '—'})</div>
             {(group.sub_trades[0].entry_confirmations||[]).map((c,i)=>{
@@ -112,9 +112,18 @@ function GroupedTradeRow({ group, index }) {
             })}
           </div>
           <div>
-            <div style={{fontSize:'0.7rem',textTransform:'uppercase',color:'var(--text-muted)',marginBottom:6,fontWeight:600}}>Exit Info</div>
-            {(group.sub_trades[0].exit_confirmations||[]).map((c,i)=>
-              <div key={i} style={{fontSize:'0.75rem',color:'var(--text-secondary)',padding:'3px 0',borderBottom:'1px solid var(--border)'}}>{c}</div>
+            {group.entry_snapshot_b64 ? (
+              <>
+                <div style={{fontSize:'0.7rem',textTransform:'uppercase',color:'var(--text-muted)',marginBottom:6,fontWeight:600}}>Entry Snapshot</div>
+                <img src={`data:image/png;base64,${group.entry_snapshot_b64}`} alt="Chart" style={{width:'100%',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)'}} />
+              </>
+            ) : (
+              <>
+                <div style={{fontSize:'0.7rem',textTransform:'uppercase',color:'var(--text-muted)',marginBottom:6,fontWeight:600}}>Exit Info</div>
+                {(group.sub_trades[0].exit_confirmations||[]).map((c,i)=>
+                  <div key={i} style={{fontSize:'0.75rem',color:'var(--text-secondary)',padding:'3px 0',borderBottom:'1px solid var(--border)'}}>{c}</div>
+                )}
+              </>
             )}
           </div>
         </div>

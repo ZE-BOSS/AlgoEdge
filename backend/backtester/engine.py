@@ -430,6 +430,7 @@ class BacktestEngine:
             "mfe_pips": 0.0,
             "confluence_score": sig.get("confluence_score", 0),
             "entry_confirmations": entry_confirmations,
+            "entry_snapshot_b64": sig.get("metadata", {}).get("entry_snapshot_b64", ""),
         }
 
     def _group_trades(self, trades: List[Dict]) -> List[Dict]:
@@ -454,6 +455,9 @@ class BacktestEngine:
                     "tp_count": 0,
                     "best_exit": None,
                     "worst_exit": None,
+                    "entry_snapshot_b64": t.get("entry_snapshot_b64", ""),
+                    "entry_confirmations": t.get("entry_confirmations", []),
+                    "confluence_score": t.get("confluence_score", 0),
                 }
             g = groups[gid]
             g["sub_trades"].append(t)

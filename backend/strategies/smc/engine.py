@@ -79,7 +79,7 @@ class SMCEngine(BaseStrategy):
         self.fvg = FVGDetector(self.smc_params.fvg_min_gap_pips)
         self.liquidity = LiquidityMapper(self.smc_params.liq_sweep_min_pips)
         self.scorer = ConfluenceScorer(self.smc_params)
-        self.signal_gen = SignalGenerator(self.smc_params)
+        self.signal_gen = SignalGenerator(user_config)
         self.ipdm = IPDMDetector()
 
         # Optional modules
@@ -113,6 +113,14 @@ class SMCEngine(BaseStrategy):
             self.bias = ms_h4.get("trend", "NEUTRAL")
             self.context["htf_bias"] = self.bias
             
+            # Granular H4 logging
+            last_bos = ms_h4.get("last_bos")
+            last_choch = ms_h4.get("last_choch")
+            if last_bos:
+                bot_service.log_system_event(f"[{symbol} H4] Break of Structure ({last_bos}) confirmed at {ms_h4.get('last_bos_level')} | BOS count: {ms_h4.get('consecutive_bos')}", "INFO", "SMC")
+            if last_choch:
+                bot_service.log_system_event(f"[{symbol} H4] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
+
             # Log HTF Bias changes
             if self.bias != "NEUTRAL" and self.bias != self.last_logged_htf_bias:
                 bot_service.log_system_event(f"[{symbol} H4] HTF Bias shifted to {self.bias}", "INFO", "SMC")
@@ -124,6 +132,14 @@ class SMCEngine(BaseStrategy):
             ms_h1 = self.h1_structure.update(candles)
             self.context["h1"] = ms_h1
             
+            # Granular H1 logging
+            last_bos = ms_h1.get("last_bos")
+            last_choch = ms_h1.get("last_choch")
+            if last_bos:
+                bot_service.log_system_event(f"[{symbol} H1] Break of Structure ({last_bos}) confirmed at {ms_h1.get('last_bos_level')} | BOS count: {ms_h1.get('consecutive_bos')}", "INFO", "SMC")
+            if last_choch:
+                bot_service.log_system_event(f"[{symbol} H1] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
+
             # Check if H1 trend aligns with H4
             h1_trend = ms_h1.get("trend", "NEUTRAL")
             if h1_trend != self.last_logged_h1_trend:
@@ -178,17 +194,33 @@ class SMCEngine(BaseStrategy):
             ms_m15 = self.ltf_structure.update(candles)
             self.context["ltf_structure"] = ms_m15
 
+            # Granular M15 logging
+            last_bos = ms_m15.get("last_bos")
+            last_choch = ms_m15.get("last_choch")
+            if last_bos:
+                bot_service.log_system_event(f"[{symbol} M15] Break of Structure ({last_bos}) confirmed at {ms_m15.get('last_bos_level')} | BOS count: {ms_m15.get('consecutive_bos')}", "INFO", "SMC")
+            if last_choch:
+                bot_service.log_system_event(f"[{symbol} M15] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
+
             # Check if M15 trend has shifted to align with H1 bias (ChoCH occurred)
             m15_trend = ms_m15.get("trend")
             if m15_trend != htf_bias:
                 return None  # M15 structure not aligned yet
 
             # Update entry zone detectors on M15
-            self.context["obs"] = self.order_blocks.update(candles)
-            self.context["fvgs"] = self.fvg.update(candles)
+            obs = self.order_blocks.update(candles)
+            fvgs = self.fvg.update(candles)
+            self.context["obs"] = obs
+            self.context["fvgs"] = fvgs
             self.context["liquidity"] = self.liquidity.update(
                 candles, ms_m15["swings"]
             )
+            
+            if last_choch and (obs or fvgs):
+                ob_str = f"{len(obs)} Order Block(s)" if obs else ""
+                fvg_str = f"{len(fvgs)} FVG(s)" if fvgs else ""
+                zones = " and ".join(filter(None, [ob_str, fvg_str]))
+                bot_service.log_system_event(f"[{symbol} M15] Entry Zones Detected: {zones} identified near ChoCH.", "INFO", "SMC")
 
             # Check OTE zone if premium_discount module exists
             in_ote = False
@@ -216,34 +248,38 @@ class SMCEngine(BaseStrategy):
             scorer_context["entry_price"] = entry_price
             
             # SL = M15 previous swing extreme + buffer
-            # We must pull swings from ltf_structure
             ms_m15 = self.context.get("ltf_structure", {})
             m15_swings = ms_m15.get("swings", [])
+            
+            # TP = H1 structural reversal point (from strategy2.md)
+            ms_h1 = self.context.get("h1", {})
+            h1_swings = ms_h1.get("swings", [])
             
             # Fallback values
             sl = entry_price * 0.99 if htf_bias == "BULLISH" else entry_price * 1.01
             tp = entry_price * 1.03 if htf_bias == "BULLISH" else entry_price * 0.97
             
             if htf_bias == "BULLISH":
-                # Find last swing low on M15
+                # Find last swing low on M15 for SL
                 lows = [s for s in m15_swings if s["type"] == "LOW"]
                 if lows:
-                    # Buffer of ~3 pips (we use a generic multiplier for now if point_value not avail)
+                    # Buffer of ~3 pips
                     sl = float(lows[-1]["price"]) * 0.9995  
                 
-                # TP targets the origin of the ChoCH (last major swing high before pullback)
-                highs = [s for s in m15_swings if s["type"] == "HIGH"]
-                if highs:
-                    # The swing high that got broken during ChoCH or the one before it
-                    tp = float(highs[-2]["price"]) if len(highs) >= 2 else float(highs[-1]["price"])
+                # TP targets the H1 Swing High (origin of the ChoCH pullback)
+                h1_highs = [s for s in h1_swings if s["type"] == "HIGH"]
+                if h1_highs:
+                    tp = float(h1_highs[-1]["price"])
             else:
+                # Find last swing high on M15 for SL
                 highs = [s for s in m15_swings if s["type"] == "HIGH"]
                 if highs:
                     sl = float(highs[-1]["price"]) * 1.0005
                 
-                lows = [s for s in m15_swings if s["type"] == "LOW"]
-                if lows:
-                    tp = float(lows[-2]["price"]) if len(lows) >= 2 else float(lows[-1]["price"])
+                # TP targets the H1 Swing Low
+                h1_lows = [s for s in h1_swings if s["type"] == "LOW"]
+                if h1_lows:
+                    tp = float(h1_lows[-1]["price"])
                     
             scorer_context["stop_loss"] = sl
             scorer_context["tp1_price"] = tp
@@ -253,8 +289,36 @@ class SMCEngine(BaseStrategy):
 
             # ── Generate signal if score meets threshold ──
             if score >= self.smc_params.min_signal_score:
-                bot_service.log_system_event(f"[{symbol} M5] 🎯 SIGNAL VALIDATED! Score: {score}/100. Direction: {htf_bias}", "SIGNAL", "SMC")
-                return self.signal_gen.generate(scorer_context, score)
+                bot_service.log_system_event(f"[{symbol} M5] Candlestick Confirmation: {pattern.name} (Tier {pattern.tier}) detected.", "INFO", "SMC")
+                
+                breakdown = scorer_context.get("score_breakdown", {})
+                breakdown_str = ", ".join(f"{k}: {v}" for k, v in breakdown.items() if v > 0)
+                bot_service.log_system_event(f"[{symbol} M5] 🎯 SIGNAL VALIDATED! Score: {score}/100. Direction: {htf_bias} | Confluences: {breakdown_str}", "SIGNAL", "SMC")
+                
+                sig = self.signal_gen.generate(scorer_context, score)
+                if sig:
+                    # Generate Base64 Snapshot
+                    from backend.analytics.snapshots import generate_trade_snapshot_b64
+                    try:
+                        b64 = generate_trade_snapshot_b64(
+                            symbol=symbol,
+                            timeframe="M5",
+                            candles=candles,
+                            order_blocks=self.context.get("obs", []),
+                            fvgs=self.context.get("fvgs", []),
+                            entry_price=sig.entry_price,
+                            stop_loss=sig.stop_loss,
+                            take_profit=sig.take_profit,
+                            direction=sig.direction,
+                            snapshot_type="ENTRY",
+                            trade_id="signal_preview"
+                        )
+                        if b64:
+                            sig.metadata["entry_snapshot_b64"] = b64
+                    except Exception as e:
+                        logger.error(f"Base64 snapshot generation failed: {e}")
+
+                    return sig
 
         return None
 
