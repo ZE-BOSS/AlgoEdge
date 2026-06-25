@@ -158,6 +158,8 @@ export const getSignalDetail = (id) => api.get(`/signals/${id}`);
 // ── Backtest ────────────────────────────────────────────────────────────────
 
 export const runBacktest = (data) => api.post('/backtest', data, { timeout: 300000 });
+export const getBacktestStatus = () => api.get('/status');
+export const getLatestBacktestResult = () => api.get('/latest_result');
 export const saveBacktest = (id, data) => api.post(`/backtests/${id}/save`, data);
 export const getBacktests = () => api.get('/backtests');
 export const getBacktest = (id) => api.get(`/backtests/${id}`);

@@ -107,6 +107,8 @@ class SMCEngine(BaseStrategy):
                 "category": category,
                 "message": message
             })
+            # Also broadcast live to the frontend terminal!
+            bot_service.log_system_event(message, level, category="BACKTEST_LOG")
         else:
             bot_service.log_system_event(message, level, category)
 

@@ -21,6 +21,8 @@ from backend.api.deps import get_current_user
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+USER_BACKTEST_STATE = {}  # In-memory persistence: user_id -> state
 router = APIRouter(prefix="/api", tags=["backtest"])
 
 
@@ -78,357 +80,309 @@ class SaveBacktestRequest(BaseModel):
 
 
 
+
+@router.get("/status")
+async def get_backtest_status(current_user: User = Depends(get_current_user)):
+    state = USER_BACKTEST_STATE.get(current_user.id, {"status": "idle", "progress": None})
+    return {"status": state["status"], "progress": state.get("progress")}
+
+@router.get("/latest_result")
+async def get_backtest_latest_result(current_user: User = Depends(get_current_user)):
+    state = USER_BACKTEST_STATE.get(current_user.id)
+    if state and state["status"] == "complete":
+        return state.get("result", {})
+    return {}
+
 @router.post("/backtest")
 async def run_backtest_endpoint(
     req: BacktestRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Run a backtest — returns results WITHOUT saving.
-    User decides to save or dismiss after reviewing.
+    Run a backtest in the background to prevent frontend timeouts.
     """
-    from backend.backtester.runner import run_backtest
-    from backend.mt5.data_fetcher import DataFetcher, DataFetchError
     from backend.services.bot_service import bot_service
-    import time as _time
 
-    bt_start = _time.time()
-    logger.info(f"═══ BACKTEST START ═══ {req.symbol} {req.timeframe} | user={current_user.email}")
-    logger.info(f"  Config: balance=${req.initial_balance} | dates={req.start_date}→{req.end_date} | candles={req.candle_count} | tp_count={req.tp_count} | session_filter={req.session_filter_enabled}")
-    bot_service.log_system_event(f"Backtest started: {req.symbol} {req.timeframe}", category="BACKTEST")
+    bot_service.log_system_event(f"Backtest queued: {req.symbol} {req.timeframe}", category="BACKTEST")
 
-    # Fetch candles: use date range if provided, otherwise use candle_count
-    try:
-        if req.start_date and req.end_date:
+    async def _run_backtest_task():
+        global USER_BACKTEST_STATE
+        USER_BACKTEST_STATE[current_user.id] = {
+            "status": "running",
+            "progress": {"stage": "Fetching data...", "pct": 0},
+            "result": None
+        }
+        try:
+            from backend.backtester.runner import run_backtest
+            from backend.mt5.data_fetcher import DataFetcher, DataFetchError
+            from backend.services.bot_service import bot_service
+            from backend.api.websocket import manager as ws_manager
+            import time as _time
+
+            bt_start = _time.time()
+            logger.info(f"═══ BACKTEST START ═══ {req.symbol} {req.timeframe} | user={current_user.email}")
+            bot_service.log_system_event(f"Backtest started: {req.symbol} {req.timeframe}", category="BACKTEST")
+
             try:
-                start = datetime.fromisoformat(req.start_date)
-                end = datetime.fromisoformat(req.end_date)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD or ISO format.")
-            logger.info(f"  Fetching data range: {start} → {end} for H4, H1, M15, M5")
-            candles_h4 = await DataFetcher.get_data_range(req.symbol, "H4", start, end)
-            candles_h1 = await DataFetcher.get_data_range(req.symbol, "H1", start, end)
-            candles_m15 = await DataFetcher.get_data_range(req.symbol, "M15", start, end)
-            candles_m5 = await DataFetcher.get_data_range(req.symbol, "M5", start, end)
-        else:
-            logger.info(f"  Fetching last {req.candle_count} candles for H4, H1, M15, M5")
-            # If candle_count is provided, we fetch it for the base timeframe (M15), 
-            # and fetch proportionally more for M5, less for H1/H4 so they align roughly in time.
-            # However, DataFetcher limits apply, so we fetch count for all to ensure coverage.
-            candles_h4 = await DataFetcher.get_historical_data(req.symbol, "H4", count=req.candle_count)
-            candles_h1 = await DataFetcher.get_historical_data(req.symbol, "H1", count=req.candle_count)
-            candles_m15 = await DataFetcher.get_historical_data(req.symbol, "M15", count=req.candle_count)
-            candles_m5 = await DataFetcher.get_historical_data(req.symbol, "M5", count=req.candle_count)
-    except DataFetchError as e:
-        logger.error(f"  Data fetch failed: {e}")
-        bot_service.log_system_event(f"Backtest data fetch failed: {e.reason}", category="BACKTEST", level="ERROR")
-        raise HTTPException(status_code=400, detail=str(e))
+                USER_BACKTEST_STATE[current_user.id]["progress"] = {"stage": "Fetching historical data...", "pct": 5}
+                if req.start_date and req.end_date:
+                    start = datetime.fromisoformat(req.start_date)
+                    end = datetime.fromisoformat(req.end_date)
+                    candles_h4 = await DataFetcher.get_data_range(req.symbol, "H4", start, end)
+                    candles_h1 = await DataFetcher.get_data_range(req.symbol, "H1", start, end)
+                    candles_m15 = await DataFetcher.get_data_range(req.symbol, "M15", start, end)
+                    candles_m5 = await DataFetcher.get_data_range(req.symbol, "M5", start, end)
+                else:
+                    candles_h4 = await DataFetcher.get_historical_data(req.symbol, "H4", count=req.candle_count)
+                    candles_h1 = await DataFetcher.get_historical_data(req.symbol, "H1", count=req.candle_count)
+                    candles_m15 = await DataFetcher.get_historical_data(req.symbol, "M15", count=req.candle_count)
+                    candles_m5 = await DataFetcher.get_historical_data(req.symbol, "M5", count=req.candle_count)
+            except DataFetchError as e:
+                bot_service.log_system_event(f"Backtest data fetch failed: {e.reason}", category="BACKTEST", level="ERROR")
+                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
+                return
 
-    if any(c is None or c.empty for c in [candles_h4, candles_h1, candles_m15, candles_m5]):
-        logger.warning(f"  Incomplete MTF data available for {req.symbol} — aborting backtest")
-        raise HTTPException(status_code=400, detail="Incomplete MTF data available for backtest")
+            if any(c is None or c.empty for c in [candles_h4, candles_h1, candles_m15, candles_m5]):
+                bot_service.log_system_event("Incomplete MTF data available for backtest", category="BACKTEST", level="ERROR")
+                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": "Incomplete MTF data"})
+                return
 
-    logger.info(f"  Fetched MTF candles successfully.")
-
-    # Generate signals using the unified SMCEngine
-    import pandas as pd
-    from backend.strategies.smc.engine import SMCEngine
-    from backend.strategies.smc.params import UserConfig
-    
-    config = UserConfig()
-    config.smc.min_signal_score = req.confluence_threshold
-    config.smc.swing_length_htf = req.swing_length
-    config.smc.ob_impulse_min_ratio = req.ob_impulse_ratio
-    config.smc.fvg_min_gap_pips = req.fvg_min_gap_pips
-    config.smc.liq_sweep_min_pips = req.liq_sweep_min_pips
-    config.smc.session_filter_enabled = req.session_filter_enabled
-    config.smc.news_filter_enabled = req.news_filter_enabled
-    engine = SMCEngine(config)
-    engine.is_backtesting = True
-
-    def _index_candles(df):
-        if 'time' in df.columns:
-            return df.set_index(pd.to_datetime(df['time'], unit='s'))
-        return df
-        
-    candles_h4_idx = _index_candles(candles_h4)
-    candles_h1_idx = _index_candles(candles_h1)
-    candles_m15_idx = _index_candles(candles_m15)
-    candles_m5_idx = _index_candles(candles_m5)
-    
-    # In order to simulate time progression, we iterate over the M15 timeframe (primary).
-    # We pass the data slices to the engine to simulate historical state.
-    signals = []
-    
-    async def generate_signals_simulated():
-        sigs = []
-        prev_h4_time = None
-        prev_h1_time = None
-        prev_m5_time = None
-        
-        import asyncio
-        
-        # Sort indices once just to be perfectly safe for .loc slicing
-        candles_h4_sorted = candles_h4_idx.sort_index()
-        candles_h1_sorted = candles_h1_idx.sort_index()
-        candles_m5_sorted = candles_m5_idx.sort_index()
-
-        for i in range(100, len(candles_m15_idx)):
-            # Yield to event loop periodically to prevent blocking the server!
-            if i % 10 == 0:
-                await asyncio.sleep(0)
-
-            current_time = candles_m15_idx.index[i]
+            # Generate signals using the unified SMCEngine
+            import pandas as pd
+            from backend.strategies.smc.engine import SMCEngine
+            from backend.strategies.smc.params import UserConfig
             
-            # Use rolling windows to prevent O(N^2) explosion during backtest
-            start_h4 = current_time - pd.Timedelta(days=200)
-            start_h1 = current_time - pd.Timedelta(days=50)
-            start_m15_idx = max(0, i - 1000)
-            start_m5 = current_time - pd.Timedelta(days=10)
-            
-            # FAST SLICING using .loc on sorted datetime index
-            slice_h4 = candles_h4_sorted.loc[start_h4:current_time]
-            slice_h1 = candles_h1_sorted.loc[start_h1:current_time]
-            slice_m15 = candles_m15_idx.iloc[start_m15_idx:i+1]
-            slice_m5 = candles_m5_sorted.loc[start_m5:current_time]
-            
-            if len(slice_h4) < 20 or len(slice_h1) < 20 or len(slice_m5) < 20:
-                continue
+            config = UserConfig()
+            config.smc.min_signal_score = req.confluence_threshold
+            config.smc.swing_length_htf = req.swing_length
+            config.smc.ob_impulse_min_ratio = req.ob_impulse_ratio
+            config.smc.fvg_min_gap_pips = req.fvg_min_gap_pips
+            config.smc.liq_sweep_min_pips = req.liq_sweep_min_pips
+            config.smc.session_filter_enabled = req.session_filter_enabled
+            config.smc.news_filter_enabled = req.news_filter_enabled
+            engine = SMCEngine(config)
+            engine.is_backtesting = True
+
+            def _index_candles(df):
+                if 'time' in df.columns:
+                    return df.set_index(pd.to_datetime(df['time'], unit='s'))
+                return df
                 
-            # CACHING: Only evaluate HTF if a new HTF candle has appeared
-            last_h4_time = slice_h4.index[-1]
-            if last_h4_time != prev_h4_time:
-                await engine.on_bar(req.symbol, "H4", slice_h4)
-                prev_h4_time = last_h4_time
-                
-            last_h1_time = slice_h1.index[-1]
-            if last_h1_time != prev_h1_time:
-                await engine.on_bar(req.symbol, "H1", slice_h1)
-                prev_h1_time = last_h1_time
-                
-            # Primary timeframe updates every step
-            await engine.on_bar(req.symbol, "M15", slice_m15)
+            candles_h4_idx = _index_candles(candles_h4)
+            candles_h1_idx = _index_candles(candles_h1)
+            candles_m15_idx = _index_candles(candles_m15)
+            candles_m5_idx = _index_candles(candles_m5)
             
-            # M5 updates
-            last_m5_time = slice_m5.index[-1]
-            sig = None
-            if last_m5_time != prev_m5_time:
-                sig = await engine.on_bar(req.symbol, "M5", slice_m5)
-                prev_m5_time = last_m5_time
+            signals = []
             
-            if sig:
-                sig_dict = {
-                    "symbol": sig.symbol,
-                    "direction": sig.direction,
-                    "time": int(current_time.timestamp()),
-                    "entry_price": sig.entry_price,
-                    "stop_loss": sig.stop_loss,
-                    "take_profit": sig.take_profit,
-                    "confluence_score": sig.confluence_score,
-                    "score_breakdown": sig.metadata.get("score_breakdown", {}),
-                    "metadata": sig.metadata,
-                }
-                sigs.append(sig_dict)
-        return sigs
+            async def generate_signals_simulated():
+                sigs = []
+                prev_h4_time = None
+                prev_h1_time = None
+                prev_m5_time = None
+                
+                import asyncio
+                
+                candles_h4_sorted = candles_h4_idx.sort_index()
+                candles_h1_sorted = candles_h1_idx.sort_index()
+                candles_m5_sorted = candles_m5_idx.sort_index()
 
-    logger.info(f"  Generating signals by simulating SMCEngine over {len(candles_m15_idx)} bars...")
-    # Wrap in to_thread if it's CPU bound, but since it has awaits it must run in the event loop.
-    # It's an async generator loop now.
-    signals = await generate_signals_simulated()
-    
-    logger.info(f"  Generated {len(signals)} signals")
-    
-    # We need to pass the base timeframe candles to the BacktestEngine so it can walk through prices.
-    # The M15 timeframe is ideal as the primary risk management ticker.
-    candles = candles_m15
+                for i in range(100, len(candles_m15_idx)):
+                    if i % 10 == 0:
+                        await asyncio.sleep(0)
+                        
+                    if i % 200 == 0:
+                        pct = int((i / len(candles_m15_idx)) * 80) + 10  # from 10% to 90%
+                        progress_obj = {"stage": "Running simulation...", "pct": pct}
+                        USER_BACKTEST_STATE[current_user.id]["progress"] = progress_obj
+                        try:
+                            # Using fire-and-forget to avoid blocking
+                            asyncio.create_task(ws_manager.broadcast_to_user(current_user.id, {
+                                "type": "backtest_progress",
+                                "stage": "Running simulation...",
+                                "pct": pct
+                            }))
+                        except: pass
 
-    # Build merged risk config with ALL override fields from the backtest form
-    merged_risk_config = {
-        "risk_per_trade_pct": req.risk_per_trade_pct,
-        "min_rr": req.min_rr,
-        "tp_count": req.tp_count,
-        "tp1_rr": req.tp1_rr,
-        "tp2_rr": req.tp2_rr,
-        "tp3_rr": req.tp3_rr,
-        "tp4_rr": req.tp4_rr,
-        "tp5_rr": req.tp5_rr,
-        "tp_splits": req.tp_splits,
-        "be_trigger_rr": req.be_trigger_rr,
-        "be_buffer_pips": req.be_buffer_pips,
-        "trail_method_tp2": req.trail_method_tp2,
-        "trail_method_tp3": req.trail_method_tp3,
-        "trail_method_tp4": req.trail_method_tp4,
-        "trail_method_tp5": req.trail_method_tp5,
-        "atr_trail_multiplier": req.atr_trail_multiplier,
-        "trail_pips": req.trail_pips,
-        "session_filter_enabled": req.session_filter_enabled,
-        "multi_position_mode": req.tp_count > 1,
-        "max_daily_consecutive_losses": req.max_daily_consecutive_losses,
-        "max_weekly_consecutive_losses": req.max_weekly_consecutive_losses,
-        "max_consecutive_losses": req.max_consecutive_losses,
-        "max_concurrent_positions": req.max_concurrent_positions,
-        "compounding_enabled": req.compounding_enabled,
-        **req.risk_config,  # Any extra overrides from risk_config dict
-    }
+                    current_time = candles_m15_idx.index[i]
+                    
+                    start_h4 = current_time - pd.Timedelta(days=200)
+                    start_h1 = current_time - pd.Timedelta(days=50)
+                    start_m15_idx = max(0, i - 1000)
+                    start_m5 = current_time - pd.Timedelta(days=10)
+                    
+                    slice_h4 = candles_h4_sorted.loc[start_h4:current_time]
+                    slice_h1 = candles_h1_sorted.loc[start_h1:current_time]
+                    slice_m15 = candles_m15_idx.iloc[start_m15_idx:i+1]
+                    slice_m5 = candles_m5_sorted.loc[start_m5:current_time]
+                    
+                    if len(slice_h4) < 20 or len(slice_h1) < 20 or len(slice_m5) < 20:
+                        continue
+                        
+                    last_h4_time = slice_h4.index[-1]
+                    if last_h4_time != prev_h4_time:
+                        await engine.on_bar(req.symbol, "H4", slice_h4)
+                        prev_h4_time = last_h4_time
+                        
+                    last_h1_time = slice_h1.index[-1]
+                    if last_h1_time != prev_h1_time:
+                        await engine.on_bar(req.symbol, "H1", slice_h1)
+                        prev_h1_time = last_h1_time
+                        
+                    await engine.on_bar(req.symbol, "M15", slice_m15)
+                    
+                    last_m5_time = slice_m5.index[-1]
+                    sig = None
+                    if last_m5_time != prev_m5_time:
+                        sig = await engine.on_bar(req.symbol, "M5", slice_m5)
+                        prev_m5_time = last_m5_time
+                    
+                    if sig:
+                        sig_dict = {
+                            "symbol": sig.symbol,
+                            "direction": sig.direction,
+                            "time": int(current_time.timestamp()),
+                            "entry_price": sig.entry_price,
+                            "stop_loss": sig.stop_loss,
+                            "take_profit": sig.take_profit,
+                            "confluence_score": sig.confluence_score,
+                            "score_breakdown": sig.metadata.get("score_breakdown", {}),
+                            "metadata": sig.metadata,
+                        }
+                        sigs.append(sig_dict)
+                return sigs
 
-    logger.info(f"  Running backtest engine...")
-    results = await run_backtest(
-        user_id=current_user.id,
-        strategy_id=req.strategy_id,
-        symbol=req.symbol,
-        candles=candles,
-        signals=signals,
-        risk_config=merged_risk_config,
-        initial_balance=req.initial_balance,
-        save_mode="DISCARD",  # Never auto-save — user decides
-    )
+            signals = await generate_signals_simulated()
+            candles = candles_m15
 
-    report = results.get("report")
-    elapsed = (_time.time() - bt_start) * 1000
-    pnl = results.get('final_balance', 0) - req.initial_balance
-    wr = (report.win_rate if report else 0) * 100
-    logger.info(f"═══ BACKTEST COMPLETE ═══ {req.symbol} | {results['total_trades']} trades | "
-                f"P&L=${pnl:.2f} | WR={wr:.1f}% | {elapsed:.0f}ms")
-    bot_service.log_system_event(
-        f"Backtest complete: {req.symbol} | {results['total_trades']} trades | P&L=${pnl:.2f} | WR={wr:.1f}%",
-        category="BACKTEST"
-    )
+            merged_risk_config = {
+                "risk_per_trade_pct": req.risk_per_trade_pct,
+                "min_rr": req.min_rr,
+                "tp_count": req.tp_count,
+                "tp1_rr": req.tp1_rr,
+                "tp2_rr": req.tp2_rr,
+                "tp3_rr": req.tp3_rr,
+                "tp4_rr": req.tp4_rr,
+                "tp5_rr": req.tp5_rr,
+                "tp_splits": req.tp_splits,
+                "be_trigger_rr": req.be_trigger_rr,
+                "be_buffer_pips": req.be_buffer_pips,
+                "trail_method_tp2": req.trail_method_tp2,
+                "trail_method_tp3": req.trail_method_tp3,
+                "trail_method_tp4": req.trail_method_tp4,
+                "trail_method_tp5": req.trail_method_tp5,
+                "atr_trail_multiplier": req.atr_trail_multiplier,
+                "trail_pips": req.trail_pips,
+                "session_filter_enabled": req.session_filter_enabled,
+                "multi_position_mode": req.tp_count > 1,
+                "max_daily_consecutive_losses": req.max_daily_consecutive_losses,
+                "max_weekly_consecutive_losses": req.max_weekly_consecutive_losses,
+                "max_consecutive_losses": req.max_consecutive_losses,
+                "max_concurrent_positions": req.max_concurrent_positions,
+                "compounding_enabled": req.compounding_enabled,
+                **req.risk_config,
+            }
 
-    # ── Sanitize numpy types to native Python for JSON serialization ──
-    import numpy as _np
-
-    def _sanitize(obj):
-        """Recursively convert numpy types to native Python types."""
-        if isinstance(obj, dict):
-            return {k: _sanitize(v) for k, v in obj.items()}
-        elif isinstance(obj, (list, tuple)):
-            return [_sanitize(v) for v in obj]
-        elif isinstance(obj, (_np.bool_, bool)):
-            return bool(obj)
-        elif isinstance(obj, (_np.integer,)):
-            return int(obj)
-        elif isinstance(obj, (_np.floating,)):
-            return float(obj)
-        elif isinstance(obj, _np.ndarray):
-            return obj.tolist()
-        return obj
-
-    # Return full results for frontend display
-    response = {
-        "backtest_id": results["backtest_id"],
-        "initial_balance": results["initial_balance"],
-        "final_balance": results["final_balance"],
-        "total_trades": results["total_trades"],
-        "total_signals": results.get("total_signals", 0),
-        "invalid_signals": results.get("invalid_signals", 0),
-        "equity_curve": results.get("equity_curve", []),
-        "trades": results.get("trades", []),
-        "grouped_trades": results.get("grouped_trades", []),
-        "run_logs": engine.run_logs,
-        "report": {
-            "win_rate": report.win_rate if report else 0,
-            "profit_factor": report.profit_factor if report else 0,
-            "sharpe_ratio": report.sharpe_ratio if report else 0,
-            "sortino_ratio": report.sortino_ratio if report else 0,
-            "max_drawdown_pct": report.max_drawdown_pct if report else 0,
-            "total_pnl": report.total_pnl if report else 0,
-            "expectancy_r": report.expectancy_r if report else 0,
-            "tp1_hit_rate": report.tp1_hit_rate if report else 0,
-            "tp2_hit_rate": report.tp2_hit_rate if report else 0,
-            "tp3_hit_rate": report.tp3_hit_rate if report else 0,
-            "tp4_hit_rate": report.tp4_hit_rate if report else 0,
-            "tp5_hit_rate": report.tp5_hit_rate if report else 0,
-            "sl_hit_rate": report.sl_hit_rate if report else 0,
-            "trail_hit_rate": report.trail_hit_rate if report else 0,
-            "be_hit_rate": report.be_hit_rate if report else 0,
-            "london_win_rate": report.london_win_rate if report else 0,
-            "ny_win_rate": report.ny_win_rate if report else 0,
-            "overlap_win_rate": report.overlap_win_rate if report else 0,
-            "max_consecutive_wins": report.max_consecutive_wins if report else 0,
-            "max_consecutive_losses": report.max_consecutive_losses if report else 0,
-        },
-    }
-
-    return _sanitize(response)
-
-
-@router.post("/backtests/{backtest_id}/save")
-async def save_backtest(
-    backtest_id: str,
-    req: SaveBacktestRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """User explicitly saves a backtest after reviewing results."""
-
-    def _epoch_to_dt(val):
-        """Convert epoch int/float to datetime, pass through datetime/None."""
-        if val is None:
-            return None
-        if isinstance(val, (int, float)):
-            return datetime.fromtimestamp(val, tz=timezone.utc)
-        if isinstance(val, str):
-            try:
-                return datetime.fromisoformat(val.replace('Z', '+00:00'))
-            except ValueError:
-                return None
-        return val
-
-    data = req.backtest_data
-    report = data.get("report", {})
-
-    run = BacktestRun(
-        id=backtest_id,
-        user_id=current_user.id,
-        strategy_id=data.get("strategy_id", "SMC_v1"),
-        symbol=data.get("symbol", ""),
-        start_date=_epoch_to_dt(data.get("start_date")) or datetime.now(timezone.utc),
-        end_date=_epoch_to_dt(data.get("end_date")) or datetime.now(timezone.utc),
-        params_snapshot=json.dumps(data.get("risk_config", {})),
-        total_trades=data.get("total_trades", 0),
-        win_rate=report.get("win_rate", 0),
-        profit_factor=report.get("profit_factor", 0),
-        sharpe_ratio=report.get("sharpe_ratio", 0),
-        max_drawdown_pct=report.get("max_drawdown_pct", 0),
-        total_pnl=report.get("total_pnl", 0),
-        tp1_hit_rate=report.get("tp1_hit_rate", 0),
-        tp2_hit_rate=report.get("tp2_hit_rate", 0),
-        tp3_hit_rate=report.get("tp3_hit_rate", 0),
-        tp4_hit_rate=report.get("tp4_hit_rate", 0),
-        tp5_hit_rate=report.get("tp5_hit_rate", 0),
-        be_hit_rate=report.get("be_hit_rate", 0),
-        trail_hit_rate=report.get("trail_hit_rate", 0),
-        run_logs=json.dumps(data.get("run_logs", [])),
-    )
-    db.add(run)
-
-    if req.save_mode == "FULL":
-        for trade_data in data.get("trades", []):
-            bt_trade = BacktestTrade(
-                backtest_id=backtest_id,
-                symbol=trade_data.get("symbol", ""),
-                direction=trade_data.get("direction"),
-                entry_price=trade_data.get("entry_price"),
-                exit_price=trade_data.get("exit_price"),
-                stop_loss=trade_data.get("stop_loss"),
-                entry_time=_epoch_to_dt(trade_data.get("entry_time")),
-                exit_time=_epoch_to_dt(trade_data.get("exit_time")),
-                tp_level_hit=trade_data.get("tp_level"),
-                exit_reason=trade_data.get("exit_reason"),
-                pnl=trade_data.get("pnl"),
-                be_applied=trade_data.get("be_applied", False),
-                trail_method=trade_data.get("trail_method"),
-                mae_pips=trade_data.get("mae_pips"),
-                mfe_pips=trade_data.get("mfe_pips"),
-                confluence_score=trade_data.get("confluence_score"),
+            USER_BACKTEST_STATE[current_user.id]["progress"] = {"stage": "Finalizing backtest...", "pct": 95}
+            results = await run_backtest(
+                user_id=current_user.id,
+                strategy_id=req.strategy_id,
+                symbol=req.symbol,
+                candles=candles,
+                signals=signals,
+                risk_config=merged_risk_config,
+                initial_balance=req.initial_balance,
+                save_mode="DISCARD",
             )
-            db.add(bt_trade)
 
-    await db.commit()
-    logger.info(f"Backtest saved: {backtest_id} ({req.save_mode})")
-    return {"saved": True, "backtest_id": backtest_id}
+            report = results.get("report")
+            elapsed = (_time.time() - bt_start) * 1000
+            pnl = results.get('final_balance', 0) - req.initial_balance
+            wr = (report.win_rate if report else 0) * 100
+            bot_service.log_system_event(
+                f"Backtest complete: {req.symbol} | {results['total_trades']} trades | P&L=${pnl:.2f} | WR={wr:.1f}%",
+                category="BACKTEST"
+            )
 
+            import numpy as _np
+
+            def _sanitize(obj):
+                if isinstance(obj, dict):
+                    return {k: _sanitize(v) for k, v in obj.items()}
+                elif isinstance(obj, (list, tuple)):
+                    return [_sanitize(v) for v in obj]
+                elif isinstance(obj, (_np.bool_, bool)):
+                    return bool(obj)
+                elif isinstance(obj, (_np.integer,)):
+                    return int(obj)
+                elif isinstance(obj, (_np.floating,)):
+                    return float(obj)
+                elif isinstance(obj, _np.ndarray):
+                    return obj.tolist()
+                return obj
+
+            response = {
+                "backtest_id": results["backtest_id"],
+                "initial_balance": results["initial_balance"],
+                "final_balance": results["final_balance"],
+                "total_trades": results["total_trades"],
+                "total_signals": results.get("total_signals", 0),
+                "invalid_signals": results.get("invalid_signals", 0),
+                "equity_curve": results.get("equity_curve", []),
+                "trades": results.get("trades", []),
+                "grouped_trades": results.get("grouped_trades", []),
+                "run_logs": engine.run_logs,
+                "report": {
+                    "win_rate": report.win_rate if report else 0,
+                    "profit_factor": report.profit_factor if report else 0,
+                    "sharpe_ratio": report.sharpe_ratio if report else 0,
+                    "sortino_ratio": report.sortino_ratio if report else 0,
+                    "max_drawdown_pct": report.max_drawdown_pct if report else 0,
+                    "total_pnl": report.total_pnl if report else 0,
+                    "expectancy_r": report.expectancy_r if report else 0,
+                    "tp1_hit_rate": report.tp1_hit_rate if report else 0,
+                    "tp2_hit_rate": report.tp2_hit_rate if report else 0,
+                    "tp3_hit_rate": report.tp3_hit_rate if report else 0,
+                    "tp4_hit_rate": report.tp4_hit_rate if report else 0,
+                    "tp5_hit_rate": report.tp5_hit_rate if report else 0,
+                    "sl_hit_rate": report.sl_hit_rate if report else 0,
+                    "trail_hit_rate": report.trail_hit_rate if report else 0,
+                    "be_hit_rate": report.be_hit_rate if report else 0,
+                    "london_win_rate": report.london_win_rate if report else 0,
+                    "ny_win_rate": report.ny_win_rate if report else 0,
+                    "overlap_win_rate": report.overlap_win_rate if report else 0,
+                    "max_consecutive_wins": report.max_consecutive_wins if report else 0,
+                    "max_consecutive_losses": report.max_consecutive_losses if report else 0,
+                },
+            }
+            
+            sanitized = _sanitize(response)
+            USER_BACKTEST_STATE[current_user.id] = {
+                "status": "complete",
+                "progress": {"stage": "complete", "pct": 100},
+                "result": sanitized
+            }
+            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": sanitized})
+            
+        except Exception as e:
+            USER_BACKTEST_STATE[current_user.id] = {
+                "status": "error",
+                "progress": {"stage": "error", "message": str(e), "pct": 0},
+                "result": None
+            }
+            import traceback
+            logger.error(f"Backtest error: {e}\n{traceback.format_exc()}")
+            from backend.api.websocket import manager as ws_manager
+            from backend.services.bot_service import bot_service
+            bot_service.log_system_event(f"Backtest failed: {str(e)}", category="BACKTEST", level="ERROR")
+            try:
+                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
+            except: pass
+
+    background_tasks.add_task(_run_backtest_task)
+    return {"status": "started", "message": "Backtest queued and running in the background."}
 
 @router.get("/backtests")
 async def list_backtests(
