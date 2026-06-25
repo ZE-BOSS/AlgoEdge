@@ -137,13 +137,17 @@ class BotService:
                     self._log_event(f"Scanning {symbol}...", category="SCAN")
 
                     try:
-                        # Fetch recent candles
-                        candles = await DataFetcher.get_historical_data(symbol, "M15", count=200)
-                        if candles is None or candles.empty:
-                            self._log_event(f"No data for {symbol}", "WARN", "SCAN")
+                        # Fetch multi-timeframe candles (limit 5000 for live)
+                        candles_h4 = await DataFetcher.get_historical_data(symbol, "H4", count=5000)
+                        candles_h1 = await DataFetcher.get_historical_data(symbol, "H1", count=5000)
+                        candles_m15 = await DataFetcher.get_historical_data(symbol, "M15", count=5000)
+                        candles_m5 = await DataFetcher.get_historical_data(symbol, "M5", count=5000)
+
+                        if any(c is None or c.empty for c in [candles_h4, candles_h1, candles_m15, candles_m5]):
+                            self._log_event(f"Incomplete MTF data for {symbol}", "WARN", "SCAN")
                             continue
 
-                        self._log_event(f"Fetched {len(candles)} candles for {symbol}", category="DATA")
+                        self._log_event(f"Fetched MTF data for {symbol} (H4/H1/M15/M5)", category="DATA")
 
                         # Try to run strategy engine
                         try:
@@ -155,15 +159,18 @@ class BotService:
                             engine = SMCEngine(config)
 
                             import pandas as pd
-                            # Ensure candles have proper index for the strategy
-                            if 'time' in candles.columns:
-                                candles_indexed = candles.set_index(
-                                    pd.to_datetime(candles['time'], unit='s')
-                                )
-                            else:
-                                candles_indexed = candles
+                            
+                            def _index_candles(df):
+                                if 'time' in df.columns:
+                                    return df.set_index(pd.to_datetime(df['time'], unit='s'))
+                                return df
 
-                            signal = await engine.on_bar(symbol, "M15", candles_indexed)
+                            # Feed the engine in hierarchical order
+                            await engine.on_bar(symbol, "H4", _index_candles(candles_h4))
+                            await engine.on_bar(symbol, "H1", _index_candles(candles_h1))
+                            await engine.on_bar(symbol, "M15", _index_candles(candles_m15))
+                            signal = await engine.on_bar(symbol, "M5", _index_candles(candles_m5))
+                            
                             if signal:
                                 self.total_signals_today += 1
                                 self._log_event(

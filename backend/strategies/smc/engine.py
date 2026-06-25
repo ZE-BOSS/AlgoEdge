@@ -176,6 +176,43 @@ class SMCEngine(BaseStrategy):
 
             # ── Build scorer context (Issue #19 fix) ──
             scorer_context = self._build_scorer_context(htf_bias, pattern)
+            
+            # ── Calculate Entry, SL, TP ──
+            entry_price = float(candles['close'].iloc[-1])
+            scorer_context["entry_price"] = entry_price
+            
+            # SL = M15 previous swing extreme + buffer
+            # We must pull swings from ltf_structure
+            ms_m15 = self.context.get("ltf_structure", {})
+            m15_swings = ms_m15.get("swings", [])
+            
+            # Fallback values
+            sl = entry_price * 0.99 if htf_bias == "BULLISH" else entry_price * 1.01
+            tp = entry_price * 1.03 if htf_bias == "BULLISH" else entry_price * 0.97
+            
+            if htf_bias == "BULLISH":
+                # Find last swing low on M15
+                lows = [s for s in m15_swings if s["type"] == "LOW"]
+                if lows:
+                    # Buffer of ~3 pips (we use a generic multiplier for now if point_value not avail)
+                    sl = float(lows[-1]["price"]) * 0.9995  
+                
+                # TP targets the origin of the ChoCH (last major swing high before pullback)
+                highs = [s for s in m15_swings if s["type"] == "HIGH"]
+                if highs:
+                    # The swing high that got broken during ChoCH or the one before it
+                    tp = float(highs[-2]["price"]) if len(highs) >= 2 else float(highs[-1]["price"])
+            else:
+                highs = [s for s in m15_swings if s["type"] == "HIGH"]
+                if highs:
+                    sl = float(highs[-1]["price"]) * 1.0005
+                
+                lows = [s for s in m15_swings if s["type"] == "LOW"]
+                if lows:
+                    tp = float(lows[-2]["price"]) if len(lows) >= 2 else float(lows[-1]["price"])
+                    
+            scorer_context["stop_loss"] = sl
+            scorer_context["tp1_price"] = tp
 
             # ── Score ──
             score = self.scorer.calculate_score(scorer_context)

@@ -38,11 +38,13 @@ class TradeGate:
         if sweep is None:
             return False, "No liquidity sweep detected before entry"
 
-        # Gate 3: Price must be at a POI (OB or FVG zone)
+        # Gate 3: Price must be at a POI (OB, FVG, Fib/OTE, or S&D)
         fresh_ob = context.get("fresh_ob")
-        active_fvgs = context.get("active_fvgs", [])
-        if fresh_ob is None and len(active_fvgs) == 0:
-            return False, "Price is not at any POI (no OB or FVG)"
+        fvg_inside_ob = context.get("fvg_inside_ob", False)
+        in_ote = context.get("in_ote_zone", False)
+        in_sd = context.get("in_sd_zone", False)
+        if fresh_ob is None and not fvg_inside_ob and not in_ote and not in_sd:
+            return False, "Price is not at any POI (no OB, FVG, Fib, or S&D zone)"
 
         # Gate 4: Minimum RR must be met
         entry = context.get("entry_price", 0)

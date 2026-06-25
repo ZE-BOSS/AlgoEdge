@@ -46,6 +46,8 @@ def get_symbol_info(symbol: str) -> dict:
                 "volume_max": info.volume_max,
                 "volume_step": info.volume_step,
                 "contract_size": info.trade_contract_size,
+                "tick_value": info.trade_tick_value,
+                "tick_size": info.trade_tick_size,
             }
     # Use InstrumentProfile for accurate per-instrument defaults
     try:
@@ -57,6 +59,8 @@ def get_symbol_info(symbol: str) -> dict:
                 "volume_max": profile.lot_max,
                 "volume_step": profile.lot_step,
                 "contract_size": profile.contract_size,
+                "tick_value": profile.point_value_per_lot,
+                "tick_size": profile.point_size,
             }
     except ImportError:
         pass
@@ -66,6 +70,8 @@ def get_symbol_info(symbol: str) -> dict:
         "volume_max": 100.0,
         "volume_step": 0.01,
         "contract_size": 100000,
+        "tick_value": 1.0,  # Fallback assumption
+        "tick_size": 0.00001,
     }
 
 
@@ -102,20 +108,22 @@ def calculate_lot_size(
     except ImportError:
         pass
 
-    # Fallback: use pip_size × contract_size (original forex logic)
-    pip_size = get_pip_size(symbol)
-    sl_pips = sl_distance / pip_size if pip_size > 0 else 0
+    # Universal calculation: Lot = Risk / (SL_distance * (Tick_Value / Tick_Size))
     info = get_symbol_info(symbol)
-    pip_value = pip_size * info["contract_size"]
+    tick_value = info.get("tick_value", 1.0)
+    tick_size = info.get("tick_size", 0.00001)
 
-    if sl_pips == 0 or pip_value == 0:
+    if tick_size == 0 or tick_value == 0 or sl_distance == 0:
         return 0.0
 
-    raw_lot = risk_amount / (sl_pips * pip_value)
+    # The USD value of a 1.0 price move per 1 standard lot
+    value_per_unit_move = tick_value / tick_size
+    raw_lot = risk_amount / (sl_distance * value_per_unit_move)
+
     clamped = max(info["volume_min"], min(info["volume_max"], raw_lot))
     step = info["volume_step"]
     rounded = round(clamped / step) * step if step > 0 else clamped
-    return round(rounded, 2)
+    return round(rounded, 3)
 
 
 def calculate_lot_from_dollars(
@@ -148,20 +156,21 @@ def calculate_lot_from_dollars(
     except ImportError:
         pass
 
-    # Fallback
-    pip_size = get_pip_size(symbol)
-    sl_pips = sl_distance / pip_size if pip_size > 0 else 0
+    # Universal calculation: Lot = Risk / (SL_distance * (Tick_Value / Tick_Size))
     info = get_symbol_info(symbol)
-    pip_value = pip_size * info["contract_size"]
+    tick_value = info.get("tick_value", 1.0)
+    tick_size = info.get("tick_size", 0.00001)
 
-    if sl_pips == 0 or pip_value == 0:
+    if tick_size == 0 or tick_value == 0 or sl_distance == 0:
         return 0.0
 
-    raw_lot = risk_dollars / (sl_pips * pip_value)
+    value_per_unit_move = tick_value / tick_size
+    raw_lot = risk_dollars / (sl_distance * value_per_unit_move)
+
     clamped = max(info["volume_min"], min(info["volume_max"], raw_lot))
     step = info["volume_step"]
     rounded = round(clamped / step) * step if step > 0 else clamped
-    return round(rounded, 2)
+    return round(rounded, 3)
 
 
 def kelly_lot_size(

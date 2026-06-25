@@ -78,10 +78,10 @@ class MarketStructureDetector:
             prev_sl = low_swings[-2]["price"]
             curr_sl = low_swings[-1]["price"]
 
-            hh = curr_sh > prev_sh  # Higher High
-            hl = curr_sl > prev_sl  # Higher Low
-            lh = curr_sh < prev_sh  # Lower High
-            ll = curr_sl < prev_sl  # Lower Low
+            hh = curr_sh > prev_sh
+            hl = curr_sl > prev_sl
+            lh = curr_sh < prev_sh
+            ll = curr_sl < prev_sl
 
             if hh and hl:
                 if self.trend == "BEARISH":
@@ -93,20 +93,26 @@ class MarketStructureDetector:
                         self.consecutive_bos = 1  # First BOS of new trend
                         self.trend_confirmed = False
                         self._last_bos_level = curr_sh
-                    # If only broke 1, not a valid ChoCH yet
+                        self.trend = "BULLISH"
                 else:
-                    last_bos = "BULLISH"
-                    self.consecutive_bos += 1
-                    self._last_bos_level = curr_sh
-                    if self.consecutive_bos >= self.min_bos_count:
-                        self.trend_confirmed = True
-                    self.bos_history.append({
-                        "direction": "BULLISH",
-                        "price": curr_sh,
-                        "index": high_swings[-1]["index"],
-                        "count": self.consecutive_bos,
-                    })
-                self.trend = "BULLISH"
+                    # BOS validation: must close above the previous swing high
+                    # We check if the candle that formed curr_sh closed above prev_sh
+                    # To be strict, latest_close should be above prev_sh, or the curr_sh close was above it.
+                    if latest_close > prev_sh:
+                        # Prevent double-counting the same BOS
+                        if self._last_bos_level != prev_sh:
+                            last_bos = "BULLISH"
+                            self.consecutive_bos += 1
+                            self._last_bos_level = prev_sh
+                            if self.consecutive_bos >= self.min_bos_count:
+                                self.trend_confirmed = True
+                            self.bos_history.append({
+                                "direction": "BULLISH",
+                                "price": prev_sh,
+                                "index": high_swings[-1]["index"],
+                                "count": self.consecutive_bos,
+                            })
+                    self.trend = "BULLISH"
 
             elif lh and ll:
                 if self.trend == "BULLISH":
@@ -117,19 +123,23 @@ class MarketStructureDetector:
                         self.consecutive_bos = 1
                         self.trend_confirmed = False
                         self._last_bos_level = curr_sl
+                        self.trend = "BEARISH"
                 else:
-                    last_bos = "BEARISH"
-                    self.consecutive_bos += 1
-                    self._last_bos_level = curr_sl
-                    if self.consecutive_bos >= self.min_bos_count:
-                        self.trend_confirmed = True
-                    self.bos_history.append({
-                        "direction": "BEARISH",
-                        "price": curr_sl,
-                        "index": low_swings[-1]["index"],
-                        "count": self.consecutive_bos,
-                    })
-                self.trend = "BEARISH"
+                    # BOS validation: must close below the previous swing low
+                    if latest_close < prev_sl:
+                        if self._last_bos_level != prev_sl:
+                            last_bos = "BEARISH"
+                            self.consecutive_bos += 1
+                            self._last_bos_level = prev_sl
+                            if self.consecutive_bos >= self.min_bos_count:
+                                self.trend_confirmed = True
+                            self.bos_history.append({
+                                "direction": "BEARISH",
+                                "price": prev_sl,
+                                "index": low_swings[-1]["index"],
+                                "count": self.consecutive_bos,
+                            })
+                    self.trend = "BEARISH"
 
         return self._result(last_bos, last_choch)
 
