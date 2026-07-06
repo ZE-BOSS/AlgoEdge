@@ -186,7 +186,7 @@ class BotService:
                 from backend.data.database import async_session_maker
                 from backend.data.models import UserConfigModel
                 from sqlalchemy import select
-                from backend.strategies.smc.params import UserConfigV2, UserConfig
+                from backend.strategies.strategy_one.params import UserConfigV2, UserConfig
                 import json
                 
                 async with async_session_maker() as session:
@@ -203,13 +203,15 @@ class BotService:
                     else:
                         config = UserConfig()
 
-                from backend.strategies.smc.engine import SMCEngine
                 from backend.risk.circuit_breaker import CircuitBreaker
+                from backend.strategies.registry import get_strategy
 
-                if not self.engine:
-                    self.engine = SMCEngine(config)
                 if not self.circuit_breaker:
                     self.circuit_breaker = CircuitBreaker(config.risk.to_dict() if hasattr(config.risk, 'to_dict') else config.risk.__dict__)
+
+                # Maintain a dictionary of engines per symbol
+                if not hasattr(self, 'engines'):
+                    self.engines = {}
 
                 for symbol in self.symbols:
                     if not self.running:
@@ -248,13 +250,31 @@ class BotService:
                                     return df.set_index(pd.to_datetime(df['time'], unit='s'))
                                 return df
 
+                            # ── DYNAMIC STRATEGY RESOLUTION ──
+                            # Find the strategy ID assigned to this symbol, or default to "SMC_v1"
+                            strategy_id = "SMC_v1"
+                            if hasattr(config, 'instrument_settings') and config.instrument_settings:
+                                for settings in config.instrument_settings:
+                                    if settings.symbol == symbol:
+                                        strategy_id = getattr(settings, 'strategy_id', "SMC_v1")
+                                        break
+                            
+                            # Instantiate engine if not exists
+                            if symbol not in self.engines or getattr(self.engines[symbol], 'strategy_id', None) != strategy_id:
+                                engine_class = get_strategy(strategy_id)
+                                self.engines[symbol] = engine_class(config)
+                                self.engines[symbol].strategy_id = strategy_id
+                                self._log_event(f"[{symbol}] Instantiated {strategy_id} Engine", "INFO", "BOT")
+                                
+                            current_engine = self.engines[symbol]
+
                             # Feed the engine in hierarchical order
-                            await self.engine.on_bar(symbol, "H4", _index_candles(candles_h4))
-                            await self.engine.on_bar(symbol, "H1", _index_candles(candles_h1))
-                            await self.engine.on_bar(symbol, "M15", _index_candles(candles_m15))
+                            await current_engine.on_bar(symbol, "H4", _index_candles(candles_h4))
+                            await current_engine.on_bar(symbol, "H1", _index_candles(candles_h1))
+                            await current_engine.on_bar(symbol, "M15", _index_candles(candles_m15))
                             
                             await asyncio.sleep(0.01)
-                            signal = await self.engine.on_bar(symbol, "M5", _index_candles(candles_m5))
+                            signal = await current_engine.on_bar(symbol, "M5", _index_candles(candles_m5))
                             await asyncio.sleep(0.01)
                             if signal:
                                 # Cooldown check

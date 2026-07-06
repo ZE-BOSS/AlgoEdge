@@ -1,111 +1,109 @@
 # Implementation Plan: Multi-Strategy Audit & Target Architecture
 
-This document serves as the comprehensive audit and implementation plan to transition the AlgoEdge codebase to a multi-strategy architecture where `SMC_Strategy-1.md` (Strategy One) and `strategy2.md` (Strategy Two) are the **only two canonical strategies** implemented.
+This document is the comprehensive audit and implementation plan for upgrading the AlgoEdge codebase to a robust, high-performance multi-strategy architecture. It incorporates extensive feedback regarding the integration of both the `SMC` and `CrashBoom` strategies, frontend performance optimization, dynamic charting, advanced analytics, and the resolution of architectural discrepancies.
 
 ---
 
-## 1. Current State
+## 1. Current State (Audit Summary)
 
-### Documentation Inventory
-- `CompoundingPlan_Spec.md`: Details the stepped fixed-dollar risk compounding algorithm.
-- `CrashBoom_Strategy_Spec.md`: Strategy spec for synthetic indices based on continuous drift + discrete jump mechanics.
-- `Frontend_PWA_LLM_Spec.md`: Frontend architecture, PWA features, and LLM trade analysis integration spec.
-- `RiskManagement_Spec.md`: Core risk management system spec including multi-TP, trailing stops, and break-even rules.
-- `SMC_Strategy-1.md`: **[CANONICAL: Strategy One]** Algorithmic strategy specification detailing the core Smart Money Concepts entry model (liquidity sweeps, order blocks, candlestick confirmation).
-- `SMC_Strategy_Spec.md`: Older, alternative SMC configuration and strategy specification.
-- `TradingBot_MasterPlan-2.md`: Overall system architecture, technology stack, and multi-user scaling vision.
-- `strategy2.md`: **[CANONICAL: Strategy Two]** Definitive step-by-step SMC execution flow combining HTF bias, IPDM phase gating, and LTF ChoCH confirmation.
+### Documentation & Strategy Inventory
+- **`SMC_Strategy-1.md` & `strategy2.md`**: Canonical specs for the Smart Money Concepts (SMC) strategy.
+- **`CrashBoom_Strategy_Spec.md`**: Spec for the Crash & Boom synthetic indices strategy (Continuous Drift + Discrete Jump).
+- **`RiskManagement_Spec.md`**: Spec for Multi-TP, Trailing Stop, and Break-Even rules.
+- **`CompoundingPlan_Spec.md`**: Spec for stepped fixed-dollar risk compounding.
+- **`Frontend_PWA_LLM_Spec.md`**: Spec for PWA and LLM integration.
 
-### Codebase Strategy Inventory
-Currently, the codebase implements a single, monolithic SMC strategy.
-- `backend/strategies/base_strategy.py`: Abstract base class defining the strategy interface.
-- `backend/strategies/registry.py`: Registry for storing and initializing strategies.
-- `backend/strategies/smc/engine.py`: The monolithic core SMC execution engine orchestrating all multi-timeframe signal logic.
-- `backend/strategies/smc/params.py`: Configuration schemas and default parameters for both the SMC strategy and global risk management.
-- `backend/strategies/smc/signals.py`: Validates signals against hard filters (RR, POI, spread).
-- `backend/strategies/smc/*.py`: Various detection modules (`asian_range.py`, `candlestick.py`, `confluence.py`, `fvg.py`, `ipdm.py`, `liquidity.py`, `market_structure.py`, `order_blocks.py`, `premium_discount.py`, `supply_demand.py`).
-- `backend/risk/*.py`: Global risk components (`engine.py`, `multi_tp.py`, `position_sizer.py`, `trailing_manager.py`, `breakeven_manager.py`, `circuit_breaker.py`, `news_filter.py`, `compounding.py`).
-- `backend/backtester/*.py`: Backtesting execution environment, runner, optimizer, and reporting tools.
+### Codebase Status & Existing Discrepancies
+- **Monolithic Engine**: The current codebase relies on a monolithic `smc/engine.py`. There is no actual multi-strategy architecture allowing `CrashBoom` to run simultaneously alongside `SMC`.
+- **Global Parameter Leakage**: The frontend settings (`Settings/Strategy.jsx`) blindly display SMC parameters regardless of the selected strategy or symbol. Parameters are not stored per-symbol.
+- **Frontend Sluggishness**: The UI (`Backtester.jsx`) hangs during backtesting and live journal rendering. This is caused by base64 encoded chart snapshots bloating JSON payloads and latency in DB/Redis calls.
+- **Trade Fragmentation**: Multi-TP positions (TP1, TP2, TP3) are incorrectly logged as completely separate trades rather than sub-positions of a single grouped trade.
+- **Broken / Ignored Features**:
+  - News Filter and Session Filter incorrectly apply to Synthetic Indices.
+  - Manual Bias Override is missing.
+- **Statistics Deficit**: The backtest report lacks deep analytics (Win rate by bias, win rate by confluence type, starting/ending balances per period).
 
 ---
 
-## 2. Target State
+## 2. Discrepancies Resolution: SMC_Strategy_Spec.md vs strategy2.md vs Codebase
 
-The system must run as a **MULTI-STRATEGY system** with exactly two distinct trading strategies:
-1. **Strategy One (`strategy_one/`)**: Implements `SMC_Strategy-1.md` (Core SMC model, focusing on sweeps, OBs, and strict candlestick confirmation).
-2. **Strategy Two (`strategy_two/`)**: Implements `strategy2.md` (4-Layer Multi-Timeframe Model, utilizing HTF Bias, IPDM Phase gating, M15 ChoCH, and M5 Confirmation).
+A deep audit revealed structural conflicts between the older `SMC_Strategy_Spec.md`, `strategy2.md`, and the `engine.py` codebase. The following resolutions have been chosen for implementation:
 
-### Target Architecture
-- **Shared Core Indicators**: The mathematical detection logic (BOS/ChoCH, FVGs, OBs, IPDM, Asian Range) currently trapped inside the monolithic `smc` strategy folder must be extracted into a shared `backend/strategies/core/` directory. Both Strategy One and Strategy Two will import and utilize these shared primitives.
-- **Strategy Selection**: Handled via `registry.py`. Users configure which strategy runs on which symbol via the frontend settings (e.g., `EURUSD: StrategyOne`, `XAUUSD: StrategyTwo`).
-- **Configuration Isolation**: Strategy-specific parameters must live in their respective strategy directories. Global risk parameters currently trapped in `smc/params.py` must be migrated to `backend/risk/params.py`. All parameters will be fully user-controllable (exposed to the UI/DB schemas).
-
----
-
-## 3. Full Discrepancy List
-
-### A. Architectural Discrepancies
-1. **Monolithic Strategy Engine (Severity: CRITICAL | Type: Architectural)**
-   - *Current Code:* A single massive `backend/strategies/smc/engine.py` tries to combine the rules of both canonical specs into one monolithic pipeline.
-   - *Spec Requirement:* The system must support Strategy One and Strategy Two as distinct, independent algorithms.
-2. **Parameter Coupling (Severity: MODERATE | Type: Architectural)**
-   - *Current Code:* `backend/strategies/smc/params.py` houses both strategy-specific parameters (e.g., OTE Fib levels) and global risk parameters (e.g., Kelly sizing, Multi-TP).
-   - *Spec Requirement:* Risk parameters apply system-wide and must be centrally located in the Risk module.
-
-### B. Legacy Conflicts & Missing Logic
-1. **Stop Loss Hardcoding (Severity: MODERATE | Type: Legacy Conflict)**
-   - *Current Code:* `engine.py` hardcodes a hierarchical structural SL fallback (Priority 1: M15 Swing, Priority 2: OB Extreme).
-   - *Spec Requirement:* `RiskManagement_Spec.md` outlines user-selectable `sl_method` (`OB_EXTREME`, `SWING_POINT`, `FVG_EDGE`, `ATR_BASED`). The hardcoded logic must be replaced with configuration-driven options.
-2. **IPDM & FVG Exceptions (Severity: MINOR | Type: Config Mismatch)**
-   - *Current Code:* `engine.py` contains hardcoded exemptions (e.g., skipping IPDM synchronization and FVG filters to boost trade frequency).
-   - *Spec Requirement:* These exemptions must be converted into user-controllable Boolean toggles (e.g., `require_ipdm_expansion_phase: bool`) within the Strategy Two parameter schema, defaulting to `False` if preferred, but not hardcoded as absolute bypasses in the engine logic.
+1. **Entry Confirmation Model**
+   - **Conflict**: `SMC_Strategy_Spec.md` mechanically enters on an LTF BOS, ignoring candlesticks. `strategy2.md` enters on M5 candlestick patterns.
+   - **Resolution**: Use the `strategy2.md` confirmation model (M5 candlestick patterns like Hammer/Engulfing). However, this M5 confirmation must occur strictly at the POIs defined in `SMC_Strategy_Spec.md`. Ensure that valid POIs include S&D (Supply & Demand) and Fibonacci zones, not just OBs and FVGs.
+2. **Confluence Requirements**
+   - **Conflict**: `SMC_Strategy_Spec.md` requires a hard minimum of 3 confluences. `strategy2.md` requires only 1 valid POI. The codebase uses a dynamic scoring system (e.g., >= 65).
+   - **Resolution**: Enforce a strict minimum of 3 confluences. Crucially, there must be at least one confluence present on *each* of the following timeframes simultaneously: H1, M15 (which must be an OB, FVG, Fib, or S&D), and M5 (candlestick confirmation).
+3. **Stop Loss Methodology**
+   - **Conflict**: `SMC_Strategy_Spec.md` places SL `beyond_poi`. `strategy2.md` uses structural swing fallback.
+   - **Resolution**: Implement hybrid logic. If an Order Block (OB) is present at the POI, use the `SMC_Strategy_Spec.md` SL placement (beyond the POI + buffer). If no OB is present, fall back to placing the SL at the structural swing point.
+4. **IPDM Logic**
+   - **Conflict**: `SMC_Strategy_Spec.md` enforces strict IPDM phases. Codebase currently exempts IPDM phase gating to improve frequency.
+   - **Resolution**: Re-enable and enforce the `SMC_Strategy_Spec.md` IPDM logic (Accumulation, Manipulation, Expansion), but calculate and track it exclusively on the **H4 timeframe**.
+5. **Risk & Sizing Logic**
+   - **Conflict**: `SMC_Strategy_Spec.md` dictates Kelly/fixed-pct sizing internally. `strategy2.md` uses decoupled 5-TP tiers.
+   - **Resolution**: Keep the `strategy2.md` decoupled risk and sizing logic.
 
 ---
 
-## 4. Existing Codebase Issues
+## 3. Target Architecture & Implementation Details
 
-- **Hardcoded Asset Type Checks:** `engine.py` explicitly checks `if instrument_type != "SYNTHETIC"` to bypass the Asian Range filter. This should be driven by an instrument profile configuration, not hardcoded string matching.
-- **Missing Guardrails:** The multi-TP scaling logic assumes ideal MT5 execution; it lacks protective bounds for symbols with extremely high minimum lot sizes where percentage-based splitting results in 0 lots.
-- **Risk Module Independence:** The risk modules (`circuit_breaker`, `news_filter`) currently rely on context passed down from the monolithic SMC engine rather than operating as a pure independent layer.
+The system must run as a **TRUE MULTI-STRATEGY system** supporting both `SMC` and `CrashBoom` seamlessly. **Crucially, all the features listed below apply to BOTH Live Trading and Backtesting.**
 
----
+### 3.1 Multi-Strategy Engine & Parameters *(For Live Trading & Backtesting)*
+- **Per-Symbol Configuration**: Strategy assignment and parameters are configured *per-symbol* (e.g., EURUSD -> SMC, Crash 500 -> CrashBoom).
+- **Dynamic Parameter Forms**: Refactor React forms (`Settings.jsx`, `Backtester.jsx`) to read a schema definition based on the selected strategy. SMC parameters will not leak into CrashBoom forms.
+- **Saved Trade Parameters**: Every generated trade logs a snapshot of the exact strategy parameters used, enabling historical review of which parameters yielded specific win rates.
 
-## 5. Files/Modules to Delete
+### 3.2 Dynamic Charting & Frontend Performance *(For Live Trading & Backtesting)*
+- **Eliminate Base64 Images**: Completely remove base64 static chart images from the backend API.
+- **Dynamic Multi-Chart Component**: Build a `MultiTimeframeChart.jsx` component using TradingView Lightweight Charts with interactive tabs for H4, H1, M15, M5, and M1 (if CrashBoom).
+- **Algorithmic Zone Marking**: The frontend charts will dynamically draw strategy zones based on backend metadata payloads:
+  - *H4 Chart*: Mark Bias direction.
+  - *H1 Chart*: Mark BOS (Break of Structure) zones.
+  - *M15 Chart*: Mark Confluences (FVG, ChoCH, OB, S&D).
+  - *CrashBoom*: Mark indicator zones (EMA boundaries, spikes).
+- **Frontend Caching & Lazy Loading**: Chart data is fetched lazily per active tab and cached. Redis will be run locally to reduce pub/sub latency. Backtest results will be chunked/paginated.
 
-1. `docs/CrashBoom_Strategy_Spec.md`
-   - *Justification:* Violates the explicit requirement that Strategy One and Strategy Two are the *only* two strategies implemented.
-2. `docs/SMC_Strategy_Spec.md`
-   - *Justification:* An older, superseded alternative SMC configuration document that conflicts with the canonical specs.
-3. `backend/strategies/smc/engine.py` (Eventually)
-   - *Justification:* Will be destroyed and replaced by `strategy_one/engine.py` and `strategy_two/engine.py`.
+### 3.3 Trade Management & Balances *(For Live Trading & Backtesting)*
+- **Trade Grouping**: Update the database schema so that TP1, TP2, and TP3 are tracked as `sub_positions` of a single unified `Trade` entity.
+- **Balance Tracking**: Explicitly record `balance_before` (balance prior to trade entry) and `balance_after` (balance after all sub-positions are closed) for every grouped trade.
+- **Time-Based Filtering**: Filter and group trades by Day, Week, Month, and Year (calculated dynamically from the trade's specific timestamp, not calendar start).
+- **Period Balances**: For each time-filtered group, display the `Starting Balance`, `Closing Balance`, and total `P&L` for that period.
 
----
+### 3.4 Deep Statistics Engine *(For Live Trading & Backtesting)*
+- **Verify Win Rate**: Audit and repair the core win rate calculation.
+- **Granular Analytics**:
+  - Calculate Win Rate by Bias (Bullish vs. Bearish).
+  - Calculate Win Rate by Confluence Score.
+  - *SMC Confirmations*: Win rate when FVG is present, OB is present, ChoCH is present.
+  - *CrashBoom Confirmations*: Win rate per specific technical indicator used.
 
-## 6. Files/Modules to Modify
-
-1. **`backend/strategies/smc/params.py`**
-   - *Action:* Split entirely. Move risk parameters to `backend/risk/params.py`. Move strategy parameters to the individual strategy folders.
-2. **`backend/strategies/registry.py`**
-   - *Action:* Update to support registering and instantiating `StrategyOne` and `StrategyTwo` dynamically based on user config.
-3. **`backend/risk/engine.py`**
-   - *Action:* Update to accept standard signals from the multi-strategy registry rather than SMC-specific contexts. Ensure it applies the `sl_method` configuration strictly.
-
----
-
-## 7. Files/Modules to Create
-
-1. **`backend/strategies/core/` (Directory)**
-   - *Purpose:* House all the mathematical detection primitives currently located in the `smc` folder (e.g., `market_structure.py`, `ipdm.py`, `fvg.py`). Both strategies will import from here.
-2. **`backend/strategies/strategy_one/engine.py` & `params.py`**
-   - *Purpose:* Dedicated implementation of `SMC_Strategy-1.md`.
-3. **`backend/strategies/strategy_two/engine.py` & `params.py`**
-   - *Purpose:* Dedicated implementation of `strategy2.md`.
-4. **`backend/risk/params.py`**
-   - *Purpose:* Centralized, global risk parameter schema decoupled from strategy-specific logic.
+### 3.5 Infrastructure & Bug Fixes
+- **Database Migration**: Migrate `backend/data/database.py` from PostgreSQL to a local SQLite database (`algoedge.db`) so it can be pushed to GitHub.
+- **Manual Bias Override *(Both Modes)***: Introduce a toggleable "Manual Bias" parameter per symbol. If set to Bullish/Bearish, the engine overrides the H4 structural bias. Signals conflicting with the manual bias are rejected.
+- **Fix Compounding Engine**: Audit and repair the `CompoundingPlan` module. *(Note: Compounding code updates will be submitted for manual approval before finalizing).*
+- **Filter Exemptions**: Ensure `NewsFilter` and `SessionFilter` explicitly ignore symbols with the `SYNTHETIC` tag.
 
 ---
 
-## 8. Open Questions
+## 4. Execution Roadmap
 
-1. **Symbol Subscription Management:** If a user configures EURUSD to trade using *both* Strategy One and Strategy Two, should the MT5 bridge generate two separate tick/bar loops, or will the bridge push a single bar event to the strategy registry which then broadcasts it to both strategy instances?
-2. **Strategy Two IPDM Exemption:** The canonical spec for Strategy Two recently updated the documentation to note that the IPDM Expansion phase gate is *exempted* in the codebase to improve trade frequency. Should the new `Strategy_Two` engine permanently remove the IPDM module entirely, or just expose it as an optional toggle (`enforce_ipdm_phase: false`)?
+1. **Phase 1: Foundation (Database & Redis)**
+   - Migrate `database.py` to SQLite.
+   - Configure local Redis instance for pub/sub.
+2. **Phase 2: Core Refactoring**
+   - Deconstruct the monolithic `smc/engine.py` into shared `core/` math, `smc/engine.py`, and `crashboom/engine.py`.
+   - Update DB schema for Trade Grouping and Balance Tracking (`balance_before`, `balance_after`).
+3. **Phase 3: Strategy Discrepancies Resolution**
+   - Implement the hybrid Stop Loss logic, H4 IPDM tracking, and strict 3-confluence requirement across H1/M15/M5.
+4. **Phase 4: Backend API & Analytics**
+   - Implement deep stats (Win rate by bias/confluence/confirmation).
+   - Strip base64 charting; implement OHLCV chunked payload delivery.
+5. **Phase 5: Frontend Refactoring**
+   - Build `MultiTimeframeChart.jsx` with zone drawing and caching.
+   - Make Parameter Forms dynamic per strategy/symbol.
+   - Implement Day/Week/Month/Year filters in Journal/Backtester.
+6. **Phase 6: Manual Review Items**
+   - Fix compounding engine and submit for manual approval.

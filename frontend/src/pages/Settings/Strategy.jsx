@@ -11,7 +11,12 @@ export default function StrategySettings() {
   const [saved, setSaved] = useState(false);
 
   const [config, setConfig] = useState({
-    symbols: ['XAUUSD', 'EURUSD', 'GBPUSD'],
+    symbols: ['XAUUSD', 'EURUSD', 'GBPUSD'], // legacy support
+    instrument_settings: [
+      { symbol: 'XAUUSD', strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false },
+      { symbol: 'EURUSD', strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false },
+      { symbol: 'GBPUSD', strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false }
+    ],
     htf_timeframe: 'H4',
     ltf_timeframe: 'M15',
     confluence_threshold: 60,
@@ -67,12 +72,31 @@ export default function StrategySettings() {
     'Step Index','Range Break 100 Index','Range Break 200 Index',
   ];
 
+  const activeSymbols = config.instrument_settings ? config.instrument_settings.filter(i => i.enabled).map(i => i.symbol) : config.symbols;
+
   const toggleSymbol = (sym) => {
-    if (config.symbols.includes(sym)) {
-      update('symbols', config.symbols.filter(s => s !== sym));
+    let settings = [...(config.instrument_settings || [])];
+    const exists = settings.find(i => i.symbol === sym);
+    
+    if (exists) {
+      exists.enabled = !exists.enabled;
     } else {
-      update('symbols', [...config.symbols, sym]);
+      settings.push({ symbol: sym, strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false });
     }
+    
+    const active = settings.filter(i => i.enabled).map(i => i.symbol);
+    setConfig({ ...config, instrument_settings: settings, symbols: active });
+  };
+
+  const updateSymbolSetting = (sym, key, val) => {
+    let settings = [...(config.instrument_settings || [])];
+    let exists = settings.find(i => i.symbol === sym);
+    if (!exists) {
+      exists = { symbol: sym, strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false };
+      settings.push(exists);
+    }
+    exists[key] = val;
+    setConfig({ ...config, instrument_settings: settings });
   };
 
   const updateBias = (sym, bias) => {
@@ -90,7 +114,7 @@ export default function StrategySettings() {
           {allSymbols.map(sym => (
             <button
               key={sym}
-              className={`btn btn-sm ${config.symbols.includes(sym) ? 'btn-primary' : 'btn-secondary'}`}
+              className={`btn btn-sm ${activeSymbols.includes(sym) ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => toggleSymbol(sym)}
             >
               {sym}
@@ -100,25 +124,55 @@ export default function StrategySettings() {
       </div>
 
       <div className="card">
-        <div className="card-header"><span className="card-title">Manual Bias Overrides</span></div>
+        <div className="card-header"><span className="card-title">Per-Symbol Strategy Configuration</span></div>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12 }}>
-          Override the algorithmic HTF trend for specific symbols. Leave as NONE to use automatic bias.
+          Assign a specific trading engine and parameters to each active symbol.
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-          {config.symbols.map(sym => (
-            <div key={sym} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
-              <strong style={{ fontSize: '0.85rem' }}>{sym}</strong>
-              <select 
-                value={(config.manual_bias_overrides || {})[sym] || 'NONE'} 
-                onChange={e => updateBias(sym, e.target.value)}
-                style={{ fontSize: '0.75rem', padding: '2px 6px' }}
-              >
-                <option value="NONE">Auto</option>
-                <option value="BULLISH">Bullish Only</option>
-                <option value="BEARISH">Bearish Only</option>
-              </select>
-            </div>
-          ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {activeSymbols.map(sym => {
+            const symConfig = (config.instrument_settings || []).find(i => i.symbol === sym) || {};
+            return (
+              <div key={sym} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                <strong style={{ fontSize: '0.9rem', width: '150px' }}>{sym}</strong>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Strategy Engine</label>
+                    <select 
+                      value={symConfig.strategy_id || 'SMC_v1'} 
+                      onChange={e => updateSymbolSetting(sym, 'strategy_id', e.target.value)}
+                      style={{ fontSize: '0.8rem', padding: '4px 8px' }}
+                    >
+                      <option value="SMC_v1">SMC Multi-TF</option>
+                      <option value="CrashBoom_v1">CrashBoom Drift</option>
+                    </select>
+                  </div>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Manual HTF Bias</label>
+                    <select 
+                      value={(config.manual_bias_overrides || {})[sym] || 'NONE'} 
+                      onChange={e => updateBias(sym, e.target.value)}
+                      style={{ fontSize: '0.8rem', padding: '4px 8px' }}
+                    >
+                      <option value="NONE">Auto-Detect</option>
+                      <option value="BULLISH">Force Bullish</option>
+                      <option value="BEARISH">Force Bearish</option>
+                    </select>
+                  </div>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.8rem', marginTop: 16 }}>
+                    <input 
+                      type="checkbox" 
+                      checked={symConfig.compounding_enabled || false} 
+                      onChange={e => updateSymbolSetting(sym, 'compounding_enabled', e.target.checked)} 
+                      style={{ width: 14, height: 14 }} 
+                    /> 
+                    Compounding
+                  </label>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

@@ -136,15 +136,16 @@ async def get_backtest_latest_result(current_user: User = Depends(get_current_us
             logger.warning(f"[API] Redis get latest_result failed: {e}")
             
     if state and state.get("status") == "complete":
-        result_data = state.get("result", {})
+        import copy
+        result_data = copy.deepcopy(state.get("result", {}))
         # Strip massive chart data from main payload
         trades = result_data.get("grouped_trades", result_data.get("trades", []))
         if isinstance(trades, list):
             for t in trades:
                 if isinstance(t, dict):
-                    t["chart_data"] = []
-                    t["chart_data_h1"] = []
-                    t["chart_data_m15"] = []
+                    t.pop("chart_data", None)
+                    t.pop("chart_data_h1", None)
+                    t.pop("chart_data_m15", None)
         
         # Strip massive run_logs array
         if "run_logs" in result_data:
@@ -274,8 +275,8 @@ async def run_backtest_endpoint(
 
             # Generate signals using the unified SMCEngine
             import pandas as pd
-            from backend.strategies.smc.engine import SMCEngine
-            from backend.strategies.smc.params import UserConfig
+            from backend.strategies.strategy_one.engine import SMCEngine
+            from backend.strategies.strategy_one.params import UserConfig
             
             config = UserConfig()
             config.smc.min_signal_score = req.confluence_threshold
@@ -532,6 +533,8 @@ async def run_backtest_endpoint(
                     "overlap_win_rate": report.overlap_win_rate if report else 0,
                     "max_consecutive_wins": report.max_consecutive_wins if report else 0,
                     "max_consecutive_losses": report.max_consecutive_losses if report else 0,
+                    "bias_stats": report.bias_stats if report and hasattr(report, "bias_stats") else {},
+                    "confluence_stats": report.confluence_stats if report and hasattr(report, "confluence_stats") else {},
                 },
             }
             
@@ -542,8 +545,17 @@ async def run_backtest_endpoint(
             current_state["progress"] = {"stage": "complete", "pct": 100}
             current_state["result"] = sanitized
             
+            # Create a stripped payload for the frontend to prevent UI freezing
+            import copy
+            ws_payload = copy.deepcopy(sanitized)
+            if "grouped_trades" in ws_payload:
+                for t in ws_payload["grouped_trades"]:
+                    t.pop("chart_data", None)
+                    t.pop("chart_data_h1", None)
+                    t.pop("chart_data_m15", None)
+            
             # Broadcast IMMEDIATELY so the frontend gets the data even if Redis is slow/failing
-            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": sanitized})
+            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
             
             # Now save to state (which writes to Redis and might block)
             await _save_state(current_state)
@@ -779,6 +791,31 @@ async def get_saved_trade_chart(
         "chart_data": safe_json_loads(t.chart_data, []),
         "chart_data_h1": safe_json_loads(t.chart_data_h1, []),
         "chart_data_m15": safe_json_loads(t.chart_data_m15, [])
+    }
+
+
+@router.get("/backtest_result/trade/{group_id}/chart")
+async def get_unsaved_trade_chart(
+    group_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch massive chart data for an unsaved trade from the current running/completed backtest state."""
+    state = await _get_state()
+    if not state or not state.get("result"):
+        raise HTTPException(status_code=404, detail="No active or completed backtest found")
+        
+    result = state["result"]
+    trades = result.get("grouped_trades", [])
+    
+    # Find the trade by group_id
+    trade = next((t for t in trades if t.get("group_id") == group_id), None)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found in current backtest")
+        
+    return {
+        "chart_data": trade.get("chart_data", []),
+        "chart_data_h1": trade.get("chart_data_h1", []),
+        "chart_data_m15": trade.get("chart_data_m15", [])
     }
 
 

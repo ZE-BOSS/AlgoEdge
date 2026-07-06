@@ -7,7 +7,7 @@ Source: RiskManagement_Spec.md Section 6
 """
 
 from typing import Dict, Any, Optional
-from backend.strategies.smc.params import UserConfig
+from backend.strategies.strategy_one.params import UserConfig
 from backend.strategies.base_strategy import TradeSignal
 from backend.utils.timeutils import is_kill_zone
 from backend.utils.logger import get_logger

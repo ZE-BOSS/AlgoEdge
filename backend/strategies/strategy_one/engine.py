@@ -17,17 +17,17 @@ from typing import Dict, Any, List, Optional
 
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal, TradeAction
 from backend.strategies.registry import register_strategy
-from backend.strategies.smc.params import UserConfig
+from backend.strategies.strategy_one.params import UserConfig
 from backend.risk.position_sizer import get_pip_size
 
-from .market_structure import MarketStructureDetector
-from .order_blocks import OrderBlockDetector
-from .fvg import FVGDetector
-from .liquidity import LiquidityMapper
+from backend.strategies.core.market_structure import MarketStructureDetector
+from backend.strategies.core.order_blocks import OrderBlockDetector
+from backend.strategies.core.fvg import FVGDetector
+from backend.strategies.core.liquidity import LiquidityMapper
 from .confluence import ConfluenceScorer
 from .signals import SignalGenerator
-from .candlestick import detect_confirmation_pattern
-from .ipdm import IPDMDetector
+from backend.strategies.core.candlestick import detect_confirmation_pattern
+from backend.strategies.core.ipdm import IPDMDetector
 
 from backend.utils.logger import get_logger
 from backend.services.bot_service import bot_service
@@ -38,17 +38,17 @@ logger = get_logger(__name__)
 
 # Try importing optional modules (may not exist yet)
 try:
-    from .premium_discount import PremiumDiscountCalculator
+    from backend.strategies.core.premium_discount import PremiumDiscountCalculator
 except ImportError:
     PremiumDiscountCalculator = None
 
 try:
-    from .asian_range import AsianRange
+    from backend.strategies.core.asian_range import AsianRange
 except ImportError:
     AsianRange = None
 
 try:
-    from .supply_demand import SupplyDemandDetector
+    from backend.strategies.core.supply_demand import SupplyDemandDetector
 except ImportError:
     SupplyDemandDetector = None
 
@@ -160,6 +160,21 @@ class SMCEngine(BaseStrategy):
                 self.log_event(f"[{symbol} H4] HTF Bias shifted to {self.bias}", "INFO", "SMC")
                 self.last_logged_htf_bias = self.bias
 
+            # Update IPDM on H4
+            h4_swings = ms_h4.get("swings", [])
+            h4_highs = [s for s in h4_swings if s["type"] == "HIGH"]
+            h4_lows = [s for s in h4_swings if s["type"] == "LOW"]
+            ipdm_state = self.ipdm.update(candles, h4_highs, h4_lows)
+            self.context["ipdm"] = ipdm_state
+            
+            current_phase = ipdm_state.get("phase", "UNKNOWN")
+            if current_phase != self.last_logged_phase:
+                if current_phase == "EXPANSION":
+                    self.log_event(f"[{symbol} IPDM H4] Entered EXPANSION phase! Hunting for entries...", "INFO", "SMC")
+                else:
+                    self.log_event(f"[{symbol} IPDM H4] Entered {current_phase} phase. Waiting...", "INFO", "SMC")
+                self.last_logged_phase = current_phase
+
             return None
             
         elif timeframe == "H1":
@@ -181,21 +196,7 @@ class SMCEngine(BaseStrategy):
                 if h1_trend != "NEUTRAL" and h1_trend == self.bias:
                     self.log_event(f"[{symbol} H1] Structure aligned with H4 Bias ({self.bias})", "INFO", "SMC")
                 self.last_logged_h1_trend = h1_trend
-            
-            # Update IPDM on H1
-            h1_swings = ms_h1.get("swings", [])
-            h1_highs = [s for s in h1_swings if s["type"] == "HIGH"]
-            h1_lows = [s for s in h1_swings if s["type"] == "LOW"]
-            ipdm_state = self.ipdm.update(candles, h1_highs, h1_lows)
-            self.context["ipdm"] = ipdm_state
-            
-            current_phase = ipdm_state.get("phase", "UNKNOWN")
-            if current_phase != self.last_logged_phase:
-                if current_phase == "EXPANSION":
-                    self.log_event(f"[{symbol} IPDM] Entered EXPANSION phase! Hunting for entries...", "INFO", "SMC")
-                else:
-                    self.log_event(f"[{symbol} IPDM] Entered {current_phase} phase. Waiting...", "INFO", "SMC")
-                self.last_logged_phase = current_phase
+
 
             # Cache ATR per H1 bar (Issue 6.4)
             lookback = min(14, len(candles) - 1)
@@ -386,16 +387,16 @@ class SMCEngine(BaseStrategy):
             buffer = 5.0 * pip_size
 
             if htf_bias == "BULLISH":
-                # SL Priority 1: Last M15 swing low below entry (structural)
-                lows = [s for s in m15_swings if s["type"] == "LOW" and float(s["price"]) < entry_price]
-                if lows:
-                    sl = float(lows[-1]["price"]) - buffer
+                # SL Priority 1: OB bottom
+                obs_ctx = self.context.get("obs", [])
+                bullish_obs = [ob for ob in obs_ctx if ob.get("type") == "BULLISH"]
+                if bullish_obs:
+                    sl = float(bullish_obs[-1].get("bottom", entry_price * 0.99)) - buffer
                 else:
-                    # SL Priority 2: OB bottom
-                    obs_ctx = self.context.get("obs", [])
-                    bullish_obs = [ob for ob in obs_ctx if ob.get("type") == "BULLISH"]
-                    if bullish_obs:
-                        sl = float(bullish_obs[-1].get("bottom", entry_price * 0.99)) - buffer
+                    # SL Priority 2: Last M15 swing low below entry (structural)
+                    lows = [s for s in m15_swings if s["type"] == "LOW" and float(s["price"]) < entry_price]
+                    if lows:
+                        sl = float(lows[-1]["price"]) - buffer
                     else:
                         # SL Priority 3: Fallback — confirmation candle low
                         sl = float(candles.iloc[-1]["low"]) - buffer
@@ -405,16 +406,16 @@ class SMCEngine(BaseStrategy):
                 if h1_highs:
                     tp = float(min(h1_highs, key=lambda s: float(s["price"]))["price"])
             else:
-                # SL Priority 1: Last M15 swing high above entry (structural)
-                highs = [s for s in m15_swings if s["type"] == "HIGH" and float(s["price"]) > entry_price]
-                if highs:
-                    sl = float(highs[-1]["price"]) + buffer
+                # SL Priority 1: OB top
+                obs_ctx = self.context.get("obs", [])
+                bearish_obs = [ob for ob in obs_ctx if ob.get("type") == "BEARISH"]
+                if bearish_obs:
+                    sl = float(bearish_obs[-1].get("top", entry_price * 1.01)) + buffer
                 else:
-                    # SL Priority 2: OB top
-                    obs_ctx = self.context.get("obs", [])
-                    bearish_obs = [ob for ob in obs_ctx if ob.get("type") == "BEARISH"]
-                    if bearish_obs:
-                        sl = float(bearish_obs[-1].get("top", entry_price * 1.01)) + buffer
+                    # SL Priority 2: Last M15 swing high above entry (structural)
+                    highs = [s for s in m15_swings if s["type"] == "HIGH" and float(s["price"]) > entry_price]
+                    if highs:
+                        sl = float(highs[-1]["price"]) + buffer
                     else:
                         # SL Priority 3: Fallback — confirmation candle high
                         sl = float(candles.iloc[-1]["high"]) + buffer
@@ -519,6 +520,18 @@ class SMCEngine(BaseStrategy):
             scorer_context["markings"] = markings
 
 
+            # ── HARD FILTER: Strict 3 Confluence Minimum (H1, M15, M5) ──
+            # H1 Confluence: Confirmed by Layer 2 (h1_trend == htf_bias + trend_confirmed)
+            # M5 Confluence: Confirmed by Layer 4 (detect_confirmation_pattern)
+            # M15 Confluence: Must have at least one POI (OB, FVG, S&D, or Fib)
+            m15_confluences = 0
+            if fresh_ob: m15_confluences += 1
+            if fvg_present: m15_confluences += 1
+            if self.context.get("in_sd_zone"): m15_confluences += 1
+            
+            if m15_confluences < 1:
+                return None  # Failed strict confluence requirement
+            
             # ── Score ──
             score = self.scorer.calculate_score(scorer_context)
 
@@ -532,31 +545,8 @@ class SMCEngine(BaseStrategy):
                 
                 sig = self.signal_gen.generate(scorer_context, score)
                 if sig:
-                    # Generate Base64 Snapshot
-                    from backend.analytics.snapshots import generate_trade_snapshot_b64
-                    try:
-                        # Slice to last 80 candles to prevent OOM / blocking warning
-                        snapshot_candles = candles.iloc[-80:].copy()
-                        
-                        b64 = await asyncio.to_thread(
-                            generate_trade_snapshot_b64,
-                            symbol=symbol,
-                            timeframe="M5",
-                            candles=snapshot_candles,
-                            order_blocks=self.context.get("obs", []),
-                            fvgs=self.context.get("fvgs", []),
-                            entry_price=sig.entry_price,
-                            stop_loss=sig.stop_loss,
-                            take_profit=sig.take_profit,
-                            direction=sig.direction,
-                            snapshot_type="ENTRY",
-                            trade_id="signal_preview"
-                        )
-                        if b64:
-                            sig.metadata["entry_snapshot_b64"] = b64
-                    except Exception as e:
-                        logger.error(f"Base64 snapshot generation failed: {e}")
-
+                    # Provide metadata for frontend algorithmic zone drawing (no base64)
+                    sig.metadata["chart_zones"] = markings
                     return sig
 
         return None

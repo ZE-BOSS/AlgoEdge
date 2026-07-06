@@ -7,8 +7,10 @@ export default function TradeChart({ group, timeframe = 'M5', height = 300 }) {
 
   useEffect(() => {
     let rawChartData = group.chart_data || [];
+    if (timeframe === 'H4') rawChartData = group.chart_data_h4 || [];
     if (timeframe === 'H1') rawChartData = group.chart_data_h1 || [];
     if (timeframe === 'M15') rawChartData = group.chart_data_m15 || [];
+    if (timeframe === 'M1') rawChartData = group.chart_data_m1 || [];
 
     if (!group || !rawChartData || rawChartData.length === 0 || !chartContainerRef.current) return;
     
@@ -103,6 +105,19 @@ export default function TradeChart({ group, timeframe = 'M5', height = 300 }) {
           { time: box.start_time, price: box.top },
           { time: endTime, price: box.bottom },
           color
+        );
+        series.attachPrimitive(rect);
+      });
+    }
+
+    // 2b. Add Fibonacci (OTE) Zones
+    if (group.smc_data && group.smc_data.fib_zones) {
+      group.smc_data.fib_zones.filter(z => z.timeframe === timeframe || !z.timeframe).forEach(zone => {
+        const endTime = zone.end_time || (uniqueData.length > 0 ? uniqueData[uniqueData.length - 1].time : zone.start_time + 86400);
+        const rect = new RectanglePrimitive(
+          { time: zone.start_time, price: zone.top },
+          { time: endTime, price: zone.bottom },
+          'rgba(234, 179, 8, 0.15)' // Golden/Yellow for Fib
         );
         series.attachPrimitive(rect);
       });

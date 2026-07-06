@@ -688,7 +688,17 @@ class CompoundingEngine:
 
         new_step = self.get_step_for_balance(new_balance)
 
-        if new_step.step_number > state.current_step:
+        # Determine if we are allowed to step up based on advance_mode
+        can_advance = False
+        if self.config.advance_mode == "AUTO":
+            can_advance = True
+        elif self.config.advance_mode == "CONSERVATIVE":
+            if state.total_wins_at_level >= self.config.conservative_wins_required:
+                can_advance = True
+        elif self.config.advance_mode == "MANUAL":
+            can_advance = False # Never advance automatically
+
+        if new_step.step_number > state.current_step and can_advance:
             # STEP UP
             state.current_step            = new_step.step_number
             state.risk_amount             = new_step.risk_amount

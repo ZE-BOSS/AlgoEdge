@@ -247,6 +247,8 @@ class BacktestTrade(Base):
     entry_price = Column(Float)
     exit_price = Column(Float)
     stop_loss = Column(Float)
+    balance_before = Column(Float)
+    balance_after = Column(Float)
     tp1_price = Column(Float)
     tp2_price = Column(Float)
     tp3_price = Column(Float)

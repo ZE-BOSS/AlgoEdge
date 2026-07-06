@@ -561,6 +561,7 @@ class InstrumentSettings:
     Stored in UserConfig. Allows users to customize behaviour per symbol.
     """
     symbol:          str
+    strategy_id:     str   = "SMC_v1"       # The registry ID of the strategy to run
     enabled:         bool  = True           # Trade this symbol at all
     max_lot_override: Optional[float] = None # Cap lot size (safety)
     custom_sl_buffer: Optional[float] = None # Override profile's sl_buffer_pips

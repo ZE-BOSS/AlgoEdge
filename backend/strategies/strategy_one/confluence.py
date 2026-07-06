@@ -7,7 +7,7 @@ Source: SMC_Strategy-1.md Section 13
 """
 
 from typing import Dict, Any
-from backend.strategies.smc.params import SMCParams
+from backend.strategies.strategy_one.params import SMCParams
 
 
 class ConfluenceScorer:

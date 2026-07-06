@@ -19,14 +19,19 @@ from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Create async engine — connects to Railway PostgreSQL
-engine = create_async_engine(
-    settings.database.url,
-    echo=settings.server.debug,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,  # verify connections are alive before use
-)
+# Create async engine
+is_sqlite = settings.database.url.startswith("sqlite")
+engine_kwargs = {
+    "echo": settings.server.debug,
+}
+if not is_sqlite:
+    engine_kwargs.update({
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_pre_ping": True,
+    })
+
+engine = create_async_engine(settings.database.url, **engine_kwargs)
 
 # Session factory
 async_session = async_sessionmaker(

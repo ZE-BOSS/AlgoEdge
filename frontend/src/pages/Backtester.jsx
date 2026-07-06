@@ -242,7 +242,7 @@ const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef
             ) : mergedGroup.chart_data && mergedGroup.chart_data.length > 0 ? (
               <div style={{ background: 'rgba(0,0,0,0.1)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
                 <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.2)' }}>
-                  {['H1', 'M15', 'M5'].map(tf => (
+                  {['H4', 'H1', 'M15', 'M5', 'M1'].map(tf => (
                     <button
                       key={tf}
                       onClick={() => setActiveChart(tf)}

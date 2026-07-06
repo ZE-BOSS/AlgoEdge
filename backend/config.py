@@ -42,7 +42,7 @@ class RedisConfig:
 
 @dataclass
 class DatabaseConfig:
-    url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/algoedge")
+    url: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///algoedge.db")
 
 
 @dataclass
