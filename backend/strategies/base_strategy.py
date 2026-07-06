@@ -23,6 +23,7 @@ class TradeSignal(BaseModel):
     take_profit: float
     confluence_score: int
     metadata: Dict[str, Any] = {}
+    chart_data: Optional[List[Dict[str, Any]]] = None
 
 class TradeAction(BaseModel):
     """Action to take on an open position."""

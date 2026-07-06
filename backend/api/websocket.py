@@ -11,6 +11,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 import json
 
 from backend.utils.logger import get_logger
+from backend.config import settings
 
 logger = get_logger(__name__)
 
@@ -81,7 +82,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-async def websocket_handler(websocket: WebSocket, user_id: str, token: str = None, redis_url: str = "redis://localhost:6379"):
+async def websocket_handler(websocket: WebSocket, user_id: str, token: str = None, redis_url: str = settings.redis.url):
     """
     WebSocket endpoint handler. Subscribes to Redis channels and forwards to client.
     Enforces JWT authentication to prevent unauthorized stream interception.

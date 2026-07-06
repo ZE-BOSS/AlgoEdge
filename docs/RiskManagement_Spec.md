@@ -40,17 +40,17 @@ if calculated_rr < user_config.min_rr:   # default min = 3.0
 
 ---
 
-## 2. Multiple Take Profit System (TP1 / TP2 / TP3)
+## 2. Multiple Take Profit System (Dynamic TPs)
 
 ### 2.1 Architecture
 
-Every trade can open **up to 3 sub-positions** (TP1, TP2, TP3), each:
+Every trade can open **up to 5 sub-positions** (TP1 through TP5), each with:
 - Same entry price
 - Same stop loss
 - Different take profit level
 - Different lot size (configurable)
 
-MT5 implementation: 3 separate orders placed simultaneously, each with a unique magic number suffix (`USER_MAGIC + 10` for TP1, `+ 20` for TP2, `+ 30` for TP3).
+MT5 implementation: 5 separate orders placed simultaneously, each with a unique magic number suffix (`USER_MAGIC + 10` for TP1, `+ 20` for TP2, etc.).
 
 ### 2.2 TP Level Calculation
 
@@ -60,36 +60,36 @@ Given:
   Stop Loss    = SL
   Risk         = R = |E - SL|  (1 R unit)
 
-TP1 = E + (R × tp1_rr_multiplier)   # default 1:3 minimum
-TP2 = E + (R × tp2_rr_multiplier)   # default 1:5 standard
-TP3 = E + (R × tp3_rr_multiplier)   # default 1:7 or 1:10 (next liquidity)
+TP1 = E + (R × tp1_rr_multiplier)
+TP2 = E + (R × tp2_rr_multiplier)
+TP3 = E + (R × tp3_rr_multiplier)
+TP4 = E + (R × tp4_rr_multiplier)
+TP5 = E + (R × tp5_rr_multiplier)
 
 For SELL trades:
 TP1 = E - (R × tp1_rr_multiplier)
 TP2 = E - (R × tp2_rr_multiplier)
-TP3 = E - (R × tp3_rr_multiplier)
+# ... etc
 ```
 
 ### 2.3 Position Size Split (User Configurable)
 
-Default allocation across the three TP levels (adds to 100%):
+Default allocation across the active TP levels (adds to 100%):
 
 | TP Level | Default % | Description |
 |----------|-----------|-------------|
-| TP1 | 40% | Closes first — books profit quickly, de-risks |
-| TP2 | 35% | Mid target — standard move |
-| TP3 | 25% | Runner — extended move / maximum RR target |
+| TP1 | 30% | Closes first — books profit quickly, triggers BE |
+| TP2 | 25% | Mid target |
+| TP3 | 20% | Extended target |
+| TP4 | 15% | Trend continuation runner |
+| TP5 | 10% | Maximum HTF runner |
 
-**Example:** 0.10 lot total risk → TP1 = 0.04 lots, TP2 = 0.035 lots, TP3 = 0.025 lots. MT5 rounds to 2 decimal places — `position_sizer` handles this rounding.
-
-User can adjust split percentages: e.g. 50/30/20, 33/33/34, or 60/40/0 (no TP3).
+**Example:** 0.10 lot total risk → TP1 = 0.03, TP2 = 0.025, etc. MT5 rounds to 2 decimal places — `position_sizer` handles this rounding. User can define custom splits like `50,50` (using only 2 TPs) or `30,25,20,15,10` in the frontend settings.
 
 ### 2.4 TP Level Override Rules
 
-- If calculated RR for TP2 < user's minimum RR: **disable TP2**, use only TP1 + TP3
-- If calculated RR for TP3 < 1:5: **disable TP3**, use TP1 + TP2 only
-- If only TP1 is achievable with minimum RR: **use single position mode** (no split)
-- TP3 is always anchored to the **next external liquidity pool** (SMC target), not a fixed multiplier
+- The number of active TPs is determined dynamically by the length of the `tp_splits` array.
+- If calculated RR for any TP tier is lower than minimum RR: **disable that tier**.
 
 ---
 
@@ -220,15 +220,17 @@ Good for: Higher-priced instruments (Gold, BTC)
 Config: trail_pct = 0.005 (0.5%)
 ```
 
-**Per-Position Trailing:** Each of TP1, TP2, TP3 sub-positions can have **different trailing configurations**:
+**Per-Position Trailing:** Each active sub-position (TP1 through TP5) can have **different independent trailing configurations**:
 
 | Sub-Position | Recommended Trail | Rationale |
 |--------------|------------------|-----------|
-| TP1 (40%) | No trail — hits TP1 and closes | Book profit quickly |
-| TP2 (35%) | ATR trail after TP1 hit | Ride the move with protection |
-| TP3 (25%) | Structure trail after TP2 hit | Maximum runner potential |
+| TP1 | No trail — hits TP1 and closes | Book profit quickly |
+| TP2 | ATR trail after TP1 hit | Ride the move with protection |
+| TP3 | Structure trail after TP2 hit | Maximum runner potential |
+| TP4 | Structure trail (Higher timeframe) | Trend continuation |
+| TP5 | Fixed Pip or % Trail | Maximum extension |
 
-### 3.4 Trailing Stop State Machine
+### 3.4 Trailing Stop Logic
 
 ```
 INITIAL:
@@ -237,16 +239,16 @@ INITIAL:
 
 AFTER TP1 HIT:
   TP1 sub-position closes
-  BE applied on TP2 + TP3 positions
+  BE applied on remaining active positions
   TP2 trailing activates (ATR or user config)
 
-AFTER TP2 HIT:
-  TP2 sub-position closes
-  TP3 structure trail activates
-  SL trails to each new confirmed swing point
+AFTER TP(N) HIT:
+  TP(N) sub-position closes
+  TP(N+1) trailing activates
+  SL trails according to the specific configuration for that tier
 
-FINAL EXIT (TP3):
-  Either TP3 hits → full close at target
+FINAL EXIT:
+  Either final TP hits → full close at target
   Or trailing SL is hit → close remaining at trail level
   Or manual close → user closes from dashboard
 ```
@@ -405,14 +407,18 @@ If weekly_pnl reaches -(max_weekly_loss_pct × account_balance):
   → Resume Monday 00:01 GMT
 ```
 
-### 6.3 Consecutive Loss Streak
+### 6.3 Consecutive Loss Streaks (Daily/Weekly)
 
 ```
-If consecutive_losses >= max_consecutive_losses (default: 5):
-  → PAUSE strategy
-  → Notification: "5 consecutive losses — review required"
-  → User must manually re-enable from dashboard
-  → This prevents automated compounding of losing streaks
+If daily_consecutive_losses >= max_daily_consecutive_losses (default: 5):
+  → PAUSE strategy for the rest of the day
+  → Notification: "Daily consecutive loss limit reached"
+  → Auto-resumes at 00:00 GMT
+
+If weekly_consecutive_losses >= max_weekly_consecutive_losses (default: 15):
+  → PAUSE strategy for the rest of the week
+  → Notification: "Weekly consecutive loss limit reached"
+  → Auto-resumes Monday at 00:00 GMT
 ```
 
 ### 6.4 Correlation Guard
@@ -431,7 +437,8 @@ If two open positions are on highly correlated pairs:
 | `risk_per_trade_pct` | 1.0% | 0.25–3.0% | Risk per single trade |
 | `max_daily_loss_pct` | 5.0% | 1–10% | Daily circuit breaker |
 | `max_weekly_loss_pct` | 10.0% | 3–20% | Weekly circuit breaker |
-| `max_consecutive_losses` | 5 | 3–10 | Streak breaker |
+| `max_daily_consecutive_losses` | 5 | 3–10 | Daily streak breaker |
+| `max_weekly_consecutive_losses`| 15| 5–30 | Weekly streak breaker |
 | `max_concurrent_positions` | 3 | 1–10 | Max open trades |
 | `max_correlated_risk_pct` | 4.0% | 1–8% | Max on correlated pairs |
 | `min_rr` | 3.0 | 3.0–10.0 | Minimum RR to trade |
@@ -684,9 +691,15 @@ The backtester uses the **identical compounding engine** as live trading. Run th
 
 ---
 
-## 11. Instrument Coverage & Primary Focus
+## 11. Instrument Coverage & Timezone Rules
 
-### 11.1 Primary Instruments
+### 11.1 Default Timezone (WAT / GMT+1)
+
+The system defaults to **West Africa Time (WAT) / GMT+1** (Lagos/Nigeria) for all internal calculations, killzones, and display data. 
+- **User Configurable:** Users can update their local timezone in settings, which will adjust the display and killzone calculations relative to MT5 server time.
+- **Backtesting Parity:** The backtester accurately converts historical bar times (which are often in broker server time) to the selected timezone before checking session blocks and killzones.
+
+### 11.2 Primary Instruments
 
 | Priority | Instrument | Type | Why |
 |----------|-----------|------|-----|

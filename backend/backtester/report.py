@@ -12,7 +12,8 @@ def generate_backtest_report(backtest_results: Dict[str, Any]) -> Dict[str, Any]
     Format backtest results into a standardized report.
     """
     trades = backtest_results.get("trades", [])
-    stats = compute_portfolio_stats(trades)
+    initial_balance = backtest_results.get("initial_balance", 10000.0)
+    stats = compute_portfolio_stats(trades, initial_balance)
     
     report = {
         "summary": stats,

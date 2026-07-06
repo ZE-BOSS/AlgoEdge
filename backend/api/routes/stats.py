@@ -56,13 +56,23 @@ async def get_user_stats(
 
     # Compute live from trades
     trades_result = await db.execute(
-        select(Trade).where(Trade.user_id == current_user.id, Trade.status == "CLOSED")
+        select(Trade).where(Trade.user_id == current_user.id, Trade.status == "CLOSED").order_by(Trade.entry_time.asc())
     )
     trades = trades_result.scalars().all()
+    
+    initial_balance = 10000.0
+    if trades and trades[0].balance_before is not None and trades[0].balance_before > 0:
+        initial_balance = trades[0].balance_before
+    elif trades and trades[-1].balance_after is not None and trades[-1].balance_after > 0:
+        total_pnl = sum(t.pnl for t in trades if t.pnl is not None)
+        initial_balance = trades[-1].balance_after - total_pnl
+        if initial_balance <= 0:
+            initial_balance = 10000.0
+            
     trade_dicts = [{
         "pnl": t.pnl,
         "exit_reason": t.exit_reason,
         "be_applied": False,
     } for t in trades]
 
-    return compute_portfolio_stats(trade_dicts)
+    return compute_portfolio_stats(trade_dicts, initial_balance=initial_balance)

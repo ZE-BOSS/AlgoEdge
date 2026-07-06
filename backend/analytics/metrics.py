@@ -46,7 +46,10 @@ def compute_trade_metrics(trade: Dict[str, Any]) -> Dict[str, Any]:
     exit_time = trade.get("exit_time")
     duration = 0
     if entry_time and exit_time:
-        duration = (exit_time - entry_time).total_seconds() / 60 if hasattr(entry_time, 'total_seconds') else 0
+        try:
+            duration = (exit_time - entry_time).total_seconds() / 60
+        except AttributeError:
+            duration = (exit_time - entry_time) / 60
 
     return {
         "pnl_pips": calculate_pips(symbol, entry, exit_p),
@@ -75,7 +78,7 @@ def calculate_sortino(returns: List[float], periods_per_year: float = 252) -> fl
     arr = np.array(returns)
     mean = np.mean(arr)
     downside = arr[arr < 0]
-    if len(downside) == 0:
+    if len(downside) < 2:
         return float('inf')
     downside_std = np.std(downside, ddof=1)
     if downside_std == 0:
@@ -96,10 +99,14 @@ def calculate_max_drawdown(equity_curve: List[float]) -> tuple[float, float]:
     for val in equity_curve:
         if val > peak:
             peak = val
-        dd = peak - val
-        if dd > max_dd_abs:
-            max_dd_abs = dd
-            max_dd_pct = dd / peak if peak > 0 else 0
+        dd_abs = peak - val
+        dd_pct = dd_abs / peak if peak > 0 else 0.0
+        
+        if dd_abs > max_dd_abs:
+            max_dd_abs = dd_abs
+        if dd_pct > max_dd_pct:
+            max_dd_pct = dd_pct
+            
     return max_dd_pct, max_dd_abs
 
 
@@ -116,7 +123,7 @@ def max_consecutive(values: List[bool]) -> int:
     return max_count
 
 
-def compute_portfolio_stats(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+def compute_portfolio_stats(trades: List[Dict[str, Any]], initial_balance: float = 10000.0) -> Dict[str, Any]:
     """
     Compute aggregate portfolio statistics from a list of closed trades.
     Source: RiskManagement_Spec.md Section 8.2
@@ -125,6 +132,7 @@ def compute_portfolio_stats(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         return {"total_trades": 0}
 
     pnls = [t.get("pnl", 0) for t in trades]
+    pct_returns = [t.get("pnl", 0) / t.get("balance_before", initial_balance) if t.get("balance_before", initial_balance) > 0 else 0 for t in trades]
     wins = [t for t in trades if t.get("pnl", 0) > 0]
     losses = [t for t in trades if t.get("pnl", 0) <= 0]
 
@@ -136,12 +144,18 @@ def compute_portfolio_stats(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     avg_loss = np.mean(loss_pnls) if loss_pnls else 0
 
     gross_profit = sum(win_pnls) if win_pnls else 0
-    gross_loss = sum(loss_pnls) if loss_pnls else 1
+    gross_loss = sum(loss_pnls)
 
-    # Build equity curve
-    equity = [0.0]
-    for pnl in pnls:
-        equity.append(equity[-1] + pnl)
+    # Build equity curve from balance_after when available (more accurate),
+    # falling back to cumulative P&L if balance_after is missing.
+    sorted_trades = sorted(trades, key=lambda t: t.get("exit_time") or t.get("entry_time") or 0)
+    equity = [initial_balance]
+    for t in sorted_trades:
+        bal_after = t.get("balance_after")
+        if bal_after is not None and bal_after > 0:
+            equity.append(float(bal_after))
+        else:
+            equity.append(equity[-1] + t.get("pnl", 0))
 
     max_dd_pct, max_dd_abs = calculate_max_drawdown(equity)
 
@@ -163,8 +177,8 @@ def compute_portfolio_stats(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "avg_loss": avg_loss,
         "profit_factor": gross_profit / gross_loss if gross_loss > 0 else float('inf'),
         "expectancy": (win_rate * avg_win) - ((1 - win_rate) * avg_loss),
-        "sharpe_ratio": calculate_sharpe(pnls),
-        "sortino_ratio": calculate_sortino(pnls),
+        "sharpe_ratio": calculate_sharpe(pct_returns),
+        "sortino_ratio": calculate_sortino(pct_returns),
         "max_drawdown_pct": max_dd_pct,
         "max_drawdown_abs": max_dd_abs,
         "max_consecutive_wins": max_consecutive(is_win),

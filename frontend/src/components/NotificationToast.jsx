@@ -3,17 +3,17 @@ import { useNotificationStore } from '../store';
 import { X, CheckCircle, AlertTriangle, Info, XCircle } from 'lucide-react';
 
 const icons = {
-  success: <CheckCircle className="w-5 h-5 text-green-400" />,
-  error: <XCircle className="w-5 h-5 text-red-400" />,
-  warning: <AlertTriangle className="w-5 h-5 text-yellow-400" />,
-  info: <Info className="w-5 h-5 text-blue-400" />,
+  success: <CheckCircle className="toast-icon success" />,
+  error: <XCircle className="toast-icon error" />,
+  warning: <AlertTriangle className="toast-icon warning" />,
+  info: <Info className="toast-icon info" />,
 };
 
 const bgColors = {
-  success: 'bg-green-500/10 border-green-500/20',
-  error: 'bg-red-500/10 border-red-500/20',
-  warning: 'bg-yellow-500/10 border-yellow-500/20',
-  info: 'bg-blue-500/10 border-blue-500/20',
+  success: 'toast-success',
+  error: 'toast-error',
+  warning: 'toast-warning',
+  info: 'toast-info',
 };
 
 const Toast = ({ notification }) => {
@@ -32,24 +32,18 @@ const Toast = ({ notification }) => {
   const bgStyle = bgColors[notification.type] || bgColors.info;
 
   return (
-    <div className={`pointer-events-auto w-full max-w-sm overflow-hidden rounded-lg border shadow-lg ring-1 ring-black ring-opacity-5 transition-all ${bgStyle} backdrop-blur-md`}>
-      <div className="p-4">
-        <div className="flex items-start">
-          <div className="flex-shrink-0 pt-0.5">{Icon}</div>
-          <div className="ml-3 w-0 flex-1 pt-0.5">
-            <p className="text-sm font-medium text-white">{notification.title}</p>
-            <p className="mt-1 text-sm text-gray-300">{notification.message}</p>
-          </div>
-          <div className="ml-4 flex flex-shrink-0">
-            <button
-              type="button"
-              className="inline-flex rounded-md bg-transparent text-gray-400 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-              onClick={() => removeNotification(notification.id)}
-            >
-              <span className="sr-only">Close</span>
-              <X className="h-5 w-5" aria-hidden="true" />
-            </button>
-          </div>
+    <div className={`toast-card ${bgStyle}`}>
+      <div className="toast-content">
+        <div className="toast-icon-wrapper">{Icon}</div>
+        <div className="toast-text">
+          <p className="toast-title">{notification.title}</p>
+          <p className="toast-message">{notification.message}</p>
+        </div>
+        <div className="toast-close">
+          <button type="button" className="toast-close-btn" onClick={() => removeNotification(notification.id)}>
+            <span className="sr-only">Close</span>
+            <X aria-hidden="true" />
+          </button>
         </div>
       </div>
     </div>
@@ -80,11 +74,8 @@ export const NotificationContainer = () => {
   }, [addNotification]);
 
   return (
-    <div
-      aria-live="assertive"
-      className="pointer-events-none fixed inset-0 flex px-4 py-6 sm:items-start sm:p-6 z-50 mt-16"
-    >
-      <div className="flex w-full flex-col items-center space-y-4 sm:items-end">
+    <div aria-live="assertive" className="toast-container">
+      <div className="toast-list">
         {notifications.map((notification) => (
           <Toast key={notification.id} notification={notification} />
         ))}

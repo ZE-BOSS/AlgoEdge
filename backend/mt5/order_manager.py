@@ -40,7 +40,16 @@ class OrderManager:
             return {"success": True, "ticket": 12345}
             
         action = mt5.ORDER_TYPE_BUY if direction.upper() in ("BUY", "BULLISH") else mt5.ORDER_TYPE_SELL
-        price = mt5.symbol_info_tick(symbol).ask if direction.upper() in ("BUY", "BULLISH") else mt5.symbol_info_tick(symbol).bid
+        
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick:
+            logger.error(f"Order failed: Invalid symbol {symbol} or not found in Market Watch.")
+            return {"success": False, "error": "Invalid symbol"}
+            
+        price = tick.ask if direction.upper() in ("BUY", "BULLISH") else tick.bid
+        
+        sym_info = mt5.symbol_info(symbol)
+        filling_type = mt5.ORDER_FILLING_FOK if sym_info and (sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK) else mt5.ORDER_FILLING_IOC
         
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -54,15 +63,19 @@ class OrderManager:
             "magic": magic,
             "comment": comment,
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": filling_type,
         }
         
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             _executor, 
             lambda: mt5.order_send(request)
         )
         
+        if result is None:
+            logger.error("Order failed: MT5 returned None (connection lost?)")
+            return {"success": False, "error": "MT5 returned None"}
+            
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             logger.error(f"Order failed: {result.retcode} - {result.comment}")
             return {"success": False, "error": result.comment}
@@ -102,18 +115,27 @@ class OrderManager:
         if not mt5:
             return True
             
+        loop = asyncio.get_running_loop()
+        position = await loop.run_in_executor(_executor, lambda: mt5.positions_get(ticket=ticket))
+        if not position:
+            return False
+            
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "position": ticket,
-            "sl": new_sl
+            "sl": new_sl,
+            "tp": position[0].tp
         }
         
-        loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             _executor, 
             lambda: mt5.order_send(request)
         )
         
+        if result is None:
+            logger.error("Modify SL failed: MT5 returned None")
+            return False
+            
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             logger.error(f"Modify SL failed: {result.comment}")
             return False
@@ -128,7 +150,8 @@ class OrderManager:
         if not mt5:
             return True
             
-        position = mt5.positions_get(ticket=ticket)
+        loop = asyncio.get_running_loop()
+        position = await loop.run_in_executor(_executor, lambda: mt5.positions_get(ticket=ticket))
         if not position:
             logger.error(f"Position {ticket} not found")
             return False
@@ -137,7 +160,16 @@ class OrderManager:
         symbol = position.symbol
         direction = "SELL" if position.type == mt5.ORDER_TYPE_BUY else "BUY" # opposite to close
         action = mt5.ORDER_TYPE_SELL if direction == "SELL" else mt5.ORDER_TYPE_BUY
-        price = mt5.symbol_info_tick(symbol).bid if action == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
+        
+        tick = await loop.run_in_executor(_executor, lambda: mt5.symbol_info_tick(symbol))
+        if not tick:
+            logger.error(f"Close failed: Invalid symbol {symbol} or not found in Market Watch.")
+            return False
+            
+        price = tick.bid if action == mt5.ORDER_TYPE_SELL else tick.ask
+        
+        sym_info = await loop.run_in_executor(_executor, lambda: mt5.symbol_info(symbol))
+        filling_type = mt5.ORDER_FILLING_FOK if sym_info and (sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK) else mt5.ORDER_FILLING_IOC
         
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -150,13 +182,50 @@ class OrderManager:
             "magic": position.magic,
             "comment": "manual close",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": filling_type,
         }
         
-        loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             _executor, 
             lambda: mt5.order_send(request)
         )
-        
+        if result is None:
+            logger.error(f"Close position {ticket} failed: MT5 returned None")
+            return False
+            
         return result.retcode == mt5.TRADE_RETCODE_DONE
+
+    @staticmethod
+    async def get_closed_positions_since(last_check_time: float) -> List[Dict[str, Any]]:
+        """Get positions closed since last_check_time."""
+        if not mt5:
+            return []
+            
+        from datetime import datetime
+        
+        loop = asyncio.get_running_loop()
+        now = datetime.now()
+        start_dt = datetime.fromtimestamp(last_check_time)
+        
+        deals = await loop.run_in_executor(
+            _executor,
+            lambda: mt5.history_deals_get(start_dt, now)
+        )
+        
+        if not deals:
+            return []
+            
+        closed_deals = []
+        for d in deals:
+            if d.entry == mt5.DEAL_ENTRY_OUT:
+                closed_deals.append({
+                    "ticket": d.ticket,
+                    "position_id": d.position_id,
+                    "symbol": d.symbol,
+                    "profit": d.profit,
+                    "commission": d.commission,
+                    "swap": d.swap,
+                    "time": d.time,
+                    "price": d.price,
+                })
+        return closed_deals

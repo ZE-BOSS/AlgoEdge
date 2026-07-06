@@ -53,14 +53,15 @@ export const useNotificationStore = create((set) => ({
     };
     
     // Automatically trigger Web Browser Notification
-    if (Notification.permission === "granted") {
-      new Notification(newNotif.title, {
-        body: newNotif.message,
-        icon: '/favicon.ico' // Assuming standard vite icon location
-      });
-    } else if (Notification.permission !== "denied") {
-      Notification.requestPermission().then(permission => {
-        if (permission === "granted") {
+    if (typeof Notification !== 'undefined') {
+      if (Notification.permission === "granted") {
+        new Notification(newNotif.title, {
+          body: newNotif.message,
+          icon: '/favicon.ico' // Assuming standard vite icon location
+        });
+      } else if (Notification.permission !== "denied") {
+        Notification.requestPermission().then(permission => {
+          if (permission === "granted") {
           new Notification(newNotif.title, {
             body: newNotif.message,
             icon: '/favicon.ico'
@@ -68,10 +69,17 @@ export const useNotificationStore = create((set) => ({
         }
       });
     }
+    }
     
     return { notifications: [newNotif, ...state.notifications] };
   }),
   removeNotification: (id) => set((state) => ({
     notifications: state.notifications.filter(n => n.id !== id)
   })),
+}));
+
+export const useLoadingStore = create((set, get) => ({
+  activeRequests: 0,
+  startLoading: () => set((state) => ({ activeRequests: state.activeRequests + 1 })),
+  stopLoading: () => set((state) => ({ activeRequests: Math.max(0, state.activeRequests - 1) })),
 }));

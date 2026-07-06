@@ -766,18 +766,26 @@ class CompoundingEngine:
         )
         projections = [(0, balance, state.current_step)]
         current_balance = balance
+        win_accumulator = 0.0
 
         for i in range(1, num_trades + 1):
             step = self.get_step_for_balance(current_balance)
             risk = step.risk_amount
             reward = step.reward_at_3r
 
-            # Probabilistic: win_rate % of time we win
-            expected_gain = (win_rate * reward) - ((1 - win_rate) * risk)
-            current_balance += expected_gain
+            # Deterministic alternating wins/losses based on win_rate
+            win_accumulator += win_rate
+            if win_accumulator >= 1.0:
+                trade_won = True
+                win_accumulator -= 1.0
+                current_balance += reward
+            else:
+                trade_won = False
+                current_balance -= risk
+            
             current_balance = max(0, current_balance)
 
-            state = self.update_state(state, expected_gain > 0, current_balance)
+            state = self.update_state(state, trade_won, current_balance)
             projections.append((i, round(current_balance, 2), state.current_step))
 
         return projections
@@ -867,6 +875,10 @@ class CompoundingParams:
     def get_steps(self) -> List[CompoundingStep]:
         if self.use_default_plan or not self.custom_steps:
             return DEFAULT_1_3RR_STEPS
+            
+        # Sort custom steps by entry_threshold ascending
+        sorted_steps = sorted(self.custom_steps, key=lambda x: x.get("entry_threshold", 0))
+        
         # Parse custom steps
         return [
             CompoundingStep(
@@ -876,7 +888,7 @@ class CompoundingParams:
                 entry_threshold=s["entry_threshold"],
                 account_after_win=s["entry_threshold"] + s["risk"] * 3,
             )
-            for s in self.custom_steps
+            for s in sorted_steps
         ]
 
     def build_engine(self) -> CompoundingEngine:

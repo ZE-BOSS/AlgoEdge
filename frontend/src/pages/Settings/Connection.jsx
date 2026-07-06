@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Wifi, WifiOff, Check, RefreshCw } from 'lucide-react';
-import { setBackendUrl, getBackendUrl, checkHealth } from '../../services/api';
+import axios from 'axios';
+import { setBackendUrl, getBackendUrl } from '../../services/api';
 import { useConnectionStore } from '../../store';
 
 export default function ConnectionSettings() {
@@ -13,10 +14,12 @@ export default function ConnectionSettings() {
     setTesting(true);
     setTestResult(null);
     try {
-      setBackendUrl(url);
-      const res = await checkHealth();
+      const res = await axios.get(`${url}/api/health`);
       if (res.data?.status === 'ok') {
+        setBackendUrl(url);
         setTestResult({ ok: true, msg: `Connected! Service: ${res.data.service} v${res.data.version}` });
+      } else {
+        setTestResult({ ok: false, msg: `Connection failed: Invalid response` });
       }
     } catch (e) {
       setTestResult({ ok: false, msg: `Connection failed: ${e.message}` });

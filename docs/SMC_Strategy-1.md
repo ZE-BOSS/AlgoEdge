@@ -518,6 +518,8 @@ Every institutional price move follows a predictable three-phase model:
 - SM action: delivering price to the next liquidity target
 - Algorithmic detection: confirmed BOS/ChoCH AFTER liquidity sweep, price momentum above average
 
+***IMPORTANT CODEBASE EXEMPTION:*** *While the IPDM cycle mathematically tracks these phases, empirical testing proved that waiting for H1 to mathematically register `EXPANSION` severely choked trade frequency (missing initial explosive momentum). Therefore, the codebase officially exempts the IPDM phase gate — M15 ChoCH signals trigger opportunistically upon structural breaks regardless of whether H1 mathematically registers EXPANSION yet.*
+
 ### 8.2 Algorithmic Phase Detection
 
 ```python
@@ -914,6 +916,7 @@ MAGIC NUMBER: unique per user (user1=1001, user2=1002) for MT5 tracking
 
 Synthetic indices (V75, V25, V50, V100, Boom, Crash, Step) trade **24/7** and are unaffected by economic news. For these symbols:
 - Session filter is **automatically disabled** (no London/NY restriction)
+- Asian Range sweep filter is **automatically disabled** (no Asian high/low logic applied)
 - News filter is **automatically disabled** (economic calendar irrelevant)
 - The bot runs continuously, evaluating every M15 bar close around the clock
 - SMC patterns (OBs, FVGs, BOS, ChoCH) are fully applicable — algorithmic price generation creates consistent, repeatable structure
@@ -1299,12 +1302,39 @@ SMC_PARAMS_V2 = {
     # Circuit Breaker (updated to trade counts)
     "max_daily_consecutive_losses": 3,    # Was max_daily_loss_pct: 5.0
     "max_weekly_consecutive_losses": 5,   # Was max_weekly_loss_pct: 10.0
+    
+    # Hard Filters (Algorithmic Optimization for >40% Win Rate)
+    "enforce_htf_pd": True,              # Only trade inside HTF Premium/Discount arrays
+    "enforce_fvg_displacement": True,    # Only trade OBs created by strong FVG displacement
+    "enforce_asian_range_sweep": True,   # Only trade after Asian range sweep (Forex/Metals only)
+    "asian_range_start_hour": 18,
+    "asian_range_end_hour": 0,
 }
 ```
 
+### 15.4 Algorithmic SMC Optimization (Hard Filters)
+
+To ensure high-probability trade setups and win rates above 40%, the bot enforces three optional "Hard Filters". When enabled, these filters aggressively block lower-probability trades:
+
+1. **Enforce HTF Premium/Discount (PD) Arrays:**
+   - Instead of taking any valid setup in the direction of the trend, the bot calculates the HTF (H4) swing range.
+   - For long trades, the setup MUST occur in the Discount Zone (< 50%) of the H4 range.
+   - For short trades, the setup MUST occur in the Premium Zone (> 50%) of the H4 range.
+
+2. **Enforce FVG Displacement:**
+   - The setup's entry zone (Order Block) must have been created by a candle that left a Fair Value Gap (FVG).
+   - This proves strong institutional displacement (urgency) leaving the zone, making it a high-probability POI when price returns.
+
+3. **Enforce Asian Range Sweep:**
+   - For non-synthetic pairs (Forex, Metals), the Asian session (e.g., 18:00 - 00:00 EST) creates a liquidity buildup.
+   - The bot calculates the high and low of the Asian range.
+   - It will ONLY take trades AFTER price has swept the Asian High (for shorts) or Asian Low (for longs).
+   - This avoids the "Asian chop" and targets the true London/NY expansion move.
+   - *Note: This filter is automatically bypassed for Synthetic indices (which operate 24/7).*
+
 ---
 
-*Document Version 2.0 | AlgoEdge SMC Strategy Specification | June 2026*
+*Document Version 2.1 | AlgoEdge SMC Strategy Specification | June 2026*
 *Based on: Mind of the Market (Pamela Donald), ICT Concepts, SMC Research 2024–2026*
-*Updated: Multi-TF model finalized, IPDM gate added, ChoCH rules tightened, zone-based TPs*
+*Updated: Multi-TF model finalized, IPDM gate added, ChoCH rules tightened, zone-based TPs, Algorithmic Optimization Hard Filters added.*
 

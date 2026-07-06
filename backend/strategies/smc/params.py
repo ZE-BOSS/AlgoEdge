@@ -13,7 +13,7 @@ Sources:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Literal, Tuple, Optional
+from typing import List, Literal, Tuple, Optional, Dict, Any
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -60,11 +60,11 @@ class RiskParams:
     If tp_count > 2: TP1+TP2 at entry, TP3–5 deferred (conviction-based).
     Range: 1–5."""
 
-    tp_splits: List[float] = field(default_factory=lambda: [30.0, 25.0, 20.0, 15.0, 10.0])
+    tp_splits: List[float] = field(default_factory=lambda: [40.0, 35.0, 25.0])
     """
     Percentage of total lot allocated to each TP level.
     Must sum to 100. Length should match tp_count.
-    Default for 5 TPs: [30, 25, 20, 15, 10].
+    Default for 3 TPs: [40, 35, 25].
     """
 
     # ── Take Profit Levels (RR Multipliers) ──────────────────────────
@@ -177,6 +177,12 @@ class RiskParams:
     Resets at 00:00 GMT. Range: 1–10.
     """
 
+    max_daily_trades: int = 5
+    """
+    Maximum total trades allowed per day (wins or losses).
+    Prevents strategy overtrading in sideways chop. Range: 1–20.
+    """
+
     max_weekly_consecutive_losses: int = 5
     """
     Strategy pauses for the week when weekly consecutive losses hit this count.
@@ -191,6 +197,15 @@ class RiskParams:
 
     max_concurrent_positions: int = 3
     """Maximum simultaneously open positions per user. Range: 1–10."""
+
+    target_profit_enabled: bool = False
+    """Enable circuit breaker based on daily/weekly profit."""
+
+    max_daily_profit: float = 500.0
+    """Target profit for the day. Bot pauses when reached."""
+
+    max_weekly_profit: float = 2000.0
+    """Target profit for the week. Bot pauses when reached."""
 
     max_trades_per_session: int = 2
     """Max new trades allowed per London or NY session."""
@@ -261,10 +276,13 @@ class SMCParams:
 
     # ── FVG Settings ──────────────────────────────────────────────────
     fvg_min_gap_pips: float = 3.0
-    """Minimum FVG size in pips to be considered valid."""
+    """Minimum displacement gap between wick 1 and wick 3 for a valid FVG."""
 
     fvg_entry_level: float = 0.50
     """Where within FVG to enter: 0.5 = 50% (CE level)."""
+
+    manual_bias_overrides: Dict[str, str] = field(default_factory=dict)
+    """Manual overrides for HTF Bias. Map of symbol to BULLISH/BEARISH/NONE."""
 
     fvg_max_age_bars: int = 50
     """Invalidate FVGs older than this many bars."""
@@ -288,6 +306,22 @@ class SMCParams:
 
     discount_threshold: float = 0.50
     """Price below this Fibonacci level = discount zone (buy zone)."""
+
+    # ── Hard Filters (Strategy Optimization) ──────────────────────────
+    enforce_htf_pd: bool = True
+    """Hard reject Buy signals in Premium, Sell signals in Discount."""
+
+    enforce_fvg_displacement: bool = True
+    """Hard reject ChoCH signals that do not leave behind an FVG."""
+
+    enforce_asian_range_sweep: bool = True
+    """Hard reject signals if Asian Range (Accumulation) has not been swept."""
+
+    asian_range_start_hour: int = 18
+    """Start hour of Asian Range for mapping (e.g. 18 for 18:00)."""
+
+    asian_range_end_hour: int = 0
+    """End hour of Asian Range for mapping (e.g. 0 for 00:00)."""
 
     # ── IPDM Phase Detection ──────────────────────────────────────────
     ipdm_accum_atr_ratio: float = 0.70
@@ -435,7 +469,6 @@ SMC_OPTIMIZATION_GRID = {
     "smc.liq_sweep_min_pips":       [3.0, 5.0, 8.0],
     "smc.candle_wick_min_ratio":    [1.5, 2.0, 2.5],
     "smc.min_signal_score":         [60, 65, 70, 75],
-    "smc.max_spread_multiplier":    [1.5, 2.0, 2.5],
 }
 
 RISK_OPTIMIZATION_GRID = {
@@ -449,8 +482,8 @@ RISK_OPTIMIZATION_GRID = {
     "risk.trail_method_tp3":        ["STRUCTURE_TRAIL", "FIXED_PIPS"],
     "risk.atr_trail_multiplier":    [1.0, 1.5, 2.0],
     "risk.risk_per_trade_pct":      [0.5, 1.0, 1.5],
-    "risk.sl_method":               ["OB_EXTREME", "SWING_POINT"],
     "risk.sl_buffer_pips":          [3.0, 5.0, 8.0],
+    "risk.max_spread_multiplier":   [1.5, 2.0, 2.5],
 }
 
 # Pre-built risk presets (selectable in UI as starting points)
@@ -547,6 +580,29 @@ class UserConfigV2(UserConfig):
     """
     compounding: CompoundingParams = None
     instrument_settings: List[InstrumentSettings] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "UserConfigV2":
+        smc_data  = data.pop("smc",  {})
+        risk_data = data.pop("risk", {})
+        compounding_data = data.pop("compounding", None)
+        instrument_data = data.pop("instrument_settings", None)
+        
+        config = cls(**data)
+        config.smc  = SMCParams(**smc_data)
+        config.risk = RiskParams(**risk_data)
+        
+        if compounding_data:
+            config.compounding = CompoundingParams(**compounding_data)
+        else:
+            config.compounding = CompoundingParams()
+            
+        if instrument_data:
+            config.instrument_settings = [InstrumentSettings(**i) for i in instrument_data]
+        else:
+            config.instrument_settings = []
+            
+        return config
 
     def __post_init__(self):
         if self.compounding is None:

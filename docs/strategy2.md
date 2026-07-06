@@ -115,10 +115,8 @@ The pullback/retest itself follows the IPDM cycle:
 3. **EXPANSION** (real move begins):
    → After manipulation: price reverses strongly in bias direction. ATR > 120% of baseline (momentum confirmed). BOS/ChoCH confirmed after the sweep. THIS IS THE ENTRY WINDOW — proceed to Layer 3 (M15 ChoCH).
 
-**RULE:** Only proceed to M15 ChoCH detection when:
-- IPDM phase is EXPANSION, OR
-- Manipulation just completed (sweep + rejection detected)
-- Never enter during ACCUMULATION or MANIPULATION
+**RULE:** The codebase historically attempted to strictly synchronize the M15 ChoCH with the H1 EXPANSION phase. However, empirical testing showed this severely choked trade frequency (missing initial explosive momentum). 
+Therefore, **IPDM Synchronization is officially exempted**. M15 ChoCH signals trigger opportunistically upon structural breaks regardless of whether H1 mathematically registers EXPANSION yet.
 
 *Key insight:* "A pullback on HTF is an entire trend on LTF." The H1 pullback to BOS follows the Accumulation→Manipulation→Expansion cycle. The manipulation (liquidity sweep) IS the trap — the expansion after it IS the entry.
 
@@ -150,7 +148,12 @@ Price has been making HH/HL on M15 (pullback)
 ## STEP 5 — Entry Point Identification + M5 Candlestick Confirmation
 **Purpose:** Find the precise entry after ChoCH, confirmed by M5 candle pattern.
 
-After M15 ChoCH confirmed, identify the entry zone (in priority order). **Only ONE of the following is required:**
+### HARD FILTER GATES:
+1. **HTF PD Array Filter:** Bullish setups in H4 Discount Zone, bearish setups in H4 Premium Zone.
+2. **Asian Range Sweep:** For Forex/Metals, price must sweep the Asian High/Low. **NOTE: This filter is completely exempted for 24/7 Synthetic Indices.**
+3. **FVG Displacement:** A high-probability confluence where the ChoCH impulse leaves a Fair Value Gap. *(Note: This is no longer a strict "Hard Filter" — if no FVG is found, the engine will still proceed to evaluate Order Blocks and Fib Zones).*
+
+After M15 ChoCH confirmed and hard filters pass, identify the entry zone (in priority order). **Only ONE of the following is required:**
 1. **ORDER BLOCK** (highest priority):
    → The last opposing candle before the ChoCH impulse on M15. Must be fresh (0 prior touches). Entry at the OB zone edge.
 2. **FAIR VALUE GAP** (high priority):
@@ -174,29 +177,36 @@ After M15 ChoCH confirmed, identify the entry zone (in priority order). **Only O
 **Entry** = market order on M5 candlestick confirmation candle close.
 
 ## STEP 6 — Stop Loss Placement
-- **BULLISH setup:** SL = Below the previous swing LOW on M15 (below the low of the pullback / manipulation candle) + buffer of 3-5 pips
-- **BEARISH setup:** SL = Above the previous swing HIGH on M15 (above the high of the pullback / manipulation candle) + buffer of 3-5 pips
+The system uses a strict hierarchical structural fallback mechanism that overrides user-selected methods if structural points exist:
+- **Priority 1 (Structural Swing):** Below the previous M15 swing LOW (for Buys) or above previous M15 swing HIGH (for Sells).
+- **Priority 2 (OB Extreme):** If no valid swing exists, placed at the extreme of the Order Block.
+- **Priority 3 (Confirmation Candle):** If no OB exists, placed just beyond the extreme of the M5 confirmation candlestick.
+
+*A buffer of 5 pips (or equivalent points) is always added to the calculated SL.*
 
 SL must be BEYOND the OB/FVG extreme — never inside the zone.
 AFTER 1:1 R:R reached: Move SL to a few pips beyond the confirmation candlestick (the M5 candle that confirmed the entry).
 
-## STEP 7 — Take Profit Targets (Zone-Based)
-**IMPORTANT:** TPs are calculated from H1 rejection zones and structural levels, NOT from fixed R:R ratios alone. The final TP targets the ChoCH reversal point.
+## STEP 7 — Take Profit Targets (Dynamic Multi-Tier)
+**IMPORTANT:** TPs are calculated using fixed R:R multipliers mapped against the calculated Risk (Entry to SL). The system scales out across up to 5 Take Profit levels.
 
-### ZONE-BASED TP CALCULATION:
-1. Scan H1 data for rejection zones between entry and final target: Previous swing highs/lows on H1, Areas where price was rejected, Supply/demand zones on H1. These become intermediate TP levels.
-2. **FINAL TP = The point where market made the ChoCH:** i.e., the point at which price reversed AFTER breaking past the last 2 swing highs (bearish) or 2 swing lows (bullish). This is the structural reversal point on H1.
-3. Assign TPs to zones (closest to farthest from entry):
-   - **TP1** (close first portion at ~1:1 R:R): First H1 rejection zone / start of pullback. After TP1 hit: move SL to breakeven (entry + buffer).
-   - **TP2** (intermediate): Next H1 rejection zone between TP1 and final target. Any significant S/D zone or previous BOS level. Minimum 3:1 R:R required.
-   - **TP3 / FINAL TP** (last portion): The ChoCH reversal point on H1. Where price originally broke past 2+ swing highs/lows and then reversed. Minimum 5:1 R:R.
+### TP CONFIGURATION & ALLOCATION:
+1. **Dynamic Risk Anchoring:** The initial Stop Loss determines the base Risk (R). Each TP target is a multiple of R.
+2. **5-Tier Scaling System:**
+   - **TP1 (De-risk):** Configurable R:R (e.g., 1.0R). Used to secure initial profit and trigger Break-Even.
+   - **TP2 (Standard):** Configurable R:R (e.g., 3.0R). Mid-range target.
+   - **TP3 (Extended):** Configurable R:R (e.g., 5.0R). Secondary continuation target.
+   - **TP4 (Runner):** Configurable R:R (e.g., 10.0R). Extended institutional swing target.
+   - **TP5 (Max Runner):** Configurable R:R (e.g., 15.0R). Ultimate HTF structural level.
+3. **Position Splitting:** The total lot size is split across active TPs based on user-defined percentages (e.g., "30,25,20,15,10").
+4. **Structural Context:** While the R multiples are fixed by config, the entry itself relies on HTF and LTF structure. High R multiples (TP4/TP5) often align with HTF rejection zones or the original ChoCH reversal origin.
 
-IF full confluence (OB + FVG both present): Pursue final TP more aggressively. Use minimum 1:3 R:R for longer entries.
+IF full confluence (OB + FVG both present): Pursue final TPs more aggressively. Use minimum 1:3 R:R for standard entries.
 
-## STEP 8 — Trade Management
-1. All TP positions open at entry (no deferred stacking).
-2. When TP1 hits → move ALL remaining positions to breakeven.
-3. Trailing: SL trails to below each new Higher Low (buys) or above each new Lower High (sells) on M15.
+## STEP 8 — Trade Management (Independent Trailing)
+1. All TP positions open simultaneously at entry (no deferred stacking).
+2. When TP1 hits → Move all remaining positions to Breakeven (Entry + buffer).
+3. **Independent Trailing:** Each sub-position (TP2-TP5) can utilize an independent trailing method (ATR, Fixed Pips, Structure Trail, or % Trail) activated after the previous TP hits.
 4. If trade open for 3 sessions without TP1 → close at market.
 5. Close all positions at 23:00 GMT Friday (weekend gap risk).
 

@@ -6,6 +6,7 @@ Validates broker connectivity before allowing bot to start.
 """
 
 import json
+import asyncio
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -20,6 +21,7 @@ from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api", tags=["bot"])
+bot_start_lock = asyncio.Lock()
 
 # Deriv / synthetic symbols that require the Deriv broker
 DERIV_SYMBOLS = {
@@ -105,16 +107,20 @@ async def start_bot(
         )
 
     # 3. Start the bot
-    bot_service.log_system_event(
-        f"Bot starting with {len(symbols)} symbols: {', '.join(symbols)}",
-        category="BOT"
-    )
-    result = await bot_service.start(
-        user_id=current_user.id,
-        symbols=symbols,
-        scan_interval=req.scan_interval,
-    )
-    return result
+    async with bot_start_lock:
+        if bot_service.running:
+            return {"running": True, "message": "Bot is already running"}
+            
+        bot_service.log_system_event(
+            f"Bot starting with {len(symbols)} symbols: {', '.join(symbols)}",
+            category="BOT"
+        )
+        result = await bot_service.start(
+            user_id=current_user.id,
+            symbols=symbols,
+            scan_interval=req.scan_interval,
+        )
+        return result
 
 
 @router.post("/bot/stop")

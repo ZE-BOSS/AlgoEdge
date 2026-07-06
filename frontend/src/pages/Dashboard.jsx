@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, DollarSign, Target, Shield, Activity, AlertTriangle, Play, Square, Eye, Loader2, Terminal, Trash2 } from 'lucide-react';
 import { useConnectionStore, useRiskStore, useAuthStore } from '../store';
-import { getStats, getPositions, getCompounding, getChartData, getBotStatus, startBot, stopBot, getBotLogs, getConfig, getBrokerStatus } from '../services/api';
+import { getDashboardData, getChartData, startBot, stopBot, getBotLogs } from '../services/api';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
 
 // ── Category color mapping for activity log ───────────────────────────────
@@ -36,13 +36,14 @@ function MetricCard({ label, value, color = '', subtext = '', icon: Icon }) {
   );
 }
 
-function LiveChart() {
+function LiveChart({ symbol = 'XAUUSD', timeframe = 'H1' }) {
   const chartRef = useRef(null);
   const containerRef = useRef(null);
+  const seriesRef = useRef(null);
 
   const { data: chartData } = useQuery({
-    queryKey: ['chart', 'XAUUSD', 'H1'],
-    queryFn: () => getChartData('XAUUSD', 'H1', 200).then(r => r.data),
+    queryKey: ['chart', symbol, timeframe],
+    queryFn: () => getChartData(symbol, timeframe, 200).then(r => r.data),
     staleTime: 60000,
   });
 
@@ -74,7 +75,18 @@ function LiveChart() {
       wickUpColor: '#3fb68b',
     });
 
-    if (chartData?.candles?.length) {
+    chartRef.current = chart;
+    seriesRef.current = candleSeries;
+
+    const handleResize = () => {
+      if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => { window.removeEventListener('resize', handleResize); chart.remove(); };
+  }, []);
+
+  useEffect(() => {
+    if (seriesRef.current && chartData?.candles?.length) {
       const mapped = chartData.candles
         .map(c => {
           let t = c.time;
@@ -84,16 +96,10 @@ function LiveChart() {
         .sort((a, b) => a.time - b.time)
         .filter((c, i, arr) => i === 0 || c.time > arr[i - 1].time);
       if (mapped.length > 0) {
-        candleSeries.setData(mapped);
+        seriesRef.current.setData(mapped);
+        if (chartRef.current) chartRef.current.timeScale().fitContent();
       }
     }
-
-    chart.timeScale().fitContent();
-    chartRef.current = chart;
-
-    const handleResize = () => chart.applyOptions({ width: containerRef.current.clientWidth });
-    window.addEventListener('resize', handleResize);
-    return () => { window.removeEventListener('resize', handleResize); chart.remove(); };
   }, [chartData]);
 
   return <div ref={containerRef} className="chart-container" />;
@@ -101,6 +107,7 @@ function LiveChart() {
 
 function PositionCard({ position }) {
   const { trade, sub_positions } = position;
+  if (!trade) return null;
   const isLong = trade.direction === 'BUY';
   return (
     <div className="card" style={{ marginBottom: 12 }}>
@@ -132,26 +139,16 @@ function BotControl() {
   const queryClient = useQueryClient();
   const [startError, setStartError] = useState(null);
 
-  const { data: botStatus } = useQuery({
-    queryKey: ['botStatus'],
-    queryFn: () => getBotStatus().then(r => r.data),
+  const { data: dashboardData } = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: () => getDashboardData().then(r => r.data),
     refetchInterval: 5000,
     enabled: connStatus === 'ONLINE' && isAuthenticated,
   });
 
-  // Load user config to get configured symbols
-  const { data: userConfig } = useQuery({
-    queryKey: ['userConfig'],
-    queryFn: () => getConfig().then(r => r.data),
-    enabled: connStatus === 'ONLINE' && isAuthenticated,
-  });
-
-  // Load broker connection status
-  const { data: brokerStatus } = useQuery({
-    queryKey: ['brokerStatus'],
-    queryFn: () => getBrokerStatus().then(r => r.data),
-    enabled: connStatus === 'ONLINE' && isAuthenticated,
-  });
+  const botStatus = dashboardData?.bot;
+  const userConfig = dashboardData?.config;
+  const brokerStatus = dashboardData?.broker;
 
   // Get symbols from config, or defaults
   const configSymbols = userConfig?.config?.watched_symbols || userConfig?.config?.symbols || ['XAUUSD', 'EURUSD', 'GBPUSD'];
@@ -160,7 +157,7 @@ function BotControl() {
     mutationFn: () => startBot({ symbols: configSymbols, scan_interval: 60 }),
     onSuccess: () => {
       setStartError(null);
-      queryClient.invalidateQueries({ queryKey: ['botStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
     onError: (err) => {
       const detail = err?.response?.data?.detail;
@@ -174,7 +171,7 @@ function BotControl() {
 
   const stopMutation = useMutation({
     mutationFn: () => stopBot(),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['botStatus'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
   });
 
   const isRunning = botStatus?.running === true;
@@ -285,7 +282,7 @@ function ActivityLog() {
   }, []);
 
   // Merge polled logs with live WS events, dedup by time+message
-  const mergedEvents = useCallback(() => {
+  const mergedEvents = useMemo(() => {
     const polled = botLogs?.events || [];
     const all = [...liveEvents, ...polled];
     // Dedup by time+message
@@ -308,7 +305,7 @@ function ActivityLog() {
       if (filter === 'SIGNALS') return evt.level === 'SIGNAL' || evt.category === 'SIGNAL';
       return (evt.category || '').toUpperCase() === filter;
     });
-  }, [botLogs, liveEvents, filter])();
+  }, [botLogs, liveEvents, filter]);
 
   // Auto-scroll to top when new events arrive
   useEffect(() => {
@@ -418,26 +415,19 @@ export default function Dashboard() {
   const { setStats, setCompounding } = useRiskStore();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
-  const { data: statsData } = useQuery({
-    queryKey: ['stats'],
-    queryFn: () => getStats().then(r => r.data),
-    refetchInterval: 15000,
-    enabled: status === 'ONLINE' && isAuthenticated,
-  });
-
-  const { data: positionsData } = useQuery({
-    queryKey: ['positions'],
-    queryFn: () => getPositions().then(r => r.data),
+  const { data: dashboardData } = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: () => getDashboardData().then(r => r.data),
     refetchInterval: 5000,
     enabled: status === 'ONLINE' && isAuthenticated,
   });
 
-  const { data: compoundingData } = useQuery({
-    queryKey: ['compounding'],
-    queryFn: () => getCompounding().then(r => r.data),
-    refetchInterval: 30000,
-    enabled: status === 'ONLINE' && isAuthenticated,
-  });
+  const statsData = dashboardData?.stats;
+  const userConfig = dashboardData?.config;
+  const positionsData = dashboardData?.positions;
+  const compoundingData = dashboardData?.compounding;
+
+  const configSymbols = userConfig?.config?.watched_symbols || userConfig?.config?.symbols || ['XAUUSD', 'EURUSD', 'GBPUSD'];
 
   useEffect(() => {
     if (statsData) setStats(statsData);
@@ -474,9 +464,9 @@ export default function Dashboard() {
           <div className="card">
             <div className="card-header">
               <span className="card-title">Live Chart</span>
-              <span className="badge badge-green">XAUUSD</span>
+              <span className="badge badge-green">{configSymbols[0] || 'XAUUSD'}</span>
             </div>
-            <LiveChart />
+            <LiveChart symbol={configSymbols[0] || 'XAUUSD'} timeframe="H1" />
           </div>
         </div>
 

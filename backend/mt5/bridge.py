@@ -33,6 +33,10 @@ class MT5Bridge:
         self._executor = ThreadPoolExecutor(max_workers=4)
         self.account_info = None
         self._connected_account: Optional[int] = None  # Track which account is connected
+        self._intentional_disconnect = False
+        self._last_method = None
+        self._last_kwargs = {}
+        self._reconnect_task = None
 
     async def connect(self, config_override=None) -> bool:
         """
@@ -40,6 +44,11 @@ class MT5Bridge:
         Auto-reconnects on failure.
         """
         logger.info("Connecting to MT5...")
+        self._intentional_disconnect = False
+        self._last_method = self.connect
+        self._last_kwargs = {"config_override": config_override}
+        if self._reconnect_task is None:
+            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
         if not mt5:
             logger.warning("MetaTrader5 package not found. Running in MOCK mode.")
             self.connected = True
@@ -66,7 +75,7 @@ class MT5Bridge:
                 logger.error(f"MT5 login failed: {mt5.last_error()}")
                 return False
 
-        self.account_info = mt5.account_info()
+        self.account_info = await loop.run_in_executor(self._executor, mt5.account_info)
         self._connected_account = cfg.account if cfg.account else None
         self.connected = True
         logger.info("MT5 Connected Successfully")
@@ -81,6 +90,11 @@ class MT5Bridge:
         broker account is used per user.
         """
         logger.info(f"Connecting to MT5 for user {user_id}...")
+        self._intentional_disconnect = False
+        self._last_method = self.connect_for_user
+        self._last_kwargs = {"user_id": user_id}
+        if self._reconnect_task is None:
+            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
         
         if not mt5:
             logger.warning("MetaTrader5 package not found. Running in MOCK mode.")
@@ -145,7 +159,7 @@ class MT5Bridge:
             await loop.run_in_executor(self._executor, mt5.shutdown)
             return False
 
-        self.account_info = mt5.account_info()
+        self.account_info = await loop.run_in_executor(self._executor, mt5.account_info)
         self._connected_account = account
         self.connected = True
         logger.info(
@@ -161,6 +175,11 @@ class MT5Bridge:
         Same as connect_for_user but uses deriv_mt5_* fields.
         """
         logger.info(f"Connecting to Deriv MT5 for user {user_id}...")
+        self._intentional_disconnect = False
+        self._last_method = self.connect_for_user_deriv
+        self._last_kwargs = {"user_id": user_id}
+        if self._reconnect_task is None:
+            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
         
         if not mt5:
             logger.warning("MetaTrader5 package not found. Running in MOCK mode.")
@@ -221,15 +240,25 @@ class MT5Bridge:
             await loop.run_in_executor(self._executor, mt5.shutdown)
             return False
 
-        self.account_info = mt5.account_info()
+        self.account_info = await loop.run_in_executor(self._executor, mt5.account_info)
         self._connected_account = account
         self.connected = True
         logger.info(f"Deriv MT5 connected for user {user_id}: account={account}")
         return True
 
+    async def get_live_account_info(self):
+        """Fetch live account info and update self.account_info."""
+        if not mt5 or not self.connected:
+            return None
+        loop = asyncio.get_running_loop()
+        self.account_info = await loop.run_in_executor(self._executor, mt5.account_info)
+        return self.account_info
+
     async def disconnect(self):
         """Shutdown connection."""
         logger.info("Disconnecting MT5...")
+        self._intentional_disconnect = True
+        self._last_method = None
         if mt5 and self.connected:
             await asyncio.get_event_loop().run_in_executor(self._executor, mt5.shutdown)
         self.connected = False
@@ -252,7 +281,10 @@ class MT5Bridge:
             )
 
         loop = asyncio.get_event_loop()
-        while self.connected:
+        while not getattr(self, '_intentional_disconnect', False):
+            if not self.connected:
+                await asyncio.sleep(1)
+                continue
             for sym in symbols:
                 tick = await loop.run_in_executor(
                     self._executor, lambda s=sym: mt5.symbol_info_tick(s)
@@ -277,6 +309,33 @@ class MT5Bridge:
     def get_connected_account(self) -> Optional[int]:
         """Return the currently connected MT5 account number."""
         return self._connected_account
+
+    async def _reconnect_loop(self):
+        """Background daemon to check MT5 health and auto-reconnect every 10s."""
+        while True:
+            await asyncio.sleep(10)
+            if getattr(self, '_intentional_disconnect', False) or not getattr(self, '_last_method', None) or not mt5:
+                continue
+
+            try:
+                loop = asyncio.get_event_loop()
+                terminal = await loop.run_in_executor(self._executor, mt5.terminal_info)
+                is_connected = terminal is not None and terminal.connected
+            except Exception:
+                is_connected = False
+
+            if not is_connected:
+                logger.warning("MT5 connection lost! Attempting to auto-reconnect...")
+                self.connected = False
+                try:
+                    success = await self._last_method(**self._last_kwargs)
+                    if success:
+                        logger.info("MT5 auto-reconnect successful.")
+                    else:
+                        logger.error("MT5 auto-reconnect failed. Retrying in 10s...")
+                except Exception as e:
+                    logger.error(f"Error during auto-reconnect: {e}")
+
 
 
 bridge = MT5Bridge()

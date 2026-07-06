@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Zap, CheckCircle, XCircle, ChevronDown, ChevronRight, Image, Activity } from 'lucide-react';
 import { useConnectionStore, useAuthStore } from '../store';
@@ -49,6 +49,39 @@ function ConfluenceBreakdown({ breakdownJson }) {
       })}
     </div>
   );
+}
+
+function AuthenticatedImage({ url, alt }) {
+  const [imgSrc, setImgSrc] = useState(null);
+  const [error, setError] = useState(false);
+  const token = useAuthStore(s => s.token);
+
+  useEffect(() => {
+    let objectUrl = null;
+    fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to fetch snapshot');
+        return r.blob();
+      })
+      .then(blob => {
+        objectUrl = URL.createObjectURL(blob);
+        setImgSrc(objectUrl);
+      })
+      .catch(err => {
+        console.error(err);
+        setError(true);
+      });
+
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url, token]);
+
+  if (error) return <div style={{ color: 'var(--text-muted)' }}>Failed to load snapshot</div>;
+  if (!imgSrc) return <div style={{ color: 'var(--text-muted)' }}>Loading...</div>;
+  return <img src={imgSrc} alt={alt} />;
 }
 
 function SignalDetail({ signal }) {
@@ -119,7 +152,7 @@ function SignalDetail({ signal }) {
             </button>
             {showSnapshot && (
               <div className="snapshot-viewer">
-                <img src={`${getBackendUrl()}/api/signals/${signal.id}/snapshot`} alt="Entry snapshot" />
+                <AuthenticatedImage url={`${getBackendUrl()}/api/signals/${signal.id}/snapshot`} alt="Entry snapshot" />
               </div>
             )}
           </div>
@@ -196,7 +229,7 @@ export default function Signals() {
               </thead>
               <tbody>
                 {signals.map(sig => (
-                  <>
+                  <Fragment key={sig.id}>
                     <tr key={sig.id} onClick={() => toggle(sig.id)} className="signal-row clickable">
                       <td>{expanded.has(sig.id) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</td>
                       <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
@@ -227,7 +260,7 @@ export default function Signals() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>

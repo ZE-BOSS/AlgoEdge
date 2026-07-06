@@ -7,10 +7,10 @@ Source: TradingBot_MasterPlan-2.md Section 6 — REST API
 
 import json
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, defer
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
@@ -21,13 +21,13 @@ from backend.api.deps import get_current_user
 from backend.utils.logger import get_logger
 
 try:
-    from redis.asyncio import Redis
+    from backend.data.redis_client import redis_client
     HAS_REDIS = True
 except ImportError:
     HAS_REDIS = False
-    Redis = None
+    redis_client = None
 
-REDIS_URL = "redis://localhost:6379"
+from backend.config import settings
 
 logger = get_logger(__name__)
 
@@ -53,6 +53,12 @@ class BacktestRequest(BaseModel):
     max_spread_pips: float = 3.0
     session_filter_enabled: bool = True
     news_filter_enabled: bool = True
+    enforce_htf_pd: bool = True
+    enforce_fvg_displacement: bool = True
+    enforce_asian_range_sweep: bool = True
+    asian_range_start_hour: int = 18
+    asian_range_end_hour: int = 0
+    manual_bias_overrides: Dict[str, str] = {}
     # ── Risk Params ──
     risk_per_trade_pct: float = 1.0
     min_rr: float = 3.0
@@ -60,6 +66,10 @@ class BacktestRequest(BaseModel):
     max_weekly_consecutive_losses: int = 5
     max_consecutive_losses: int = 5
     max_concurrent_positions: int = 3
+    max_daily_trades: int = 5
+    target_profit_enabled: bool = False
+    max_daily_profit: float = 500.0
+    max_weekly_profit: float = 2000.0
     # ── TP Config (defaults per spec: TP1=1:1, TP2=3:1, TP3=5:1) ──
     tp_count: int = 3
     tp1_rr: float = 1.0
@@ -87,31 +97,88 @@ class SaveBacktestRequest(BaseModel):
     save_mode: str = "FULL"  # "FULL" or "SUMMARY"
 
 
-
-
-
-@router.get("/status")
+@router.get("/backtest_status")
 async def get_backtest_status(current_user: User = Depends(get_current_user)):
-    if HAS_REDIS:
-        async with Redis.from_url(REDIS_URL) as redis:
-            data = await redis.get(f"backtest_state:{current_user.id}")
-            state = json.loads(data) if data else {"status": "idle", "progress": None}
-    else:
-        state = USER_BACKTEST_STATE.get(current_user.id, {"status": "idle", "progress": None})
+    # 1. Try local memory first (instant)
+    state = USER_BACKTEST_STATE.get(current_user.id)
+    
+    # 2. Fallback to Redis if missing (e.g. server restarted)
+    if state is None and HAS_REDIS and redis_client and redis_client.redis:
+        try:
+            import asyncio
+            import redis.exceptions
+            data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
+            if data:
+                state = json.loads(data)
+                # Cache it back to memory
+                USER_BACKTEST_STATE[current_user.id] = state
+        except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
+            logger.warning(f"[API] Redis get status failed: {e}")
+            
+    if state is None:
+        state = {"status": "idle", "progress": None}
+        
     return {"status": state.get("status"), "progress": state.get("progress")}
 
 @router.get("/latest_result")
 async def get_backtest_latest_result(current_user: User = Depends(get_current_user)):
-    if HAS_REDIS:
-        async with Redis.from_url(REDIS_URL) as redis:
-            data = await redis.get(f"backtest_state:{current_user.id}")
-            state = json.loads(data) if data else None
-    else:
-        state = USER_BACKTEST_STATE.get(current_user.id)
-        
+    state = USER_BACKTEST_STATE.get(current_user.id)
+    
+    if state is None and HAS_REDIS and redis_client and redis_client.redis:
+        try:
+            import asyncio
+            import redis.exceptions
+            data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
+            if data:
+                state = json.loads(data)
+                USER_BACKTEST_STATE[current_user.id] = state
+        except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
+            logger.warning(f"[API] Redis get latest_result failed: {e}")
+            
     if state and state.get("status") == "complete":
-        return state.get("result", {})
+        result_data = state.get("result", {})
+        # Strip massive chart data from main payload
+        trades = result_data.get("grouped_trades", result_data.get("trades", []))
+        if isinstance(trades, list):
+            for t in trades:
+                if isinstance(t, dict):
+                    t["chart_data"] = []
+                    t["chart_data_h1"] = []
+                    t["chart_data_m15"] = []
+        
+        # Strip massive run_logs array
+        if "run_logs" in result_data:
+            result_data["run_logs"] = []
+            
+        return result_data
     return {}
+
+@router.post("/stop")
+async def stop_backtest_endpoint(current_user: User = Depends(get_current_user)):
+    state = USER_BACKTEST_STATE.get(current_user.id)
+    
+    if state is None and HAS_REDIS and redis_client and redis_client.redis:
+        try:
+            import asyncio
+            import redis.exceptions
+            data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
+            if data:
+                state = json.loads(data)
+        except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
+            logger.warning(f"[API] Redis get cancel failed: {e}")
+        
+    if state and state.get("status") == "running":
+        state["status"] = "cancelled"
+        USER_BACKTEST_STATE[current_user.id] = state
+        if HAS_REDIS and redis_client and redis_client.redis:
+            try:
+                import asyncio
+                import redis.exceptions
+                await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
+            except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
+                logger.warning(f"[API] Redis set cancel failed: {e}")
+        return {"message": "Backtest cancelled"}
+    return {"message": "No running backtest found"}
 
 @router.post("/backtest")
 async def run_backtest_endpoint(
@@ -136,19 +203,30 @@ async def run_backtest_endpoint(
         }
         
         async def _save_state(state):
-            if HAS_REDIS:
-                async with Redis.from_url(REDIS_URL) as redis:
-                    await redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
-            else:
-                USER_BACKTEST_STATE[current_user.id] = state
+            USER_BACKTEST_STATE[current_user.id] = state
+            if HAS_REDIS and redis_client and redis_client.redis:
+                async def _redis_save():
+                    try:
+                        import asyncio
+                        import redis.exceptions
+                        await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
+                    except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
+                        logger.warning(f"[BACKTEST] Failed to save state to Redis: {e}")
+                
+                import asyncio
+                asyncio.create_task(_redis_save())
 
         async def _get_state():
-            if HAS_REDIS:
-                async with Redis.from_url(REDIS_URL) as redis:
-                    data = await redis.get(f"backtest_state:{current_user.id}")
-                    return json.loads(data) if data else initial_state.copy()
-            else:
-                return USER_BACKTEST_STATE.get(current_user.id, initial_state.copy())
+            if HAS_REDIS and redis_client and redis_client.redis:
+                try:
+                    import asyncio
+                    import redis.exceptions
+                    data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
+                    if data:
+                        return json.loads(data)
+                except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
+                    logger.warning(f"[BACKTEST] Failed to get state from Redis: {e}")
+            return USER_BACKTEST_STATE.get(current_user.id, initial_state.copy())
 
         await _save_state(initial_state)
         try:
@@ -169,10 +247,16 @@ async def run_backtest_endpoint(
                 if req.start_date and req.end_date:
                     start = datetime.fromisoformat(req.start_date)
                     end = datetime.fromisoformat(req.end_date)
-                    candles_h4 = await DataFetcher.get_data_range(req.symbol, "H4", start, end)
-                    candles_h1 = await DataFetcher.get_data_range(req.symbol, "H1", start, end)
-                    candles_m15 = await DataFetcher.get_data_range(req.symbol, "M15", start, end)
-                    candles_m5 = await DataFetcher.get_data_range(req.symbol, "M5", start, end)
+                    import pandas as pd
+                    # Fetch historical context so indicators can warm up immediately on start_date
+                    h4_start = start - pd.Timedelta(days=150)
+                    h1_start = start - pd.Timedelta(days=50)
+                    m15_start = start - pd.Timedelta(days=10)
+                    m5_start = start - pd.Timedelta(days=5)
+                    candles_h4 = await DataFetcher.get_data_range(req.symbol, "H4", h4_start, end)
+                    candles_h1 = await DataFetcher.get_data_range(req.symbol, "H1", h1_start, end)
+                    candles_m15 = await DataFetcher.get_data_range(req.symbol, "M15", m15_start, end)
+                    candles_m5 = await DataFetcher.get_data_range(req.symbol, "M5", m5_start, end)
                 else:
                     candles_h4 = await DataFetcher.get_historical_data(req.symbol, "H4", count=req.candle_count)
                     candles_h1 = await DataFetcher.get_historical_data(req.symbol, "H1", count=req.candle_count)
@@ -222,27 +306,45 @@ async def run_backtest_endpoint(
                 sigs = []
                 prev_h4_time = None
                 prev_h1_time = None
+                prev_m15_time = None
                 prev_m5_time = None
-                
+
                 import asyncio
-                
+                import numpy as np
+
                 candles_h4_sorted = candles_h4_idx.sort_index()
                 candles_h1_sorted = candles_h1_idx.sort_index()
                 candles_m5_sorted = candles_m5_idx.sort_index()
+                candles_m15_sorted = candles_m15_idx.sort_index()
 
-                for i in range(100, len(candles_m15_idx)):
-                    if i % 10 == 0:
-                        await asyncio.sleep(0)
-                        
-                    if i % 200 == 0:
-                        pct = int((i / len(candles_m15_idx)) * 80) + 10  # from 10% to 90%
+                # Pre-compute index arrays for fast binary search
+                h4_times = candles_h4_sorted.index.values
+                h1_times = candles_h1_sorted.index.values
+                m15_times = candles_m15_sorted.index.values
+                m5_times = candles_m5_sorted.index.values
+
+                # Max lookback windows (bars)
+                H4_WINDOW = 200
+                H1_WINDOW = 300
+                M15_WINDOW = 200
+                M5_WINDOW = 500
+
+                for i in range(300, len(m5_times)):
+                    if i % 500 == 0:
+                        await asyncio.sleep(0)  # yield event loop every 500 bars
+
+                    if i % 600 == 0:
+                        pct = int((i / len(m5_times)) * 80) + 10
                         progress_obj = {"stage": "Running simulation...", "pct": pct}
-                        
+
                         current_state = await _get_state()
+                        if current_state.get("status") == "cancelled":
+                            bot_service.log_system_event("Backtest simulation cancelled by user", category="BACKTEST")
+                            raise Exception("Backtest Cancelled")
+
                         current_state["progress"] = progress_obj
                         await _save_state(current_state)
                         try:
-                            # Using fire-and-forget to avoid blocking
                             asyncio.create_task(ws_manager.broadcast_to_user(current_user.id, {
                                 "type": "backtest_progress",
                                 "stage": "Running simulation...",
@@ -250,44 +352,55 @@ async def run_backtest_endpoint(
                             }))
                         except: pass
 
-                    current_time = candles_m15_idx.index[i]
-                    
-                    start_h4 = current_time - pd.Timedelta(days=200)
-                    start_h1 = current_time - pd.Timedelta(days=50)
-                    start_m15_idx = max(0, i - 1000)
-                    start_m5 = current_time - pd.Timedelta(days=10)
-                    
-                    slice_h4 = candles_h4_sorted.loc[start_h4:current_time]
-                    slice_h1 = candles_h1_sorted.loc[start_h1:current_time]
-                    slice_m15 = candles_m15_idx.iloc[start_m15_idx:i+1]
-                    slice_m5 = candles_m5_sorted.loc[start_m5:current_time]
-                    
-                    if len(slice_h4) < 20 or len(slice_h1) < 20 or len(slice_m5) < 20:
+                    current_time = m5_times[i]
+                    is_warmup = req.start_date and current_time < np.datetime64(datetime.fromisoformat(req.start_date))
+
+                    # Fast integer-based slicing (O(log n) searchsorted instead of O(n) loc)
+                    h4_end = int(np.searchsorted(h4_times, current_time, side='right'))
+                    h4_start = max(0, h4_end - H4_WINDOW)
+                    slice_h4 = candles_h4_sorted.iloc[h4_start:h4_end]
+
+                    h1_end = int(np.searchsorted(h1_times, current_time, side='right'))
+                    h1_start = max(0, h1_end - H1_WINDOW)
+                    slice_h1 = candles_h1_sorted.iloc[h1_start:h1_end]
+
+                    m15_end = int(np.searchsorted(m15_times, current_time, side='right'))
+                    m15_start = max(0, m15_end - M15_WINDOW)
+                    slice_m15 = candles_m15_sorted.iloc[m15_start:m15_end]
+
+                    m5_end = i + 1
+                    m5_start = max(0, m5_end - M5_WINDOW)
+                    slice_m5 = candles_m5_sorted.iloc[m5_start:m5_end]
+
+                    if len(slice_h4) < 20 or len(slice_h1) < 20 or len(slice_m15) < 20 or len(slice_m5) < 20:
                         continue
-                        
+
                     last_h4_time = slice_h4.index[-1]
                     if last_h4_time != prev_h4_time:
                         await engine.on_bar(req.symbol, "H4", slice_h4)
                         prev_h4_time = last_h4_time
-                        
+
                     last_h1_time = slice_h1.index[-1]
                     if last_h1_time != prev_h1_time:
                         await engine.on_bar(req.symbol, "H1", slice_h1)
                         prev_h1_time = last_h1_time
-                        
-                    await engine.on_bar(req.symbol, "M15", slice_m15)
-                    
-                    last_m5_time = slice_m5.index[-1]
+
+                    last_m15_time = slice_m15.index[-1]
+                    if last_m15_time != prev_m15_time:
+                        await engine.on_bar(req.symbol, "M15", slice_m15)
+                        prev_m15_time = last_m15_time
+
+                    last_m5_time = m5_times[i]
                     sig = None
                     if last_m5_time != prev_m5_time:
                         sig = await engine.on_bar(req.symbol, "M5", slice_m5)
                         prev_m5_time = last_m5_time
-                    
-                    if sig:
+
+                    if sig and not is_warmup:
                         sig_dict = {
                             "symbol": sig.symbol,
                             "direction": sig.direction,
-                            "time": i,
+                            "time": int(current_time.astype('datetime64[s]').astype(int)) if hasattr(current_time, 'astype') else int(current_time),
                             "entry_price": sig.entry_price,
                             "stop_loss": sig.stop_loss,
                             "take_profit": sig.take_profit,
@@ -299,7 +412,7 @@ async def run_backtest_endpoint(
                 return sigs
 
             signals = await generate_signals_simulated()
-            candles = candles_m15
+            candles = candles_m5_idx
 
             merged_risk_config = {
                 "risk_per_trade_pct": req.risk_per_trade_pct,
@@ -325,7 +438,12 @@ async def run_backtest_endpoint(
                 "max_weekly_consecutive_losses": req.max_weekly_consecutive_losses,
                 "max_consecutive_losses": req.max_consecutive_losses,
                 "max_concurrent_positions": req.max_concurrent_positions,
+                "max_daily_trades": req.max_daily_trades,
+                "target_profit_enabled": req.target_profit_enabled,
+                "max_daily_profit": req.max_daily_profit,
+                "max_weekly_profit": req.max_weekly_profit,
                 "compounding_enabled": req.compounding_enabled,
+                "manual_bias_overrides": req.manual_bias_overrides,
                 **req.risk_config,
             }
 
@@ -340,6 +458,8 @@ async def run_backtest_endpoint(
                 signals=signals,
                 risk_config=merged_risk_config,
                 initial_balance=req.initial_balance,
+                candles_h1=candles_h1_idx,
+                candles_m15=candles_m15_idx,
                 save_mode="DISCARD",
             )
 
@@ -355,19 +475,30 @@ async def run_backtest_endpoint(
             import numpy as _np
 
             def _sanitize(obj):
+                import math
                 if isinstance(obj, dict):
                     return {k: _sanitize(v) for k, v in obj.items()}
                 elif isinstance(obj, (list, tuple)):
                     return [_sanitize(v) for v in obj]
                 elif isinstance(obj, (_np.bool_, bool)):
                     return bool(obj)
-                elif isinstance(obj, (_np.integer,)):
+                elif isinstance(obj, (_np.integer, int)):
                     return int(obj)
-                elif isinstance(obj, (_np.floating,)):
+                elif isinstance(obj, (_np.floating, float)):
+                    if math.isnan(obj) or math.isinf(obj):
+                        return None
                     return float(obj)
                 elif isinstance(obj, _np.ndarray):
-                    return obj.tolist()
-                return obj
+                    return _sanitize(obj.tolist())
+                elif isinstance(obj, (int, float)) and pd.isna(obj):
+                    return None
+                elif isinstance(obj, pd.Timestamp):
+                    return obj.isoformat()
+                elif hasattr(obj, 'isoformat'):
+                    return obj.isoformat()
+                elif isinstance(obj, (str, type(None))):
+                    return obj
+                return str(obj)
 
             response = {
                 "backtest_id": results["backtest_id"],
@@ -410,15 +541,25 @@ async def run_backtest_endpoint(
             current_state["status"] = "complete"
             current_state["progress"] = {"stage": "complete", "pct": 100}
             current_state["result"] = sanitized
-            await _save_state(current_state)
+            
+            # Broadcast IMMEDIATELY so the frontend gets the data even if Redis is slow/failing
             await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": sanitized})
+            
+            # Now save to state (which writes to Redis and might block)
+            await _save_state(current_state)
             
         except Exception as e:
             current_state = await _get_state()
             current_state["status"] = "error"
             current_state["progress"] = {"stage": "error", "message": str(e), "pct": 0}
             current_state["result"] = None
+            
+            try:
+                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
+            except: pass
+
             await _save_state(current_state)
+            
             import traceback
             logger.error(f"Backtest error: {e}\n{traceback.format_exc()}")
             from backend.api.websocket import manager as ws_manager
@@ -440,6 +581,7 @@ async def list_backtests(
     """List all saved backtests for the authenticated user."""
     result = await db.execute(
         select(BacktestRun)
+        .options(defer(BacktestRun.run_logs), defer(BacktestRun.params_snapshot))
         .where(BacktestRun.user_id == current_user.id)
         .order_by(desc(BacktestRun.created_at))
     )
@@ -455,8 +597,16 @@ async def list_backtests(
         "max_drawdown_pct": r.max_drawdown_pct,
         "profit_factor": r.profit_factor,
         "created_at": r.created_at,
+        "notes_preview": r.notes[:50] + "..." if getattr(r, "notes", None) else None,
     } for r in runs]
 
+def safe_json_loads(data, default=None):
+    if not data:
+        return default if default is not None else {}
+    try:
+        return json.loads(data)
+    except (json.JSONDecodeError, TypeError):
+        return default if default is not None else {}
 
 @router.get("/backtests/{backtest_id}")
 async def get_backtest(
@@ -476,12 +626,15 @@ async def get_backtest(
 
     # Build equity curve from trades
     equity_curve = []
-    balance = 10000.0  # Default; should come from params_snapshot
+    initial_balance = 10000.0  # Default; should come from params_snapshot
+    params = {}
     try:
-        params = json.loads(run.params_snapshot) if run.params_snapshot else {}
-        balance = params.get("initial_balance", 10000.0)
-    except (json.JSONDecodeError, TypeError):
+        params = safe_json_loads(run.params_snapshot, {})
+        initial_balance = params.get("initial_balance", 10000.0)
+    except Exception:
         pass
+
+    balance = initial_balance
 
     equity_curve.append(balance)
     for t in run.trades:
@@ -490,7 +643,13 @@ async def get_backtest(
 
     # TP distribution
     tp_dist = {"TP1": 0, "TP2": 0, "TP3": 0, "TP4": 0, "TP5": 0, "SL": 0, "TRAIL": 0, "BE": 0}
-    session_stats = {"LONDON": {"wins": 0, "total": 0}, "NY": {"wins": 0, "total": 0}, "OVERLAP": {"wins": 0, "total": 0}}
+    session_stats = {
+        "LONDON": {"wins": 0, "total": 0}, 
+        "NY": {"wins": 0, "total": 0}, 
+        "LONDON/NY": {"wins": 0, "total": 0},
+        "ASIAN": {"wins": 0, "total": 0},
+        "UNKNOWN": {"wins": 0, "total": 0}
+    }
 
     for t in run.trades:
         reason = t.exit_reason or ""
@@ -500,15 +659,68 @@ async def get_backtest(
             tp_dist["SL"] += 1
 
         # Session breakdown (if available)
-        session = getattr(t, "session", None) or ""
-        if session in session_stats:
-            session_stats[session]["total"] += 1
-            if (t.pnl or 0) > 0:
-                session_stats[session]["wins"] += 1
+        session = getattr(t, "session", None) or "UNKNOWN"
+        if session not in session_stats:
+            session = "UNKNOWN"
+        
+        session_stats[session]["total"] += 1
+        if (t.pnl or 0) > 0:
+            session_stats[session]["wins"] += 1
 
     session_win_rates = {}
     for sess, data in session_stats.items():
-        session_win_rates[sess] = data["wins"] / data["total"] if data["total"] > 0 else 0
+        key = "OVERLAP" if sess == "LONDON/NY" else sess
+        session_win_rates[key] = data["wins"] / data["total"] if data["total"] > 0 else 0
+
+    grouped_trades_out = []
+    for t in run.trades:
+        sub_trades = safe_json_loads(t.sub_trades, [])
+        tp_count = len(sub_trades)
+        tp_wins = sum(1 for st in sub_trades if st.get("pnl", 0) > 0)
+        tp_losses = tp_count - tp_wins
+        duration = 0
+        if t.entry_time and t.exit_time:
+            duration = int((t.exit_time - t.entry_time).total_seconds() / 60)
+            
+        grouped_trades_out.append({
+            "group_id": t.id,
+            "symbol": t.symbol,
+            "direction": t.direction,
+            "entry_price": t.entry_price,
+            "exit_price": t.exit_price,
+            "stop_loss": t.stop_loss,
+            "pnl": t.pnl,
+            "combined_pnl": t.pnl,
+            "exit_reason": t.exit_reason,
+            "tp_level_hit": t.tp_level_hit,
+            "balance_before": t.balance_before,
+            "balance_after": t.balance_after,
+            "tp1_price": t.tp1_price,
+            "tp2_price": t.tp2_price,
+            "tp3_price": t.tp3_price,
+            "tp4_price": t.tp4_price,
+            "tp5_price": t.tp5_price,
+            "pnl_r": t.pnl_r,
+            "planned_rr": t.planned_rr,
+            "realized_rr": t.realized_rr,
+            "entry_time": t.entry_time.isoformat() if t.entry_time else None,
+            "entry_time_iso": t.entry_time.isoformat() if t.entry_time else None,
+            "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+            "exit_time_iso": t.exit_time.isoformat() if t.exit_time else None,
+            "duration_minutes": duration,
+            "entry_session": getattr(t, "session", None) or "UNKNOWN",
+            "tp_count": tp_count,
+            "tp_wins": tp_wins,
+            "tp_losses": tp_losses,
+            "be_applied": t.be_applied,
+            "trail_method": t.trail_method,
+            "mae_pips": t.mae_pips,
+            "mfe_pips": t.mfe_pips,
+            "confluence_score": t.confluence_score,
+            "smc_data": safe_json_loads(t.smc_data, {}),
+            "sub_trades": sub_trades,
+            "entry_snapshot_b64": ""
+        })
 
     return {
         "run": {
@@ -518,6 +730,8 @@ async def get_backtest(
             "total_trades": run.total_trades,
             "win_rate": run.win_rate,
             "total_pnl": run.total_pnl,
+            "initial_balance": initial_balance,
+            "final_balance": round(balance, 2),
             "sharpe_ratio": run.sharpe_ratio,
             "profit_factor": run.profit_factor,
             "max_drawdown_pct": run.max_drawdown_pct,
@@ -531,28 +745,40 @@ async def get_backtest(
             "start_date": run.start_date,
             "end_date": run.end_date,
             "created_at": run.created_at,
+            "notes": run.notes,
+            "params_snapshot": params,
+            "bias_stats": params.get("bias_stats"),
+            "confluence_stats": params.get("confluence_stats"),
         },
-        "trades": [{
-            "symbol": t.symbol,
-            "direction": t.direction,
-            "entry_price": t.entry_price,
-            "exit_price": t.exit_price,
-            "stop_loss": t.stop_loss,
-            "pnl": t.pnl,
-            "exit_reason": t.exit_reason,
-            "tp_level_hit": t.tp_level_hit,
-            "entry_time": t.entry_time,
-            "exit_time": t.exit_time,
-            "be_applied": t.be_applied,
-            "trail_method": t.trail_method,
-            "mae_pips": t.mae_pips,
-            "mfe_pips": t.mfe_pips,
-            "confluence_score": t.confluence_score,
-        } for t in run.trades],
+        "grouped_trades": grouped_trades_out,
         "equity_curve": equity_curve,
         "tp_distribution": tp_dist,
         "session_win_rates": session_win_rates,
-        "run_logs": json.loads(run.run_logs) if run.run_logs else [],
+        "run_logs": [],  # Stripped to prevent UI freeze
+    }
+
+
+@router.get("/backtests/{backtest_id}/trade/{group_id}/chart")
+async def get_saved_trade_chart(
+    backtest_id: str,
+    group_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fetch massive chart data for a specific trade separately to prevent UI freeze."""
+    from backend.data.models import BacktestTrade
+    result = await db.execute(
+        select(BacktestTrade)
+        .where(BacktestTrade.backtest_id == backtest_id, BacktestTrade.id == group_id)
+    )
+    t = result.scalar_one_or_none()
+    if not t:
+        raise HTTPException(status_code=404, detail="Trade not found")
+        
+    return {
+        "chart_data": safe_json_loads(t.chart_data, []),
+        "chart_data_h1": safe_json_loads(t.chart_data_h1, []),
+        "chart_data_m15": safe_json_loads(t.chart_data_m15, [])
     }
 
 
@@ -570,4 +796,125 @@ async def delete_backtest(
     if not run:
         raise HTTPException(status_code=404, detail="Backtest not found")
     await db.delete(run)
+    await db.commit()
     return {"deleted": True}
+@router.post("/backtests/{backtest_id}/save")
+async def save_backtest_from_client(
+    backtest_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save a discarded backtest from the client."""
+    from backend.data.models import BacktestRun, BacktestTrade
+    from sqlalchemy.future import select
+    from datetime import datetime, timezone
+    import json
+    
+    raw_data = await request.json()
+    data = raw_data.get("backtest_data", raw_data)
+    
+    # Check if already exists
+    res = await db.execute(select(BacktestRun).where(BacktestRun.id == backtest_id))
+    if res.scalars().first():
+        return {"status": "ok", "message": "Already saved"}
+
+    report = data.get("report", {})
+    
+    start_date = datetime.now(timezone.utc).replace(tzinfo=None)
+    end_date = datetime.now(timezone.utc).replace(tzinfo=None)
+    trades = data.get("grouped_trades", data.get("trades", []))
+    if trades:
+        try:
+            start_date = datetime.fromisoformat(trades[0].get("entry_time")).replace(tzinfo=None)
+            end_date = datetime.fromisoformat(trades[-1].get("exit_time") or trades[-1].get("entry_time")).replace(tzinfo=None)
+        except:
+            pass
+
+    run = BacktestRun(
+        id=backtest_id,
+        user_id=current_user.id,
+        strategy_id="smc",
+        symbol=data.get("symbol", "Volatility 75 Index"),
+        start_date=start_date,
+        end_date=end_date,
+        params_snapshot=json.dumps({
+            **data.get("risk_config", {}),
+            "bias_stats": report.get("bias_stats", {}),
+            "confluence_stats": report.get("confluence_stats", {})
+        }),
+        notes=data.get("notes", ""),
+        total_trades=data.get("total_trades", report.get("total_trades", 0)),
+        win_rate=data.get("win_rate", report.get("win_rate", 0)),
+        profit_factor=data.get("profit_factor", report.get("profit_factor", 0)),
+        sharpe_ratio=data.get("sharpe_ratio", report.get("sharpe_ratio", 0)),
+        max_drawdown_pct=data.get("max_drawdown_pct", report.get("max_drawdown_pct", 0)),
+        total_pnl=data.get("total_pnl", report.get("total_pnl", 0)),
+        tp1_hit_rate=report.get("tp1_hit_rate", 0),
+        tp2_hit_rate=report.get("tp2_hit_rate", 0),
+        tp3_hit_rate=report.get("tp3_hit_rate", 0),
+        tp4_hit_rate=report.get("tp4_hit_rate", 0),
+        tp5_hit_rate=report.get("tp5_hit_rate", 0),
+        sl_hit_rate=report.get("sl_hit_rate", 0),
+        be_hit_rate=report.get("be_hit_rate", 0),
+        trail_hit_rate=report.get("trail_hit_rate", 0),
+    )
+    
+    db.add(run)
+    
+    for t in trades:
+        try:
+            etime = t.get("entry_time_iso") or t.get("entry_time")
+            if isinstance(etime, (int, float)):
+                entry_time = datetime.fromtimestamp(etime)
+            else:
+                entry_time = datetime.fromisoformat(etime).replace(tzinfo=None) if etime else None
+                
+            xtime = t.get("exit_time_iso") or t.get("exit_time")
+            if isinstance(xtime, (int, float)):
+                exit_time = datetime.fromtimestamp(xtime)
+            else:
+                exit_time = datetime.fromisoformat(xtime).replace(tzinfo=None) if xtime else None
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to parse time for trade: {e}")
+            entry_time, exit_time = None, None
+            
+        bt_trade = BacktestTrade(
+            backtest_id=backtest_id,
+            symbol=t.get("symbol", run.symbol),
+            direction=t.get("direction"),
+            entry_price=t.get("entry_price"),
+            exit_price=t.get("exit_price"),
+            stop_loss=t.get("stop_loss"),
+            pnl=t.get("combined_pnl", t.get("pnl", 0)),
+            balance_before=t.get("balance_before"),
+            balance_after=t.get("balance_after"),
+            session=t.get("entry_session", "UNKNOWN"),
+            exit_reason=t.get("exit_reason"),
+            tp_level_hit=t.get("tp_level_hit") or t.get("tp_level"),
+            entry_time=entry_time,
+            exit_time=exit_time,
+            be_applied=t.get("be_applied", False),
+            trail_method=t.get("trail_method"),
+            mae_pips=t.get("mae_pips"),
+            mfe_pips=t.get("mfe_pips"),
+            confluence_score=t.get("confluence_score"),
+            chart_data=json.dumps(t.get("chart_data", [])),
+            chart_data_h1=json.dumps(t.get("chart_data_h1", [])),
+            chart_data_m15=json.dumps(t.get("chart_data_m15", [])),
+            tp1_price=t.get("tp1_price"),
+            tp2_price=t.get("tp2_price"),
+            tp3_price=t.get("tp3_price"),
+            tp4_price=t.get("tp4_price"),
+            tp5_price=t.get("tp5_price"),
+            pnl_r=t.get("pnl_r"),
+            planned_rr=t.get("planned_rr"),
+            realized_rr=t.get("realized_rr"),
+            smc_data=json.dumps(t.get("smc_data", {})),
+            sub_trades=json.dumps(t.get("sub_trades", []))
+        )
+        db.add(bt_trade)
+        
+    await db.commit()
+    return {"status": "ok", "message": "Backtest saved successfully"}

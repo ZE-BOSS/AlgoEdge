@@ -1,11 +1,12 @@
 import axios from 'axios';
+import { useLoadingStore } from '../store';
 
 const DEFAULT_URL = import.meta.env.VITE_DEFAULT_BACKEND_URL || 'http://localhost:8000';
 const BACKEND_URL = localStorage.getItem('backend_url') || DEFAULT_URL;
 
 const api = axios.create({
   baseURL: `${BACKEND_URL}/api`,
-  timeout: 15000,
+  timeout: 60000,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -35,11 +36,18 @@ export const clearAuth = () => {
 
 // ── Request Interceptor: Attach JWT ─────────────────────────────────────────
 
+const isSilentUrl = (url) => url && (url.includes('/latest_result') || url.includes('/status') || url.includes('/logs'));
+
 api.interceptors.request.use((config) => {
   const token = getToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  
+  if (!isSilentUrl(config.url)) {
+    if (useLoadingStore) useLoadingStore.getState().startLoading();
+  }
+  
   return config;
 });
 
@@ -57,8 +65,12 @@ const processQueue = (error, token = null) => {
 };
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    if (!isSilentUrl(res.config?.url) && useLoadingStore) useLoadingStore.getState().stopLoading();
+    return res;
+  },
   async (err) => {
+    if (!isSilentUrl(err.config?.url) && useLoadingStore) useLoadingStore.getState().stopLoading();
     const originalRequest = err.config;
 
     // If 401 and not already retrying
@@ -75,9 +87,9 @@ api.interceptors.response.use(
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         }).then((token) => {
-          originalRequest.headers.Authorization = `Bearer ${token}`;
+          originalRequest.headers['Authorization'] = `Bearer ${token}`;
           return api(originalRequest);
-        });
+        }).catch(err => Promise.reject(err));
       }
 
       originalRequest._retry = true;
@@ -89,7 +101,7 @@ api.interceptors.response.use(
         });
         storeAuth(data.access_token, data.refresh_token, getStoredUser());
         processQueue(null, data.access_token);
-        originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
+        originalRequest.headers['Authorization'] = `Bearer ${data.access_token}`;
         return api(originalRequest);
       } catch (refreshErr) {
         processQueue(refreshErr, null);
@@ -121,6 +133,10 @@ export const register = (data) => api.post('/auth/register', data);
 export const login = (data) => api.post('/auth/login', data);
 export const refreshTokenApi = (data) => api.post('/auth/refresh', data);
 export const getMe = () => api.get('/auth/me');
+
+// ── Dashboard ───────────────────────────────────────────────────────────────
+
+export const getDashboardData = () => api.get('/dashboard');
 
 // ── Health ──────────────────────────────────────────────────────────────────
 
@@ -158,8 +174,11 @@ export const getSignalDetail = (id) => api.get(`/signals/${id}`);
 // ── Backtest ────────────────────────────────────────────────────────────────
 
 export const runBacktest = (data) => api.post('/backtest', data, { timeout: 300000 });
-export const getBacktestStatus = () => api.get('/status');
+export const getBacktestStatus = () => api.get('/backtest_status');
 export const getLatestBacktestResult = () => api.get('/latest_result');
+export const getUnsavedTradeChart = (groupId) => api.get(`/backtest_result/trade/${groupId}/chart`);
+export const getSavedTradeChart = (backtestId, groupId) => api.get(`/backtests/${backtestId}/trade/${groupId}/chart`);
+export const stopBacktest = () => api.post('/stop');
 export const saveBacktest = (id, data) => api.post(`/backtests/${id}/save`, data);
 export const getBacktests = () => api.get('/backtests');
 export const getBacktest = (id) => api.get(`/backtests/${id}`);

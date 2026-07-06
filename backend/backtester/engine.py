@@ -49,6 +49,8 @@ def _calc_duration_minutes(entry_time, exit_time) -> float:
     try:
         if isinstance(entry_time, (int, float)) and isinstance(exit_time, (int, float)):
             return (exit_time - entry_time) / 60.0
+        elif hasattr(entry_time, "timestamp") and hasattr(exit_time, "timestamp"):
+            return (exit_time.timestamp() - entry_time.timestamp()) / 60.0
         return 0.0
     except Exception:
         return 0.0
@@ -91,6 +93,8 @@ class BacktestEngine:
         candles: pd.DataFrame,
         signals: List[Dict[str, Any]],
         initial_balance: float = 10000.0,
+        candles_h1: pd.DataFrame = None,
+        candles_m15: pd.DataFrame = None,
         compounding_enabled: bool = False,
     ) -> Dict[str, Any]:
         """Run a backtest on historical candles with pre-generated signals."""
@@ -132,8 +136,8 @@ class BacktestEngine:
             for j in range(max(sw_len, i - swing_lookback), i - sw_len):
                 if j - sw_len < 0:
                     continue
-                window_h = highs_arr[j - sw_len:j + 1]
-                window_l = lows_arr[j - sw_len:j + 1]
+                window_h = highs_arr[j - sw_len:j + sw_len + 1]
+                window_l = lows_arr[j - sw_len:j + sw_len + 1]
                 if highs_arr[j] == window_h.max():
                     points.append({"type": "HIGH", "price": float(highs_arr[j])})
                 if lows_arr[j] == window_l.min():
@@ -141,9 +145,6 @@ class BacktestEngine:
             if points:
                 swing_cache[i] = points
 
-        # ── In backtesting, auto-reset circuit breaker streak so it doesn't block all trades ──
-        # The circuit breaker requires "manual re-enable" in live — but in backtest we auto-reset
-        original_max_losses = self.risk_engine.circuit.max_consecutive_losses
 
         for i in range(len(candles)):
             bar = candles.iloc[i]
@@ -173,13 +174,16 @@ class BacktestEngine:
                     pos["lowest_price"] = min(pos.get("lowest_price", pos["entry_price"]), low)
 
                 # Check Max Holding Time (48 hours)
-                if isinstance(current_time, (int, float)) and isinstance(pos.get("entry_time"), (int, float)):
-                    if current_time - pos["entry_time"] >= 48 * 3600:
-                        pos["exit_price"] = current_price
-                        pos["exit_reason"] = "TIME_LIMIT_48H"
-                        pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
-                        closed_this_bar.append(pos)
-                        continue
+                c_ts = current_time.timestamp() if hasattr(current_time, "timestamp") else current_time
+                e_ts = pos["entry_time"].timestamp() if hasattr(pos.get("entry_time"), "timestamp") else pos.get("entry_time")
+                if isinstance(c_ts, (int, float)) and isinstance(e_ts, (int, float)):
+                    if c_ts > 1e8 and e_ts > 1e8:
+                        if c_ts - e_ts >= 48 * 3600:
+                            pos["exit_price"] = current_price
+                            pos["exit_reason"] = "TIME_LIMIT_48H"
+                            pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
+                            closed_this_bar.append(pos)
+                            continue
 
                 # Check SL hit
                 if pos["direction"] == "BUY" and low <= pos["stop_loss"]:
@@ -258,6 +262,8 @@ class BacktestEngine:
                                 pos["be_applied"] = True
 
             # Close positions and build exit confirmations
+            # FIX 2: Collect positions to remove after the loop (avoids O(n) list.remove in hot loop)
+            positions_to_remove = []
             for pos in closed_this_bar:
                 pos["exit_time"] = current_time
                 try:
@@ -284,31 +290,55 @@ class BacktestEngine:
                 ]
 
                 balance += pos.get("pnl", 0)
+                pos["balance_after"] = balance
                 is_win = pos.get("pnl", 0) > 0
-                self.risk_engine.on_position_closed(pos.get("pnl", 0), is_win)
+                self.risk_engine.on_position_closed(pos.get("group_id", "unknown"), pos.get("pnl", 0), current_time)
                 self.trades.append(pos)
-                self.open_positions.remove(pos)
+                positions_to_remove.append(pos)
+            # FIX 2: Bulk removal after the loop — avoids O(n) list.remove per closed position
+            for p in positions_to_remove:
+                if p in self.open_positions:
+                    self.open_positions.remove(p)
 
+            current_timestamp = current_time.timestamp() if hasattr(current_time, "timestamp") else float(current_time)
             # 2. Check for new signals on this bar
+            # FIX 1 (Lookahead bias): use >= so a signal is only actioned on the NEXT bar
+            # after it was generated (sig_time must be strictly less than current_timestamp).
             while signal_idx < len(signals):
                 sig = signals[signal_idx]
-                sig_time = sig.get("time", signal_idx)
-                if sig_time > i:
+                sig_time = float(sig.get("time", float("inf")))
+                if sig_time >= current_timestamp:
                     break
                 signal_idx += 1
 
-                # In backtest: auto-reset circuit breaker if it paused due to streak
-                if self.risk_engine.circuit.is_paused and "consecutive" in self.risk_engine.circuit.pause_reason.lower():
-                    self.risk_engine.circuit.manual_resume()
+                # Prevent taking multiple positions on the same symbol in the same direction (pyramiding)
+                symbol = sig.get("symbol")
+                from backend.risk.multi_tp import _is_buy
+                sig_is_buy = _is_buy(sig.get("direction", "BUY"))
+                
+                already_open = False
+                for p in self.open_positions:
+                    p_is_buy = _is_buy(p.get("direction", "BUY"))
+                    if p.get("symbol") == symbol and p_is_buy == sig_is_buy:
+                        already_open = True
+                        break
+                        
+                if already_open:
+                    continue
 
+                # Generate a group_id to link all sub-positions from this signal
+                group_id = str(uuid.uuid4())[:8]
+                sig["group_id"] = group_id
+
+                current_time_dt = datetime.fromtimestamp(float(current_time), timezone.utc) if isinstance(current_time, (int, float)) else pd.to_datetime(current_time).to_pydatetime()
                 # Evaluate signal through RiskEngine
                 approved, reason, tp_levels = self.risk_engine.evaluate_signal(
-                    sig, balance
+                    signal_data=sig,
+                    account_balance=balance,
+                    current_time=current_time_dt
                 )
 
                 if approved:
-                    # Generate a group_id to link all sub-positions from this signal
-                    group_id = str(uuid.uuid4())[:8]
                     logger.info(f"[ENGINE] ✅ Signal APPROVED at bar {i}: {sig.get('direction')} @ {sig.get('entry_price', current_price):.5f} | {len(tp_levels)} TP levels | balance=${balance:.2f}")
 
                     for tp in tp_levels:
@@ -324,9 +354,13 @@ class BacktestEngine:
                             self.invalid_signals += 1
                             continue
 
-                        position = self._create_position(sig, tp, current_time, current_price, group_id)
+                        # FIX 1 (Lookahead bias): entry price is the OPEN of the current bar
+                        # (which is the bar AFTER the signal was generated — guaranteed by the
+                        # sig_time >= current_timestamp guard above). This eliminates same-bar fill.
+                        bar_open_price = float(bar.get("open", current_price))
+                        position = self._create_position(sig, tp, current_time, bar_open_price, group_id, balance)
                         self.open_positions.append(position)
-                        logger.debug(f"[ENGINE]   Position opened: TP{tp.level} @ {tp.tp_price:.5f} | vol={tp.volume:.4f}")
+                        logger.debug(f"[ENGINE]   Position opened: TP{tp.level} @ {bar_open_price:.5f} (bar open) | vol={tp.volume:.4f}")
                 else:
                     logger.info(f"[ENGINE] ❌ Signal REJECTED at bar {i}: {reason}")
 
@@ -349,21 +383,22 @@ class BacktestEngine:
                 f"PnL: ${pos.get('pnl', 0):.2f}",
             ]
             balance += pos.get("pnl", 0)
+            pos["balance_after"] = balance
             self.trades.append(pos)
         self.open_positions = []
         self.equity_curve.append(balance)
 
         # Group trades by group_id for combined P&L display
-        grouped_trades = self._group_trades(self.trades)
+        grouped_trades = self._group_trades(self.trades, candles, candles_h1, candles_m15)
 
-        report = generate_risk_report(self.trades)
+        report = generate_risk_report(grouped_trades)
 
         # ── Engine completion summary ──
         total_pnl = balance - initial_balance
-        wins = sum(1 for t in self.trades if t.get("pnl", 0) > 0)
-        losses = sum(1 for t in self.trades if t.get("pnl", 0) <= 0)
+        wins = sum(1 for t in grouped_trades if t.get("pnl", 0) > 0)
+        losses = sum(1 for t in grouped_trades if t.get("pnl", 0) <= 0)
         logger.info(f"[ENGINE] ═══ Backtest engine complete ═══")
-        logger.info(f"[ENGINE] Trades: {len(self.trades)} ({wins}W / {losses}L) | Invalid: {self.invalid_signals}")
+        logger.info(f"[ENGINE] Trades: {len(grouped_trades)} ({wins}W / {losses}L) | Invalid: {self.invalid_signals}")
         logger.info(f"[ENGINE] P&L: ${total_pnl:.2f} | Final balance: ${balance:.2f}")
         if self.trades:
             best = max(t.get("pnl", 0) for t in self.trades)
@@ -374,6 +409,7 @@ class BacktestEngine:
             "backtest_id": str(uuid.uuid4()),
             "initial_balance": initial_balance,
             "final_balance": balance,
+            "total_pnl": total_pnl,
             "total_trades": len(self.trades),
             "total_signals": len(grouped_trades),
             "invalid_signals": self.invalid_signals,
@@ -390,6 +426,7 @@ class BacktestEngine:
         current_time: Any,
         current_price: float,
         group_id: str,
+        balance: float,
     ) -> Dict[str, Any]:
         """Create a position dict with entry confirmations and group_id."""
         entry_price = sig.get("entry_price", current_price)
@@ -424,7 +461,7 @@ class BacktestEngine:
             "id": str(uuid.uuid4()),
             "group_id": group_id,
             "symbol": sig.get("symbol", ""),
-            "direction": sig.get("direction", "BUY"),
+            "direction": "BUY" if _is_buy(sig.get("direction", "BUY")) else "SELL",
             "entry_price": entry_price,
             "stop_loss": sig.get("stop_loss", 0),
             "take_profit": tp.tp_price,
@@ -438,12 +475,15 @@ class BacktestEngine:
             "mae_pips": 0.0,
             "mfe_pips": 0.0,
             "confluence_score": sig.get("confluence_score", 0),
+            "balance_before": balance,
+            "status": "OPEN",
             "entry_confirmations": entry_confirmations,
             "entry_snapshot_b64": sig.get("metadata", {}).get("entry_snapshot_b64", ""),
+            "original_signal": sig,
         }
 
-    def _group_trades(self, trades: List[Dict]) -> List[Dict]:
-        """Group trades by group_id for combined P&L display."""
+    def _group_trades(self, trades: List[Dict], candles: Any = None, candles_h1: Any = None, candles_m15: Any = None) -> List[Dict]:
+        """Group trades by group_id for combined P&L display, extracting chart data for frontend."""
         from collections import OrderedDict
         groups = OrderedDict()
         for t in trades:
@@ -467,6 +507,10 @@ class BacktestEngine:
                     "entry_snapshot_b64": t.get("entry_snapshot_b64", ""),
                     "entry_confirmations": t.get("entry_confirmations", []),
                     "confluence_score": t.get("confluence_score", 0),
+                    "balance_before": t.get("balance_before", 0),
+                    "chart_data": [],
+                    "smc_data": {"boxes": [], "lines": [], "markers": []},
+                    "original_signal": t.get("original_signal", {}),
                 }
             g = groups[gid]
             g["sub_trades"].append(t)
@@ -482,10 +526,21 @@ class BacktestEngine:
 
         # Add summary fields
         for g in groups.values():
-            wins = sum(1 for t in g["sub_trades"] if t.get("pnl", 0) > 0)
+            sub_trades = g["sub_trades"]
+            wins = sum(1 for t in sub_trades if t.get("pnl", 0) > 0)
             g["tp_wins"] = wins
             g["tp_losses"] = g["tp_count"] - wins
             g["is_net_winner"] = g["combined_pnl"] > 0
+            
+            # These aliases allow the group to be treated as a single trade by the reporting engine
+            g["pnl"] = g["combined_pnl"]
+            g["exit_price"] = g["best_exit"].get("exit_price", 0) if g["best_exit"] else 0
+            g["exit_reason"] = g["best_exit"].get("exit_reason", "UNKNOWN") if g["best_exit"] else "UNKNOWN"
+            # FIX 3: Propagate balance_before/after and net_pnl from sub_trades
+            g["balance_before"] = sub_trades[0].get("balance_before") if sub_trades else None
+            g["balance_after"]  = sub_trades[-1].get("balance_after") if sub_trades else None
+            g["net_pnl"]        = sum(t.get("pnl", 0) for t in sub_trades)
+            
             # Find the last exit time
             exit_times = [t.get("exit_time", 0) for t in g["sub_trades"] if t.get("exit_time")]
             if exit_times:
@@ -497,6 +552,62 @@ class BacktestEngine:
                 g["exit_session"] = detect_session(g.get("exit_time", 0))
             except Exception:
                 g["exit_session"] = "UNKNOWN"
+
+            # ── Extract Chart Data and SMC Zones ──
+            if candles is not None and not candles.empty and g.get("entry_time"):
+                # Find entry index
+                entry_time = g["entry_time"]
+                exit_time = g.get("exit_time", entry_time)
+                
+                try:
+                    # Find indices for entry and exit times
+                    def _extract_chart_data(df, e_time, x_time, pad_start, pad_end):
+                        if df is None or df.empty: return []
+                        e_time_dt = pd.to_datetime(e_time, unit='s', utc=True) if isinstance(e_time, (int, float)) else pd.to_datetime(e_time)
+                        x_time_dt = pd.to_datetime(x_time, unit='s', utc=True) if isinstance(x_time, (int, float)) else pd.to_datetime(x_time)
+                        
+                        if isinstance(df.index, pd.DatetimeIndex):
+                            e_time_naive = e_time_dt.tz_localize(None) if getattr(e_time_dt, 'tzinfo', None) else e_time_dt
+                            x_time_naive = x_time_dt.tz_localize(None) if getattr(x_time_dt, 'tzinfo', None) else x_time_dt
+                            idx_naive = df.index.tz_localize(None) if getattr(df.index, 'tz', None) else df.index
+                            
+                            s_idx = max(0, idx_naive.searchsorted(e_time_naive, side='right') - 1 - pad_start)
+                            e_idx = min(len(df), idx_naive.searchsorted(x_time_naive, side='left') + pad_end)
+                        else:
+                            s_idx = max(0, df['time'].searchsorted(e_time, side='right') - 1 - pad_start)
+                            e_idx = min(len(df), df['time'].searchsorted(x_time, side='left') + pad_end)
+                            
+                        # CRITICAL FIX: Cap the slice to prevent MemoryError on massive multi-week trades
+                        if e_idx - s_idx > 500:
+                            e_idx = s_idx + 500
+                            
+                        slice_d = df.iloc[s_idx:e_idx]
+                        c_data = []
+                        for idx, row in slice_d.iterrows():
+                            t = int(idx.timestamp()) if isinstance(idx, pd.Timestamp) else int(row.get("time", 0))
+                            c_data.append({
+                                "time": t,
+                                "open": float(row.get("open", 0)),
+                                "high": float(row.get("high", 0)),
+                                "low": float(row.get("low", 0)),
+                                "close": float(row.get("close", 0))
+                            })
+                        return c_data
+
+                    g["chart_data"] = _extract_chart_data(candles, entry_time, exit_time, 30, 15)
+                    g["chart_data_h1"] = _extract_chart_data(candles_h1, entry_time, exit_time, 20, 5)
+                    g["chart_data_m15"] = _extract_chart_data(candles_m15, entry_time, exit_time, 30, 10)
+                    
+                    # Generate SMC zones based on the first trade's signal data
+                    sig = g.get("original_signal", {})
+                    # Generate SMC zones from signal metadata
+                    markings = sig.get("metadata", {}).get("markings", [])
+                    g["smc_data"]["boxes"] = [m for m in markings if m["type"] in ("OB", "FVG")]
+                    g["smc_data"]["markers"] = [m for m in markings if m["type"] == "STRUCTURE"]
+                    
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
 
         return list(groups.values())
 

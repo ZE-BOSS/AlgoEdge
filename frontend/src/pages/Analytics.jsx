@@ -35,7 +35,7 @@ export default function Analytics() {
 
   // Build equity curve from trades
   const equityCurve = [];
-  let balance = 10000;
+  let balance = (trades && trades.length > 0) ? (trades[0].balance_before || 10000) : 10000;
   (trades || []).forEach((t, i) => {
     balance += (t.pnl || 0);
     equityCurve.push({ trade: i + 1, balance: +balance.toFixed(2) });

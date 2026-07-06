@@ -15,7 +15,11 @@ export default function RiskSettings() {
     max_daily_consecutive_losses: 3,
     max_weekly_consecutive_losses: 5,
     max_consecutive_losses: 5,
+    max_daily_trades: 5,
     max_concurrent_positions: 3,
+    target_profit_enabled: false,
+    max_daily_profit: 500.0,
+    max_weekly_profit: 2000.0,
     min_rr: 3.0,
     be_trigger_rr: 1.0,
     be_buffer_pips: 2.0,
@@ -85,8 +89,21 @@ export default function RiskSettings() {
           <div><label>Max Daily Consec. Losses</label><input type="number" step="1" min="1" value={config.max_daily_consecutive_losses} onChange={e => update('max_daily_consecutive_losses', +e.target.value)} /></div>
           <div><label>Max Weekly Consec. Losses</label><input type="number" step="1" min="1" value={config.max_weekly_consecutive_losses} onChange={e => update('max_weekly_consecutive_losses', +e.target.value)} /></div>
           <div><label>Max Consec. Losses</label><input type="number" value={config.max_consecutive_losses} onChange={e => update('max_consecutive_losses', +e.target.value)} /></div>
+          <div><label>Max Daily Trades</label><input type="number" step="1" min="1" value={config.max_daily_trades} onChange={e => update('max_daily_trades', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Prevents overtrading in chop</div></div>
           <div><label>Max Open Positions</label><input type="number" value={config.max_concurrent_positions} onChange={e => update('max_concurrent_positions', +e.target.value)} /></div>
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, marginBottom: 12 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
+            <input type="checkbox" checked={config.target_profit_enabled} onChange={e => update('target_profit_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
+            Enable Target Profit Halts
+          </label>
+        </div>
+        {config.target_profit_enabled && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
+            <div><label>Max Daily Profit ($)</label><input type="number" step="10" value={config.max_daily_profit} onChange={e => update('max_daily_profit', +e.target.value)} /></div>
+            <div><label>Max Weekly Profit ($)</label><input type="number" step="10" value={config.max_weekly_profit} onChange={e => update('max_weekly_profit', +e.target.value)} /></div>
+          </div>
+        )}
       </div>
 
       <div className="card">

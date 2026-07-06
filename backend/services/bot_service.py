@@ -13,11 +13,11 @@ from collections import deque
 
 from backend.utils.logger import get_logger
 from backend.config import settings
+from backend.services.profit_tracker import profit_tracker
 
 logger = get_logger(__name__)
 
-MAX_LOG_ENTRIES = 500
-
+MAX_LOG_ENTRIES = 1000
 
 class BotService:
     """Singleton service managing the trading bot lifecycle."""
@@ -26,10 +26,15 @@ class BotService:
         self.running = False
         self.symbols: List[str] = []
         self.last_scan: Optional[str] = None
-        self.total_signals_today: int = 0
         self.scan_interval: int = 60  # seconds between scans
         self._task: Optional[asyncio.Task] = None
+        self._sync_task: Optional[asyncio.Task] = None
         self._events: deque = deque(maxlen=MAX_LOG_ENTRIES)
+        self.user_id: Optional[str] = None
+        self.total_signals_today = 0
+        self._last_signal_time = {}
+        self.engine = None
+        self.circuit_breaker = None
 
     def _log_event(self, message: str, level: str = "INFO", category: str = "BOT"):
         """Log an event to memory, terminal, and WebSocket."""
@@ -52,7 +57,11 @@ class BotService:
             logger.info(f"[{category}] {message}")
 
         # Broadcast to all connected WebSocket clients
-        asyncio.ensure_future(self._broadcast_event(event))
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._broadcast_event(event))
+        except RuntimeError:
+            pass
 
     async def _broadcast_event(self, event: dict):
         """Send event to all connected WebSocket clients."""
@@ -95,6 +104,7 @@ class BotService:
         self.scan_interval = scan_interval
         self.running = True
         self.total_signals_today = 0
+        self.user_id = user_id
 
         self._log_event(
             f"Bot started — scanning {', '.join(self.symbols)} every {self.scan_interval}s",
@@ -103,6 +113,25 @@ class BotService:
 
         # Start background scanning task
         self._task = asyncio.create_task(self._scan_loop(user_id))
+        self._sync_task = asyncio.create_task(self._trade_sync_loop())
+
+        # Server restart recovery: Check DB for OPEN trades and verify with MT5
+        try:
+            from backend.data.database import async_session_maker
+            from backend.data.models import TradePosition
+            from sqlalchemy import select
+            import MetaTrader5 as mt5
+            
+            if mt5.terminal_info():
+                async with async_session_maker() as session:
+                    result = await session.execute(select(TradePosition).where(TradePosition.status == "OPEN"))
+                    open_pos = result.scalars().all()
+                    for pos in open_pos:
+                        mt5_pos = mt5.positions_get(ticket=pos.mt5_ticket)
+                        if not mt5_pos:
+                            self._log_event(f"Position {pos.mt5_ticket} no longer open in MT5. Trade sync will catch it.", "WARN", "BOT")
+        except Exception as e:
+            logger.error(f"Recovery error: {e}")
 
         return {"running": True, "message": "Bot started successfully", "symbols": self.symbols}
 
@@ -119,6 +148,14 @@ class BotService:
             except asyncio.CancelledError:
                 pass
         self._task = None
+        
+        if self._sync_task and not self._sync_task.done():
+            self._sync_task.cancel()
+            try:
+                await self._sync_task
+            except asyncio.CancelledError:
+                pass
+        self._sync_task = None
 
         self._log_event("Bot stopped by user", category="BOT")
         return {"running": False, "message": "Bot stopped"}
@@ -146,18 +183,52 @@ class BotService:
 
         while self.running:
             try:
+                from backend.data.database import async_session_maker
+                from backend.data.models import UserConfigModel
+                from sqlalchemy import select
+                from backend.strategies.smc.params import UserConfigV2, UserConfig
+                import json
+                
+                async with async_session_maker() as session:
+                    result = await session.execute(select(UserConfigModel).where(UserConfigModel.user_id == user_id))
+                    config_db = result.scalar_one_or_none()
+                    if config_db and getattr(config_db, 'config_json', None):
+                        try:
+                            config_dict = json.loads(config_db.config_json)
+                            config = UserConfigV2.from_dict(config_dict)
+                        except Exception:
+                            config = UserConfig()
+                    elif config_db and getattr(config_db, 'config', None):
+                        config = UserConfig.parse_obj(config_db.config)
+                    else:
+                        config = UserConfig()
+
+                from backend.strategies.smc.engine import SMCEngine
+                from backend.risk.circuit_breaker import CircuitBreaker
+
+                if not self.engine:
+                    self.engine = SMCEngine(config)
+                if not self.circuit_breaker:
+                    self.circuit_breaker = CircuitBreaker(config.risk.to_dict() if hasattr(config.risk, 'to_dict') else config.risk.__dict__)
+
                 for symbol in self.symbols:
                     if not self.running:
                         break
 
+                    # Yield control to event loop to allow WebSocket pings and API requests
+                    await asyncio.sleep(0.1)
+
                     self._log_event(f"Scanning {symbol}...", category="SCAN")
 
                     try:
-                        # Fetch multi-timeframe candles (limit 5000 for live)
                         candles_h4 = await DataFetcher.get_historical_data(symbol, "H4", count=5000)
+                        await asyncio.sleep(0.05)
                         candles_h1 = await DataFetcher.get_historical_data(symbol, "H1", count=5000)
+                        await asyncio.sleep(0.05)
                         candles_m15 = await DataFetcher.get_historical_data(symbol, "M15", count=5000)
+                        await asyncio.sleep(0.05)
                         candles_m5 = await DataFetcher.get_historical_data(symbol, "M5", count=5000)
+                        await asyncio.sleep(0.05)
 
                         if any(c is None or c.empty for c in [candles_h4, candles_h1, candles_m15, candles_m5]):
                             self._log_event(f"Incomplete MTF data for {symbol}", "WARN", "SCAN")
@@ -167,12 +238,8 @@ class BotService:
 
                         # Try to run strategy engine
                         try:
-                            from backend.strategies.smc.engine import SMCEngine
-                            from backend.strategies.smc.params import UserConfig
                             from backend.risk.engine import RiskEngine
                             from backend.mt5.order_manager import OrderManager
-                            config = UserConfig()
-                            engine = SMCEngine(config)
 
                             import pandas as pd
                             
@@ -182,12 +249,32 @@ class BotService:
                                 return df
 
                             # Feed the engine in hierarchical order
-                            await engine.on_bar(symbol, "H4", _index_candles(candles_h4))
-                            await engine.on_bar(symbol, "H1", _index_candles(candles_h1))
-                            await engine.on_bar(symbol, "M15", _index_candles(candles_m15))
-                            signal = await engine.on_bar(symbol, "M5", _index_candles(candles_m5))
+                            await self.engine.on_bar(symbol, "H4", _index_candles(candles_h4))
+                            await self.engine.on_bar(symbol, "H1", _index_candles(candles_h1))
+                            await self.engine.on_bar(symbol, "M15", _index_candles(candles_m15))
                             
+                            await asyncio.sleep(0.01)
+                            signal = await self.engine.on_bar(symbol, "M5", _index_candles(candles_m5))
+                            await asyncio.sleep(0.01)
                             if signal:
+                                # Cooldown check
+                                sig_time = getattr(signal, 'timestamp', None)
+                                if not sig_time and hasattr(signal, 'chart_data') and signal.chart_data:
+                                    sig_time = signal.chart_data[-1].get('time')
+                                if sig_time and sig_time == self._last_signal_time.get(symbol):
+                                    continue
+                                if sig_time:
+                                    self._last_signal_time[symbol] = sig_time
+                                    
+                                try:
+                                    cd_df = candles_m5.tail(100).copy()
+                                    if "time" not in cd_df.columns and cd_df.index.name == "time":
+                                        cd_df = cd_df.reset_index()
+                                    # DataFetcher already returns epoch seconds for time, so no conversion is needed
+                                    signal.chart_data = cd_df.to_dict(orient="records")
+                                except Exception as e:
+                                    logger.error(f"Failed to inject chart_data: {e}")
+
                                 self.total_signals_today += 1
                                 self._log_event(
                                     f"Signal: {signal.direction} {symbol} @ {signal.entry_price} "
@@ -197,14 +284,11 @@ class BotService:
 
                                 # === Execute trade via RiskEngine ===
                                 try:
-                                    # Get account balance (from MT5 or default)
-                                    account_balance = 10000.0
-                                    try:
-                                        from backend.mt5.bridge import bridge
-                                        if bridge.account_info:
-                                            account_balance = bridge.account_info.balance
-                                    except Exception:
-                                        pass
+                                    from backend.mt5.bridge import bridge
+                                    if not bridge.account_info:
+                                        self._log_event("Trade rejected: MT5 bridge offline or account info unavailable.", "ERROR", "RISK")
+                                        continue
+                                    account_balance = bridge.account_info.balance
 
                                     risk_config = {
                                         "risk_per_trade_pct": config.risk.risk_per_trade_pct,
@@ -216,7 +300,14 @@ class BotService:
                                         "tp_splits": config.risk.tp_splits if hasattr(config.risk, 'tp_splits') else [40, 35, 25],
                                         "multi_position_mode": True,
                                         "max_daily_consecutive_losses": config.risk.max_daily_consecutive_losses,
+                                        "max_weekly_consecutive_losses": config.risk.max_weekly_consecutive_losses if hasattr(config.risk, 'max_weekly_consecutive_losses') else 5,
+                                        "max_consecutive_losses": config.risk.max_consecutive_losses if hasattr(config.risk, 'max_consecutive_losses') else 5,
+                                        "max_daily_trades": config.risk.max_daily_trades if hasattr(config.risk, 'max_daily_trades') else 5,
                                         "max_concurrent_positions": config.risk.max_concurrent_positions,
+                                        "target_profit_enabled": config.risk.target_profit_enabled if hasattr(config.risk, 'target_profit_enabled') else False,
+                                        "max_daily_profit": config.risk.max_daily_profit if hasattr(config.risk, 'max_daily_profit') else 500.0,
+                                        "max_weekly_profit": config.risk.max_weekly_profit if hasattr(config.risk, 'max_weekly_profit') else 2000.0,
+                                        "compounding_enabled": config.risk.compounding_enabled if hasattr(config.risk, 'compounding_enabled') else False,
                                         "be_trigger_rr": config.risk.be_trigger_rr,
                                         "be_buffer_pips": config.risk.be_buffer_pips,
                                         "trail_method_tp2": config.risk.trail_method_tp2 if hasattr(config.risk, 'trail_method_tp2') else "ATR_TRAIL",
@@ -224,19 +315,29 @@ class BotService:
                                     }
                                     risk_engine = RiskEngine(risk_config)
 
+                                    import uuid
+                                    group_id = str(uuid.uuid4())[:8]
+
                                     signal_data = {
+                                        "group_id": group_id,
                                         "symbol": signal.symbol,
                                         "direction": signal.direction,
                                         "entry_price": signal.entry_price,
                                         "stop_loss": signal.stop_loss,
                                         "take_profit": signal.take_profit,
+                                        "chart_data": signal.chart_data,
                                     }
 
+                                    compounding_risk = config.get_risk_amount(account_balance) if hasattr(config, 'get_risk_amount') else account_balance * (config.risk.risk_per_trade_pct / 100)
+
                                     approved, reason, tp_levels = risk_engine.evaluate_signal(
-                                        signal_data, account_balance
+                                        signal_data, account_balance, compounding_risk_dollars=compounding_risk
                                     )
 
                                     if approved:
+                                        if hasattr(self.circuit_breaker, 'position_opened'):
+                                            self.circuit_breaker.position_opened(group_id, len(tp_levels), symbol=signal.symbol)
+                                            
                                         # Place ALL TP positions at entry (no deferred stacking)
                                         self._log_event(
                                             f"Trade approved: {len(tp_levels)} positions — all at entry",
@@ -244,6 +345,7 @@ class BotService:
                                         )
 
                                         # Place orders via OrderManager
+                                        db_positions = []
                                         for tp in tp_levels:
                                             try:
                                                 result = await OrderManager.place_market_order(
@@ -256,6 +358,13 @@ class BotService:
                                                     comment=f"AE_TP{tp.level}",
                                                 )
                                                 if result.get("success"):
+                                                    ticket = result.get("ticket")
+                                                    db_positions.append({
+                                                        "tp_level": tp.level,
+                                                        "volume": tp.volume,
+                                                        "tp_price": tp.tp_price,
+                                                        "ticket": ticket
+                                                    })
                                                     self._log_event(
                                                         f"Order placed: TP{tp.level} | "
                                                         f"{tp.volume} lots @ {signal.entry_price} "
@@ -277,6 +386,44 @@ class BotService:
                                                     f"Order placement error: {str(order_err)[:100]}",
                                                     "ERROR", "TRADE"
                                                 )
+                                    
+                                        if db_positions and self.user_id:
+                                            try:
+                                                import json
+                                                from backend.data.database import async_session_maker
+                                                from backend.data.models import Trade, TradePosition
+                                                
+                                                async with async_session_maker() as session:
+                                                    trade = Trade(
+                                                        user_id=self.user_id,
+                                                        symbol=signal.symbol,
+                                                        direction=signal.direction,
+                                                        entry_price=signal.entry_price,
+                                                        stop_loss=signal.stop_loss,
+                                                        volume=sum(p["volume"] for p in db_positions),
+                                                        status="OPEN",
+                                                        chart_data=json.dumps(signal.chart_data) if signal.chart_data else None,
+                                                    )
+                                                    session.add(trade)
+                                                    await session.flush()
+                                                    
+                                                    for p in db_positions:
+                                                        pos = TradePosition(
+                                                            parent_trade_id=trade.id,
+                                                            user_id=self.user_id,
+                                                            tp_level=p["tp_level"],
+                                                            mt5_ticket=p["ticket"],
+                                                            volume=p["volume"],
+                                                            entry_price=signal.entry_price,
+                                                            stop_loss=signal.stop_loss,
+                                                            take_profit=p["tp_price"],
+                                                            status="OPEN"
+                                                        )
+                                                        session.add(pos)
+                                                    await session.commit()
+                                            except Exception as db_err:
+                                                logger.error(f"Failed to save live trade to DB: {db_err}")
+                                                
                                     else:
                                         self._log_event(
                                             f"Trade rejected by risk engine: {reason}",
@@ -318,10 +465,101 @@ class BotService:
                 self._log_event("Scan loop cancelled", category="BOT")
                 break
             except Exception as e:
+                import traceback
+                error_trace = traceback.format_exc()
+                logger.error(f"Scan loop error: {e}\n{error_trace}")
                 self._log_event(f"Scan loop error: {str(e)[:200]}", "ERROR", "BOT")
                 await asyncio.sleep(10)
 
         self._log_event("Scan loop exited", category="BOT")
+
+    async def _trade_sync_loop(self):
+        """Monitors closed MT5 positions and updates ProfitTracker."""
+        from backend.mt5.order_manager import OrderManager
+        
+        last_check_time = datetime.now(timezone.utc).timestamp() - 86400 * 3 # lookback 3 days initially to catch missed closures
+        
+        while self.running:
+            try:
+                await asyncio.sleep(15) # Poll every 15s
+                
+                deals = await OrderManager.get_closed_positions_since(last_check_time)
+                if deals:
+                    # Sort by time so we process chronologically
+                    deals.sort(key=lambda x: x["time"])
+                    
+                    for deal in deals:
+                        if deal["time"] > last_check_time:
+                            net_profit = deal["profit"] + deal["commission"] + deal["swap"]
+                            await profit_tracker.add_profit(net_profit)
+                            
+                            self._log_event(
+                                f"Trade closed: {deal['symbol']} | P&L: ${net_profit:.2f}",
+                                "INFO", "TRADE"
+                            )
+                            # Push notification for closed trade
+                            asyncio.ensure_future(self._broadcast_notification(
+                                "Trade Closed",
+                                f"{deal['symbol']} closed for ${net_profit:.2f}",
+                                "success" if net_profit >= 0 else "error"
+                            ))
+                            
+                            # Also update database
+                            try:
+                                from backend.data.database import async_session_maker
+                                from backend.data.models import Trade, TradePosition
+                                from sqlalchemy import select
+                                import json
+                                
+                                async with async_session_maker() as session:
+                                    pos_id = deal.get("position_id")
+                                    if pos_id:
+                                        result = await session.execute(
+                                            select(TradePosition).where(TradePosition.mt5_ticket == pos_id)
+                                        )
+                                        pos = result.scalar_one_or_none()
+                                        if pos and pos.status == "OPEN":
+                                            pos.status = "CLOSED"
+                                            pos.pnl = net_profit
+                                            pos.exit_price = deal.get("price", 0.0)
+                                            pos.exit_time = datetime.fromtimestamp(deal["time"], timezone.utc)
+                                            
+                                            result2 = await session.execute(
+                                                select(TradePosition).where(TradePosition.parent_trade_id == pos.parent_trade_id)
+                                            )
+                                            siblings = result2.scalars().all()
+                                            if all(s.status == "CLOSED" for s in siblings):
+                                                trade = await session.get(Trade, pos.parent_trade_id)
+                                                if trade:
+                                                    trade.status = "CLOSED"
+                                                    trade.exit_time = pos.exit_time
+                                                    trade.pnl = sum(s.pnl for s in siblings if getattr(s, 'pnl', None) is not None)
+                                                    
+                                                    # UPDATE CHART DATA (9.1 Fill Trade.chart_data on live trade close)
+                                                    try:
+                                                        from backend.mt5.data_fetcher import DataFetcher
+                                                        import pandas as pd
+                                                        candles = await DataFetcher.get_historical_data(trade.symbol, "M5", 100)
+                                                        if not candles.empty:
+                                                            cd_df = candles.copy()
+                                                            if "time" not in cd_df.columns and cd_df.index.name == "time":
+                                                                cd_df = cd_df.reset_index()
+                                                            # DataFetcher already returns epoch seconds for time, so no conversion is needed
+                                                            trade.chart_data = json.dumps(cd_df.to_dict(orient="records"))
+                                                    except Exception as chart_err:
+                                                        logger.warning(f"Failed to fetch exit chart data: {chart_err}")
+                                            
+                                            await session.commit()
+                            except Exception as db_err:
+                                logger.error(f"Failed to update trade in DB: {db_err}")
+                            
+                            last_check_time = max(last_check_time, deal["time"])
+                            
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Trade sync loop error: {e}")
+                await asyncio.sleep(5)
 
 
 # Singleton instance

@@ -72,6 +72,7 @@ async def get_signals(
         "session": s.session,
         "entry_snapshot": s.entry_snapshot,
         "signal_time": s.signal_time,
+        "chart_data": s.chart_data,
     } for s in signals]
 
 
@@ -82,12 +83,13 @@ async def get_signal_detail(
     db: AsyncSession = Depends(get_db),
 ):
     """Get full signal detail including linked trade info."""
+    from fastapi import HTTPException
     result = await db.execute(
         select(Signal).where(Signal.id == signal_id, Signal.user_id == current_user.id)
     )
     signal = result.scalar_one_or_none()
     if not signal:
-        return {"error": "Signal not found"}
+        raise HTTPException(status_code=404, detail="Signal not found")
 
     # If executed, get linked trade info
     linked_trade = None
@@ -130,8 +132,9 @@ async def get_signal_detail(
         "acted_on": signal.acted_on,
         "skip_reason": signal.skip_reason,
         "session": signal.session,
-        "entry_snapshot": signal.entry_snapshot,
         "signal_time": signal.signal_time,
+        "entry_snapshot": signal.entry_snapshot,
+        "chart_data": signal.chart_data,
         "linked_trade": linked_trade,
     }
 
@@ -143,13 +146,15 @@ async def get_signal_snapshot(
     db: AsyncSession = Depends(get_db),
 ):
     """Get signal entry chart snapshot image."""
+    import os
     from fastapi.responses import FileResponse
+    from fastapi import HTTPException
 
     result = await db.execute(
         select(Signal).where(Signal.id == signal_id, Signal.user_id == current_user.id)
     )
     signal = result.scalar_one_or_none()
-    if not signal or not signal.entry_snapshot:
-        return {"error": "Snapshot not available"}
+    if not signal or not signal.entry_snapshot or not os.path.exists(signal.entry_snapshot):
+        raise HTTPException(status_code=404, detail="Snapshot not available")
 
     return FileResponse(signal.entry_snapshot)

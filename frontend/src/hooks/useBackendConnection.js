@@ -36,14 +36,18 @@ export function useBackendConnection() {
 
 export function useWebSocket() {
   const wsRef = useRef(null);
+  const timeoutRef = useRef(null);
   const retryRef = useRef(1000);
-  const { setWsConnected } = useConnectionStore();
-  const { status } = useConnectionStore();
+  const { setWsConnected, status } = useConnectionStore();
   const user = useAuthStore((s) => s.user);
   const token = useAuthStore((s) => s.token);
 
   const connect = useCallback(() => {
     if (status !== 'ONLINE' || !user?.id || !token) return;
+
+    if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
 
     const url = getBackendUrl().replace('http', 'ws');
     const ws = new WebSocket(`${url}/ws/${user.id}?token=${token}`);
@@ -56,10 +60,11 @@ export function useWebSocket() {
 
     ws.onclose = () => {
       setWsConnected(false);
+      wsRef.current = null;
       // Exponential backoff reconnect: 1s → 2s → 4s → 8s → 30s cap
       const delay = Math.min(retryRef.current, 30000);
       retryRef.current = delay * 2;
-      setTimeout(connect, delay);
+      timeoutRef.current = setTimeout(connect, delay);
     };
 
     ws.onerror = () => setWsConnected(false);
@@ -70,12 +75,20 @@ export function useWebSocket() {
         window.dispatchEvent(new CustomEvent('ws-message', { detail: data }));
       } catch {}
     };
-  }, [status, user?.id]);
+  }, [status, user?.id, token, setWsConnected]);
 
   useEffect(() => {
     connect();
-    return () => { if (wsRef.current) wsRef.current.close(); setWsConnected(false); };
-  }, [status, user?.id]);
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      if (wsRef.current) {
+        wsRef.current.onclose = null; // Prevent reconnect on unmount
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      setWsConnected(false);
+    };
+  }, [connect, setWsConnected]);
 
   return wsRef;
 }

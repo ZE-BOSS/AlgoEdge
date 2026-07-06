@@ -18,10 +18,18 @@ logger = get_logger(__name__)
 
 def get_pip_size(symbol: str) -> float:
     """Return pip size for the symbol (e.g. 0.0001 for EURUSD, 0.01 for XAUUSD)."""
+    try:
+        from backend.risk.compounding import get_instrument_profile
+        profile = get_instrument_profile(symbol)
+        if profile and profile.point_size:
+            return profile.point_size
+    except ImportError:
+        pass
+
     gold_like = ["XAUUSD", "GOLD"]
     jpy_pairs = ["USDJPY", "EURJPY", "GBPJPY"]
     indices = ["US30", "US500", "NAS100"]
-    synthetics = ["V10", "V25", "V50", "V75", "V100", "Boom", "Crash", "Step"]
+    synthetics = ["V10", "V25", "V50", "V75", "V100", "BOOM", "CRASH", "STEP", "VOLATILITY", "JUMP", "DEX"]
 
     symbol_upper = symbol.upper()
 

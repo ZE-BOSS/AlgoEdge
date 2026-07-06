@@ -8,6 +8,7 @@ Provides explicit error reporting when fetch fails rather than returning silent 
 import pandas as pd
 from typing import Optional
 from datetime import datetime
+import time
 
 from backend.utils.logger import get_logger
 import asyncio
@@ -49,9 +50,14 @@ def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
         return df
     # Convert datetime to epoch seconds if needed
     if pd.api.types.is_datetime64_any_dtype(df['time']):
+        if df['time'].dt.tz is not None:
+            df['time'] = df['time'].dt.tz_localize(None)
         df['time'] = df['time'].astype('int64') // 10**9
     elif not pd.api.types.is_integer_dtype(df['time']):
-        df['time'] = pd.to_datetime(df['time']).astype('int64') // 10**9
+        time_series = pd.to_datetime(df['time'])
+        if time_series.dt.tz is not None:
+            time_series = time_series.dt.tz_localize(None)
+        df['time'] = time_series.astype('int64') // 10**9
     # Sort ascending by time and remove any duplicate timestamps
     df = df.sort_values('time').drop_duplicates(subset=['time'], keep='last').reset_index(drop=True)
     return df
@@ -69,8 +75,13 @@ class DataFetchError(Exception):
 class DataFetcher:
     """Handles retrieval of historical candles from MT5."""
 
-    @staticmethod
+    _cache = {}
+    _cache_time = {}
+    CACHE_DURATION = 10  # seconds
+
+    @classmethod
     async def get_historical_data(
+        cls,
         symbol: str, 
         timeframe: str, 
         count: int = 1000
@@ -81,6 +92,12 @@ class DataFetcher:
         """
         logger.debug(f"Fetching {count} candles for {symbol} on {timeframe}")
         
+        cache_key = f"{symbol}_{timeframe}_{count}"
+        now = time.time()
+        if cache_key in cls._cache and now - cls._cache_time.get(cache_key, 0) < cls.CACHE_DURATION:
+            logger.debug(f"Returning cached data for {symbol} on {timeframe}")
+            return cls._cache[cache_key].copy()
+
         if not mt5:
             error_msg = "MT5 terminal is not available on this system. Cannot fetch live/historical data."
             logger.error(error_msg)
@@ -89,7 +106,7 @@ class DataFetcher:
         tf_code = _get_timeframe_code(timeframe)
         
         # Check if symbol exists
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         symbol_info = await loop.run_in_executor(
             _executor, lambda: mt5.symbol_info(symbol)
         )
@@ -123,10 +140,15 @@ class DataFetcher:
         df = pd.DataFrame(rates)
         df = _normalize_df(df)
         logger.info(f"Fetched {len(df)} candles for {symbol} {timeframe}")
+        
+        cls._cache[cache_key] = df.copy()
+        cls._cache_time[cache_key] = time.time()
+        
         return df
 
-    @staticmethod
+    @classmethod
     async def get_data_range(
+        cls,
         symbol: str, 
         timeframe: str, 
         start: datetime, 
@@ -145,7 +167,7 @@ class DataFetcher:
             
         tf_code = _get_timeframe_code(timeframe)
         
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         rates = await loop.run_in_executor(
             _executor, 
             lambda: mt5.copy_rates_range(symbol, tf_code, start, end)

@@ -63,6 +63,10 @@ async def get_trades(
         "mt5_ticket": t.mt5_ticket,
         "entry_snapshot": t.entry_snapshot,
         "exit_snapshot": t.exit_snapshot,
+        "balance_before": t.balance_before,
+        "balance_after": t.balance_after,
+        "confluence_score": t.confluence_score,
+        "chart_data": t.chart_data,
     } for t in trades]
 
 
@@ -115,17 +119,19 @@ async def get_trade_snapshot(
     db: AsyncSession = Depends(get_db),
 ):
     """Get entry or exit chart snapshot path."""
+    import os
     from fastapi.responses import FileResponse
+    from fastapi import HTTPException
 
     result = await db.execute(
         select(Trade).where(Trade.id == trade_id, Trade.user_id == current_user.id)
     )
     trade = result.scalar_one_or_none()
     if not trade:
-        return {"error": "Trade not found"}
+        raise HTTPException(status_code=404, detail="Trade not found")
 
     path = trade.entry_snapshot if snapshot_type == "entry" else trade.exit_snapshot
-    if not path:
-        return {"error": "Snapshot not available"}
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Snapshot not available")
 
     return FileResponse(path)

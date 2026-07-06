@@ -8,6 +8,7 @@ Source: RiskManagement_Spec.md
 """
 
 from typing import Dict, Any, List, Tuple, Optional
+from datetime import datetime
 from backend.risk.position_sizer import calculate_lot_size, calculate_lot_from_dollars, get_pip_size, calculate_risk_dollars
 from backend.risk.multi_tp import MultiTPManager, TPLevel
 from backend.risk.breakeven_manager import BreakevenManager
@@ -43,7 +44,8 @@ class RiskEngine:
         signal_data: Dict[str, Any],
         account_balance: float,
         compounding_risk_dollars: float = 0.0,
-    ) -> Tuple[bool, str, List[TPLevel]]:
+        current_time: Optional[datetime] = None,
+    ) -> Tuple[bool, str, List[Dict[str, Any]]]:
         """
         Evaluate if a signal is safe to trade, and if so, calculate sizes and TPs.
         Returns (is_approved, reason, tp_levels).
@@ -54,12 +56,23 @@ class RiskEngine:
         sl = signal_data.get("stop_loss", 0.0)
 
         # 1. Circuit Breaker Check
-        can_trade, reason = self.circuit.check_all(account_balance)
+        can_trade, reason = self.circuit.check_all(account_balance, current_time)
         if not can_trade:
             logger.warning(f"[RISK] Circuit breaker blocked: {reason}")
             return False, reason, []
 
-        # 2. Minimum RR Check
+        # 2. Minimum RR Check and Direction Validation
+        from backend.risk.multi_tp import _is_buy
+        is_buy = _is_buy(direction)
+        
+        if is_buy and sl >= entry:
+            logger.warning(f"[RISK] Rejected: BUY SL ({sl:.5f}) >= entry ({entry:.5f})")
+            return False, "BUY Stop Loss must be below entry", []
+            
+        if not is_buy and sl <= entry:
+            logger.warning(f"[RISK] Rejected: SELL SL ({sl:.5f}) <= entry ({entry:.5f})")
+            return False, "SELL Stop Loss must be above entry", []
+            
         risk = abs(entry - sl)
         if risk == 0:
             logger.warning(f"[RISK] Rejected: zero risk (entry={entry:.5f}, SL={sl:.5f})")
@@ -103,16 +116,17 @@ class RiskEngine:
         if not tp_levels:
             return False, "No valid TP levels calculated", []
 
-        # 5. Validate minimum RR on TP1
-        tp1_price = tp_levels[0].tp_price
-        tp1_reward = abs(tp1_price - entry)
-        tp1_rr = tp1_reward / risk
-        if tp1_rr < self.min_rr:
-            logger.warning(f"[RISK] Rejected: TP1 RR {tp1_rr:.1f} < min_rr {self.min_rr} (entry={entry:.5f}, SL={sl:.5f}, TP1={tp1_price:.5f})")
-            return False, f"TP1 RR {tp1_rr:.1f} below minimum {self.min_rr}", []
+        # 5. Validate minimum RR on last TP
+        last_tp_price = tp_levels[-1].tp_price
+        last_tp_reward = abs(last_tp_price - entry)
+        last_tp_rr = last_tp_reward / risk
+        if last_tp_rr < self.min_rr:
+            logger.warning(f"[RISK] Rejected: Last TP RR {last_tp_rr:.1f} < min_rr {self.min_rr} (entry={entry:.5f}, SL={sl:.5f}, TP={last_tp_price:.5f})")
+            return False, f"Last TP RR {last_tp_rr:.1f} below minimum {self.min_rr}", []
 
-        self.circuit.position_opened()
-        logger.info(f"[RISK] ✅ Trade approved: {direction} {symbol} @ {entry:.5f} | SL={sl:.5f} | risk={risk:.5f} | TP1_RR={tp1_rr:.1f} | {len(tp_levels)} TPs | Lots={total_lots:.4f}")
+        group_id = signal_data.get("group_id", "unknown")
+        self.circuit.position_opened(group_id, len(tp_levels), symbol=symbol)
+        logger.info(f"[RISK] ✅ Trade approved: {direction} {symbol} @ {entry:.5f} | SL={sl:.5f} | risk={risk:.5f} | Last_TP_RR={last_tp_rr:.1f} | {len(tp_levels)} TPs | Lots={total_lots:.4f}")
         return True, "APPROVED", tp_levels
 
     def manage_open_position(
@@ -157,6 +171,8 @@ class RiskEngine:
                 stop_loss=original_sl,
                 direction=direction,
                 pip_value=pip_value,
+                live_spread=position.get("live_spread", pip_value),
+                atr=atr_value if atr_value > 0 else abs(entry - original_sl) * 0.1,
                 be_already_applied=be_applied,
                 tp1_hit=tp1_hit,
             )
@@ -182,7 +198,6 @@ class RiskEngine:
 
         return actions
 
-    def on_position_closed(self, pnl: float, is_win: bool):
+    def on_position_closed(self, group_id: str, pnl: float, current_time: Optional[datetime] = None):
         """Update circuit breaker state after a position closes."""
-        self.circuit.record_trade_result(pnl, is_win)
-        self.circuit.position_closed()
+        self.circuit.position_closed(group_id, pnl, current_time)

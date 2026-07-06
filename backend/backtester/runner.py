@@ -8,7 +8,7 @@ Source: TradingBot_MasterPlan-2.md Section 11
 
 import uuid
 import json
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, List
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -55,10 +55,13 @@ async def run_backtest(
     strategy_id: str,
     symbol: str,
     candles: pd.DataFrame,
-    signals: list,
+    signals: List[Dict[str, Any]],
     risk_config: Dict[str, Any],
     initial_balance: float = 10000.0,
     save_mode: str = "FULL",
+    candles_h1: pd.DataFrame = None,
+    candles_m15: pd.DataFrame = None,
+    compounding_enabled: bool = False,
 ) -> Dict[str, Any]:
     """
     Execute a backtest and optionally persist results to PostgreSQL.
@@ -86,7 +89,7 @@ async def run_backtest(
     # Run CPU-bound engine in a thread pool so it doesn't block the event loop
     # (without this, ALL other API requests hang until the backtest finishes)
     import asyncio
-    results = await asyncio.to_thread(engine.run, candles, signals, initial_balance)
+    results = await asyncio.to_thread(engine.run, candles, signals, initial_balance, candles_h1, candles_m15, compounding_enabled)
 
     # Broadcast: engine complete
     await _broadcast_progress(user_id, {
@@ -111,7 +114,7 @@ async def run_backtest(
         })
         logger.info("Backtest completed — results discarded")
         
-        asyncio.ensure_future(_broadcast_notification(
+        asyncio.create_task(_broadcast_notification(
             user_id,
             "Backtest Complete",
             f"Simulated {results.get('total_trades', 0)} trades. Final P&L: ${results.get('total_pnl', 0):.2f}.",
@@ -169,7 +172,7 @@ async def run_backtest(
         session.add(run)
 
         if save_mode == "FULL":
-            for trade_data in results["trades"]:
+            for trade_data in results["grouped_trades"]:
                 bt_trade = BacktestTrade(
                     backtest_id=backtest_id,
                     symbol=trade_data.get("symbol", symbol),
@@ -187,6 +190,9 @@ async def run_backtest(
                     mae_pips=trade_data.get("mae_pips"),
                     mfe_pips=trade_data.get("mfe_pips"),
                     confluence_score=trade_data.get("confluence_score"),
+                    balance_before=trade_data.get("balance_before"),
+                    balance_after=trade_data.get("balance_after"),
+                    smc_data=json.dumps(trade_data.get("score_breakdown") or {}),
                 )
                 session.add(bt_trade)
 
@@ -199,7 +205,7 @@ async def run_backtest(
     logger.info(f"Backtest saved: {backtest_id} ({save_mode})")
     
     import asyncio
-    asyncio.ensure_future(_broadcast_notification(
+    asyncio.create_task(_broadcast_notification(
         user_id,
         "Backtest Complete",
         f"Simulated {report.total_trades} trades. Final P&L: ${report.total_pnl:.2f}.",

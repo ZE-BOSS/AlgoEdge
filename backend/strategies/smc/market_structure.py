@@ -58,6 +58,14 @@ class MarketStructureDetector:
         low_roll_vals = lows.values
         idx_vals = candles.index
         
+        # Robust time extraction
+        if 'time' in candles.columns:
+            time_vals = candles['time'].values
+        elif pd.api.types.is_datetime64_any_dtype(candles.index):
+            time_vals = candles.index.astype('int64') // 10**9
+        else:
+            time_vals = [0] * len(candles)
+            
         swings_list = []
         
         for i in high_indices:
@@ -66,6 +74,7 @@ class MarketStructureDetector:
                     "type": "HIGH",
                     "price": float(high_vals[i]),
                     "index": idx_vals[i],
+                    "time": int(time_vals[i]),
                     "bar_idx": int(i),
                 })
                 
@@ -75,6 +84,7 @@ class MarketStructureDetector:
                     "type": "LOW",
                     "price": float(low_vals[i]),
                     "index": idx_vals[i],
+                    "time": int(time_vals[i]),
                     "bar_idx": int(i),
                 })
                 

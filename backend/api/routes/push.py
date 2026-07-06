@@ -49,6 +49,7 @@ async def subscribe(
         auth=req.auth,
     )
     db.add(sub)
+    await db.commit()
     logger.info(f"Push subscription added for user {current_user.id}")
     return {"id": sub.id, "status": "subscribed"}
 
@@ -70,4 +71,5 @@ async def unsubscribe(
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
     await db.delete(sub)
+    await db.commit()
     return {"status": "unsubscribed"}

@@ -56,7 +56,7 @@ pywebpush
 # ── LLM Provider SDKs ────────────────────────────────────────
 anthropic
 openai
-google-generativeai
+google-genai
 
 # ── News / Calendar Feed ─────────────────────────────────────
 feedparser

@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap } from 'lucide-react';
-import { runBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult } from '../services/api';
+import { runBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart } from '../services/api';
+import TradeChart from '../components/TradeChart';
 import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
@@ -43,11 +45,13 @@ function LiveLogPanel({ events, setEvents }) {
     return () => window.removeEventListener('ws-message', h);
   }, []);
 
-  const merged = useCallback(() => {
+  const merged = useMemo(() => {
     const all = [...events, ...(logs?.events || [])]; const seen = new Set(); const out = [];
     for (const e of all) { const k = `${e.time}|${e.message}`; if (!seen.has(k)) { seen.add(k); out.push(e); } }
-    out.sort((a, b) => (b.time || '').localeCompare(a.time || '')); return out.filter(e => ['BACKTEST', 'BACKTEST_LOG', 'SIGNAL', 'TRADE', 'SMC'].includes(e.category) || e.level === 'ERROR');
-  }, [logs, events])();
+    out.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+    const allowed = ['BACKTEST', 'BACKTEST_LOG', 'SIGNAL', 'TRADE', 'SMC'];
+    return out.filter(e => allowed.some(a => (e.category || '').includes(a)) || e.level === 'ERROR');
+  }, [logs, events]);
 
   return (<div style={{ maxHeight: 340, overflow: 'auto', background: '#0d1117', borderRadius: 'var(--radius-xs)', padding: '8px 12px', fontFamily: "'JetBrains Mono',monospace", fontSize: '0.72rem', lineHeight: 1.7, border: '1px solid var(--border)' }}>
     {merged.length ? merged.map((e, i) => (
@@ -60,11 +64,85 @@ function LiveLogPanel({ events, setEvents }) {
   </div>);
 }
 
-function GroupedTradeRow({ group, index }) {
+function SaveModal({ result, form, onClose, onSuccess }) {
+  const [notesInput, setNotesInput] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const confirmSave = async () => {
+    if (!result) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await saveBacktest(result.backtest_id, { 
+        backtest_data: { 
+          ...result, 
+          strategy_id: 'SMC_v1', 
+          symbol: form.symbol, 
+          risk_config: form,
+          notes: notesInput
+        }, 
+        save_mode: 'FULL' 
+      });
+      onSuccess();
+    } catch (e) {
+      console.error("Save failed", e);
+      setError(e?.response?.data?.detail || e.message || 'Save failed');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="card" style={{ width: '90%', maxWidth: 500, padding: 20 }}>
+        <h3 style={{ marginTop: 0 }}>Save Backtest</h3>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Add narration and notes to this backtest run for future review. The current parameters will be saved automatically.</p>
+        <textarea 
+          value={notesInput} 
+          onChange={e => setNotesInput(e.target.value)}
+          placeholder="E.g., Added Killzones to avoid Asian range chop. Improved WR by 5%..."
+          style={{ width: '100%', height: 120, marginTop: 10, marginBottom: 15, padding: 10, background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', resize: 'vertical' }}
+        />
+        {error && <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginBottom: 15 }}>{error}</div>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={confirmSave} disabled={isSaving}>
+            {isSaving ? 'Saving...' : 'Save & Close'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef, vIndex, backtestId }) {
   const [open, setOpen] = useState(false);
+  const [activeChart, setActiveChart] = useState('M5');
+  const [fetchedCharts, setFetchedCharts] = useState(null);
+  const [isLoadingChart, setIsLoadingChart] = useState(false);
   const pnl = group.combined_pnl || 0;
-  return (<>
-    <tr onClick={() => setOpen(!open)} style={{ cursor: 'pointer', background: pnl >= 0 ? 'rgba(63,182,139,0.04)' : 'rgba(248,81,73,0.04)' }}>
+  
+  useEffect(() => {
+    if (open && !fetchedCharts && !isLoadingChart) {
+      setIsLoadingChart(true);
+      const req = backtestId ? getSavedTradeChart(backtestId, group.group_id) : getUnsavedTradeChart(group.group_id);
+      req.then(res => setFetchedCharts(res.data)).catch(()=>{}).finally(() => setIsLoadingChart(false));
+    }
+  }, [open, fetchedCharts, isLoadingChart, backtestId, group.group_id]);
+  
+  // Use fetched charts, or fallback to any embedded data
+  const mergedGroup = {
+    ...group,
+    chart_data: fetchedCharts?.chart_data || group.chart_data,
+    chart_data_h1: fetchedCharts?.chart_data_h1 || group.chart_data_h1,
+    chart_data_m15: fetchedCharts?.chart_data_m15 || group.chart_data_m15
+  };
+
+  
+  return (
+    <tbody ref={measureRef} data-index={vIndex}>
+      <tr onClick={() => setOpen(!open)} style={{ cursor: 'pointer', background: pnl >= 0 ? 'rgba(63,182,139,0.04)' : 'rgba(248,81,73,0.04)' }}>
       <td>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
       <td>{index + 1}</td>
       <td><strong>{group.symbol}</strong></td>
@@ -75,26 +153,33 @@ function GroupedTradeRow({ group, index }) {
       <td>{fmtDur(group.duration_minutes)}</td>
       <td>{group.tp_count} TPs ({group.tp_wins}W/{group.tp_losses}L)</td>
       <td style={{ color: pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>${pnl.toFixed(2)}</td>
+      <td style={{ fontSize: '0.8rem' }}>${group.balance_before ? group.balance_before.toFixed(2) : '—'}</td>
+      <td style={{ fontSize: '0.8rem' }}>${group.balance_after ? group.balance_after.toFixed(2) : '—'}</td>
       <td><span className="badge badge-blue">{group.entry_session || '—'}</span>{group.exit_session && group.exit_session !== group.entry_session && <span className="badge badge-blue" style={{ marginLeft: 4 }}>→{group.exit_session}</span>}</td>
     </tr>
     {open && group.sub_trades?.map((t, j) => (
-      <tr key={j} style={{ background: 'var(--bg-tertiary)', fontSize: '0.8rem' }}>
+      <tr key={j} style={{ background: 'var(--bg-tertiary)', width: '100%', fontSize: '0.8rem' }}>
         <td></td><td></td>
         <td colSpan={2}><span className={`badge ${t.exit_reason?.startsWith('TP') ? 'badge-green' : t.exit_reason === 'BE_SL' ? 'badge-blue' : 'badge-red'}`}>TP{t.tp_level} → {t.exit_reason}</span></td>
         <td colSpan={2} style={{ fontSize: '0.72rem' }}>{fmt(t.entry_time_iso)} → {fmt(t.exit_time_iso)}</td>
         <td>{fmtDur(t.duration_minutes)}</td>
         <td style={{ fontSize: '0.72rem' }}>Vol: {t.volume} | BE: {t.be_applied ? '✓' : '✗'}{t.trail_applied ? ' | Trail: ✓' : ''}</td>
-        <td style={{ fontSize: '0.72rem' }}>MAE: {(t.mae_pips || 0).toFixed(1)}p | MFE: {(t.mfe_pips || 0).toFixed(1)}p</td>
+        <td style={{ fontSize: '0.72rem' }}>
+          MAE: {(t.mae_pips || 0).toFixed(1)}p | MFE: {(t.mfe_pips || 0).toFixed(1)}p
+          <br/>
+          Bal: ${t.balance_before ? t.balance_before.toFixed(2) : '—'} → ${t.balance_after ? t.balance_after.toFixed(2) : '—'}
+        </td>
         <td style={{ color: (t.pnl || 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
           ${(t.pnl || 0).toFixed(2)}
         </td>
         <td>{t.session || '—'}</td>
+        <td></td><td></td>
       </tr>
     ))}
-    {open && group.sub_trades?.[0]?.entry_confirmations && (
-      <tr><td colSpan={11} style={{ padding: 0, border: 'none' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 16, padding: '12px 16px', background: 'var(--bg-tertiary)', margin: '4px 8px', borderRadius: 'var(--radius-xs)' }}>
-          <div>
+    {open && mergedGroup.sub_trades?.[0]?.entry_confirmations && (
+      <tr><td colSpan={13} style={{ padding: 0, border: 'none' }}>
+        <div style={{ display: 'flex', gap: '20px', flexDirection: 'row', padding: '16px', background: 'var(--bg-tertiary)', margin: '4px 0px', borderRadius: 'var(--radius-xs)' }}>
+          <div style={{ width: '300px', flexShrink: 0, maxHeight: '800px', overflowY: 'auto' }}>
             <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Entry Confirmations (Score: {group.sub_trades[0].confluence_score || '—'})</div>
             {(group.sub_trades[0].entry_confirmations || []).map((c, i) => {
               const isHeader = c.startsWith('═') || c.startsWith('──');
@@ -110,43 +195,207 @@ function GroupedTradeRow({ group, index }) {
                 marginTop: isHeader ? 8 : 0,
               }}>{c}</div>;
             })}
-          </div>
-          <div>
-            {group.entry_snapshot_b64 ? (
+            {group.sub_trades[0].exit_confirmations && (
               <>
-                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Entry Snapshot</div>
-                <img src={`data:image/png;base64,${group.entry_snapshot_b64}`} alt="Chart" style={{ width: '100%', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }} />
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Exit Info</div>
-                {(group.sub_trades[0].exit_confirmations || []).map((c, i) =>
+                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 16, marginBottom: 6, fontWeight: 600 }}>Exit Info</div>
+                {group.sub_trades[0].exit_confirmations.map((c, i) =>
                   <div key={i} style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: '3px 0', borderBottom: '1px solid var(--border)' }}>{c}</div>
                 )}
               </>
             )}
+            
+            <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 16, marginBottom: 8, fontWeight: 600 }}>Trade Analytics</div>
+            <div style={{ display: 'grid', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Group ID</span>
+                <span style={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>{group.group_id}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Session</span>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--purple)' }}>{group.entry_session || 'UNKNOWN'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Confluence Score</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ width: '40px', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, Math.max(0, group.confluence_score || 0))}%`, height: '100%', background: (group.confluence_score||0) >= 80 ? 'var(--green)' : (group.confluence_score||0) >= 60 ? 'var(--blue)' : 'var(--yellow)' }} />
+                  </div>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{group.confluence_score || 0}/100</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Risk / TP Splits</span>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {group.sub_trades?.map((st, idx) => (
+                    <span key={idx} className={`badge badge-${(st.pnl || 0) > 0 ? 'green' : (st.pnl || 0) < 0 ? 'red' : 'secondary'}`} style={{ fontSize: '0.65rem' }}>
+                      TP{st.tp_level || idx+1}: {st.volume}L
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', flexGrow: 1, minWidth: 0 }}>
+            {isLoadingChart ? (
+              <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Loading charts...</div>
+            ) : mergedGroup.chart_data && mergedGroup.chart_data.length > 0 ? (
+              <div style={{ background: 'rgba(0,0,0,0.1)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.2)' }}>
+                  {['H1', 'M15', 'M5'].map(tf => (
+                    <button
+                      key={tf}
+                      onClick={() => setActiveChart(tf)}
+                      style={{
+                        padding: '8px 16px', background: 'none', border: 'none',
+                        color: activeChart === tf ? 'var(--text-primary)' : 'var(--text-muted)',
+                        fontWeight: activeChart === tf ? 600 : 400,
+                        borderBottom: activeChart === tf ? '2px solid var(--blue)' : '2px solid transparent',
+                        cursor: 'pointer', fontSize: '0.8rem'
+                      }}
+                    >
+                      {tf === 'H1' ? 'HTF Context (H1)' : tf === 'M15' ? 'Intermediate (M15)' : 'Entry (M5)'}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ padding: '8px' }}>
+                  {activeChart === 'H1' && <TradeChart group={mergedGroup} timeframe="H1" height={400} />}
+                  {activeChart === 'M15' && <TradeChart group={mergedGroup} timeframe="M15" height={400} />}
+                  {activeChart === 'M5' && <TradeChart group={mergedGroup} timeframe="M5" height={400} />}
+                </div>
+              </div>
+            ) : mergedGroup.entry_snapshot_b64 ? (
+              <>
+                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Entry Snapshot</div>
+                <img src={`data:image/png;base64,${mergedGroup.entry_snapshot_b64}`} alt="Chart" style={{ width: '100%', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }} />
+              </>
+            ) : null}
           </div>
         </div>
       </td></tr>
     )}
-  </>);
-}
+  </tbody>);
+});
 
-function BacktestResults({ result, onSave, onDismiss, isSaving }) {
+const BacktestResults = memo(function BacktestResults({ result, onSave, onDismiss, onClose, isSaving }) {
   const report = result.report || {};
   const grouped = result.grouped_trades || [];
   const eqData = (result.equity_curve || []).map((v, i) => ({ bar: i, equity: v }));
-  const sessionData = [{ session: 'London', rate: (report.london_win_rate || 0) * 100 }, { session: 'NY', rate: (report.ny_win_rate || 0) * 100 }, { session: 'London/NY', rate: (report.overlap_win_rate || 0) * 100 }];
+  const sessionRates = result.session_win_rates || {};
+  const sessionData = [
+    { session: 'London', rate: ((report.london_win_rate ?? sessionRates.LONDON) || 0) * 100 },
+    { session: 'NY', rate: ((report.ny_win_rate ?? sessionRates.NY) || 0) * 100 },
+    { session: 'London/NY', rate: ((report.overlap_win_rate ?? sessionRates.OVERLAP) || 0) * 100 },
+    { session: 'Asian', rate: ((report.asian_win_rate ?? sessionRates.ASIAN) || 0) * 100 },
+    { session: 'Other', rate: ((report.other_win_rate ?? sessionRates.UNKNOWN) || 0) * 100 }
+  ];
+
+  const [groupBy, setGroupBy] = useState('Month'); // Default to month
+  const [viewMode, setViewMode] = useState('TRADES'); // 'TRADES' or 'SUMMARY'
+  const [activeFilter, setActiveFilter] = useState('All');
+  
+  let filteredGrouped = grouped;
+  if (activeFilter === 'Wins') filteredGrouped = grouped.filter(g => (g.combined_pnl || g.pnl) > 0);
+  if (activeFilter === 'Losses') filteredGrouped = grouped.filter(g => (g.combined_pnl || g.pnl) <= 0);
+
+  let displayGroups = [];
+  const displayGrouped = filteredGrouped.slice(0, 300);
+  
+  if (groupBy === 'None') {
+    displayGroups = [{ label: 'All Trades', trades: displayGrouped }];
+  } else {
+    const groupsMap = {};
+    displayGrouped.forEach(g => {
+      if (!g.entry_time_iso) return;
+      const d = new Date(g.entry_time_iso);
+      let key = '';
+      if (groupBy === 'Day') key = d.toLocaleDateString();
+      if (groupBy === 'Week') key = `Week ${getWeekNumber(d)}`;
+      if (groupBy === 'Month') key = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+      if (groupBy === 'Year') key = d.getFullYear().toString();
+      if (!groupsMap[key]) groupsMap[key] = [];
+      groupsMap[key].push(g);
+    });
+    const sortedKeys = Object.keys(groupsMap).sort((a,b) => new Date(b) - new Date(a));
+    displayGroups = sortedKeys.map(k => ({ label: k, trades: groupsMap[k] }));
+  }
+
+  function getWeekNumber(d) {
+    if (!displayGrouped || displayGrouped.length === 0) return 1;
+    const earliestTime = Math.min(...displayGrouped.map(tg => new Date(tg.entry_time_iso || 0).getTime()));
+    return Math.floor((d.getTime() - earliestTime) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  }
+
+  const summaryData = useMemo(() => {
+    if (groupBy === 'None') return [];
+    return displayGroups.map(group => {
+      let startBal = null;
+      let endBal = null;
+      let pnl = 0;
+      let wins = 0;
+      let losses = 0;
+      
+      const sorted = [...group.trades].sort((a,b) => new Date(a.entry_time_iso || 0) - new Date(b.entry_time_iso || 0));
+      sorted.forEach(t => {
+        if (startBal === null) startBal = t.balance_before;
+        endBal = t.balance_after;
+        const tpnl = t.combined_pnl || t.pnl || 0;
+        pnl += tpnl;
+        if (tpnl > 0) wins++; else losses++;
+      });
+      return {
+        period: group.label,
+        tradeCount: group.trades.length,
+        startBal, endBal, pnl,
+        winRate: wins / (wins + losses) || 0
+      };
+    });
+  }, [displayGroups, groupBy]);
+
+  // Downsample equity curve to prevent Recharts from freezing the browser
+  let chartEqData = eqData;
+  if (eqData.length > 500) {
+    const step = Math.ceil(eqData.length / 500);
+    chartEqData = eqData.filter((_, i) => i % step === 0 || i === eqData.length - 1);
+  }
 
   return (<div className="card" style={{ marginTop: 20 }}>
     <div className="card-header">
       <span className="card-title">Results — {result.total_signals || 0} signals, {result.total_trades || 0} sub-positions</span>
       <div style={{ display: 'flex', gap: 8 }}>
-        <button className="btn btn-primary btn-sm" onClick={onSave} disabled={isSaving}><Save size={14} /> {isSaving ? 'Saving...' : 'Save'}</button>
-        <button className="btn btn-danger btn-sm" onClick={onDismiss}><X size={14} /> Dismiss</button>
+        {!result.is_saved ? (
+          <>
+            <button className="btn btn-primary btn-sm" onClick={onSave} disabled={isSaving}><Save size={14} /> {isSaving ? 'Saving...' : 'Save'}</button>
+            <button className="btn btn-danger btn-sm" onClick={onDismiss}><X size={14} /> Dismiss</button>
+          </>
+        ) : (
+          <button className="btn btn-secondary btn-sm" onClick={onClose}><X size={14} /> Close</button>
+        )}
       </div>
     </div>
     {result.invalid_signals > 0 && <div style={{ fontSize: '0.8rem', color: 'var(--yellow)', marginBottom: 8 }}><Shield size={12} style={{ display: 'inline', marginRight: 4 }} />{result.invalid_signals} signals rejected (invalid SL/TP)</div>}
+    
+    {result.notes && (
+      <div style={{ marginBottom: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--blue)', marginBottom: 4 }}>Narration / Notes</div>
+        <div style={{ fontSize: '0.85rem', whiteSpace: 'pre-wrap' }}>{result.notes}</div>
+      </div>
+    )}
+
+    {result.params_snapshot && Object.keys(result.params_snapshot).length > 0 && (
+      <div style={{ marginBottom: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--purple)', marginBottom: 4 }}>Configuration Parameters</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 4 }}>
+          {Object.entries(result.params_snapshot).map(([k, v]) => (
+            <div key={k} style={{ fontSize: '0.75rem', display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>{k}:</span>
+              <span>{String(v)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
     <div className="metrics-grid" style={{ marginBottom: 16 }}>
       <div className="metric-card"><div className="metric-label">Final Balance</div><div className={`metric-value ${result.final_balance >= result.initial_balance ? 'green' : 'red'}`}>${result.final_balance?.toFixed(2)}</div></div>
       <div className="metric-card"><div className="metric-label">Net P&L</div><div className={`metric-value ${(result.final_balance - result.initial_balance) >= 0 ? 'green' : 'red'}`}>${(result.final_balance - result.initial_balance).toFixed(2)}</div></div>
@@ -164,24 +413,186 @@ function BacktestResults({ result, onSave, onDismiss, isSaving }) {
     </div>
     <div className="grid-2" style={{ marginBottom: 16 }}>
       {eqData.length > 1 && (<div className="card" style={{ padding: 12 }}><h4 style={{ marginBottom: 8 }}>Equity Curve</h4>
-        <ResponsiveContainer width="100%" height={200}><AreaChart data={eqData}><XAxis dataKey="bar" hide /><YAxis domain={['auto', 'auto']} fontSize={10} /><Tooltip formatter={v => `$${v.toFixed(2)}`} /><Area type="monotone" dataKey="equity" stroke="#3fb68b" fill="#3fb68b20" strokeWidth={2} /></AreaChart></ResponsiveContainer>
+        <ResponsiveContainer width="100%" height={200}><AreaChart data={chartEqData}><XAxis dataKey="bar" hide /><YAxis domain={['auto', 'auto']} fontSize={10} /><Tooltip formatter={v => `$${v.toFixed(2)}`} /><Area type="monotone" dataKey="equity" stroke="#3fb68b" fill="#3fb68b20" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>)}
       <div className="card" style={{ padding: 12 }}><h4 style={{ marginBottom: 8 }}>Win Rate by Session</h4>
         <ResponsiveContainer width="100%" height={200}><BarChart data={sessionData}><XAxis dataKey="session" fontSize={11} /><YAxis domain={[0, 100]} fontSize={10} /><Tooltip formatter={v => `${v.toFixed(1)}%`} /><Bar dataKey="rate" fill="#58a6ff" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
       </div>
     </div>
-    {grouped.length > 0 && (<>
-      <div className="card-header"><span className="card-title">Trade Groups ({grouped.length})</span></div>
-      <div className="table-wrapper" style={{ maxHeight: 500, overflow: 'auto' }}>
-        <table><thead><tr><th style={{ width: 24 }}></th><th>#</th><th>Symbol</th><th>Dir</th><th>Entry</th><th>Entry Time</th><th>Exit Time</th><th>Duration</th><th>TPs</th><th>Net P&L</th><th>Session</th></tr></thead>
-          <tbody>{grouped.map((g, i) => <GroupedTradeRow key={g.group_id || i} group={g} index={i} />)}</tbody>
-        </table>
+    {(report.confluence_stats || report.bias_stats) && (
+      <div className="grid-3" style={{ marginBottom: 16 }}>
+        <div className="card" style={{ padding: 12 }}>
+          <h4 style={{ marginBottom: 8 }}>Win Rate by Score</h4>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {Object.entries(report.confluence_stats.by_score || {}).sort((a,b)=>Number(b[0])-Number(a[0])).map(([score, data]) => (
+              <div key={score} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                <span>Score {score}</span>
+                <span style={{ color: data.win_rate >= 0.5 ? 'var(--green)' : 'var(--red)' }}>
+                  {(data.win_rate * 100).toFixed(1)}% ({data.wins}/{data.trades})
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="card" style={{ padding: 12 }}>
+          <h4 style={{ marginBottom: 8 }}>Win Rate by Confirmation</h4>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {Object.entries(report.confluence_stats.by_confirmation || {}).sort((a,b)=>b[1].trades-a[1].trades).map(([conf, data]) => (
+              <div key={conf} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                <span style={{ textTransform: 'capitalize' }}>{conf.replace('_', ' ')}</span>
+                <span style={{ color: data.win_rate >= 0.5 ? 'var(--green)' : 'var(--red)' }}>
+                  {(data.win_rate * 100).toFixed(1)}% ({data.wins}/{data.trades})
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {report.bias_stats && (
+          <div className="card" style={{ padding: 12 }}>
+            <h4 style={{ marginBottom: 8 }}>Win Rate by Bias</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {Object.entries(report.bias_stats).map(([bias, data]) => (
+                <div key={bias} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                  <span style={{ textTransform: 'capitalize' }}>{bias}</span>
+                  <span style={{ color: data.win_rate >= 0.5 ? 'var(--green)' : 'var(--red)' }}>
+                    {(data.win_rate * 100).toFixed(1)}% ({data.wins}/{data.trades})
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+    )}
+    {grouped.length > 0 && (<>
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <span className="card-title">Trade Groups ({filteredGrouped.length}{filteredGrouped.length > 300 ? ' - Showing top 300' : ''})</span>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button className={`btn btn-sm ${activeFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveFilter('All')}>All</button>
+            <button className={`btn btn-sm ${activeFilter === 'Wins' ? 'btn-green' : 'btn-secondary'}`} onClick={() => setActiveFilter('Wins')}>Wins</button>
+            <button className={`btn btn-sm ${activeFilter === 'Losses' ? 'btn-red' : 'btn-secondary'}`} onClick={() => setActiveFilter('Losses')}>Losses</button>
+          </div>
+          <div style={{ display: 'flex', gap: 4, marginLeft: 10 }}>
+            <button className={`btn btn-sm ${viewMode === 'TRADES' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewMode('TRADES')}>List</button>
+            <button className={`btn btn-sm ${viewMode === 'SUMMARY' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setViewMode('SUMMARY'); if(groupBy === 'None') setGroupBy('Month'); }}>Summary</button>
+          </div>
+          <select value={groupBy} onChange={e => setGroupBy(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
+            <option value="None">No Grouping</option>
+            <option value="Day">Group by Day</option>
+            <option value="Week">Group by Week</option>
+            <option value="Month">Group by Month</option>
+            <option value="Year">Group by Year</option>
+          </select>
+        </div>
+      </div>
+      {viewMode === 'SUMMARY' ? (
+        <div className="table-wrapper" style={{ maxHeight: 500, overflow: 'auto' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th>Trades</th>
+                <th>Win Rate</th>
+                <th>Starting Balance</th>
+                <th>Ending Balance</th>
+                <th>Period P&L</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summaryData.length > 0 ? summaryData.map((row, i) => (
+                <tr key={i}>
+                  <td><strong>{row.period}</strong></td>
+                  <td>{row.tradeCount}</td>
+                  <td style={{ color: row.winRate >= 0.5 ? 'var(--green)' : 'var(--red)' }}>{(row.winRate * 100).toFixed(1)}%</td>
+                  <td>${row.startBal != null ? row.startBal.toFixed(2) : '—'}</td>
+                  <td>${row.endBal != null ? row.endBal.toFixed(2) : '—'}</td>
+                  <td style={{ color: row.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                    ${row.pnl.toFixed(2)}
+                  </td>
+                </tr>
+              )) : (
+                <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px 0' }}>No summary data available. Select a grouping mode.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <VirtualizedTradeList displayGroups={displayGroups} groupBy={groupBy} backtestId={result.run?.id} />
+      )}
     </>)}
   </div>);
-}
+});
 
 const TRAIL_METHODS = [{ v: 'ATR_TRAIL', l: 'ATR Trail' }, { v: 'FIXED_PIPS', l: 'Fixed Pips' }, { v: 'STRUCTURE_TRAIL', l: 'Structure Trail' }, { v: 'PCT_TRAIL', l: '% Trail' }];
+
+const VirtualizedTradeList = memo(function VirtualizedTradeList({ displayGroups, groupBy, backtestId }) {
+  const parentRef = useRef(null);
+
+  const flattenedRows = useMemo(() => {
+    const arr = [];
+    displayGroups.forEach((grouping, gIdx) => {
+      if (groupBy !== 'None') {
+        arr.push({ type: 'header', label: grouping.label, count: grouping.trades.length, isFirst: gIdx === 0 });
+      }
+      grouping.trades.forEach((g, i) => {
+        arr.push({ type: 'trade', group: g, index: i });
+      });
+    });
+    return arr;
+  }, [displayGroups, groupBy]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: flattenedRows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (index) => flattenedRows[index].type === 'header' ? 35 : 42,
+  });
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+  const paddingBottom = virtualItems.length > 0 ? rowVirtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end : 0;
+
+  return (
+    <div className="table-wrapper" ref={parentRef} style={{ maxHeight: 500, overflow: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr>
+            <th style={{ width: 24 }}></th>
+            <th>#</th>
+            <th>Symbol</th>
+            <th>Dir</th>
+            <th>Entry</th>
+            <th>Entry Time</th>
+            <th>Exit Time</th>
+            <th>Duration</th>
+            <th>TPs</th>
+            <th>Net P&L</th>
+            <th>Bal. Before</th>
+            <th>Bal. After</th>
+            <th>Session</th>
+          </tr>
+        </thead>
+        {paddingTop > 0 && <tbody><tr><td colSpan={13} style={{ height: paddingTop, padding: 0, border: 'none' }} /></tr></tbody>}
+        {virtualItems.map((virtualRow) => {
+          const row = flattenedRows[virtualRow.index];
+          if (row.type === 'header') {
+            return (
+              <tbody key={virtualRow.index} ref={rowVirtualizer.measureElement} data-index={virtualRow.index}>
+                <tr>
+                  <td colSpan={13} style={{ padding: '8px 12px', background: 'var(--bg-tertiary)', fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                    {row.label} ({row.count})
+                  </td>
+                </tr>
+              </tbody>
+            );
+          }
+          return <GroupedTradeRow key={virtualRow.index} group={row.group} index={row.index} measureRef={rowVirtualizer.measureElement} vIndex={virtualRow.index} backtestId={backtestId} />;
+        })}
+        {paddingBottom > 0 && <tbody><tr><td colSpan={13} style={{ height: paddingBottom, padding: 0, border: 'none' }} /></tr></tbody>}
+      </table>
+    </div>
+  );
+});
 
 export default function Backtester() {
   const queryClient = useQueryClient();
@@ -203,7 +614,7 @@ export default function Backtester() {
       session_filter_enabled: true, news_filter_enabled: true,
       risk_per_trade_pct: 1.0, min_rr: 3.0,
       max_daily_consecutive_losses: 3, max_weekly_consecutive_losses: 5,
-      max_consecutive_losses: 5, max_concurrent_positions: 3,
+      max_consecutive_losses: 5, max_concurrent_positions: 3, max_daily_trades: 5,
       tp_count: 3, tp1_rr: 1.0, tp2_rr: 3.0, tp3_rr: 5.0, tp4_rr: 10.0, tp5_rr: 15.0,
       tp_splits: '30,25,20,15,10',
       be_trigger_rr: 1.0, be_buffer_pips: 2.0,
@@ -211,6 +622,8 @@ export default function Backtester() {
       trail_method_tp4: 'ATR_TRAIL', trail_method_tp5: 'STRUCTURE_TRAIL',
       atr_trail_multiplier: 1.5, trail_pips: 15,
       compounding_enabled: false,
+      target_profit_enabled: false, max_daily_profit: 500.0, max_weekly_profit: 2000.0,
+      manual_bias: 'NONE',
     };
   });
 
@@ -224,31 +637,51 @@ export default function Backtester() {
   });
 
   const [events, setEvents] = useState([]);
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const resultsRef = useRef(null);
+
+  useEffect(() => {
+    if (result && resultsRef.current) {
+      setTimeout(() => {
+        resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    }
+  }, [result]);
+
   const [isSaving, setIsSaving] = useState(false);
   const [progress, setProgress] = useState(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [savedBtFilter, setSavedBtFilter] = useState('All');
+  const [savedBtSort, setSavedBtSort] = useState('Date');
   const [configLoaded, setConfigLoaded] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
 
-  // Auto-save config to localStorage on every change
+  // Auto-save config to localStorage on every change (debounced)
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(form)); } catch { }
+    const timer = setTimeout(() => {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(form)); } catch { }
+    }, 500);
+    return () => clearTimeout(timer);
   }, [form]);
 
-  // Auto-save result to localStorage
+  // Auto-save result to localStorage (debounced)
   useEffect(() => {
-    try {
-      if (result) {
-        localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(result));
-      } else {
-        localStorage.removeItem(RESULT_STORAGE_KEY);
-      }
-    } catch (e) {
-      // If quota exceeded (run_logs can be large), save without logs
+    const timer = setTimeout(() => {
       try {
-        const trimmed = { ...result, run_logs: [] };
-        localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(trimmed));
-      } catch { }
-    }
+        if (result) {
+          localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(result));
+        } else {
+          localStorage.removeItem(RESULT_STORAGE_KEY);
+        }
+      } catch (e) {
+        // If quota exceeded (run_logs can be large), save without logs
+        try {
+          const trimmed = { ...result, run_logs: [] };
+          localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(trimmed));
+        } catch { }
+      }
+    }, 500);
+    return () => clearTimeout(timer);
   }, [result]);
 
   // Load defaults from user's live config (only on first load if no saved config)
@@ -288,12 +721,14 @@ export default function Backtester() {
         if (res.data.status === 'running') {
           setProgress(res.data.progress || { stage: 'Restoring...', pct: 0 });
         } else if (res.data.status === 'complete' && !result) {
+          setIsLoadingDetail(true);
           getLatestBacktestResult().then(r => {
             if (r.data && Object.keys(r.data).length > 0) {
               setResult(r.data);
               if (r.data.run_logs) setEvents(r.data.run_logs);
             }
-          }).catch(()=>{});
+          }).catch(()=>{})
+            .finally(() => setIsLoadingDetail(false));
         }
       }).catch(()=>{});
     }
@@ -306,33 +741,64 @@ export default function Backtester() {
       setResult(null);
       setEvents([]);
       setProgress({ stage: 'starting', message: 'Initializing backtest request...', pct: 0 });
-      return runBacktest({ ...form, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: {} });
+      const payload = { ...form, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: {} };
+      if (form.manual_bias && form.manual_bias !== 'NONE') {
+        payload.manual_bias_overrides = { [form.symbol]: form.manual_bias };
+      }
+      return runBacktest(payload);
     },
     onSuccess: res => {
-      // Do nothing, we wait for websocket 'complete' stage
-    },
-    onError: () => setProgress(null),
+      // Background task started, result will be pushed via WebSocket or polling
+      queryClient.invalidateQueries({ queryKey: ['backtests'] });
+    }
   });
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!result) return;
-    setIsSaving(true);
-    try {
-      await saveBacktest(result.backtest_id, { backtest_data: { ...result, strategy_id: 'SMC_v1', symbol: form.symbol, risk_config: form }, save_mode: 'FULL' });
-      setResult(null);
-      queryClient.invalidateQueries({ queryKey: ['backtests'] });
-      refetch();
-    } finally { setIsSaving(false); }
+    setShowSaveModal(true);
   };
+  
+  const handleSaveSuccess = () => {
+    setShowSaveModal(false);
+    setResult(null);
+    localStorage.removeItem(RESULT_STORAGE_KEY);
+    queryClient.invalidateQueries({ queryKey: ['backtests'] });
+    refetch();
+    setTimeout(() => {
+      document.getElementById('saved-backtests')?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  };
+
   const handleDismiss = () => {
     setResult(null);
     localStorage.removeItem(RESULT_STORAGE_KEY);
   };
   const handleDelete = async id => { await deleteBacktest(id); refetch(); };
   const handleView = async id => {
-    const res = await getBacktest(id);
-    setResult({ ...res.data.run, trades: res.data.trades, equity_curve: res.data.equity_curve, report: res.data.run, grouped_trades: res.data.grouped_trades || [] });
-    if (res.data.run_logs) setEvents(res.data.run_logs);
+    setIsLoadingDetail(true);
+    // Scroll immediately to show loader
+    setTimeout(() => {
+      if (resultsRef.current) resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+
+    try {
+      const res = await getBacktest(id);
+      setResult({ ...res.data.run, trades: res.data.trades, equity_curve: res.data.equity_curve, report: res.data.run, grouped_trades: res.data.grouped_trades || [], is_saved: true });
+      if (res.data.run_logs) setEvents(res.data.run_logs);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingDetail(false);
+    }
+  };
+
+  const handleStop = async () => {
+    try {
+      await stopBacktest();
+      setProgress(null);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const isRunning = mutation.isPending || (progress !== null && progress.stage !== 'complete');
@@ -368,7 +834,6 @@ export default function Backtester() {
 
           <button className="btn btn-secondary btn-sm" onClick={() => setShowAdvanced(!showAdvanced)} style={{ width: '100%' }}><Settings2 size={14} /> {showAdvanced ? 'Hide' : 'Show'} Advanced Parameters</button>
           {showAdvanced && (<div style={{ display: 'grid', gap: 14, padding: 14, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
-            {/* SMC Strategy */}
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>━ SMC Strategy</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
               <div><label style={{ fontSize: '0.7rem' }}>Confluence Threshold</label><input type="number" value={form.confluence_threshold} onChange={e => u('confluence_threshold', +e.target.value)} /></div>
@@ -377,16 +842,37 @@ export default function Backtester() {
               <div><label style={{ fontSize: '0.7rem' }}>FVG Min Gap (pips)</label><input type="number" value={form.fvg_min_gap_pips} onChange={e => u('fvg_min_gap_pips', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Liq Sweep Min (pips)</label><input type="number" value={form.liq_sweep_min_pips} onChange={e => u('liq_sweep_min_pips', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Max Spread (pips)</label><input type="number" value={form.max_spread_pips} onChange={e => u('max_spread_pips', +e.target.value)} /></div>
+              <div><label style={{ fontSize: '0.7rem' }}>Manual HTF Bias</label><select value={form.manual_bias || 'NONE'} onChange={e => u('manual_bias', e.target.value)}><option value="NONE">Auto</option><option value="BULLISH">Bullish Only</option><option value="BEARISH">Bearish Only</option></select></div>
             </div>
-            {/* Circuit Breakers */}
+            
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>━ Hard Filters (Optimization)</div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={form.enforce_htf_pd} onChange={e => u('enforce_htf_pd', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce HTF P/D Arrays</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={form.enforce_fvg_displacement} onChange={e => u('enforce_fvg_displacement', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce FVG Displacement</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={form.enforce_asian_range_sweep} onChange={e => u('enforce_asian_range_sweep', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce Asian Range Sweep</label>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div><label style={{ fontSize: '0.7rem' }}>Asian Range Start (Hour)</label><input type="number" value={form.asian_range_start_hour ?? 18} onChange={e => u('asian_range_start_hour', +e.target.value)} /></div>
+              <div><label style={{ fontSize: '0.7rem' }}>Asian Range End (Hour)</label><input type="number" value={form.asian_range_end_hour ?? 0} onChange={e => u('asian_range_end_hour', +e.target.value)} /></div>
+            </div>
+
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--yellow)' }}>━ Circuit Breakers</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
               <div><label style={{ fontSize: '0.7rem' }}>Max Daily Consec. Losses</label><input type="number" step="1" min="1" value={form.max_daily_consecutive_losses} onChange={e => u('max_daily_consecutive_losses', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Max Weekly Consec. Losses</label><input type="number" step="1" min="1" value={form.max_weekly_consecutive_losses} onChange={e => u('max_weekly_consecutive_losses', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Max Consec. Losses</label><input type="number" value={form.max_consecutive_losses} onChange={e => u('max_consecutive_losses', +e.target.value)} /></div>
+              <div><label style={{ fontSize: '0.7rem' }}>Max Daily Trades</label><input type="number" value={form.max_daily_trades} onChange={e => u('max_daily_trades', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Max Open Positions</label><input type="number" value={form.max_concurrent_positions} onChange={e => u('max_concurrent_positions', +e.target.value)} /></div>
+              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center', marginTop: 4 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={form.target_profit_enabled} onChange={e => u('target_profit_enabled', e.target.checked)} style={{ width: 14, height: 14 }} /> Target Profit Halts</label>
+                {form.target_profit_enabled && (
+                  <>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}><label style={{ fontSize: '0.7rem', margin: 0 }}>Daily $</label><input type="number" step="10" value={form.max_daily_profit} onChange={e => u('max_daily_profit', +e.target.value)} style={{ width: 80, padding: '2px 4px' }} /></div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}><label style={{ fontSize: '0.7rem', margin: 0 }}>Weekly $</label><input type="number" step="10" value={form.max_weekly_profit} onChange={e => u('max_weekly_profit', +e.target.value)} style={{ width: 80, padding: '2px 4px' }} /></div>
+                  </>
+                )}
+              </div>
             </div>
-            {/* TP R:R + Volume Split */}
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--green)' }}>━ Take Profit</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8 }}>
               {[1, 2, 3, 4, 5].filter(n => n <= form.tp_count).map(n => (
@@ -394,13 +880,11 @@ export default function Backtester() {
               ))}
             </div>
             <div><label style={{ fontSize: '0.7rem' }}>TP Volume Split (%)</label><input type="text" value={form.tp_splits} onChange={e => u('tp_splits', e.target.value)} placeholder="30,25,20,15,10" /><div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Comma-separated % per TP (must sum to 100)</div></div>
-            {/* Break-Even */}
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--purple)' }}>━ Break-Even</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div><label style={{ fontSize: '0.7rem' }}>BE Trigger (R)</label><input type="number" step="0.1" value={form.be_trigger_rr} onChange={e => u('be_trigger_rr', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>BE Buffer (pips)</label><input type="number" step="0.5" value={form.be_buffer_pips} onChange={e => u('be_buffer_pips', +e.target.value)} /></div>
             </div>
-            {/* Trailing Stops */}
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--red)' }}>━ Trailing Stops</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {[2, 3, 4, 5].filter(n => n <= form.tp_count).map(n => (
@@ -412,9 +896,15 @@ export default function Backtester() {
           </div>)}
 
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary" onClick={() => mutation.mutate()} disabled={isRunning || status !== 'ONLINE'} style={{ flex: 1 }}>
-              {isRunning ? <><Loader2 size={16} className="spin" /> Running...</> : <><Play size={16} /> Run Backtest</>}
-            </button>
+            {!isRunning ? (
+              <button className="btn btn-primary" onClick={() => mutation.mutate()} disabled={status !== 'ONLINE'} style={{ flex: 1 }}>
+                <Play size={16} /> Run Backtest
+              </button>
+            ) : (
+              <button className="btn btn-danger" onClick={handleStop} style={{ flex: 1 }}>
+                <X size={16} /> Stop Backtest
+              </button>
+            )}
             <button className="btn btn-secondary btn-sm" onClick={() => { localStorage.removeItem(STORAGE_KEY); location.reload(); }} title="Reset to defaults" style={{ whiteSpace: 'nowrap' }}>
               <X size={14} /> Reset
             </button>
@@ -424,29 +914,101 @@ export default function Backtester() {
         </div>
       </div>
 
-      {/* Right panel: Live logs always visible */}
       <div className="card">
         <div className="card-header"><span className="card-title"><Terminal size={14} style={{ display: 'inline', marginRight: 6 }} />Live Logs</span></div>
         <LiveLogPanel events={events} setEvents={setEvents} />
       </div>
     </div>
 
-    {/* Results */}
-    {result && <BacktestResults result={result} onSave={handleSave} onDismiss={handleDismiss} isSaving={isSaving} />}
+    <div ref={resultsRef} style={{ marginTop: 40 }}>
+      {isLoadingDetail && (
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
+          <Loader2 size={32} className="spinner" style={{ marginBottom: 16 }} />
+          <div>Loading backtest details...</div>
+        </div>
+      )}
+      {isRunning && (
+        <div className="card" style={{ padding: 40, color: 'var(--text-muted)' }}>
+           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+             <div style={{ height: 32, background: 'var(--bg-tertiary)', borderRadius: 4, width: '40%', animation: 'pulse 1.5s infinite ease-in-out' }} />
+             <div style={{ height: 200, background: 'var(--bg-tertiary)', borderRadius: 4, width: '100%', animation: 'pulse 1.5s infinite ease-in-out' }} />
+             <div style={{ display: 'flex', gap: 20 }}>
+               <div style={{ height: 100, background: 'var(--bg-tertiary)', borderRadius: 4, width: '50%', animation: 'pulse 1.5s infinite ease-in-out' }} />
+               <div style={{ height: 100, background: 'var(--bg-tertiary)', borderRadius: 4, width: '50%', animation: 'pulse 1.5s infinite ease-in-out' }} />
+             </div>
+           </div>
+           <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
+        </div>
+      )}
+      {result && !isLoadingDetail && !isRunning && <BacktestResults result={result} onSave={handleSave} onDismiss={handleDismiss} onClose={() => setResult(null)} isSaving={isSaving} />}
+    </div>
 
-    {/* Saved Backtests — always visible at bottom */}
-    <div className="card" style={{ marginTop: 20 }}>
-      <div className="card-header"><span className="card-title">Saved Backtests</span><span className="badge badge-blue">{backtests?.length || 0}</span></div>
+    <div id="saved-backtests" className="card" style={{ marginTop: 20 }}>
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <span className="card-title">Saved Backtests</span>
+          <span className="badge badge-blue">{backtests?.length || 0}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button className={`btn btn-sm ${savedBtFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSavedBtFilter('All')}>All</button>
+            <button className={`btn btn-sm ${savedBtFilter === 'Profitable' ? 'btn-green' : 'btn-secondary'}`} onClick={() => setSavedBtFilter('Profitable')}>Profitable</button>
+            <button className={`btn btn-sm ${savedBtFilter === 'HighWinRate' ? 'btn-blue' : 'btn-secondary'}`} onClick={() => setSavedBtFilter('HighWinRate')}>WR &gt; 50%</button>
+          </div>
+          <select value={savedBtSort} onChange={e => setSavedBtSort(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
+            <option value="Date">Sort by Date</option>
+            <option value="PNL">Sort by P&L</option>
+            <option value="WinRate">Sort by Win Rate</option>
+          </select>
+        </div>
+      </div>
       <div className="table-wrapper">
-        <table><thead><tr><th>Symbol</th><th>Trades</th><th>Win Rate</th><th>P&L</th><th></th></tr></thead>
-          <tbody>{backtests?.length ? backtests.map(bt => (
-            <tr key={bt.id}><td><strong>{bt.symbol}</strong></td><td>{bt.total_trades}</td><td>{((bt.win_rate || 0) * 100).toFixed(0)}%</td>
-              <td style={{ color: bt.total_pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>${(bt.total_pnl || 0).toFixed(2)}</td>
-              <td><div style={{ display: 'flex', gap: 4 }}><button className="btn btn-secondary btn-sm" onClick={() => handleView(bt.id)}><Eye size={12} /></button><button className="btn btn-danger btn-sm" onClick={() => handleDelete(bt.id)}><Trash2 size={12} /></button></div></td>
-            </tr>
-          )) : (<tr><td colSpan={5}><div className="empty-state"><FlaskConical /><h3>No saved backtests</h3></div></td></tr>)}</tbody>
+        <table>
+          <thead><tr><th>Date</th><th>Symbol</th><th>Trades</th><th>Win Rate</th><th>P&L</th><th>Notes</th><th></th></tr></thead>
+          <tbody>
+            {(() => {
+              if (!backtests?.length) return <tr><td colSpan="7" style={{ textAlign: 'center', padding: 20 }}>No saved backtests</td></tr>;
+              
+              let filtered = [...backtests];
+              if (savedBtFilter === 'Profitable') filtered = filtered.filter(b => b.total_pnl > 0);
+              if (savedBtFilter === 'HighWinRate') filtered = filtered.filter(b => b.win_rate >= 0.5);
+              
+              filtered.sort((a, b) => {
+                if (savedBtSort === 'Date') return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+                if (savedBtSort === 'PNL') return (b.total_pnl || 0) - (a.total_pnl || 0);
+                if (savedBtSort === 'WinRate') return (b.win_rate || 0) - (a.win_rate || 0);
+                return 0;
+              });
+
+              return filtered.map(bt => (
+                <tr key={bt.id}>
+                  <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{bt.created_at ? new Date(bt.created_at).toLocaleString() : 'N/A'}</td>
+                  <td><strong>{bt.symbol}</strong></td>
+                  <td>{bt.total_trades}</td>
+                  <td className={bt.win_rate >= 0.5 ? 'green' : 'yellow'}>{((bt.win_rate || 0) * 100).toFixed(0)}%</td>
+                  <td style={{ color: bt.total_pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>${(bt.total_pnl || 0).toFixed(2)}</td>
+                  <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bt.notes_preview || ''}</td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => handleView(bt.id)}><Eye size={12} /></button>
+                      <button className="btn btn-danger btn-sm" onClick={() => handleDelete(bt.id)}><Trash2 size={12} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ));
+            })()}
+          </tbody>
         </table>
       </div>
     </div>
+    
+    {showSaveModal && (
+      <SaveModal
+        result={result}
+        form={form}
+        onClose={() => setShowSaveModal(false)}
+        onSuccess={handleSaveSuccess}
+      />
+    )}
   </>);
 }

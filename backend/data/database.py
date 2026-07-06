@@ -44,9 +44,17 @@ async def init_db():
         # Simple schema migrations for newly added columns
         try:
             from sqlalchemy import text
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;"))
             await conn.execute(text("ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS sl_hit_rate FLOAT;"))
             await conn.execute(text("ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS trail_hit_rate FLOAT;"))
             await conn.execute(text("ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS run_logs TEXT;"))
+            
+            # Migrations for BacktestTrade chart storage
+            await conn.execute(text("ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS chart_data TEXT;"))
+            await conn.execute(text("ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS chart_data_h1 TEXT;"))
+            await conn.execute(text("ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS chart_data_m15 TEXT;"))
+            await conn.execute(text("ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS smc_data TEXT;"))
+            await conn.execute(text("ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS sub_trades TEXT;"))
         except Exception as e:
             logger.warning(f"Simple migration failed (likely already applied): {e}")
             

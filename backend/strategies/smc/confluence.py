@@ -32,71 +32,77 @@ class ConfluenceScorer:
             ltf_choch:         bool
             in_kill_zone:      bool
         """
-        # Base score for passing structural gates (H4 Bias + H1 BOS + IPDM + M15 ChoCH)
-        # We only reach the scorer if these gates have already been passed.
-        score = 40
-        breakdown = {"base_structure": 40}
+        # We only reach the scorer if base gates have passed.
+        # We assign the base structural points automatically.
+        score = 0
+        breakdown = {}
 
-        # ENTRY ZONE CONFIRMATION (Max +35)
-        zone_score = 0
-        zone_names = []
+        # 1. HTF Bias (Max 15)
+        bias_score = 15 if context.get("htf_bias") == context.get("signal_direction") else 0
+        score += bias_score
+        breakdown["htf_bias"] = bias_score
 
-        if context.get("fresh_ob") is not None:
-            zone_score += 25
-            zone_names.append("Fresh OB")
-            
-        if context.get("fvg_inside_ob", False) or context.get("fvg_present", False):
-            # FVG gets points, whether inside OB or standalone
-            fvg_points = 15 if context.get("fvg_inside_ob", False) else 15
-            zone_score += fvg_points
-            zone_names.append("FVG")
-            
-        if context.get("in_sd_zone", False):
-            zone_score += 10
-            zone_names.append("S&D")
+        # 2. H1 Structure (Max 10)
+        h1_score = 10 if context.get("h1_structure") == context.get("signal_direction") else 0
+        score += h1_score
+        breakdown["h1_structure"] = h1_score
 
-        # Cap primary zone score to ensure max total score is bounded appropriately
-        zone_score = min(zone_score, 35)
-        
-        # SECONDARY CONFLUENCES
-        ote_score = 0
-        if context.get("in_ote_zone", False):
-            ote_score = 10
-            zone_names.append("OTE Fib")
+        # 3. LTF ChoCH (Max 10)
+        choch_score = 10 if context.get("ltf_choch", False) else 0
+        score += choch_score
+        breakdown["ltf_choch"] = choch_score
 
-        zone_name_str = " + ".join(zone_names) if zone_names else "None"
-        score += zone_score + ote_score
-        breakdown[f"entry_zone ({zone_name_str})"] = zone_score + ote_score
-
-        # LIQUIDITY SWEEP (Max +10)
+        # 4. Liquidity Sweep (Max 15)
         sweep_score = 0
         sweep = context.get("liquidity_sweep")
         if sweep is not None:
             if (sweep.get("type") == "SSL" and context.get("signal_direction") == "BULLISH") or \
                (sweep.get("type") == "BSL" and context.get("signal_direction") == "BEARISH"):
-                sweep_score = 10
-                
+                sweep_score = 15
         score += sweep_score
-        breakdown["liquidity_sweep"] = sweep_score
+        breakdown["sweep"] = sweep_score
 
-        # CANDLESTICK CONFIRMATION (Max +5)
+        # 5. Fresh OB (Max 15)
+        ob_score = 0
+        if context.get("fresh_ob") is not None:
+            ob_score = 15
+        elif context.get("in_sd_zone", False):
+            ob_score = 10 # Fallback for S&D
+        score += ob_score
+        breakdown["fresh_ob"] = ob_score
+
+        # 6. FVG Inside OB / Present (Max 10)
+        fvg_score = 0
+        if context.get("fvg_inside_ob", False):
+            fvg_score = 10
+        elif context.get("fvg_present", False):
+            fvg_score = 5
+        score += fvg_score
+        breakdown["fvg_inside_ob"] = fvg_score
+
+        # 7. OTE Zone (Max 5)
+        ote_score = 5 if context.get("in_ote_zone", False) else 0
+        score += ote_score
+        breakdown["ote_zone"] = ote_score
+
+        # 8. Candlestick Confirmation (Max 15)
         candle_score = 0
         candle_tier = context.get("candle_tier", 0)
         if candle_tier == 1:
-            candle_score = 5
+            candle_score = 15
         elif candle_tier == 2:
-            candle_score = 3
+            candle_score = 10
         elif candle_tier == 3:
-            candle_score = 1
-            
+            candle_score = 5
         score += candle_score
-        breakdown[f"candlestick (tier {candle_tier})"] = candle_score
+        breakdown["candle"] = candle_score
 
-        # KILL ZONE / SESSION ALIGNMENT is now part of base or optional. Let's cap at 100.
-        # Max so far: Base (40) + Zones (35) + OTE (10) + Sweep (10) + Candle (5) = 100!
-        kz_score = 0
-        
-        # Inject the breakdown directly into context so it can be logged
+        # 9. Kill Zone (Max 5)
+        kz_score = 5 if context.get("in_kill_zone", False) else 0
+        score += kz_score
+        breakdown["kill_zone"] = kz_score
+
+        score = min(score, 100)
         context["score_breakdown"] = breakdown
 
         return min(score, 100)

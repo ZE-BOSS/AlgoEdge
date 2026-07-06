@@ -24,7 +24,7 @@ except ImportError:
     HAS_OPENAI = False
 
 try:
-    import google.generativeai as genai
+    from google import genai
     HAS_GEMINI = True
 except ImportError:
     HAS_GEMINI = False
@@ -157,7 +157,9 @@ Provide:
 
     async def _call_gemini(self, model: str, prompt: str) -> str:
         """Call Google Gemini API."""
-        genai.configure(api_key=self.api_keys.get("gemini", ""))
-        gm = genai.GenerativeModel(model)
-        response = await gm.generate_content_async(prompt)
+        client = genai.Client(api_key=self.api_keys.get("gemini", ""))
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=prompt
+        )
         return response.text

@@ -21,8 +21,9 @@ export default function StrategySettings() {
     fvg_min_gap_pips: 5.0,
     liq_sweep_min_pips: 5.0,
     max_spread_pips: 3.0,
-    session_filter: true,
-    news_filter: true,
+    session_filter_enabled: true,
+    news_filter_enabled: true,
+    manual_bias_overrides: {},
   });
 
   // Load current config from backend
@@ -74,6 +75,13 @@ export default function StrategySettings() {
     }
   };
 
+  const updateBias = (sym, bias) => {
+    const next = { ...(config.manual_bias_overrides || {}) };
+    if (bias === 'NONE') delete next[sym];
+    else next[sym] = bias;
+    update('manual_bias_overrides', next);
+  };
+
   return (
     <div style={{ display: 'grid', gap: 20, maxWidth: 800 }}>
       <div className="card">
@@ -87,6 +95,29 @@ export default function StrategySettings() {
             >
               {sym}
             </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Manual Bias Overrides</span></div>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+          Override the algorithmic HTF trend for specific symbols. Leave as NONE to use automatic bias.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          {config.symbols.map(sym => (
+            <div key={sym} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
+              <strong style={{ fontSize: '0.85rem' }}>{sym}</strong>
+              <select 
+                value={(config.manual_bias_overrides || {})[sym] || 'NONE'} 
+                onChange={e => updateBias(sym, e.target.value)}
+                style={{ fontSize: '0.75rem', padding: '2px 6px' }}
+              >
+                <option value="NONE">Auto</option>
+                <option value="BULLISH">Bullish Only</option>
+                <option value="BEARISH">Bearish Only</option>
+              </select>
+            </div>
           ))}
         </div>
       </div>
@@ -134,11 +165,11 @@ export default function StrategySettings() {
         <div className="card-header"><span className="card-title">Filters</span></div>
         <div style={{ display: 'flex', gap: 24 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.session_filter} onChange={e => update('session_filter', e.target.checked)} style={{ width: 16, height: 16 }} />
+            <input type="checkbox" checked={config.session_filter_enabled} onChange={e => update('session_filter_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
             Session Filter (London/NY Kill Zones only)
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.news_filter} onChange={e => update('news_filter', e.target.checked)} style={{ width: 16, height: 16 }} />
+            <input type="checkbox" checked={config.news_filter_enabled} onChange={e => update('news_filter_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
             News Filter (block ±30min HIGH impact)
           </label>
         </div>

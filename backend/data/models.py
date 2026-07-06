@@ -61,9 +61,17 @@ class Trade(Base):
     max_drawdown = Column(Float)  # Max adverse excursion
     entry_snapshot = Column(Text)  # path to entry chart PNG
     exit_snapshot = Column(Text)   # path to exit chart PNG
+    balance_before = Column(Float)
+    balance_after = Column(Float)
+    confluence_score = Column(Integer)
+    chart_data = Column(Text)
     mt5_ticket = Column(BigInteger)
     created_at = Column(DateTime, server_default=func.now())
     positions = relationship("TradePosition", back_populates="parent_trade", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_trades_user_status", "user_id", "status"),
+    )
 
 
 # ── Trade Sub-Positions (Multi-TP) ───────────────────────────────────────────
@@ -122,8 +130,9 @@ class Signal(Base):
     confluence_breakdown = Column(Text)  # JSON: {"htf_bias": 15, "sweep": 15, ...}
     acted_on = Column(Boolean, default=False)
     skip_reason = Column(String(200))  # Rejection reason if skipped
-    trade_id = Column(BigInteger)
+    trade_id = Column(BigInteger, ForeignKey("trades.id"))
     entry_snapshot = Column(Text)  # Path to entry chart PNG
+    chart_data = Column(Text)
     session = Column(String(20))  # LONDON, NY, OVERLAP, 24/7
     signal_time = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())
@@ -158,6 +167,7 @@ class User(Base):
     max_daily_loss = Column(Float, default=5.0)
     allowed_symbols = Column(Text)  # JSON array
     is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -248,6 +258,8 @@ class BacktestTrade(Base):
     exit_reason = Column(String(20))
     pnl = Column(Float)
     pnl_r = Column(Float)
+    balance_before = Column(Float)
+    balance_after = Column(Float)
     planned_rr = Column(Float)
     realized_rr = Column(Float)
     be_applied = Column(Boolean, default=False)
@@ -257,6 +269,14 @@ class BacktestTrade(Base):
     confluence_score = Column(Integer)
     session = Column(String(20))
     llm_analysis = Column(Text)
+    
+    # Chart & SMC Data
+    chart_data = Column(Text)
+    chart_data_h1 = Column(Text)
+    chart_data_m15 = Column(Text)
+    smc_data = Column(Text)
+    sub_trades = Column(Text)
+    
     backtest_run = relationship("BacktestRun", back_populates="trades")
 
 

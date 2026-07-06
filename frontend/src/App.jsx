@@ -3,10 +3,11 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 're
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   LayoutDashboard, BookOpen, FlaskConical, BarChart3,
-  Zap, Settings, Wifi, WifiOff, Loader2, LogOut
+  Zap, Settings, Wifi, WifiOff, Loader2, LogOut, ChevronLeft, ChevronRight
 } from 'lucide-react';
+import { useState } from 'react';
 import { useBackendConnection, useWebSocket } from './hooks/useBackendConnection';
-import { useConnectionStore, useAuthStore } from './store';
+import { useConnectionStore, useAuthStore, useLoadingStore } from './store';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { NotificationContainer } from './components/NotificationToast';
 import Login from './pages/Login';
@@ -43,7 +44,7 @@ function AuthGuard({ children }) {
   return children;
 }
 
-function Sidebar() {
+function Sidebar({ isCollapsed, setIsCollapsed }) {
   const { status } = useConnectionStore();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -58,7 +59,10 @@ function Sidebar() {
   ];
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
+      <button className="sidebar-toggle" onClick={() => setIsCollapsed(!isCollapsed)}>
+        {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+      </button>
       <div className="sidebar-brand">
         <div className="dot" />
         <h1>AlgoEdge</h1>
@@ -89,15 +93,27 @@ function Sidebar() {
   );
 }
 
+function GlobalLoader() {
+  const activeRequests = useLoadingStore(s => s.activeRequests);
+  if (activeRequests === 0) return null;
+  return (
+    <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 99999, background: 'var(--bg-tertiary)', padding: 8, borderRadius: '50%', boxShadow: '0 4px 12px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border)' }}>
+      <Loader2 size={20} className="spin" color="var(--blue)" />
+    </div>
+  );
+}
+
 function AppContent() {
+  const [isCollapsed, setIsCollapsed] = useState(false);
   useBackendConnection();
   useWebSocket();
 
   return (
     <div className="app-layout">
-      <Sidebar />
+      <GlobalLoader />
+      <Sidebar isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} />
       <NotificationContainer />
-      <main className="main-content">
+      <main className={`main-content ${isCollapsed ? 'collapsed' : ''}`}>
         <ErrorBoundary>
           <Suspense fallback={<PageLoader />}>
             <Routes>
