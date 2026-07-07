@@ -77,3 +77,5 @@ pytest-asyncio
 # scikit-learn
 # hmmlearn
 # ollama
+# SQLite Async Driver
+aiosqlite

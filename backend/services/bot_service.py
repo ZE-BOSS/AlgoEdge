@@ -186,7 +186,7 @@ class BotService:
                 from backend.data.database import async_session_maker
                 from backend.data.models import UserConfigModel
                 from sqlalchemy import select
-                from backend.strategies.strategy_one.params import UserConfigV2, UserConfig
+                from backend.core.config_schema import UserConfigV2, UserConfig
                 import json
                 
                 async with async_session_maker() as session:

@@ -17,17 +17,24 @@ export default function StrategySettings() {
       { symbol: 'EURUSD', strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false },
       { symbol: 'GBPUSD', strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false }
     ],
-    htf_timeframe: 'H4',
-    ltf_timeframe: 'M15',
-    confluence_threshold: 60,
-    swing_length_htf: 5,
-    swing_length_ltf: 3,
-    ob_impulse_ratio: 2.0,
-    fvg_min_gap_pips: 5.0,
-    liq_sweep_min_pips: 5.0,
-    max_spread_pips: 3.0,
-    session_filter_enabled: true,
-    news_filter_enabled: true,
+    smc: {
+      confluence_threshold: 60,
+      swing_length_htf: 5,
+      swing_length_ltf: 3,
+      ob_impulse_ratio: 2.0,
+      fvg_min_gap_pips: 5.0,
+      liq_sweep_min_pips: 5.0,
+      max_spread_pips: 3.0,
+      session_filter_enabled: true,
+      news_filter_enabled: true,
+    },
+    crashboom: {
+      spike_lookback_bars: 50,
+      drift_ema_fast: 5,
+      drift_ema_slow: 15,
+      spike_threshold_pips: 20.0,
+      recovery_target_pips: 10.0,
+    },
     manual_bias_overrides: {},
   });
 
@@ -58,8 +65,15 @@ export default function StrategySettings() {
     },
   });
 
-  const update = (key, val) => setConfig({ ...config, [key]: val });
-
+  const updateNested = (section, key, val) => {
+    setConfig({
+      ...config,
+      [section]: {
+        ...(config[section] || {}),
+        [key]: val
+      }
+    });
+  };
   const handleSave = () => mutation.mutate(config);
 
   const allSymbols = [
@@ -177,41 +191,29 @@ export default function StrategySettings() {
       </div>
 
       <div className="card">
-        <div className="card-header"><span className="card-title">Timeframes</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div>
-            <label>HTF (Bias)</label>
-            <select value={config.htf_timeframe} onChange={e => update('htf_timeframe', e.target.value)}>
-              <option value="H1">H1</option>
-              <option value="H4">H4</option>
-              <option value="D1">D1</option>
-            </select>
-          </div>
-          <div>
-            <label>LTF (Entry)</label>
-            <select value={config.ltf_timeframe} onChange={e => update('ltf_timeframe', e.target.value)}>
-              <option value="M5">M5</option>
-              <option value="M15">M15</option>
-              <option value="M30">M30</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
         <div className="card-header"><span className="card-title">SMC Parameters</span></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <div>
             <label>Confluence Threshold</label>
-            <input type="number" value={config.confluence_threshold} onChange={e => update('confluence_threshold', +e.target.value)} />
+            <input type="number" value={config.smc?.min_signal_score || config.smc?.confluence_threshold || 60} onChange={e => updateNested('smc', 'min_signal_score', +e.target.value)} />
             <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Min score to execute (0-100)</div>
           </div>
-          <div><label>Swing Length HTF</label><input type="number" value={config.swing_length_htf} onChange={e => update('swing_length_htf', +e.target.value)} /></div>
-          <div><label>Swing Length LTF</label><input type="number" value={config.swing_length_ltf} onChange={e => update('swing_length_ltf', +e.target.value)} /></div>
-          <div><label>OB Impulse Ratio</label><input type="number" step="0.1" value={config.ob_impulse_ratio} onChange={e => update('ob_impulse_ratio', +e.target.value)} /></div>
-          <div><label>FVG Min Gap (pips)</label><input type="number" value={config.fvg_min_gap_pips} onChange={e => update('fvg_min_gap_pips', +e.target.value)} /></div>
-          <div><label>Liq Sweep Min (pips)</label><input type="number" value={config.liq_sweep_min_pips} onChange={e => update('liq_sweep_min_pips', +e.target.value)} /></div>
-          <div><label>Max Spread (pips)</label><input type="number" value={config.max_spread_pips} onChange={e => update('max_spread_pips', +e.target.value)} /></div>
+          <div><label>Swing Length HTF</label><input type="number" value={config.smc?.swing_length_htf || 5} onChange={e => updateNested('smc', 'swing_length_htf', +e.target.value)} /></div>
+          <div><label>Swing Length LTF</label><input type="number" value={config.smc?.swing_length_ltf || 3} onChange={e => updateNested('smc', 'swing_length_ltf', +e.target.value)} /></div>
+          <div><label>OB Impulse Ratio</label><input type="number" step="0.1" value={config.smc?.ob_impulse_ratio || 2.0} onChange={e => updateNested('smc', 'ob_impulse_ratio', +e.target.value)} /></div>
+          <div><label>FVG Min Gap (pips)</label><input type="number" value={config.smc?.fvg_min_gap_pips || 5.0} onChange={e => updateNested('smc', 'fvg_min_gap_pips', +e.target.value)} /></div>
+          <div><label>Liq Sweep Min (pips)</label><input type="number" value={config.smc?.liq_sweep_min_pips || 5.0} onChange={e => updateNested('smc', 'liq_sweep_min_pips', +e.target.value)} /></div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">CrashBoom Drift Parameters</span></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div><label>Spike Lookback (Bars)</label><input type="number" value={config.crashboom?.spike_lookback_bars || 50} onChange={e => updateNested('crashboom', 'spike_lookback_bars', +e.target.value)} /></div>
+          <div><label>Drift EMA Fast</label><input type="number" value={config.crashboom?.drift_ema_fast || 5} onChange={e => updateNested('crashboom', 'drift_ema_fast', +e.target.value)} /></div>
+          <div><label>Drift EMA Slow</label><input type="number" value={config.crashboom?.drift_ema_slow || 15} onChange={e => updateNested('crashboom', 'drift_ema_slow', +e.target.value)} /></div>
+          <div><label>Spike Threshold (pips)</label><input type="number" value={config.crashboom?.spike_threshold_pips || 20.0} onChange={e => updateNested('crashboom', 'spike_threshold_pips', +e.target.value)} /></div>
+          <div><label>Recovery Target (pips)</label><input type="number" value={config.crashboom?.recovery_target_pips || 10.0} onChange={e => updateNested('crashboom', 'recovery_target_pips', +e.target.value)} /></div>
         </div>
       </div>
 
@@ -219,11 +221,11 @@ export default function StrategySettings() {
         <div className="card-header"><span className="card-title">Filters</span></div>
         <div style={{ display: 'flex', gap: 24 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.session_filter_enabled} onChange={e => update('session_filter_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
+            <input type="checkbox" checked={config.smc?.session_filter_enabled ?? true} onChange={e => updateNested('smc', 'session_filter_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
             Session Filter (London/NY Kill Zones only)
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.news_filter_enabled} onChange={e => update('news_filter_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
+            <input type="checkbox" checked={config.smc?.news_filter_enabled ?? true} onChange={e => updateNested('smc', 'news_filter_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
             News Filter (block ±30min HIGH impact)
           </label>
         </div>

@@ -624,6 +624,9 @@ export default function Backtester() {
       compounding_enabled: false,
       target_profit_enabled: false, max_daily_profit: 500.0, max_weekly_profit: 2000.0,
       manual_bias: 'NONE',
+      strategy_id: 'SMC_v1',
+      spike_lookback_bars: 50, drift_ema_fast: 5, drift_ema_slow: 15,
+      spike_threshold_pips: 20.0, recovery_target_pips: 10.0,
     };
   });
 
@@ -740,11 +743,32 @@ export default function Backtester() {
     mutationFn: () => {
       setResult(null);
       setEvents([]);
-      setProgress({ stage: 'starting', message: 'Initializing backtest request...', pct: 0 });
-      const payload = { ...form, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: {} };
+      const payload = { ...form, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: {}, strategy_params: {} };
       if (form.manual_bias && form.manual_bias !== 'NONE') {
         payload.manual_bias_overrides = { [form.symbol]: form.manual_bias };
       }
+      
+      if (form.strategy_id === 'SMC_v1') {
+        payload.strategy_params = {
+          min_signal_score: form.confluence_threshold,
+          swing_length_htf: form.swing_length,
+          ob_impulse_ratio: form.ob_impulse_ratio,
+          fvg_min_gap_pips: form.fvg_min_gap_pips,
+          liq_sweep_min_pips: form.liq_sweep_min_pips,
+          max_spread_pips: form.max_spread_pips,
+          session_filter_enabled: form.session_filter_enabled,
+          news_filter_enabled: form.news_filter_enabled
+        };
+      } else if (form.strategy_id === 'CrashBoom_v1') {
+        payload.strategy_params = {
+          spike_lookback_bars: form.spike_lookback_bars,
+          drift_ema_fast: form.drift_ema_fast,
+          drift_ema_slow: form.drift_ema_slow,
+          spike_threshold_pips: form.spike_threshold_pips,
+          recovery_target_pips: form.recovery_target_pips
+        };
+      }
+      
       return runBacktest(payload);
     },
     onSuccess: res => {
@@ -810,7 +834,10 @@ export default function Backtester() {
       <div className="card">
         <div className="card-header"><span className="card-title">Configuration</span></div>
         <div style={{ display: 'grid', gap: 14 }}>
-          <div><label>Symbol</label><select value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value })}>{SYMBOLS.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div><label>Strategy Engine</label><select value={form.strategy_id} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="CrashBoom_v1">CrashBoom Drift</option></select></div>
+            <div><label>Symbol</label><select value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value })}>{SYMBOLS.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+          </div>
           <div><label>Timeframe</label><select value={form.timeframe} onChange={e => setForm({ ...form, timeframe: e.target.value })}>{['M5', 'M15', 'H1', 'H4', 'D1'].map(tf => <option key={tf} value={tf}>{tf}</option>)}</select></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div><label>Start Date</label><input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} /></div>
@@ -834,16 +861,27 @@ export default function Backtester() {
 
           <button className="btn btn-secondary btn-sm" onClick={() => setShowAdvanced(!showAdvanced)} style={{ width: '100%' }}><Settings2 size={14} /> {showAdvanced ? 'Hide' : 'Show'} Advanced Parameters</button>
           {showAdvanced && (<div style={{ display: 'grid', gap: 14, padding: 14, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>━ SMC Strategy</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-              <div><label style={{ fontSize: '0.7rem' }}>Confluence Threshold</label><input type="number" value={form.confluence_threshold} onChange={e => u('confluence_threshold', +e.target.value)} /></div>
-              <div><label style={{ fontSize: '0.7rem' }}>Swing Length</label><input type="number" value={form.swing_length} onChange={e => u('swing_length', +e.target.value)} /></div>
-              <div><label style={{ fontSize: '0.7rem' }}>OB Impulse Ratio</label><input type="number" step="0.1" value={form.ob_impulse_ratio} onChange={e => u('ob_impulse_ratio', +e.target.value)} /></div>
-              <div><label style={{ fontSize: '0.7rem' }}>FVG Min Gap (pips)</label><input type="number" value={form.fvg_min_gap_pips} onChange={e => u('fvg_min_gap_pips', +e.target.value)} /></div>
-              <div><label style={{ fontSize: '0.7rem' }}>Liq Sweep Min (pips)</label><input type="number" value={form.liq_sweep_min_pips} onChange={e => u('liq_sweep_min_pips', +e.target.value)} /></div>
-              <div><label style={{ fontSize: '0.7rem' }}>Max Spread (pips)</label><input type="number" value={form.max_spread_pips} onChange={e => u('max_spread_pips', +e.target.value)} /></div>
-              <div><label style={{ fontSize: '0.7rem' }}>Manual HTF Bias</label><select value={form.manual_bias || 'NONE'} onChange={e => u('manual_bias', e.target.value)}><option value="NONE">Auto</option><option value="BULLISH">Bullish Only</option><option value="BEARISH">Bearish Only</option></select></div>
-            </div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>━ Strategy Engines</div>
+            {form.strategy_id === 'SMC_v1' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <div><label style={{ fontSize: '0.7rem' }}>Confluence Threshold</label><input type="number" value={form.confluence_threshold} onChange={e => u('confluence_threshold', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Swing Length</label><input type="number" value={form.swing_length} onChange={e => u('swing_length', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>OB Impulse Ratio</label><input type="number" step="0.1" value={form.ob_impulse_ratio} onChange={e => u('ob_impulse_ratio', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>FVG Min Gap (pips)</label><input type="number" value={form.fvg_min_gap_pips} onChange={e => u('fvg_min_gap_pips', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Liq Sweep Min (pips)</label><input type="number" value={form.liq_sweep_min_pips} onChange={e => u('liq_sweep_min_pips', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Max Spread (pips)</label><input type="number" value={form.max_spread_pips} onChange={e => u('max_spread_pips', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Manual HTF Bias</label><select value={form.manual_bias || 'NONE'} onChange={e => u('manual_bias', e.target.value)}><option value="NONE">Auto</option><option value="BULLISH">Bullish Only</option><option value="BEARISH">Bearish Only</option></select></div>
+              </div>
+            )}
+            {form.strategy_id === 'CrashBoom_v1' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <div><label style={{ fontSize: '0.7rem' }}>Spike Lookback (Bars)</label><input type="number" value={form.spike_lookback_bars} onChange={e => u('spike_lookback_bars', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Drift EMA Fast</label><input type="number" value={form.drift_ema_fast} onChange={e => u('drift_ema_fast', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Drift EMA Slow</label><input type="number" value={form.drift_ema_slow} onChange={e => u('drift_ema_slow', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Spike Threshold (pips)</label><input type="number" value={form.spike_threshold_pips} onChange={e => u('spike_threshold_pips', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Recovery Target (pips)</label><input type="number" value={form.recovery_target_pips} onChange={e => u('recovery_target_pips', +e.target.value)} /></div>
+              </div>
+            )}
             
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>━ Hard Filters (Optimization)</div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>

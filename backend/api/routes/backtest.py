@@ -44,21 +44,8 @@ class BacktestRequest(BaseModel):
     candle_count: int = 5000
     initial_balance: float = 10000.0
     risk_config: Dict[str, Any] = {}
-    # ── Strategy Params ──
-    confluence_threshold: int = 55
-    swing_length: int = 5
-    ob_impulse_ratio: float = 1.5
-    fvg_min_gap_pips: float = 3.0
-    liq_sweep_min_pips: float = 2.0
-    max_spread_pips: float = 3.0
-    session_filter_enabled: bool = True
-    news_filter_enabled: bool = True
-    enforce_htf_pd: bool = True
-    enforce_fvg_displacement: bool = True
-    enforce_asian_range_sweep: bool = True
-    asian_range_start_hour: int = 18
-    asian_range_end_hour: int = 0
-    manual_bias_overrides: Dict[str, str] = {}
+    # ── Dynamic Strategy Params ──
+    strategy_params: Dict[str, Any] = {}
     # ── Risk Params ──
     risk_per_trade_pct: float = 1.0
     min_rr: float = 3.0
@@ -275,20 +262,34 @@ async def run_backtest_endpoint(
 
             # Generate signals using the unified SMCEngine
             import pandas as pd
-            from backend.strategies.strategy_one.engine import SMCEngine
-            from backend.strategies.strategy_one.params import UserConfig
+            from backend.strategies.registry import get_strategy
+            from backend.core.config_schema import UserConfigV2, InstrumentSettings
             
-            config = UserConfig()
-            config.smc.min_signal_score = req.confluence_threshold
-            config.smc.swing_length_htf = req.swing_length
-            config.smc.ob_impulse_min_ratio = req.ob_impulse_ratio
-            config.smc.fvg_min_gap_pips = req.fvg_min_gap_pips
-            config.smc.liq_sweep_min_pips = req.liq_sweep_min_pips
-            config.smc.session_filter_enabled = req.session_filter_enabled
-            config.smc.news_filter_enabled = req.news_filter_enabled
+            config = UserConfigV2()
+            
+            # Map risk fields
             config.risk.min_rr = req.min_rr
-            config.risk.max_spread_pips = req.max_spread_pips
-            engine = SMCEngine(config)
+            config.risk.risk_per_trade_pct = req.risk_per_trade_pct
+            config.risk.max_daily_consecutive_losses = req.max_daily_consecutive_losses
+            config.risk.max_weekly_consecutive_losses = req.max_weekly_consecutive_losses
+            config.risk.max_consecutive_losses = req.max_consecutive_losses
+            config.risk.max_concurrent_positions = req.max_concurrent_positions
+            config.risk.max_daily_trades = req.max_daily_trades
+            
+            # Inject dynamic strategy parameters
+            if req.strategy_id == "SMC_v1":
+                for k, v in req.strategy_params.items():
+                    if hasattr(config.smc, k):
+                        setattr(config.smc, k, v)
+            elif req.strategy_id == "CrashBoom_v1":
+                for k, v in req.strategy_params.items():
+                    if hasattr(config.crashboom, k):
+                        setattr(config.crashboom, k, v)
+                        
+            config.instrument_settings = [InstrumentSettings(symbol=req.symbol, strategy_id=req.strategy_id)]
+            
+            engine_class = get_strategy(req.strategy_id)
+            engine = engine_class(config)
             engine.is_backtesting = True
 
             def _index_candles(df):

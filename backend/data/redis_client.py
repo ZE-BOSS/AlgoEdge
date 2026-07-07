@@ -23,31 +23,32 @@ class RedisClient:
     async def connect(self):
         logger.info(f"Connecting to Redis at {settings.redis.url}")
         import asyncio
-        max_retries = 5
-        retry_delay = 2
+        max_retries = 1
+        retry_delay = 1
         
         for attempt in range(max_retries):
             try:
                 self.redis = redis.from_url(
                     settings.redis.url, 
                     decode_responses=True,
-                    socket_connect_timeout=10,
-                    socket_timeout=10,
+                    socket_connect_timeout=1,
+                    socket_timeout=1,
                     health_check_interval=10,
                     retry_on_timeout=True,
-                    socket_keepalive=True
+                    socket_keepalive=True,
+                    protocol=2
                 )
                 await self.redis.ping()
                 self.pubsub = self.redis.pubsub()
                 logger.info("Redis connected successfully")
                 return
             except Exception as e:
-                logger.warning(f"Redis connection attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
                     await asyncio.sleep(retry_delay)
                 else:
                     self.redis = None
                     self.pubsub = None
+                    logger.info("Redis not detected locally. Real-time WebSockets and caching are running in fallback mode.")
                     raise e
 
     async def disconnect(self):

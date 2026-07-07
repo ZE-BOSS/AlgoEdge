@@ -110,7 +110,8 @@ async def websocket_handler(websocket: WebSocket, user_id: str, token: str = Non
 
     await manager.connect(websocket, user_id)
 
-    if not HAS_REDIS:
+    from backend.data.redis_client import redis_client
+    if not HAS_REDIS or not redis_client.redis:
         # Fallback: just keep connection alive without Redis
         # Direct broadcasts (activity_log, backtest_progress) still work
         # because they use manager.broadcast_to_user() directly
@@ -123,7 +124,7 @@ async def websocket_handler(websocket: WebSocket, user_id: str, token: str = Non
         return
 
     try:
-        redis = Redis.from_url(redis_url)
+        redis = Redis.from_url(redis_url, protocol=2)
         pubsub = redis.pubsub()
 
         # Subscribe to user-specific and global channels

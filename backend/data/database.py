@@ -47,21 +47,27 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         
         # Simple schema migrations for newly added columns
-        try:
-            from sqlalchemy import text
-            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;"))
-            await conn.execute(text("ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS sl_hit_rate FLOAT;"))
-            await conn.execute(text("ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS trail_hit_rate FLOAT;"))
-            await conn.execute(text("ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS run_logs TEXT;"))
-            
-            # Migrations for BacktestTrade chart storage
-            await conn.execute(text("ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS chart_data TEXT;"))
-            await conn.execute(text("ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS chart_data_h1 TEXT;"))
-            await conn.execute(text("ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS chart_data_m15 TEXT;"))
-            await conn.execute(text("ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS smc_data TEXT;"))
-            await conn.execute(text("ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS sub_trades TEXT;"))
-        except Exception as e:
-            logger.warning(f"Simple migration failed (likely already applied): {e}")
+        # Simple schema migrations for newly added columns
+        from sqlalchemy import text
+        migrations = [
+            "ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE;",
+            "ALTER TABLE backtest_runs ADD COLUMN sl_hit_rate FLOAT;",
+            "ALTER TABLE backtest_runs ADD COLUMN trail_hit_rate FLOAT;",
+            "ALTER TABLE backtest_runs ADD COLUMN run_logs TEXT;",
+            "ALTER TABLE backtest_trades ADD COLUMN chart_data TEXT;",
+            "ALTER TABLE backtest_trades ADD COLUMN chart_data_h1 TEXT;",
+            "ALTER TABLE backtest_trades ADD COLUMN chart_data_m15 TEXT;",
+            "ALTER TABLE backtest_trades ADD COLUMN smc_data TEXT;",
+            "ALTER TABLE backtest_trades ADD COLUMN sub_trades TEXT;"
+        ]
+        
+        for query in migrations:
+            try:
+                await conn.execute(text(query))
+            except Exception as e:
+                # Ignore duplicate column errors
+                if "duplicate column name" not in str(e).lower() and "operationalerror" not in str(e).lower():
+                    logger.warning(f"Migration failed: {e}")
             
     logger.info("Database tables initialized")
 

@@ -14,6 +14,7 @@ Sources:
 
 from dataclasses import dataclass, field
 from typing import List, Literal, Tuple, Optional, Dict, Any
+from backend.risk.compounding import CompoundingParams
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -393,67 +394,9 @@ class SMCParams:
     """DPI for saved PNG snapshot files."""
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# COMBINED USER CONFIGURATION
-# ─────────────────────────────────────────────────────────────────────────────
-
-@dataclass
-class UserConfig:
-    """
-    Full user configuration: SMC strategy params + risk management params.
-    Serialized to/from JSON in the database.
-    One per user. Editable from the frontend Settings panel.
-    """
-    user_id:    str = ""
-    smc:        SMCParams  = field(default_factory=SMCParams)
-    risk:       RiskParams = field(default_factory=RiskParams)
-
-    # ── MT5 Connection ────────────────────────────────────────────────
-    mt5_account: int  = 0
-    mt5_server:  str  = ""
-    magic_base:  int  = 1001
-    """
-    Magic number base. Sub-positions use:
-      TP1 = magic_base + 10
-      TP2 = magic_base + 20
-      TP3 = magic_base + 30
-    """
-
-    # ── LLM Configuration ─────────────────────────────────────────────
-    llm_provider: Literal["claude", "openai", "gemini", "none"] = "none"
-    llm_model:    str  = ""
-    llm_auto_analyze_live:     bool = False
-    llm_auto_analyze_backtest: bool = False
-
-    # ── Notification Preferences ──────────────────────────────────────
-    notify_trade_open:     bool = True
-    notify_trade_close:    bool = True
-    notify_sl_hit:         bool = True
-    notify_be_applied:     bool = True
-    notify_daily_limit:    bool = True
-    notify_signal:         bool = False
-    notify_daily_summary:  bool = True
-    notify_llm_ready:      bool = True
-
-    # ── Backtest Preferences ──────────────────────────────────────────
-    backtest_auto_save:    bool = False
-    """
-    If False (default), user is prompted whether to save after each backtest.
-    If True, saves automatically (user can still delete from history).
-    """
-
-    def to_dict(self) -> dict:
-        import dataclasses
-        return dataclasses.asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "UserConfig":
-        smc_data  = data.pop("smc",  {})
-        risk_data = data.pop("risk", {})
-        config = cls(**data)
-        config.smc  = SMCParams(**smc_data)
-        config.risk = RiskParams(**risk_data)
-        return config
+# Default instances
+DEFAULT_SMC_PARAMS  = SMCParams()
+DEFAULT_RISK_PARAMS = RiskParams()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -535,97 +478,6 @@ RISK_PRESETS = {
         max_concurrent_positions=3,
     ),
 }
-
-# Default instances
-DEFAULT_SMC_PARAMS  = SMCParams()
-DEFAULT_RISK_PARAMS = RiskParams()
-DEFAULT_USER_CONFIG = UserConfig()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# COMPOUNDING PARAMETERS
-# ─────────────────────────────────────────────────────────────────────────────
-
-from typing import Literal as _Literal
-from backend.risk.compounding import CompoundingParams  # noqa: F401 — re-exported for UserConfig
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# INSTRUMENT PROFILE SETTINGS (per-user overrides)
-# ─────────────────────────────────────────────────────────────────────────────
-
-@dataclass
-class InstrumentSettings:
-    """
-    Per-user instrument-level settings that override the global instrument profile.
-    Stored in UserConfig. Allows users to customize behaviour per symbol.
-    """
-    symbol:          str
-    strategy_id:     str   = "SMC_v1"       # The registry ID of the strategy to run
-    enabled:         bool  = True           # Trade this symbol at all
-    max_lot_override: Optional[float] = None # Cap lot size (safety)
-    custom_sl_buffer: Optional[float] = None # Override profile's sl_buffer_pips
-    compounding_enabled: bool = True        # Allow compounding on this symbol
-    notes:           str  = ""              # User label (e.g. "V75 main account")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# UPDATED FULL USER CONFIGURATION
-# ─────────────────────────────────────────────────────────────────────────────
-
-@dataclass 
-class UserConfigV2(UserConfig):
-    """
-    Extended UserConfig with compounding and instrument settings.
-    Replaces UserConfig for all new installations.
-    """
-    compounding: CompoundingParams = None
-    instrument_settings: List[InstrumentSettings] = None
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "UserConfigV2":
-        smc_data  = data.pop("smc",  {})
-        risk_data = data.pop("risk", {})
-        compounding_data = data.pop("compounding", None)
-        instrument_data = data.pop("instrument_settings", None)
-        
-        config = cls(**data)
-        config.smc  = SMCParams(**smc_data)
-        config.risk = RiskParams(**risk_data)
-        
-        if compounding_data:
-            config.compounding = CompoundingParams(**compounding_data)
-        else:
-            config.compounding = CompoundingParams()
-            
-        if instrument_data:
-            config.instrument_settings = [InstrumentSettings(**i) for i in instrument_data]
-        else:
-            config.instrument_settings = []
-            
-        return config
-
-    def __post_init__(self):
-        if self.compounding is None:
-            self.compounding = CompoundingParams()
-        if self.instrument_settings is None:
-            self.instrument_settings = []
-
-    def get_risk_amount(self, account_balance: float, state=None) -> float:
-        """
-        Returns dollar risk for next trade.
-        If compounding enabled: uses stepped plan.
-        Otherwise: returns risk_pct% of balance.
-        """
-        if self.compounding.enabled:
-            engine = self.compounding.build_engine()
-            return engine.get_risk_amount(account_balance, state)
-        else:
-            return account_balance * (self.risk.risk_per_trade_pct / 100)
-
-    def is_compounding_active(self) -> bool:
-        return self.compounding.enabled
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SYNTHETIC-SPECIFIC PARAMETER PRESETS

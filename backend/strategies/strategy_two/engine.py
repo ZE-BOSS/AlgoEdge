@@ -24,6 +24,7 @@ class CrashBoomEngine(BaseStrategy):
 
     def __init__(self, config: Any):
         super().__init__(config)
+        self.params = getattr(config, 'crashboom', None)
         self.context: Dict[str, Any] = {}
 
     async def initialize(self):

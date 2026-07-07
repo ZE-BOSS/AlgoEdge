@@ -23,11 +23,11 @@ def register_strategy(name: str):
     return decorator
 
 
-def get_strategy(name: str, user_config) -> BaseStrategy:
-    """Instantiate a strategy by name."""
+def get_strategy(name: str) -> Type[BaseStrategy]:
+    """Get a strategy class by name."""
     if name not in _STRATEGIES:
         raise ValueError(f"Strategy {name} not found in registry.")
-    return _STRATEGIES[name](user_config)
+    return _STRATEGIES[name]
 
 
 def list_strategies() -> list[str]:
