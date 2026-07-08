@@ -171,12 +171,32 @@ class DataFetcher:
         start_ts = int(start.timestamp()) if hasattr(start, 'timestamp') else start
         end_ts = int(end.timestamp()) if hasattr(end, 'timestamp') else end
 
+        # Calculate estimated candle count
+        tf_seconds = {
+            "M1": 60, "M5": 300, "M15": 900, "M30": 1800,
+            "H1": 3600, "H4": 14400, "D1": 86400, "W1": 604800, "MN1": 2592000
+        }
+        sec_per_candle = tf_seconds.get(timeframe.upper(), 3600)
+        
+        # Calculate count and add a safety buffer (if market has gaps, we need a larger count to reach start_ts)
+        # We cap at 200,000 candles to prevent extreme memory use.
+        duration_sec = end_ts - start_ts
+        if duration_sec <= 0:
+            raise DataFetchError(symbol, timeframe, "End date must be after start date")
+            
+        count = int(duration_sec / sec_per_candle)
+        # For forex (5 days a week), duration has weekends. So count is actually overestimated.
+        # We add 200 bars buffer.
+        count += 200
+        if count > 200000:
+            count = 200000
+
         loop = asyncio.get_running_loop()
         rates = None
-        for attempt in range(4):
+        for attempt in range(2):
             rates = await loop.run_in_executor(
                 _executor, 
-                lambda: mt5.copy_rates_range(symbol, tf_code, start_ts, end_ts)
+                lambda: mt5.copy_rates_from(symbol, tf_code, end_ts, count)
             )
             if rates is not None and len(rates) > 0:
                 break
@@ -202,5 +222,14 @@ class DataFetcher:
             
         df = pd.DataFrame(rates)
         df = _normalize_df(df)
+        
+        # Trim to the exact requested range
+        df = df[(df['time'] >= start_ts) & (df['time'] <= end_ts)]
+        
+        if df.empty:
+            error_msg = f"Data available but none falls within requested range {start} → {end} for {symbol} {timeframe}."
+            logger.error(error_msg)
+            raise DataFetchError(symbol, timeframe, error_msg)
+            
         logger.info(f"Fetched {len(df)} candles for {symbol} {timeframe} ({start.date()} → {end.date()})")
         return df
