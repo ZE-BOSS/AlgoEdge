@@ -164,7 +164,10 @@ async def run_backtest(
         tp1_hit_rate=report.tp1_hit_rate,
         tp2_hit_rate=report.tp2_hit_rate,
         tp3_hit_rate=report.tp3_hit_rate,
+        tp4_hit_rate=report.tp4_hit_rate,
+        tp5_hit_rate=report.tp5_hit_rate,
         be_hit_rate=report.be_hit_rate,
+        sl_hit_rate=report.sl_hit_rate,
         trail_hit_rate=report.trail_hit_rate,
     )
 

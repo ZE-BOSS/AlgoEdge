@@ -17,7 +17,7 @@ from typing import Dict, Any, List, Optional
 
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal, TradeAction
 from backend.strategies.registry import register_strategy
-from backend.strategies.strategy_one.params import UserConfig
+from backend.core.config_schema import UserConfig
 from backend.risk.position_sizer import get_pip_size
 
 from backend.strategies.core.market_structure import MarketStructureDetector
@@ -114,6 +114,7 @@ class SMCEngine(BaseStrategy):
         self.last_logged_htf_bias = None
         self.last_logged_h1_trend = None
         self.last_logged_phase = None
+        self.bias = "NEUTRAL"
 
     def log_event(self, message: str, level: str = "INFO", category: str = "SMC"):
         """Intercept logs. If backtesting, store them. Otherwise broadcast to bot_service."""
@@ -387,16 +388,16 @@ class SMCEngine(BaseStrategy):
             buffer = 5.0 * pip_size
 
             if htf_bias == "BULLISH":
-                # SL Priority 1: OB bottom
-                obs_ctx = self.context.get("obs", [])
-                bullish_obs = [ob for ob in obs_ctx if ob.get("type") == "BULLISH"]
-                if bullish_obs:
-                    sl = float(bullish_obs[-1].get("bottom", entry_price * 0.99)) - buffer
+                # SL Priority 1: Last M15 swing low below entry (structural)
+                lows = [s for s in m15_swings if s["type"] == "LOW" and float(s["price"]) < entry_price]
+                if lows:
+                    sl = float(lows[-1]["price"]) - buffer
                 else:
-                    # SL Priority 2: Last M15 swing low below entry (structural)
-                    lows = [s for s in m15_swings if s["type"] == "LOW" and float(s["price"]) < entry_price]
-                    if lows:
-                        sl = float(lows[-1]["price"]) - buffer
+                    # SL Priority 2: OB bottom
+                    obs_ctx = self.context.get("obs", [])
+                    bullish_obs = [ob for ob in obs_ctx if ob.get("type") == "BULLISH"]
+                    if bullish_obs:
+                        sl = float(bullish_obs[-1].get("bottom", entry_price * 0.99)) - buffer
                     else:
                         # SL Priority 3: Fallback — confirmation candle low
                         sl = float(candles.iloc[-1]["low"]) - buffer
@@ -406,16 +407,16 @@ class SMCEngine(BaseStrategy):
                 if h1_highs:
                     tp = float(min(h1_highs, key=lambda s: float(s["price"]))["price"])
             else:
-                # SL Priority 1: OB top
-                obs_ctx = self.context.get("obs", [])
-                bearish_obs = [ob for ob in obs_ctx if ob.get("type") == "BEARISH"]
-                if bearish_obs:
-                    sl = float(bearish_obs[-1].get("top", entry_price * 1.01)) + buffer
+                # SL Priority 1: Last M15 swing high above entry (structural)
+                highs = [s for s in m15_swings if s["type"] == "HIGH" and float(s["price"]) > entry_price]
+                if highs:
+                    sl = float(highs[-1]["price"]) + buffer
                 else:
-                    # SL Priority 2: Last M15 swing high above entry (structural)
-                    highs = [s for s in m15_swings if s["type"] == "HIGH" and float(s["price"]) > entry_price]
-                    if highs:
-                        sl = float(highs[-1]["price"]) + buffer
+                    # SL Priority 2: OB top
+                    obs_ctx = self.context.get("obs", [])
+                    bearish_obs = [ob for ob in obs_ctx if ob.get("type") == "BEARISH"]
+                    if bearish_obs:
+                        sl = float(bearish_obs[-1].get("top", entry_price * 1.01)) + buffer
                     else:
                         # SL Priority 3: Fallback — confirmation candle high
                         sl = float(candles.iloc[-1]["high"]) + buffer
@@ -476,8 +477,13 @@ class SMCEngine(BaseStrategy):
             for i, s in enumerate(m15_swings):
                 if i > 0:
                     prev_s = m15_swings[i-1]
-                    if s["type"] == "HIGH" and prev_s["type"] == "LOW" and float(s["price"]) > float(m15_swings[i-2]["price"]) if i>=2 else False:
-                        text = "BOS"
+                    if i >= 2:
+                        if s["type"] == "HIGH" and prev_s["type"] == "LOW" and float(s["price"]) > float(m15_swings[i-2]["price"]):
+                            text = "BOS"
+                        elif s["type"] == "LOW" and prev_s["type"] == "HIGH" and float(s["price"]) < float(m15_swings[i-2]["price"]):
+                            text = "BOS"
+                        else:
+                            text = "Swing"
                     else:
                         text = "Swing"
                     markings.append({
@@ -505,8 +511,13 @@ class SMCEngine(BaseStrategy):
             for i, s in enumerate(h1_swings):
                 if i > 0:
                     prev_s = h1_swings[i-1]
-                    if s["type"] == "HIGH" and prev_s["type"] == "LOW" and float(s["price"]) > float(h1_swings[i-2]["price"]) if i>=2 else False:
-                        text = "H1 BOS/CHOCH"
+                    if i >= 2:
+                        if s["type"] == "HIGH" and prev_s["type"] == "LOW" and float(s["price"]) > float(h1_swings[i-2]["price"]):
+                            text = "H1 BOS/CHOCH"
+                        elif s["type"] == "LOW" and prev_s["type"] == "HIGH" and float(s["price"]) < float(h1_swings[i-2]["price"]):
+                            text = "H1 BOS/CHOCH"
+                        else:
+                            text = "H1 Swing"
                     else:
                         text = "H1 Swing"
                     markings.append({
@@ -524,6 +535,11 @@ class SMCEngine(BaseStrategy):
             # H1 Confluence: Confirmed by Layer 2 (h1_trend == htf_bias + trend_confirmed)
             # M5 Confluence: Confirmed by Layer 4 (detect_confirmation_pattern)
             # M15 Confluence: Must have at least one POI (OB, FVG, S&D, or Fib)
+            m15_obs = self.context.get("obs", [])
+            m15_fvgs = self.context.get("fvgs", [])
+            fresh_ob = any(ob.get("type") == htf_bias for ob in m15_obs)
+            fvg_present = any(fvg.get("type") == htf_bias for fvg in m15_fvgs)
+
             m15_confluences = 0
             if fresh_ob: m15_confluences += 1
             if fvg_present: m15_confluences += 1
@@ -582,7 +598,7 @@ class SMCEngine(BaseStrategy):
                 if fresh_ob:
                     ob_high = fresh_ob.get("top", 0)
                     ob_low = fresh_ob.get("bottom", 0)
-                    fvg_mid = (fvg.get("high", 0) + fvg.get("low", 0)) / 2
+                    fvg_mid = (fvg.get("top", 0) + fvg.get("bottom", 0)) / 2
                     if ob_low <= fvg_mid <= ob_high:
                         fvg_inside_ob = True
 

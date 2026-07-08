@@ -316,6 +316,8 @@ class BotService:
                                         "tp1_rr": config.risk.tp1_rr,
                                         "tp2_rr": config.risk.tp2_rr,
                                         "tp3_rr": config.risk.tp3_rr,
+                                        "tp4_rr": config.risk.tp4_rr if hasattr(config.risk, 'tp4_rr') else 0,
+                                        "tp5_rr": config.risk.tp5_rr if hasattr(config.risk, 'tp5_rr') else 0,
                                         "tp_count": config.risk.tp_count if hasattr(config.risk, 'tp_count') else 3,
                                         "tp_splits": config.risk.tp_splits if hasattr(config.risk, 'tp_splits') else [40, 35, 25],
                                         "multi_position_mode": True,
@@ -332,8 +334,11 @@ class BotService:
                                         "be_buffer_pips": config.risk.be_buffer_pips,
                                         "trail_method_tp2": config.risk.trail_method_tp2 if hasattr(config.risk, 'trail_method_tp2') else "ATR_TRAIL",
                                         "trail_method_tp3": config.risk.trail_method_tp3 if hasattr(config.risk, 'trail_method_tp3') else "STRUCTURE_TRAIL",
+                                        "trail_method_tp4": config.risk.trail_method_tp4 if hasattr(config.risk, 'trail_method_tp4') else "ATR_TRAIL",
+                                        "trail_method_tp5": config.risk.trail_method_tp5 if hasattr(config.risk, 'trail_method_tp5') else "ATR_TRAIL",
                                     }
                                     risk_engine = RiskEngine(risk_config)
+                                    risk_engine.circuit = self.circuit_breaker
 
                                     import uuid
                                     group_id = str(uuid.uuid4())[:8]
@@ -355,9 +360,6 @@ class BotService:
                                     )
 
                                     if approved:
-                                        if hasattr(self.circuit_breaker, 'position_opened'):
-                                            self.circuit_breaker.position_opened(group_id, len(tp_levels), symbol=signal.symbol)
-                                            
                                         # Place ALL TP positions at entry (no deferred stacking)
                                         self._log_event(
                                             f"Trade approved: {len(tp_levels)} positions — all at entry",
@@ -393,7 +395,7 @@ class BotService:
                                                     )
                                                     asyncio.ensure_future(self._broadcast_notification(
                                                         "Trade Entered",
-                                                        f"BUY {signal.symbol} @ {signal.entry_price}",
+                                                        f"{signal.direction} {signal.symbol} @ {signal.entry_price}",
                                                         "success"
                                                     ))
                                                 else:

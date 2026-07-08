@@ -38,6 +38,8 @@ class BaseStrategy:
 
     def __init__(self, user_config: Any):
         self.config = user_config
+        self.is_backtesting = False
+        self.run_logs = []
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Optional[TradeSignal]:
         """Called on every new closed bar."""

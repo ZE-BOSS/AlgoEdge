@@ -79,15 +79,17 @@ class RiskEngine:
             return False, "Risk is zero (entry == SL)", []
 
         # 3. Position Sizing
+        size_modifier = signal_data.get("metadata", {}).get("size_modifier", 1.0)
+        
         if self.compounding_enabled and compounding_risk_dollars > 0:
-            requested_risk_dollars = compounding_risk_dollars
+            requested_risk_dollars = compounding_risk_dollars * size_modifier
             total_lots = calculate_lot_from_dollars(
                 requested_risk_dollars, entry, sl, symbol
             )
         else:
-            requested_risk_dollars = account_balance * (self.risk_pct / 100.0)
+            requested_risk_dollars = account_balance * (self.risk_pct / 100.0) * size_modifier
             total_lots = calculate_lot_size(
-                account_balance, self.risk_pct, entry, sl, symbol
+                account_balance, self.risk_pct * size_modifier, entry, sl, symbol
             )
 
         # Calculate actual dollar risk taken (after any Smart Clamping in the position sizer)

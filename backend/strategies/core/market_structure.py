@@ -124,9 +124,8 @@ class MarketStructureDetector:
                         self.trend = "BULLISH"
                 else:
                     # BOS validation: must close above the previous swing high
-                    # We check if the candle that formed curr_sh closed above prev_sh
-                    # To be strict, latest_close should be above prev_sh, or the curr_sh close was above it.
                     if latest_close > prev_sh:
+                        self.trend = "BULLISH"
                         # Prevent double-counting the same BOS
                         if self._last_bos_level != prev_sh:
                             last_bos = "BULLISH"
@@ -140,7 +139,6 @@ class MarketStructureDetector:
                                 "index": high_swings[-1]["index"],
                                 "count": self.consecutive_bos,
                             })
-                    self.trend = "BULLISH"
 
             elif lh and ll:
                 if self.trend == "BULLISH":
@@ -155,6 +153,7 @@ class MarketStructureDetector:
                 else:
                     # BOS validation: must close below the previous swing low
                     if latest_close < prev_sl:
+                        self.trend = "BEARISH"
                         if self._last_bos_level != prev_sl:
                             last_bos = "BEARISH"
                             self.consecutive_bos += 1
@@ -167,7 +166,6 @@ class MarketStructureDetector:
                                 "index": low_swings[-1]["index"],
                                 "count": self.consecutive_bos,
                             })
-                    self.trend = "BEARISH"
 
         return self._result(last_bos, last_choch)
 

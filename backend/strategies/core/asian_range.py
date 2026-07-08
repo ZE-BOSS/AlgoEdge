@@ -89,7 +89,8 @@ class AsianRange:
         if not self.is_mapped:
             return True # If not mapped yet, bypass (or we could return False depending on strictness)
             
-        if direction == "BUY":
+        if direction in ("BUY", "BULLISH"):
             return current_price <= self.low
-        else:
+        elif direction in ("SELL", "BEARISH"):
             return current_price >= self.high
+        return False

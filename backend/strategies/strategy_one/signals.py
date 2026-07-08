@@ -7,8 +7,8 @@ Source: RiskManagement_Spec.md Section 6
 """
 
 from typing import Dict, Any, Optional
-from backend.strategies.strategy_one.params import UserConfig
-from backend.strategies.base_strategy import TradeSignal
+from backend.core.config_schema import UserConfig
+from backend.strategies.base_strategy import TradeSignal, TradeAction
 from backend.utils.timeutils import is_kill_zone
 from backend.utils.logger import get_logger
 
@@ -101,6 +101,7 @@ class SignalGenerator:
             return None
 
         direction = context.get("signal_direction", "")
+        trade_direction = "BUY" if direction == "BULLISH" else ("SELL" if direction == "BEARISH" else direction)
         symbol = context.get("symbol", "")
         entry = context.get("entry_price", 0.0)
         sl = context.get("stop_loss", 0.0)
@@ -108,7 +109,7 @@ class SignalGenerator:
 
         signal = TradeSignal(
             symbol=symbol,
-            direction=direction,
+            direction=trade_direction,
             entry_price=entry,
             stop_loss=sl,
             take_profit=tp1,

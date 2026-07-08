@@ -40,7 +40,7 @@ def compute_trade_metrics(trade: Dict[str, Any]) -> Dict[str, Any]:
         pnl_raw = entry - exit_p
 
     risk = abs(entry - sl) if sl else 1
-    realized_rr = abs(exit_p - entry) / risk if risk > 0 else 0
+    realized_rr = pnl_raw / risk if risk > 0 else 0
 
     entry_time = trade.get("entry_time")
     exit_time = trade.get("exit_time")
@@ -82,8 +82,9 @@ def calculate_sortino(returns: List[float], periods_per_year: float = 252) -> fl
         return float('inf')
     downside_std = np.std(downside, ddof=1)
     if downside_std == 0:
-        return float('inf')
-    return float((mean / downside_std) * np.sqrt(periods_per_year))
+        return 999.0
+    val = float((mean / downside_std) * np.sqrt(periods_per_year))
+    return val if not np.isinf(val) else 999.0
 
 
 def calculate_max_drawdown(equity_curve: List[float]) -> tuple[float, float]:
@@ -175,7 +176,7 @@ def compute_portfolio_stats(trades: List[Dict[str, Any]], initial_balance: float
         "total_pnl": sum(pnls),
         "avg_win": avg_win,
         "avg_loss": avg_loss,
-        "profit_factor": gross_profit / gross_loss if gross_loss > 0 else float('inf'),
+        "profit_factor": gross_profit / gross_loss if gross_loss > 0 else 999.0,
         "expectancy": (win_rate * avg_win) - ((1 - win_rate) * avg_loss),
         "sharpe_ratio": calculate_sharpe(pct_returns),
         "sortino_ratio": calculate_sortino(pct_returns),

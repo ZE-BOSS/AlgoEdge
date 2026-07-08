@@ -28,19 +28,20 @@ class OrderBlockDetector:
         for ob in self.active_obs:
             if ob["mitigated"]: continue
             
-            # Check if latest candle touches the OB zone
             if ob["type"] == "BULLISH":
-                # Price drops into bullish OB
+                # Touch: price drops into bullish OB
                 if latest_candle["low"] <= ob["top"]:
                     ob["touches"] += 1
-                    if ob["touches"] >= self.max_touches:
-                        ob["mitigated"] = True
+                # Mitigation: price closes below bullish OB bottom
+                if latest_candle["close"] < ob["bottom"]:
+                    ob["mitigated"] = True
             else:
-                # Price rises into bearish OB
+                # Touch: price rises into bearish OB
                 if latest_candle["high"] >= ob["bottom"]:
                     ob["touches"] += 1
-                    if ob["touches"] >= self.max_touches:
-                        ob["mitigated"] = True
+                # Mitigation: price closes above bearish OB top
+                if latest_candle["close"] > ob["top"]:
+                    ob["mitigated"] = True
 
         self.active_obs = [ob for ob in self.active_obs if not ob["mitigated"]]
 

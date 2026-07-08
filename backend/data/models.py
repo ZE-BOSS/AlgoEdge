@@ -260,8 +260,6 @@ class BacktestTrade(Base):
     exit_reason = Column(String(20))
     pnl = Column(Float)
     pnl_r = Column(Float)
-    balance_before = Column(Float)
-    balance_after = Column(Float)
     planned_rr = Column(Float)
     realized_rr = Column(Float)
     be_applied = Column(Boolean, default=False)

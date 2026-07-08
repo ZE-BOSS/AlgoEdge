@@ -10,7 +10,11 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, 
 const SYMBOLS = [
   'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'US30', 'BTCUSD',
   'Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index',
-  'Volatility 75 Index', 'Volatility 100 Index',
+  'Volatility 75 Index', 'Volatility 100 Index', 'Volatility 150 Index', 'Volatility 250 Index',
+  'Boom 300 Index', 'Boom 500 Index', 'Boom 1000 Index',
+  'Crash 300 Index', 'Crash 500 Index', 'Crash 1000 Index',
+  'Jump 10 Index', 'Jump 25 Index', 'Jump 50 Index', 'Jump 75 Index', 'Jump 100 Index',
+  'Step Index', 'Range Break 100 Index', 'Range Break 200 Index',
 ];
 
 function fmt(v) {
@@ -77,7 +81,7 @@ function SaveModal({ result, form, onClose, onSuccess }) {
       await saveBacktest(result.backtest_id, { 
         backtest_data: { 
           ...result, 
-          strategy_id: 'SMC_v1', 
+          strategy_id: form.strategy_id, 
           symbol: form.symbol, 
           risk_config: form,
           notes: notesInput
@@ -600,6 +604,19 @@ export default function Backtester() {
   const isAuth = useAuthStore(s => s.isAuthenticated);
   const STORAGE_KEY = 'algoedge_bt_config';
 
+  const { data: remoteConfig } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => getConfig().then(r => r.data),
+    enabled: status === 'ONLINE' && isAuth,
+  });
+
+  const backtestSymbols = useMemo(() => {
+    if (!remoteConfig?.config) return SYMBOLS;
+    const cfg = remoteConfig.config;
+    const configured = cfg.instrument_settings ? cfg.instrument_settings.map(i => i.symbol) : (cfg.symbols || []);
+    return [...new Set([...SYMBOLS, ...configured])];
+  }, [remoteConfig]);
+
   const [form, setForm] = useState(() => {
     // Restore last saved config from localStorage
     try {
@@ -757,7 +774,12 @@ export default function Backtester() {
           liq_sweep_min_pips: form.liq_sweep_min_pips,
           max_spread_pips: form.max_spread_pips,
           session_filter_enabled: form.session_filter_enabled,
-          news_filter_enabled: form.news_filter_enabled
+          news_filter_enabled: form.news_filter_enabled,
+          enforce_htf_pd: form.enforce_htf_pd,
+          enforce_fvg_displacement: form.enforce_fvg_displacement,
+          enforce_asian_range_sweep: form.enforce_asian_range_sweep,
+          asian_range_start_hour: form.asian_range_start_hour,
+          asian_range_end_hour: form.asian_range_end_hour
         };
       } else if (form.strategy_id === 'CrashBoom_v1') {
         payload.strategy_params = {
@@ -836,7 +858,19 @@ export default function Backtester() {
         <div style={{ display: 'grid', gap: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div><label>Strategy Engine</label><select value={form.strategy_id} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="CrashBoom_v1">CrashBoom Drift</option></select></div>
-            <div><label>Symbol</label><select value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value })}>{SYMBOLS.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+            <div>
+              <label>Symbol</label>
+              <input 
+                type="text" 
+                list="symbols-list" 
+                value={form.symbol} 
+                onChange={e => setForm({ ...form, symbol: e.target.value })} 
+                placeholder="Type to find symbol" 
+              />
+              <datalist id="symbols-list">
+                {backtestSymbols.map(s => <option key={s} value={s} />)}
+              </datalist>
+            </div>
           </div>
           <div><label>Timeframe</label><select value={form.timeframe} onChange={e => setForm({ ...form, timeframe: e.target.value })}>{['M5', 'M15', 'H1', 'H4', 'D1'].map(tf => <option key={tf} value={tf}>{tf}</option>)}</select></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

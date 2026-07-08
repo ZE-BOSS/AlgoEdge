@@ -15,6 +15,15 @@ logger = get_logger(__name__)
 _STRATEGIES: Dict[str, Type[BaseStrategy]] = {}
 
 
+_LOADED = False
+
+def _load_strategies():
+    global _LOADED
+    if not _LOADED:
+        import backend.strategies.strategy_one.engine
+        import backend.strategies.strategy_two.engine
+        _LOADED = True
+
 def register_strategy(name: str):
     """Decorator to register a strategy class."""
     def decorator(cls: Type[BaseStrategy]):
@@ -25,6 +34,7 @@ def register_strategy(name: str):
 
 def get_strategy(name: str) -> Type[BaseStrategy]:
     """Get a strategy class by name."""
+    _load_strategies()
     if name not in _STRATEGIES:
         raise ValueError(f"Strategy {name} not found in registry.")
     return _STRATEGIES[name]
@@ -32,4 +42,5 @@ def get_strategy(name: str) -> Type[BaseStrategy]:
 
 def list_strategies() -> list[str]:
     """Get all registered strategy names."""
+    _load_strategies()
     return list(_STRATEGIES.keys())

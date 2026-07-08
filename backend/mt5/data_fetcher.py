@@ -167,11 +167,26 @@ class DataFetcher:
             
         tf_code = _get_timeframe_code(timeframe)
         
+        # Convert to epoch to avoid timezone mismatch issues
+        start_ts = int(start.timestamp()) if hasattr(start, 'timestamp') else start
+        end_ts = int(end.timestamp()) if hasattr(end, 'timestamp') else end
+
         loop = asyncio.get_running_loop()
-        rates = await loop.run_in_executor(
-            _executor, 
-            lambda: mt5.copy_rates_range(symbol, tf_code, start, end)
-        )
+        rates = None
+        for attempt in range(4):
+            rates = await loop.run_in_executor(
+                _executor, 
+                lambda: mt5.copy_rates_range(symbol, tf_code, start_ts, end_ts)
+            )
+            if rates is not None and len(rates) > 0:
+                break
+                
+            mt5_err = await loop.run_in_executor(_executor, mt5.last_error)
+            if mt5_err[0] == 1:
+                logger.info(f"MT5 downloading history for {symbol} {timeframe}, attempt {attempt+1}... waiting 2s")
+                await asyncio.sleep(2.0)
+            else:
+                break
         
         if rates is None or len(rates) == 0:
             mt5_error = mt5.last_error()

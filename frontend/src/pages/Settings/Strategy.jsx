@@ -50,7 +50,12 @@ export default function StrategySettings() {
       setConfig(prev => ({
         ...prev,
         ...Object.fromEntries(
-          Object.entries(remoteConfig.config).filter(([k]) => k in prev)
+          Object.entries(remoteConfig.config).filter(([k]) => k in prev).map(([k, v]) => {
+            if (typeof v === 'object' && v !== null && !Array.isArray(v) && typeof prev[k] === 'object') {
+              return [k, { ...prev[k], ...v }];
+            }
+            return [k, v];
+          })
         ),
       }));
     }
@@ -117,15 +122,15 @@ export default function StrategySettings() {
     const next = { ...(config.manual_bias_overrides || {}) };
     if (bias === 'NONE') delete next[sym];
     else next[sym] = bias;
-    update('manual_bias_overrides', next);
+    setConfig({ ...config, manual_bias_overrides: next });
   };
 
   return (
     <div style={{ display: 'grid', gap: 20, maxWidth: 800 }}>
       <div className="card">
         <div className="card-header"><span className="card-title"><Sliders size={14} /> Active Symbols</span></div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {allSymbols.map(sym => (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          {[...new Set([...allSymbols, ...activeSymbols])].map(sym => (
             <button
               key={sym}
               className={`btn btn-sm ${activeSymbols.includes(sym) ? 'btn-primary' : 'btn-secondary'}`}
@@ -134,6 +139,21 @@ export default function StrategySettings() {
               {sym}
             </button>
           ))}
+          <input 
+            type="text" 
+            placeholder="Add custom symbol... (Enter)" 
+            className="input" 
+            style={{ width: 220, height: 32, fontSize: '0.875rem' }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && e.target.value.trim()) {
+                const newSym = e.target.value.trim();
+                if (!activeSymbols.includes(newSym)) {
+                  toggleSymbol(newSym);
+                }
+                e.target.value = '';
+              }
+            }}
+          />
         </div>
       </div>
 

@@ -173,42 +173,54 @@ class BacktestEngine:
                 else:
                     pos["lowest_price"] = min(pos.get("lowest_price", pos["entry_price"]), low)
 
-                # Check Max Holding Time (48 hours)
+                # Check Max Holding Time (48 hours for Forex, 400 bars for CrashBoom)
                 c_ts = current_time.timestamp() if hasattr(current_time, "timestamp") else current_time
                 e_ts = pos["entry_time"].timestamp() if hasattr(pos.get("entry_time"), "timestamp") else pos.get("entry_time")
-                if isinstance(c_ts, (int, float)) and isinstance(e_ts, (int, float)):
-                    if c_ts > 1e8 and e_ts > 1e8:
-                        if c_ts - e_ts >= 48 * 3600:
-                            pos["exit_price"] = current_price
-                            pos["exit_reason"] = "TIME_LIMIT_48H"
-                            pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
-                            closed_this_bar.append(pos)
-                            continue
+                
+                pos["bars_held"] = pos.get("bars_held", 0) + 1
+                symbol_upper = pos.get("symbol", "").upper()
+                is_crashboom = "CRASH" in symbol_upper or "BOOM" in symbol_upper
+                
+                limit_hit = False
+                if is_crashboom and pos["bars_held"] >= 400:
+                    limit_hit = True
+                elif not is_crashboom and isinstance(c_ts, (int, float)) and isinstance(e_ts, (int, float)):
+                    if c_ts > 1e8 and e_ts > 1e8 and (c_ts - e_ts >= 48 * 3600):
+                        limit_hit = True
+                        
+                if limit_hit:
+                    pos["exit_price"] = current_price
+                    pos["exit_reason"] = "TIME_LIMIT"
+                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
+                    closed_this_bar.append(pos)
+                    continue
 
-                # Check SL hit
-                if pos["direction"] == "BUY" and low <= pos["stop_loss"]:
+                # Check SL and TP hits
+                sl_hit = False
+                tp_hit = False
+                if pos["direction"] == "BUY":
+                    sl_hit = low <= pos["stop_loss"]
+                    tp_hit = high >= pos["take_profit"]
+                else:
+                    sl_hit = high >= pos["stop_loss"]
+                    tp_hit = low <= pos["take_profit"]
+                    
+                # C9: Look-ahead bias handling
+                if sl_hit and tp_hit:
+                    dist_to_sl = abs(pos["stop_loss"] - bar.get("open", current_price))
+                    dist_to_tp = abs(pos["take_profit"] - bar.get("open", current_price))
+                    if dist_to_sl <= dist_to_tp:
+                        tp_hit = False
+                    else:
+                        sl_hit = False
+
+                if sl_hit:
                     pos["exit_price"] = pos["stop_loss"]
                     pos["exit_reason"] = "BE_SL" if pos.get("be_applied") else "SL"
                     pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
                     closed_this_bar.append(pos)
                     continue
-                elif pos["direction"] == "SELL" and high >= pos["stop_loss"]:
-                    pos["exit_price"] = pos["stop_loss"]
-                    pos["exit_reason"] = "BE_SL" if pos.get("be_applied") else "SL"
-                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
-                    closed_this_bar.append(pos)
-                    continue
-
-                # Check TP hit
-                if pos["direction"] == "BUY" and high >= pos["take_profit"]:
-                    pos["exit_price"] = pos["take_profit"]
-                    pos["exit_reason"] = f"TP{pos.get('tp_level', 1)}"
-                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
-                    closed_this_bar.append(pos)
-                    if pos.get("tp_level") == 1:
-                        tp1_hit_groups.add(pos.get("group_id"))
-                    continue
-                elif pos["direction"] == "SELL" and low <= pos["take_profit"]:
+                elif tp_hit:
                     pos["exit_price"] = pos["take_profit"]
                     pos["exit_reason"] = f"TP{pos.get('tp_level', 1)}"
                     pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
@@ -537,8 +549,9 @@ class BacktestEngine:
             g["exit_price"] = g["best_exit"].get("exit_price", 0) if g["best_exit"] else 0
             g["exit_reason"] = g["best_exit"].get("exit_reason", "UNKNOWN") if g["best_exit"] else "UNKNOWN"
             # FIX 3: Propagate balance_before/after and net_pnl from sub_trades
+            sorted_subs = sorted(sub_trades, key=lambda x: x.get("exit_time", 0))
             g["balance_before"] = sub_trades[0].get("balance_before") if sub_trades else None
-            g["balance_after"]  = sub_trades[-1].get("balance_after") if sub_trades else None
+            g["balance_after"]  = sorted_subs[-1].get("balance_after") if sorted_subs else None
             g["net_pnl"]        = sum(t.get("pnl", 0) for t in sub_trades)
             
             # Find the last exit time

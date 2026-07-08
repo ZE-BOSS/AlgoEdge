@@ -77,7 +77,9 @@ class BacktestRequest(BaseModel):
     trail_pips: float = 15.0
     # ── Compounding ──
     compounding_enabled: bool = False
-
+    # ── Multi-Strategy Filters ──
+    session_filter_enabled: bool = True
+    manual_bias_overrides: Dict[str, Any] = {}
 
 class SaveBacktestRequest(BaseModel):
     backtest_data: Dict[str, Any]
@@ -463,6 +465,7 @@ async def run_backtest_endpoint(
                 candles_h1=candles_h1_idx,
                 candles_m15=candles_m15_idx,
                 save_mode="DISCARD",
+                compounding_enabled=req.compounding_enabled,
             )
 
             report = results.get("report")
@@ -512,7 +515,7 @@ async def run_backtest_endpoint(
                 "equity_curve": results.get("equity_curve", []),
                 "trades": results.get("trades", []),
                 "grouped_trades": results.get("grouped_trades", []),
-                "run_logs": engine.run_logs,
+                "run_logs": getattr(engine, 'run_logs', []),
                 "report": {
                     "win_rate": report.win_rate if report else 0,
                     "profit_factor": report.profit_factor if report else 0,
@@ -801,7 +804,16 @@ async def get_unsaved_trade_chart(
     current_user: User = Depends(get_current_user),
 ):
     """Fetch massive chart data for an unsaved trade from the current running/completed backtest state."""
-    state = await _get_state()
+    state = USER_BACKTEST_STATE.get(current_user.id)
+    if state is None and HAS_REDIS and redis_client and redis_client.redis:
+        try:
+            import json
+            data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
+            if data:
+                state = json.loads(data)
+        except Exception:
+            pass
+            
     if not state or not state.get("result"):
         raise HTTPException(status_code=404, detail="No active or completed backtest found")
         
@@ -872,7 +884,7 @@ async def save_backtest_from_client(
     run = BacktestRun(
         id=backtest_id,
         user_id=current_user.id,
-        strategy_id="smc",
+        strategy_id=data.get("strategy_id", "SMC_v1"),
         symbol=data.get("symbol", "Volatility 75 Index"),
         start_date=start_date,
         end_date=end_date,
@@ -918,7 +930,9 @@ async def save_backtest_from_client(
             logging.error(f"Failed to parse time for trade: {e}")
             entry_time, exit_time = None, None
             
+        import uuid
         bt_trade = BacktestTrade(
+            id=uuid.uuid4().int & ((1 << 63) - 1),  # Bypass SQLite BIGINT autoincrement issue & ensure signed 64-bit fit
             backtest_id=backtest_id,
             symbol=t.get("symbol", run.symbol),
             direction=t.get("direction"),
