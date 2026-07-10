@@ -95,9 +95,9 @@ class SignalGenerator:
         passed, reason = self.gate.validate_all(context)
         if not passed:
             is_bt = context.get("is_backtesting", False)
-            prefix = "BT-" if is_bt else ""
-            from backend.services.bot_service import bot_service
-            bot_service.log_system_event(f"Signal rejected: {reason}", "DEBUG", f"{prefix}SIGNAL")
+            if not is_bt:
+                from backend.services.bot_service import bot_service
+                bot_service.log_system_event(f"Signal rejected: {reason}", "DEBUG", "SIGNAL")
             return None
 
         direction = context.get("signal_direction", "")

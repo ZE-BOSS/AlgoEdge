@@ -60,32 +60,34 @@ class IPDMDetector:
         close = recent_candles['close']
         open_ = recent_candles['open']
 
-        # True Range → ATR
+        # True Range -> ATR(14)
         tr1 = high - low
         tr2 = (high - close.shift(1)).abs()
         tr3 = (low - close.shift(1)).abs()
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
 
         atr = tr.rolling(window=14).mean()
-        baseline_atr = atr.rolling(window=50).mean().iloc[-1]
         current_atr = atr.iloc[-1]
 
-        if pd.isna(baseline_atr) or pd.isna(current_atr) or baseline_atr == 0:
+        if pd.isna(current_atr) or current_atr == 0:
             return {"phase": self.current_phase, "manipulation_completed": self.manipulation_completed}
 
-        ratio = current_atr / baseline_atr
-
-        # Recent range vs average range
-        recent_range = high.iloc[-20:].max() - low.iloc[-20:].min()
-        avg_range = (high.rolling(50).max() - low.rolling(50).min()).mean()
-        range_ratio = recent_range / avg_range if avg_range > 0 else 1.0
+        # 1. Accumulation Check: Price stays within N * ATR for `min_accumulation_bars` (default 10)
+        # We check the 10-bar high/low range
+        accum_bars = 10
+        recent_10_high = high.iloc[-accum_bars:].max()
+        recent_10_low = low.iloc[-accum_bars:].min()
+        recent_10_range = recent_10_high - recent_10_low
+        
+        # Spec: accumulation_max_range_atr_multiple = 2.0
+        is_accum = recent_10_range <= (2.0 * current_atr)
 
         last_candle_high = float(high.iloc[-1])
         last_candle_low = float(low.iloc[-1])
         last_candle_close = float(close.iloc[-1])
         last_candle_open = float(open_.iloc[-1])
 
-        # Check for Manipulation: liquidity sweep + wick rejection
+        # 2. Manipulation Check: Liquidity sweep + wick rejection
         manipulation_detected = False
         if swing_highs or swing_lows:
             manipulation_detected = self._check_manipulation(
@@ -94,28 +96,30 @@ class IPDMDetector:
                 swing_highs or [], swing_lows or [],
             )
 
+        # 3. Expansion Check: Displacement move >= 1.5 * ATR
+        # (Technically needs BOS/ChoCH too, but we track displacement here)
+        candle_range = last_candle_high - last_candle_low
+        is_expansion_displacement = candle_range >= (1.5 * current_atr)
+
         if manipulation_detected:
             self.current_phase = "MANIPULATION"
             self.manipulation_completed = True
             self._last_manipulation_bar = len(candles) - 1
-        elif ratio < self.accum_atr_ratio and range_ratio < self.accum_range_ratio:
+        elif is_accum:
             self.current_phase = "ACCUMULATION"
             self.manipulation_completed = False
-        elif ratio > self.exp_atr_ratio:
+        elif is_expansion_displacement:
             self.current_phase = "EXPANSION"
         else:
-            # Between accumulation and expansion thresholds
             if self.manipulation_completed:
-                # Just came out of manipulation → treat as early expansion
                 self.current_phase = "EXPANSION"
             else:
-                self.current_phase = "MANIPULATION"
+                # Default fallback if no strict state matched
+                self.current_phase = "MANIPULATION" if self.current_phase == "ACCUMULATION" else self.current_phase
 
         return {
             "phase": self.current_phase,
             "manipulation_completed": self.manipulation_completed,
-            "atr_ratio": round(ratio, 3),
-            "range_ratio": round(range_ratio, 3),
         }
 
     def _check_manipulation(

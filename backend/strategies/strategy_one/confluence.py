@@ -42,15 +42,15 @@ class ConfluenceScorer:
         score += bias_score
         breakdown["htf_bias"] = bias_score
 
-        # 2. H1 Structure (Max 10)
-        h1_score = 10 if context.get("h1_structure") == context.get("signal_direction") else 0
-        score += h1_score
-        breakdown["h1_structure"] = h1_score
+        # 2. H1 BOS (Max 15)
+        h1_bos_score = 15 if context.get("h1_bos") else 0
+        score += h1_bos_score
+        breakdown["h1_bos"] = h1_bos_score
 
-        # 3. LTF ChoCH (Max 10)
-        choch_score = 10 if context.get("ltf_choch", False) else 0
-        score += choch_score
-        breakdown["ltf_choch"] = choch_score
+        # 3. H1 ChoCH (Max 10)
+        h1_choch_score = 10 if context.get("h1_choch") else 0
+        score += h1_choch_score
+        breakdown["h1_choch"] = h1_choch_score
 
         # 4. Liquidity Sweep (Max 15)
         sweep_score = 0
@@ -85,7 +85,7 @@ class ConfluenceScorer:
         score += ote_score
         breakdown["ote_zone"] = ote_score
 
-        # 8. Candlestick Confirmation (Max 15)
+        # 8. M15 Candlestick Confirmation (Max 15)
         candle_score = 0
         candle_tier = context.get("candle_tier", 0)
         if candle_tier == 1:
@@ -97,12 +97,9 @@ class ConfluenceScorer:
         score += candle_score
         breakdown["candle"] = candle_score
 
-        # 9. Kill Zone (Max 5)
-        kz_score = 5 if context.get("in_kill_zone", False) else 0
-        score += kz_score
-        breakdown["kill_zone"] = kz_score
-
         score = min(score, 100)
         context["score_breakdown"] = breakdown
+        
+        print(f"DEBUG SCORER: total={score}, breakdown={breakdown}, pattern_tier={context.get('candle_tier')}, fallback={context.get('fallback_triggered', False)}")
 
         return min(score, 100)

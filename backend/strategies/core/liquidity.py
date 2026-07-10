@@ -1,18 +1,18 @@
 """
-backend/strategies/smc/liquidity.py
+backend/strategies/core/liquidity.py
 
-Liquidity mapping: BSL, SSL, Equal Highs/Lows, and Sweep detection.
-Source: SMC_Strategy.md Section 3 & 4
+Liquidity mapping: BSL, SSL, Equal Highs/Lows, Inducement (IDM), and Sweep detection.
+Source: SMC_Strategy.md Section 4
 """
 
 import pandas as pd
 from typing import List, Dict, Any
 
 class LiquidityMapper:
-    """Maps liquidity pools and detects sweeps."""
+    """Maps liquidity pools, inducement (IDM), and detects sweeps."""
 
     def __init__(self, sweep_min_pips: float = 0.1, eq_tolerance_pips: float = 10.0):
-        # sweep_min_pips is repurposed as atr_multiplier
+        # sweep_min_pips is repurposed as atr_multiplier for dynamic threshold
         self.atr_multiplier = sweep_min_pips
         self.eq_tolerance_pips = eq_tolerance_pips
         self.bsl_pools = []
@@ -20,27 +20,65 @@ class LiquidityMapper:
 
     def update(self, candles: pd.DataFrame, swings: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Identify new liquidity pools from swings and check for recent sweeps.
+        Identify new liquidity pools from swings, detect Inducement (IDM), and check for recent sweeps.
         """
         recent_sweep = None
+        idm_levels = []
         
-        # Build map of BSL/SSL from recent swings (e.g., last 3-5 swings)
-        highs = [s["price"] for s in swings if s["type"] == "HIGH"][-5:]
-        lows = [s["price"] for s in swings if s["type"] == "LOW"][-5:]
+        # Build map of BSL/SSL from recent swings
+        highs = [s for s in swings if s["type"] == "HIGH"][-5:]
+        lows = [s for s in swings if s["type"] == "LOW"][-5:]
         
-        # Initialize pools if not present, retaining 'swept' state
         current_bsl_levels = set(pool["level"] for pool in self.bsl_pools)
         current_ssl_levels = set(pool["level"] for pool in self.ssl_pools)
         
+        # We assume recent highs are BSL and lows are SSL
         for h in highs:
-            if h not in current_bsl_levels:
-                self.bsl_pools.append({"level": h, "swept": False})
+            if h["price"] not in current_bsl_levels:
+                self.bsl_pools.append({
+                    "level": h["price"], 
+                    "swept": False, 
+                    "time": h.get("time")
+                })
         
         for l in lows:
-            if l not in current_ssl_levels:
-                self.ssl_pools.append({"level": l, "swept": False})
+            if l["price"] not in current_ssl_levels:
+                self.ssl_pools.append({
+                    "level": l["price"], 
+                    "swept": False, 
+                    "time": l.get("time")
+                })
                 
-        # Optional: Prune old pools to prevent memory bloat
+        # IDM Detection (Inducement)
+        # IDM is a local high/low forming between 20% and 70% retracement of the last impulse leg
+        if len(swings) >= 2:
+            last_swing = swings[-1]
+            prev_swing = swings[-2]
+            impulse_range = abs(last_swing["price"] - prev_swing["price"])
+            
+            if impulse_range > 0:
+                # If impulse was BULLISH (prev was LOW, last is HIGH)
+                if last_swing["type"] == "HIGH":
+                    # Look for minor lows forming as IDM before the true POI (which is near prev_swing)
+                    min_retrace_price = last_swing["price"] - (impulse_range * 0.2)
+                    max_retrace_price = last_swing["price"] - (impulse_range * 0.7)
+                    
+                    # Any recent low (internal) between these prices is IDM
+                    for pool in self.ssl_pools:
+                        if max_retrace_price <= pool["level"] <= min_retrace_price:
+                            idm_levels.append({"type": "IDM_LOW", "level": pool["level"]})
+                            
+                # If impulse was BEARISH (prev was HIGH, last is LOW)
+                elif last_swing["type"] == "LOW":
+                    # Look for minor highs forming as IDM
+                    min_retrace_price = last_swing["price"] + (impulse_range * 0.2)
+                    max_retrace_price = last_swing["price"] + (impulse_range * 0.7)
+                    
+                    for pool in self.bsl_pools:
+                        if min_retrace_price <= pool["level"] <= max_retrace_price:
+                            idm_levels.append({"type": "IDM_HIGH", "level": pool["level"]})
+
+        # Prune old pools to prevent memory bloat
         if len(self.bsl_pools) > 10:
             self.bsl_pools = self.bsl_pools[-10:]
         if len(self.ssl_pools) > 10:
@@ -83,5 +121,6 @@ class LiquidityMapper:
         return {
             "bsl": self.bsl_pools,
             "ssl": self.ssl_pools,
+            "idm": idm_levels,
             "recent_sweep": recent_sweep
         }

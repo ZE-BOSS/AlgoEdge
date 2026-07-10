@@ -227,3 +227,23 @@ def kelly_lot_size(
     kelly = (win_rate * b - loss_rate) / b
     fraction = min(kelly, max_kelly_fraction)
     return balance * max(fraction, 0)
+
+def get_confluence_scaled_risk(base_risk_pct: float, confluence_score: int) -> float:
+    """
+    Scales the base risk percentage down if the confluence score is lower than optimal.
+    
+    Tiers (configurable):
+    - Score 80-100: Deploy 100% of base_risk_pct
+    - Score 65-79:  Deploy 75% of base_risk_pct
+    - Score 55-64:  Deploy 50% of base_risk_pct
+    - Score <55:    Rejected (0%)
+    """
+    if confluence_score >= 80:
+        return base_risk_pct
+    elif confluence_score >= 65:
+        return base_risk_pct * 0.75
+    elif confluence_score >= 55:
+        return base_risk_pct * 0.50
+    else:
+        return 0.0
+

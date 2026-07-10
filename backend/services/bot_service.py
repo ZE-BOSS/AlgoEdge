@@ -268,13 +268,21 @@ class BotService:
                                 
                             current_engine = self.engines[symbol]
 
+                            # ── ENFORCE CLOSED CANDLE LOGIC (Fix Repainting) ──
+                            # The last row returned by MT5 DataFetcher is the currently forming (unclosed) bar.
+                            # We slice it off so the strategy engine only evaluates fully formed market structure.
+                            closed_h4 = candles_h4.iloc[:-1] if len(candles_h4) > 1 else candles_h4
+                            closed_h1 = candles_h1.iloc[:-1] if len(candles_h1) > 1 else candles_h1
+                            closed_m15 = candles_m15.iloc[:-1] if len(candles_m15) > 1 else candles_m15
+                            closed_m5 = candles_m5.iloc[:-1] if len(candles_m5) > 1 else candles_m5
+
                             # Feed the engine in hierarchical order
-                            await current_engine.on_bar(symbol, "H4", _index_candles(candles_h4))
-                            await current_engine.on_bar(symbol, "H1", _index_candles(candles_h1))
-                            await current_engine.on_bar(symbol, "M15", _index_candles(candles_m15))
+                            await current_engine.on_bar(symbol, "H4", _index_candles(closed_h4))
+                            await current_engine.on_bar(symbol, "H1", _index_candles(closed_h1))
+                            await current_engine.on_bar(symbol, "M15", _index_candles(closed_m15))
                             
                             await asyncio.sleep(0.01)
-                            signal = await current_engine.on_bar(symbol, "M5", _index_candles(candles_m5))
+                            signal = await current_engine.on_bar(symbol, "M5", _index_candles(closed_m5))
                             await asyncio.sleep(0.01)
                             if signal:
                                 # Cooldown check

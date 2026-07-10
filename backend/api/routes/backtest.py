@@ -195,16 +195,12 @@ async def run_backtest_endpoint(
         async def _save_state(state):
             USER_BACKTEST_STATE[current_user.id] = state
             if HAS_REDIS and redis_client and redis_client.redis:
-                async def _redis_save():
-                    try:
-                        import asyncio
-                        import redis.exceptions
-                        await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
-                    except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
-                        logger.warning(f"[BACKTEST] Failed to save state to Redis: {e}")
-                
-                import asyncio
-                asyncio.create_task(_redis_save())
+                try:
+                    import asyncio
+                    import redis.exceptions
+                    await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
+                except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
+                    logger.warning(f"[BACKTEST] Failed to save state to Redis: {e}")
 
         async def _get_state():
             if HAS_REDIS and redis_client and redis_client.redis:
@@ -333,9 +329,14 @@ async def run_backtest_endpoint(
                 M15_WINDOW = 200
                 M5_WINDOW = 500
 
+                import time
+                last_yield_time = time.monotonic()
+                
                 for i in range(300, len(m5_times)):
-                    if i % 500 == 0:
-                        await asyncio.sleep(0)  # yield event loop every 500 bars
+                    # Yield event loop only every 50ms to keep WebSocket/Redis responsive without slowing down backtest
+                    if time.monotonic() - last_yield_time > 0.05:
+                        await asyncio.sleep(0)
+                        last_yield_time = time.monotonic()
 
                     if i % 600 == 0:
                         pct = int((i / len(m5_times)) * 80) + 10
@@ -359,45 +360,56 @@ async def run_backtest_endpoint(
                     current_time = m5_times[i]
                     is_warmup = req.start_date and current_time < np.datetime64(datetime.fromisoformat(req.start_date))
 
-                    # Fast integer-based slicing (O(log n) searchsorted instead of O(n) loc)
-                    h4_end = int(np.searchsorted(h4_times, current_time, side='right'))
+                    # Calculate cutoffs to ensure we only include fully closed candles.
+                    # A candle is only closed when its open_time + duration <= current_time.
+                    # Since we use side='right', open_time <= current_time - duration will be included.
+                    h4_cutoff = current_time - np.timedelta64(4, 'h')
+                    h4_end = int(np.searchsorted(h4_times, h4_cutoff, side='right'))
                     h4_start = max(0, h4_end - H4_WINDOW)
                     slice_h4 = candles_h4_sorted.iloc[h4_start:h4_end]
 
-                    h1_end = int(np.searchsorted(h1_times, current_time, side='right'))
+                    h1_cutoff = current_time - np.timedelta64(1, 'h')
+                    h1_end = int(np.searchsorted(h1_times, h1_cutoff, side='right'))
                     h1_start = max(0, h1_end - H1_WINDOW)
                     slice_h1 = candles_h1_sorted.iloc[h1_start:h1_end]
 
-                    m15_end = int(np.searchsorted(m15_times, current_time, side='right'))
+                    m15_cutoff = current_time - np.timedelta64(15, 'm')
+                    m15_end = int(np.searchsorted(m15_times, m15_cutoff, side='right'))
                     m15_start = max(0, m15_end - M15_WINDOW)
                     slice_m15 = candles_m15_sorted.iloc[m15_start:m15_end]
 
-                    m5_end = i + 1
+                    # m5_times[i] is current_time. We want up to i-1 to ensure it's closed.
+                    m5_end = i
                     m5_start = max(0, m5_end - M5_WINDOW)
                     slice_m5 = candles_m5_sorted.iloc[m5_start:m5_end]
 
                     if len(slice_h4) < 20 or len(slice_h1) < 20 or len(slice_m15) < 20 or len(slice_m5) < 20:
                         continue
 
+                    sig = None
+                    
                     last_h4_time = slice_h4.index[-1]
                     if last_h4_time != prev_h4_time:
-                        await engine.on_bar(req.symbol, "H4", slice_h4)
+                        s = await engine.on_bar(req.symbol, "H4", slice_h4)
+                        if s: sig = s
                         prev_h4_time = last_h4_time
 
                     last_h1_time = slice_h1.index[-1]
                     if last_h1_time != prev_h1_time:
-                        await engine.on_bar(req.symbol, "H1", slice_h1)
+                        s = await engine.on_bar(req.symbol, "H1", slice_h1)
+                        if s: sig = s
                         prev_h1_time = last_h1_time
 
                     last_m15_time = slice_m15.index[-1]
                     if last_m15_time != prev_m15_time:
-                        await engine.on_bar(req.symbol, "M15", slice_m15)
+                        s = await engine.on_bar(req.symbol, "M15", slice_m15)
+                        if s: sig = s
                         prev_m15_time = last_m15_time
 
                     last_m5_time = m5_times[i]
-                    sig = None
                     if last_m5_time != prev_m5_time:
-                        sig = await engine.on_bar(req.symbol, "M5", slice_m5)
+                        s = await engine.on_bar(req.symbol, "M5", slice_m5)
+                        if s: sig = s
                         prev_m5_time = last_m5_time
 
                     if sig and not is_warmup:
@@ -515,7 +527,8 @@ async def run_backtest_endpoint(
                 "equity_curve": results.get("equity_curve", []),
                 "trades": results.get("trades", []),
                 "grouped_trades": results.get("grouped_trades", []),
-                "run_logs": getattr(engine, 'run_logs', []),
+                "run_logs": getattr(engine, 'run_logs', [])[-100:],  # Only keep last 100 to prevent UI/Redis freezing
+                "params_snapshot": getattr(results, 'params_snapshot', req.strategy_params),
                 "report": {
                     "win_rate": report.win_rate if report else 0,
                     "profit_factor": report.profit_factor if report else 0,

@@ -17,6 +17,7 @@ from backend.strategies.registry import register_strategy
 from backend.utils.logger import get_logger
 from backend.risk.position_sizer import get_pip_size
 from backend.strategies.core.market_structure import MarketStructureDetector
+from backend.services.bot_service import bot_service
 
 logger = get_logger(__name__)
 
@@ -59,6 +60,21 @@ class CrashBoomEngine(BaseStrategy):
         self.ms_detector = MarketStructureDetector(swing_length=5, min_bos_count=1)
         self.post_jump_regime_reset = False
 
+    def log_event(self, message: str, level: str = "INFO", category: str = "CBOOM"):
+        """Intercept logs and send to bot_service."""
+        from datetime import timezone
+        if self.is_backtesting:
+            self.run_logs.append({
+                "time": datetime.now(timezone.utc).isoformat(),
+                "level": level,
+                "category": category,
+                "message": message
+            })
+            if level != "DEBUG":
+                bot_service.log_system_event(message, level, f"BT-{category}")
+        else:
+            bot_service.log_system_event(message, level, category)
+
     async def initialize(self):
         logger.info("CrashBoomEngine initialized")
 
@@ -75,12 +91,17 @@ class CrashBoomEngine(BaseStrategy):
         """Detect if the bar is a massive jump against the drift."""
         symbol_upper = symbol.upper()
         
-        # M9: use spike_lookback_bars and recovery_target_pips (optional logic could go here)
-        # C6: Use ATR-based dynamic jump detection
+        # M9: use spike_lookback_bars and recovery_target_pips
+        # C6: Use ATR-based dynamic jump detection, unless spike_threshold_pips is configured
         if pd.isna(atr_val) or atr_val <= 0:
             return False
             
-        if abs(bar['open'] - bar['close']) < 4.0 * atr_val:
+        pip_size = get_pip_size(symbol)
+        threshold_price = 4.0 * atr_val
+        if self.params and getattr(self.params, 'spike_threshold_pips', 0) > 0:
+            threshold_price = self.params.spike_threshold_pips * pip_size
+            
+        if abs(bar['open'] - bar['close']) < threshold_price:
             return False
             
         if "CRASH" in symbol_upper and bar['close'] < bar['open']:
@@ -103,11 +124,18 @@ class CrashBoomEngine(BaseStrategy):
         """
         CrashBoom Strategy 1 + 2 evaluation.
         """
+        # Clear run_logs for the new bar evaluation if not backtesting
+        if not self.is_backtesting:
+            self.run_logs = []
+            
         if len(candles) < 50:
             return None
 
+        current_bar = candles.iloc[-1]
+        self.log_event(f"[{symbol}] Evaluating new {timeframe} bar: close={current_bar['close']}")
+
         # Load UI Params (M8: default to 20/50)
-        fast_period = self.params.drift_ema_fast if self.params else 20
+        fast_period = self.params.drift_ema_fast if getattr(self, 'params', None) else 20
         slow_period = self.params.drift_ema_slow if self.params else 50
         
         pip_size = get_pip_size(symbol)
@@ -146,19 +174,23 @@ class CrashBoomEngine(BaseStrategy):
                 self.jump_distances.append(dist)
             self.last_jump_idx = len(df) - 1
             self.post_jump_regime_reset = True  # M7
+            self.log_event(f"Jump detected! Resetting regime wait.")
             return None
             
         bars_since_jump = (len(df) - 1 - self.last_jump_idx) if self.last_jump_idx is not None else 999999
         
         # M1: 5-bar cooldown
         if bars_since_jump < 5:
+            self.log_event(f"In 5-bar jump cooldown ({bars_since_jump} bars).")
             return None
         gap_pct = self.compute_gap_percentile(bars_since_jump)
+        self.log_event(f"Gap percentile computed: {gap_pct:.1f}%")
         
         # Strategy 2: Jump Exposure Management
         if gap_pct >= SPEC_DEFAULTS['flatten_all_at_percentile']:
             # Signal a flatten (close all) if implemented in orchestrator, or just block entries
             # For now, block new entries.
+            self.log_event(f"Gap percentile {gap_pct:.1f}% >= threshold {SPEC_DEFAULTS['flatten_all_at_percentile']}. Blocking entries.")
             return None
             
         # Strategy 1: Drift Continuation
@@ -175,38 +207,55 @@ class CrashBoomEngine(BaseStrategy):
             
         if not regime_active:
             self.post_jump_regime_reset = False # Allow reset if regime dies
+            self.log_event(f"Regime {drift_dir} inactive (EMA separation {ema_sep:.5f} < {min_sep:.5f} or crossed)")
             return None
             
         # M7: Post-Jump Regime Reset
         if self.post_jump_regime_reset:
             # We must wait for the regime to re-qualify, meaning a ChoCH in the drift direction
             if drift_dir == "UP" and ms_state.get("last_choch") != "BULLISH":
+                self.log_event("Waiting for BULLISH ChoCH to reset regime after jump.")
                 return None
             elif drift_dir == "DOWN" and ms_state.get("last_choch") != "BEARISH":
+                self.log_event("Waiting for BEARISH ChoCH to reset regime after jump.")
                 return None
             self.post_jump_regime_reset = False
+            self.log_event("Post-jump regime reset complete.")
             
         # Entry Trigger: Pullback to fast EMA
         dist_to_fast = abs(current_bar['close'] - current_bar['ema_fast'])
         max_dist = SPEC_DEFAULTS['pullback_max_distance_atr_multiple'] * atr_val
         
         if dist_to_fast > max_dist:
+            self.log_event(f"Pullback dist {dist_to_fast:.5f} > max_dist {max_dist:.5f}. Not entered.")
             return None # Not pulled back enough, or too far
             
         # M6: Confirmation - Require close beyond prior swing AND drift direction
         swings = ms_state.get("swings", [])
-        if not swings: return None
+        if not swings: 
+            self.log_event("No swings detected for confirmation.")
+            return None
         
         if drift_dir == "UP":
-            if current_bar['close'] <= current_bar['open']: return None
+            if current_bar['close'] <= current_bar['open']: 
+                self.log_event("Bullish drift requires bullish close candle.")
+                return None
             # Must close above previous swing high
             highs = [s for s in swings if s["type"] == "HIGH" and float(s["price"]) < current_bar["close"]]
-            if not highs: return None
+            if not highs: 
+                self.log_event("No previous swing high breached.")
+                return None
         else:
-            if current_bar['close'] >= current_bar['open']: return None
+            if current_bar['close'] >= current_bar['open']: 
+                self.log_event("Bearish drift requires bearish close candle.")
+                return None
             # Must close below previous swing low
             lows = [s for s in swings if s["type"] == "LOW" and float(s["price"]) > current_bar["close"]]
-            if not lows: return None
+            if not lows: 
+                self.log_event("No previous swing low breached.")
+                return None
+
+        self.log_event(f"M6 Confirmation passed! Building signal...")
 
         # Build Signal
         direction_str = "BUY" if drift_dir == "UP" else "SELL"
@@ -218,7 +267,7 @@ class CrashBoomEngine(BaseStrategy):
             size_modifier = 1.0 - (SPEC_DEFAULTS['size_reduction_pct_at_hard_threshold'] / 100.0)
             
         # M5: Stop Loss - Structure based
-        buffer = 2.0 * get_pip_size(symbol)
+        buffer = 1.5 * atr_val
         
         if direction_str == "BUY":
             lows = [s for s in swings if s["type"] == "LOW" and float(s["price"]) < entry_price]
@@ -232,10 +281,13 @@ class CrashBoomEngine(BaseStrategy):
         min_reward = risk * 1.5
         atr_dist = atr_val * SPEC_DEFAULTS['trailing_atr_multiple']
         
+        recovery_pips = self.params.recovery_target_pips if self.params and getattr(self.params, 'recovery_target_pips', 0) > 0 else 0
+        recovery_dist = recovery_pips * get_pip_size(symbol)
+        
         if direction_str == "BUY":
-            tp = max(entry_price + (atr_dist * 5), entry_price + min_reward)
+            tp = entry_price + max(atr_dist * 5, min_reward, recovery_dist)
         else:
-            tp = min(entry_price - (atr_dist * 5), entry_price - min_reward)
+            tp = entry_price - max(atr_dist * 5, min_reward, recovery_dist)
         
         sig = TradeSignal(
             strategy_id="CrashBoom_v1",

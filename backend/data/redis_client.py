@@ -31,8 +31,8 @@ class RedisClient:
                 self.redis = redis.from_url(
                     settings.redis.url, 
                     decode_responses=True,
-                    socket_connect_timeout=1,
-                    socket_timeout=1,
+                    socket_connect_timeout=5.0,
+                    socket_timeout=5.0,
                     health_check_interval=10,
                     retry_on_timeout=True,
                     socket_keepalive=True,

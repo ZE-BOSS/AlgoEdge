@@ -101,10 +101,16 @@ Placed at one of the following (user selectable):
 
 | Method | Description | When to Use |
 |--------|-------------|-------------|
-| `OB_EXTREME` | Below/above the Order Block that triggered the entry | Default |
-| `SWING_POINT` | Below/above the manipulation candle's wick | Wider, more room |
-| `FVG_EDGE` | Beyond the FVG zone boundary | Tighter, high confluence setups |
+| `LIQUIDITY_2_SWING`| Beyond structural liquidity pools AND the last 2 swing points | Default SMC Setup |
+| `OB_EXTREME` | Below/above the Order Block that triggered the entry | Legacy |
+| `SWING_POINT` | Below/above the manipulation candle's wick | Legacy |
+| `FVG_EDGE` | Beyond the FVG zone boundary | Legacy |
 | `ATR_BASED` | Entry ± (ATR × multiplier) | Volatility-adjusted |
+
+**SMC Native Default (`LIQUIDITY_2_SWING`) Logic:**
+1. Check if external liquidity is present nearby. If yes, SL goes *above* liquidity (for Sells) or *below* liquidity (for Buys).
+2. Validate against recent structure: SL must safely clear the **last 2 swing highs** (for Sells) or **last 2 swing lows** (for Buys).
+3. Apply `sl_buffer_pips` padding to the final selected extreme.
 
 **Buffer:** Always add `sl_buffer_pips` beyond the chosen method to avoid stop hunting.
 
@@ -380,6 +386,32 @@ def kelly_lot_size(win_rate: float, avg_win_r: float, avg_loss_r: float,
     fraction = min(kelly, max_kelly_fraction)
     return balance * max(fraction, 0)
 ```
+
+### 5.3 Dynamic Confluence-Based Risk Scaling (SMC Native)
+
+SMC setups output a **Confluence Score (0-100)**. Instead of always risking the flat `risk_pct`, this module dynamically scales the risk based on the probability of the setup.
+
+```python
+def get_confluence_scaled_risk(base_risk_pct: float, confluence_score: int) -> float:
+    """
+    Scales the base risk percentage down if the confluence score is lower than optimal.
+    
+    Tiers (configurable):
+    - Score 80-100: Deploy 100% of base_risk_pct
+    - Score 65-79:  Deploy 75% of base_risk_pct
+    - Score 55-64:  Deploy 50% of base_risk_pct
+    - Score <55:    Rejected (0%)
+    """
+    if confluence_score >= 80:
+        return base_risk_pct
+    elif confluence_score >= 65:
+        return base_risk_pct * 0.75
+    elif confluence_score >= 55:
+        return base_risk_pct * 0.50
+    else:
+        return 0.0
+```
+This ensures that the maximum risk is only deployed on "A+" setups.
 
 ---
 

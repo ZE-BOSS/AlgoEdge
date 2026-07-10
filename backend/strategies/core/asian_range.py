@@ -40,9 +40,20 @@ class AsianRange:
         found = False
         
         for idx, row in recent.iterrows():
-            ts = row.get("time", 0)
+            ts = 0
+            if "time" in row:
+                ts = row["time"]
+            elif hasattr(idx, 'timestamp'):
+                ts = idx.timestamp()
+            elif isinstance(idx, (int, float)):
+                ts = idx
+                
             if ts == 0:
                 continue
+                
+            # Handle if ts is already a pandas Timestamp
+            if hasattr(ts, 'timestamp'):
+                ts = ts.timestamp()
                 
             dt = datetime.fromtimestamp(float(ts), timezone.utc)
             local_dt = get_local_time(dt)

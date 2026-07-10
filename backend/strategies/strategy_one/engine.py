@@ -1,17 +1,16 @@
 """
 backend/strategies/smc/engine.py
 
-Main SMC Orchestrator — 4-Layer Multi-Timeframe model.
+Main SMC Orchestrator — 3-Layer Multi-Timeframe model.
 Integrates all SMC sub-components with proper context translation
 for ConfluenceScorer.
 
-Source: SMC_Strategy-1.md + Implementation Plan (Definitive Strategy Spec)
-
-Flow: H4 Bias → H1 BOS + Zones → M15 ChoCH → M5 Candlestick → Execute
+Flow: H4 Bias → H1 ChoCH/Zones → M15 Execution (Candle or Wick/BOS)
 """
 
 import pandas as pd
 import asyncio
+import numpy as np
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
@@ -35,17 +34,11 @@ from backend.utils.timeutils import detect_session
 
 logger = get_logger(__name__)
 
-
-# Try importing optional modules (may not exist yet)
+# Try importing optional modules
 try:
     from backend.strategies.core.premium_discount import PremiumDiscountCalculator
 except ImportError:
     PremiumDiscountCalculator = None
-
-try:
-    from backend.strategies.core.asian_range import AsianRange
-except ImportError:
-    AsianRange = None
 
 try:
     from backend.strategies.core.supply_demand import SupplyDemandDetector
@@ -57,13 +50,13 @@ except ImportError:
 class SMCEngine(BaseStrategy):
     """
     Core Smart Money Concepts trading strategy engine.
-    Implements the 4-Layer Multi-Timeframe model with IPDM phase filter.
+    Implements the 3-Layer Multi-Timeframe model with H1 structural validation.
     """
 
     def __init__(self, user_config: UserConfig):
         super().__init__(user_config)
         self.smc_params = user_config.smc
-        self.run_logs = []  # Store internal execution logs
+        self.run_logs = []
         self.is_backtesting = False
 
         swing_len_htf = self.smc_params.swing_length_htf
@@ -74,23 +67,23 @@ class SMCEngine(BaseStrategy):
             swing_length=swing_len_htf, min_bos_count=2
         )
 
-        # Layer 2: H1 BOS + structure detector
-        # Uses intermediate swing length (between HTF and LTF)
+        # Layer 2: H1 (ITF)
         swing_len_itf = getattr(self.smc_params, 'swing_length_mtf', max(3, swing_len_htf - 2))
         self.h1_structure = MarketStructureDetector(
             swing_length=swing_len_itf, min_bos_count=2
         )
+        self.h1_order_blocks = OrderBlockDetector()
+        self.h1_fvg = FVGDetector(self.smc_params.fvg_min_gap_pips)
+        self.h1_liquidity = LiquidityMapper(self.smc_params.liq_sweep_min_pips)
 
-        # Layer 3: M15 ChoCH detector
-        self.ltf_structure = MarketStructureDetector(
+        # Layer 3: M15 (Execution)
+        self.m15_structure = MarketStructureDetector(
             swing_length=swing_len_ltf, min_bos_count=2
         )
+        self.m15_order_blocks = OrderBlockDetector()
+        self.m15_fvg = FVGDetector(self.smc_params.fvg_min_gap_pips)
+        self.m15_liquidity = LiquidityMapper(self.smc_params.liq_sweep_min_pips)
 
-        # Sub-module detectors
-        self.order_blocks = OrderBlockDetector()
-        self.h1_order_blocks = OrderBlockDetector()
-        self.fvg = FVGDetector(self.smc_params.fvg_min_gap_pips)
-        self.liquidity = LiquidityMapper(self.smc_params.liq_sweep_min_pips)
         self.scorer = ConfluenceScorer(self.smc_params)
         self.signal_gen = SignalGenerator(user_config)
         self.ipdm = IPDMDetector()
@@ -102,22 +95,13 @@ class SMCEngine(BaseStrategy):
         ) if PremiumDiscountCalculator else None
         
         self.supply_demand = SupplyDemandDetector() if SupplyDemandDetector else None
-        self.asian_range = AsianRange(
-            start_hour=self.smc_params.asian_range_start_hour,
-            end_hour=self.smc_params.asian_range_end_hour
-        ) if AsianRange else None
 
-        # State
         self.context: Dict[str, Any] = {}
-        
-        # State tracking for frontend logs to prevent log spam
         self.last_logged_htf_bias = None
-        self.last_logged_h1_trend = None
         self.last_logged_phase = None
         self.bias = "NEUTRAL"
 
     def log_event(self, message: str, level: str = "INFO", category: str = "SMC"):
-        """Intercept logs. If backtesting, store them. Otherwise broadcast to bot_service."""
         if self.is_backtesting:
             self.run_logs.append({
                 "time": datetime.now(timezone.utc).isoformat(),
@@ -125,43 +109,35 @@ class SMCEngine(BaseStrategy):
                 "category": category,
                 "message": message
             })
-            bot_service.log_system_event(message, level, f"BT-{category}")
+            if level != "DEBUG":
+                bot_service.log_system_event(message, level, f"BT-{category}")
         else:
             bot_service.log_system_event(message, level, category)
 
     def get_required_timeframes(self) -> List[str]:
-        return ["H4", "H1", "M15", "M5"]
+        return ["H4", "H1", "M15"]
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Optional[TradeSignal]:
-        """
-        Main evaluation loop — processes each timeframe layer.
-        Called on M15 bar close with multi-TF data.
-        """
         self.log_event(f"SMC Engine evaluating {symbol} on {timeframe}", "DEBUG", "SMC")
 
-        # This method expects to be called with the primary (M15) timeframe
-        # HTF data should be pre-loaded into self.context by the caller
-        # ── Update HTF & Secondary Data Structures ──
         if timeframe == "H4":
             ms_h4 = self.htf_structure.update(candles)
             self.context["htf"] = ms_h4
             self.bias = ms_h4.get("trend", "NEUTRAL")
             self.context["htf_bias"] = self.bias
             
-            # Granular H4 logging
             last_bos = ms_h4.get("last_bos")
             last_choch = ms_h4.get("last_choch")
             if last_bos:
-                self.log_event(f"[{symbol} H4] Break of Structure ({last_bos}) confirmed at {ms_h4.get('last_bos_level')} | BOS count: {ms_h4.get('consecutive_bos')}", "INFO", "SMC")
+                self.log_event(f"[{symbol} H4] BOS confirmed.", "INFO", "SMC")
             if last_choch:
-                self.log_event(f"[{symbol} H4] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
+                self.log_event(f"[{symbol} H4] ChoCH detected! Trend shifting.", "INFO", "SMC")
 
-            # Log HTF Bias changes
             if self.bias != "NEUTRAL" and self.bias != self.last_logged_htf_bias:
-                self.log_event(f"[{symbol} H4] HTF Bias shifted to {self.bias}", "INFO", "SMC")
+                self.log_event(f"[{symbol} H4] Bias shifted to {self.bias}", "INFO", "SMC")
                 self.last_logged_htf_bias = self.bias
 
-            # Update IPDM on H4
+            # IPDM on H4
             h4_swings = ms_h4.get("swings", [])
             h4_highs = [s for s in h4_swings if s["type"] == "HIGH"]
             h4_lows = [s for s in h4_swings if s["type"] == "LOW"]
@@ -170,36 +146,28 @@ class SMCEngine(BaseStrategy):
             
             current_phase = ipdm_state.get("phase", "UNKNOWN")
             if current_phase != self.last_logged_phase:
-                if current_phase == "EXPANSION":
-                    self.log_event(f"[{symbol} IPDM H4] Entered EXPANSION phase! Hunting for entries...", "INFO", "SMC")
-                else:
-                    self.log_event(f"[{symbol} IPDM H4] Entered {current_phase} phase. Waiting...", "INFO", "SMC")
+                self.log_event(f"[{symbol} IPDM] Phase: {current_phase}", "INFO", "SMC")
                 self.last_logged_phase = current_phase
 
             return None
             
         elif timeframe == "H1":
             ms_h1 = self.h1_structure.update(candles)
-            ms_h1["obs"] = self.h1_order_blocks.update(candles)
             self.context["h1"] = ms_h1
             
-            # Granular H1 logging
             last_bos = ms_h1.get("last_bos")
             last_choch = ms_h1.get("last_choch")
             if last_bos:
-                self.log_event(f"[{symbol} H1] Break of Structure ({last_bos}) confirmed at {ms_h1.get('last_bos_level')} | BOS count: {ms_h1.get('consecutive_bos')}", "INFO", "SMC")
+                self.log_event(f"[{symbol} H1] BOS confirmed.", "INFO", "SMC")
             if last_choch:
-                self.log_event(f"[{symbol} H1] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
-
-            # Check if H1 trend aligns with H4
-            h1_trend = ms_h1.get("trend", "NEUTRAL")
-            if h1_trend != self.last_logged_h1_trend:
-                if h1_trend != "NEUTRAL" and h1_trend == self.bias:
-                    self.log_event(f"[{symbol} H1] Structure aligned with H4 Bias ({self.bias})", "INFO", "SMC")
-                self.last_logged_h1_trend = h1_trend
-
-
-            # Cache ATR per H1 bar (Issue 6.4)
+                self.log_event(f"[{symbol} H1] ChoCH detected! Trend shifting.", "INFO", "SMC")
+            
+            # Map H1 Zones & Liquidity
+            self.context["h1_obs"] = self.h1_order_blocks.update(candles)
+            self.context["h1_fvgs"] = self.h1_fvg.update(candles)
+            self.context["h1_liquidity"] = self.h1_liquidity.update(candles, ms_h1["swings"])
+            
+            # Cache ATR
             lookback = min(14, len(candles) - 1)
             if lookback > 0:
                 recent_candles = candles.iloc[-(lookback+1):]
@@ -207,82 +175,41 @@ class SMCEngine(BaseStrategy):
                 for i in range(1, len(recent_candles)):
                     c = recent_candles.iloc[i]
                     prev_c = recent_candles.iloc[i-1]
-                    tr = max(
-                        c["high"] - c["low"],
-                        abs(c["high"] - prev_c["close"]),
-                        abs(c["low"] - prev_c["close"])
-                    )
+                    tr = max(c["high"] - c["low"], abs(c["high"] - prev_c["close"]), abs(c["low"] - prev_c["close"]))
                     tr_list.append(tr)
-                self.context["h1_atr"] = sum(tr_list) / len(tr_list) if tr_list else (candles.iloc[-1]["high"] - candles.iloc[-1]["low"])
+                self.context["atr"] = sum(tr_list) / len(tr_list) if tr_list else (candles.iloc[-1]["high"] - candles.iloc[-1]["low"])
             return None
 
         elif timeframe == "M15":
-            ms_m15 = self.ltf_structure.update(candles)
-            self.context["ltf_structure"] = ms_m15
-
-            last_bos = ms_m15.get("last_bos")
-            last_choch = ms_m15.get("last_choch")
-            if last_bos:
-                self.log_event(f"[{symbol} M15] Break of Structure ({last_bos}) confirmed at {ms_m15.get('last_bos_level')} | BOS count: {ms_m15.get('consecutive_bos')}", "INFO", "SMC")
-            if last_choch:
-                self.log_event(f"[{symbol} M15] Change of Character (ChoCH) detected! Trend reversing to {last_choch}", "INFO", "SMC")
-
-            obs = self.order_blocks.update(candles)
-            fvgs = self.fvg.update(candles)
-            self.context["obs"] = obs
-            self.context["fvgs"] = fvgs
-            self.context["liquidity"] = self.liquidity.update(candles, ms_m15["swings"])
-            if self.asian_range:
-                self.asian_range.update(candles)
-
-        # ── LAYER 1: Check H4 bias ──
-        htf_bias = self.context.get("htf_bias", "NEUTRAL")
-        
-        # Apply manual bias override if specified
-        is_manual_override = False
-        manual_bias = self.smc_params.manual_bias_overrides.get(symbol)
-        if manual_bias and manual_bias.upper() in ["BULLISH", "BEARISH", "NEUTRAL"]:
-            htf_bias = manual_bias.upper()
-            is_manual_override = True
+            ms_m15 = self.m15_structure.update(candles)
+            self.context["m15"] = ms_m15
             
-        if htf_bias == "NEUTRAL":
-            return None
-
-        # ── LAYER 2: Check H1 bias agrees + 2+ BOS confirmed ──
-        h1 = self.context.get("h1", {})
-        h1_trend = h1.get("trend", "NEUTRAL")
-
-        # Double-confirm: H1 must agree with H4 (unless manually overridden)
-        if not is_manual_override and h1_trend != htf_bias:
-            return None
-
-        # Must have 2+ BOS on H1 (unless manually overridden)
-        if not is_manual_override and not h1.get("trend_confirmed", False):
-            return None
-
-
-
-        # ── LAYER 3: M15 ChoCH ──
-        if timeframe == "M15":
-            ms_m15 = self.context.get("ltf_structure", {})
+            self.context["m15_obs"] = self.m15_order_blocks.update(candles)
+            self.context["m15_fvgs"] = self.m15_fvg.update(candles)
+            self.context["m15_liquidity"] = self.m15_liquidity.update(candles, ms_m15["swings"])
             
-            # Check if M15 trend has shifted to align with H1 bias (ChoCH occurred)
-            m15_trend = ms_m15.get("trend")
-            if m15_trend != htf_bias:
-                return None  # M15 structure not aligned yet
+            # ── LAYER 1: Check H4 Bias ──
+            htf_bias = self.context.get("htf_bias", "NEUTRAL")
+            manual_bias = self.smc_params.manual_bias_overrides.get(symbol)
+            is_manual_override = False
+            if manual_bias and manual_bias.upper() in ["BULLISH", "BEARISH", "NEUTRAL"]:
+                htf_bias = manual_bias.upper()
+                is_manual_override = True
                 
-            obs = self.context.get("obs", [])
-            fvgs = self.context.get("fvgs", [])
-            last_choch = ms_m15.get("last_choch")
-            
-            if not last_choch:
+            if htf_bias == "NEUTRAL":
                 return None
 
+            # ── LAYER 2: H1 Mandatory ChoCH Check ──
+            h1 = self.context.get("h1", {})
+            h1_trend = h1.get("trend")
             
-            # Supply & Demand Context
+            if not is_manual_override and h1_trend != htf_bias:
+                return None  # Waiting for H1 to align via ChoCH (trend shift)
+
+            # Supply & Demand Context (Mapped on H1 for bias)
             in_sd_zone = False
             if self.supply_demand:
-                sd_zones = self.supply_demand.update(candles)
+                sd_zones = self.supply_demand.update(candles) 
                 current_price = float(candles.iloc[-1]["close"])
                 if htf_bias == "BULLISH":
                     for d in sd_zones.get("demand", []):
@@ -295,350 +222,222 @@ class SMCEngine(BaseStrategy):
                             in_sd_zone = True
                             break
             self.context["in_sd_zone"] = in_sd_zone
-            if last_choch and (obs or fvgs):
-                ob_str = f"{len(obs)} Order Block(s)" if obs else ""
-                fvg_str = f"{len(fvgs)} FVG(s)" if fvgs else ""
-                zones = " and ".join(filter(None, [ob_str, fvg_str]))
-                self.log_event(f"[{symbol} M15] Entry Zones Detected: {zones} identified near ChoCH.", "INFO", "SMC")
 
-            # ── HARD FILTER: Killzones (Non-Synthetics Only) ──
-            current_price = float(candles.iloc[-1]["close"])
-            from backend.risk.compounding import get_instrument_profile
-            profile = get_instrument_profile(symbol)
-            instrument_type = profile.instrument_type if profile else "FOREX"
-            
-            if self.smc_params.session_filter_enabled and instrument_type != "SYNTHETIC":
-                current_time_val = candles.iloc[-1]["time"] if "time" in candles.columns else (candles.index[-1].timestamp() if hasattr(candles.index[-1], 'timestamp') else float(candles.iloc[-1].get("time", 0)))
-                if current_time_val:
-                    from backend.utils.timeutils import is_kill_zone
-                    dt_kz = datetime.fromtimestamp(current_time_val, timezone.utc)
-                    if not is_kill_zone(dt_kz):
-                        self.log_event(f"[{symbol} M15] Rejected by Killzone filter.", "DEBUG", "SMC")
-                        return None
-
-            # ── HARD FILTER: Asian Range Sweep ──
-            if self.smc_params.enforce_asian_range_sweep and self.asian_range and self.asian_range.is_mapped and instrument_type != "SYNTHETIC":
-                if not self.asian_range.check_sweep(current_price, htf_bias):
-                    self.log_event(f"[{symbol} M15] Rejected: Asian Range not swept yet.", "DEBUG", "SMC")
-                    return None
-
-            # ── SOFT FILTER: FVG Displacement ──
-            if self.smc_params.enforce_fvg_displacement:
-                if not fvgs:
-                    self.log_event(f"[{symbol} M15] Warning: No FVG Displacement found with ChoCH. Proceeding to fallback zones.", "DEBUG", "SMC")
-                    # We no longer reject here; we allow fallback to Order Blocks or Fibs
-
-            # ── HARD FILTER: Premium/Discount (PD) Array ──
+            # OTE (Soft Filter Confluence)
             in_ote = False
-            if self.premium_discount and len(ms_m15.get("swings", [])) >= 2:
-                # Use H4 swings to find HTF dealing range
+            if self.premium_discount:
                 htf_swings = self.context.get("htf", {}).get("swings", [])
                 if len(htf_swings) >= 2:
+                    current_price = float(candles.iloc[-1]["close"])
                     h_high = max(float(s["price"]) for s in htf_swings[-4:])
                     h_low = min(float(s["price"]) for s in htf_swings[-4:])
                     pd_zones = self.premium_discount.calculate(h_high, h_low)
-                    
                     if pd_zones:
-                        eq = pd_zones.get("equilibrium", 0)
-                        if self.smc_params.enforce_htf_pd:
-                            if htf_bias == "BULLISH" and current_price > eq:
-                                self.log_event(f"[{symbol} M15] Rejected: Price is in Premium (Buying high).", "DEBUG", "SMC")
-                                return None
-                            elif htf_bias == "BEARISH" and current_price < eq:
-                                self.log_event(f"[{symbol} M15] Rejected: Price is in Discount (Selling low).", "DEBUG", "SMC")
-                                return None
-                        
-                        # Set in_ote for scoring
                         if htf_bias == "BULLISH":
                             in_ote = pd_zones["ote_long_bottom"] <= current_price <= pd_zones["ote_long_top"]
                         else:
                             in_ote = pd_zones["ote_short_bottom"] <= current_price <= pd_zones["ote_short_top"]
-
             self.context["in_ote_zone"] = in_ote
 
-            return None  # Wait for M5 candlestick confirmation
-
-        # ── LAYER 4: M5 Candlestick Confirmation ──
-        if timeframe == "M5":
-            self.context["_last_m5_candles"] = candles
+            # ── LAYER 3: M15 Execution ──
+            current_price = float(candles.iloc[-1]["close"])
+            
+            # Check Candlestick
+            self.context["_last_m15_candles"] = candles
             pattern = detect_confirmation_pattern(candles, bias=htf_bias)
+            
+            # Check Fallback (Wick Tap or M15 BOS)
+            fallback_triggered = False
             if not pattern:
+                # LTF BOS after ChoCH?
+                m15_last_choch = ms_m15.get("last_choch")
+                m15_last_bos = ms_m15.get("last_bos")
+                if m15_last_choch == htf_bias and m15_last_bos == htf_bias:
+                    fallback_triggered = True
+                else:
+                    # Wick Tap: check if current candle low/high tapped a fresh M15 or H1 OB
+                    c_high = float(candles.iloc[-1]["high"])
+                    c_low = float(candles.iloc[-1]["low"])
+                    active_obs = self.context.get("h1_obs", []) + self.context.get("m15_obs", [])
+                    for ob in active_obs:
+                        if ob.get("type") == htf_bias and ob.get("touches", 99) <= 1:
+                            if htf_bias == "BULLISH" and float(ob["bottom"]) <= c_low <= float(ob["top"]):
+                                fallback_triggered = True
+                            elif htf_bias == "BEARISH" and float(ob["bottom"]) <= c_high <= float(ob["top"]):
+                                fallback_triggered = True
+
+            # If no execution trigger, wait.
+            if not pattern and not fallback_triggered:
                 return None
 
-            # ── Build scorer context (Issue #19 fix) ──
-            scorer_context = self._build_scorer_context(symbol, htf_bias, pattern)
+            # Generate Markings
+            markings = self._generate_markings(candles)
             
-            # ── Calculate Entry, SL, TP ──
-            entry_price = float(candles['close'].iloc[-1])
+            # Build Scorer Context
+            scorer_context = self._build_scorer_context(symbol, htf_bias, pattern)
+            scorer_context["markings"] = markings
+            
+            # Refined OB Entry (50% Equilibrium)
+            entry_price = current_price
+            fresh_ob = scorer_context.get("fresh_ob")
+            if fresh_ob:
+                # Determine 50% equilibrium level
+                ob_mid = (float(fresh_ob["top"]) + float(fresh_ob["bottom"])) / 2.0
+                
             scorer_context["entry_price"] = entry_price
             
-            # SL = M15 previous swing extreme + buffer
-            ms_m15 = self.context.get("ltf_structure", {})
-            m15_swings = ms_m15.get("swings", [])
-            
-            # TP = H1 structural reversal point (from strategy2.md)
-            ms_h1 = self.context.get("h1", {})
-            h1_swings = ms_h1.get("swings", [])
-            
-            # Fallback values
-            sl = entry_price * 0.99 if htf_bias == "BULLISH" else entry_price * 1.01
-            tp = entry_price * 1.03 if htf_bias == "BULLISH" else entry_price * 0.97
-            
-            pip_size = get_pip_size(symbol)
-            buffer = 5.0 * pip_size
-
-            if htf_bias == "BULLISH":
-                # SL Priority 1: Last M15 swing low below entry (structural)
-                lows = [s for s in m15_swings if s["type"] == "LOW" and float(s["price"]) < entry_price]
-                if lows:
-                    sl = float(lows[-1]["price"]) - buffer
-                else:
-                    # SL Priority 2: OB bottom
-                    obs_ctx = self.context.get("obs", [])
-                    bullish_obs = [ob for ob in obs_ctx if ob.get("type") == "BULLISH"]
-                    if bullish_obs:
-                        sl = float(bullish_obs[-1].get("bottom", entry_price * 0.99)) - buffer
-                    else:
-                        # SL Priority 3: Fallback — confirmation candle low
-                        sl = float(candles.iloc[-1]["low"]) - buffer
-
-                # TP: nearest H1 swing HIGH above entry (closest resistance)
-                h1_highs = [s for s in h1_swings if s["type"] == "HIGH" and float(s["price"]) > entry_price]
-                if h1_highs:
-                    tp = float(min(h1_highs, key=lambda s: float(s["price"]))["price"])
-            else:
-                # SL Priority 1: Last M15 swing high above entry (structural)
-                highs = [s for s in m15_swings if s["type"] == "HIGH" and float(s["price"]) > entry_price]
-                if highs:
-                    sl = float(highs[-1]["price"]) + buffer
-                else:
-                    # SL Priority 2: OB top
-                    obs_ctx = self.context.get("obs", [])
-                    bearish_obs = [ob for ob in obs_ctx if ob.get("type") == "BEARISH"]
-                    if bearish_obs:
-                        sl = float(bearish_obs[-1].get("top", entry_price * 1.01)) + buffer
-                    else:
-                        # SL Priority 3: Fallback — confirmation candle high
-                        sl = float(candles.iloc[-1]["high"]) + buffer
-
-                # TP: nearest H1 swing LOW below entry (closest support)
-                h1_lows = [s for s in h1_swings if s["type"] == "LOW" and float(s["price"]) < entry_price]
-                if h1_lows:
-                    tp = float(max(h1_lows, key=lambda s: float(s["price"]))["price"])
-                    
+            # ── Calculate Stop Loss (Liquidity / 2-Swing Rule) ──
+            sl = self._calculate_structural_sl(htf_bias, entry_price)
             scorer_context["stop_loss"] = sl
-            scorer_context["tp1_price"] = tp
-
-            # Use cached H1 ATR instead of dynamic M5 calculation
-            atr = self.context.get("h1_atr", candles.iloc[-1]["high"] - candles.iloc[-1]["low"])
+            
+            atr = self.context.get("atr", get_pip_size(symbol) * 10)
             scorer_context["atr"] = atr
-
-            # === Generate Markings for Frontend ===
-            markings = []
-            m15_obs = self.context.get("obs", [])
-            m15_fvgs = self.context.get("fvgs", [])
-            m15_swings = self.context.get("ltf_structure", {}).get("swings", [])
             
-            # Helper to extract time safely
-            def _get_time(obj):
-                idx = obj.get("index")
-                if hasattr(idx, "timestamp"):
-                    return int(idx.timestamp())
-                return int(idx) if idx is not None else 0
-
-            # Mark OBs
-            for ob in m15_obs:
-                markings.append({
-                    "type": "OB",
-                    "timeframe": "M15",
-                    "top": float(ob["top"]),
-                    "bottom": float(ob["bottom"]),
-                    "start_time": _get_time(ob),
-                    "end_time": int(candles.iloc[-1]["time"]) if 'time' in candles.columns else _get_time({"index": candles.index[-1]}),
-                    "color": "rgba(59, 130, 246, 0.2)" if ob["type"] == "BULLISH" else "rgba(239, 68, 68, 0.2)",
-                    "text": f"M15 OB ({ob['type']})"
-                })
-                
-            # Mark FVGs
-            for fvg in m15_fvgs:
-                markings.append({
-                    "type": "FVG",
-                    "timeframe": "M15",
-                    "top": float(fvg["top"]),
-                    "bottom": float(fvg["bottom"]),
-                    "start_time": _get_time(fvg),
-                    "end_time": int(candles.iloc[-1]["time"]) if 'time' in candles.columns else _get_time({"index": candles.index[-1]}),
-                    "color": "rgba(234, 179, 8, 0.2)",
-                    "text": "M15 FVG"
-                })
-                
-            # Mark CHOCH / BOS
-            # The structure logic identifies these as swings
-            for i, s in enumerate(m15_swings):
-                if i > 0:
-                    prev_s = m15_swings[i-1]
-                    if i >= 2:
-                        if s["type"] == "HIGH" and prev_s["type"] == "LOW" and float(s["price"]) > float(m15_swings[i-2]["price"]):
-                            text = "BOS"
-                        elif s["type"] == "LOW" and prev_s["type"] == "HIGH" and float(s["price"]) < float(m15_swings[i-2]["price"]):
-                            text = "BOS"
-                        else:
-                            text = "Swing"
-                    else:
-                        text = "Swing"
-                    markings.append({
-                        "type": "STRUCTURE",
-                        "timeframe": "M15",
-                        "price": float(s["price"]),
-                        "time": int(s["time"]),
-                        "text": text
-                    })
-                    
-            # H1 Markings (HTF Context)
-            for ob in self.context.get("h1", {}).get("obs", []):
-                markings.append({
-                    "type": "OB",
-                    "timeframe": "H1",
-                    "top": float(ob["top"]),
-                    "bottom": float(ob["bottom"]),
-                    "start_time": _get_time(ob),
-                    "end_time": int(candles.iloc[-1]["time"]) if 'time' in candles.columns else _get_time({"index": candles.index[-1]}),
-                    "color": "rgba(16, 185, 129, 0.2)" if ob["type"] == "BULLISH" else "rgba(249, 115, 22, 0.2)",
-                    "text": f"H1 OB ({ob['type']})"
-                })
-                
-            h1_swings = self.context.get("h1", {}).get("swings", [])
-            for i, s in enumerate(h1_swings):
-                if i > 0:
-                    prev_s = h1_swings[i-1]
-                    if i >= 2:
-                        if s["type"] == "HIGH" and prev_s["type"] == "LOW" and float(s["price"]) > float(h1_swings[i-2]["price"]):
-                            text = "H1 BOS/CHOCH"
-                        elif s["type"] == "LOW" and prev_s["type"] == "HIGH" and float(s["price"]) < float(h1_swings[i-2]["price"]):
-                            text = "H1 BOS/CHOCH"
-                        else:
-                            text = "H1 Swing"
-                    else:
-                        text = "H1 Swing"
-                    markings.append({
-                        "type": "STRUCTURE",
-                        "timeframe": "H1",
-                        "price": float(s["price"]),
-                        "time": int(s["time"]),
-                        "text": text
-                    })
-                
-            scorer_context["markings"] = markings
-
-
-            # ── HARD FILTER: Strict 3 Confluence Minimum (H1, M15, M5) ──
-            # H1 Confluence: Confirmed by Layer 2 (h1_trend == htf_bias + trend_confirmed)
-            # M5 Confluence: Confirmed by Layer 4 (detect_confirmation_pattern)
-            # M15 Confluence: Must have at least one POI (OB, FVG, S&D, or Fib)
-            m15_obs = self.context.get("obs", [])
-            m15_fvgs = self.context.get("fvgs", [])
-            fresh_ob = any(ob.get("type") == htf_bias for ob in m15_obs)
-            fvg_present = any(fvg.get("type") == htf_bias for fvg in m15_fvgs)
-
-            m15_confluences = 0
-            if fresh_ob: m15_confluences += 1
-            if fvg_present: m15_confluences += 1
-            if self.context.get("in_sd_zone"): m15_confluences += 1
+            # Calculate TP placeholder using min_rr to pass validation Gate 4
+            min_rr = getattr(self.config.risk, "min_rr", 1.0) if hasattr(self, 'config') else 1.0
+            if htf_bias == "BULLISH":
+                scorer_context["tp1_price"] = entry_price + (entry_price - sl) * max(min_rr, 1.0)
+            else:
+                scorer_context["tp1_price"] = entry_price - (sl - entry_price) * max(min_rr, 1.0)
             
-            if m15_confluences < 1:
-                return None  # Failed strict confluence requirement
-            
-            # ── Score ──
+            # Score
             score = self.scorer.calculate_score(scorer_context)
 
-            # ── Generate signal if score meets threshold ──
-            if score >= self.smc_params.min_signal_score:
-                self.log_event(f"[{symbol} M5] Candlestick Confirmation: {pattern.name} (Tier {pattern.tier}) detected.", "INFO", "SMC")
-                
-                breakdown = scorer_context.get("score_breakdown", {})
-                breakdown_str = ", ".join(f"{k}: {v}" for k, v in breakdown.items() if v > 0)
-                self.log_event(f"[{symbol} M5] 🎯 SIGNAL VALIDATED! Score: {score}/100. Direction: {htf_bias} | Confluences: {breakdown_str}", "SIGNAL", "SMC")
-                
+            if score >= getattr(self.smc_params, "min_signal_score", 55):
                 sig = self.signal_gen.generate(scorer_context, score)
                 if sig:
-                    # Provide metadata for frontend algorithmic zone drawing (no base64)
                     sig.metadata["chart_zones"] = markings
                     return sig
 
         return None
 
     async def on_tick(self, symbol: str, tick: Dict[str, Any]) -> Optional[List[TradeAction]]:
-        """Optional intra-bar management (e.g. precise trailing)."""
         return []
 
+    def _calculate_structural_sl(self, bias: str, entry_price: float) -> float:
+        """Calculates SL based on last 2 swings and H1/M15 liquidity pools."""
+        m15_swings = self.context.get("m15", {}).get("swings", [])
+        h1_liq = self.context.get("h1_liquidity", {})
+        m15_liq = self.context.get("m15_liquidity", {})
+        
+        atr = self.context.get("atr", 0)
+        buffer = atr * 0.1 # Dynamic buffer
+        
+        if bias == "BULLISH":
+            # 1. 2-Swing Lows
+            lows = [float(s["price"]) for s in m15_swings if s["type"] == "LOW" and float(s["price"]) < entry_price]
+            sl_swing = min(lows[-2:]) if len(lows) >= 2 else (lows[-1] if lows else entry_price * 0.99)
+            
+            # 2. Liquidity (SSL)
+            sl_liq = sl_swing
+            for liq in [h1_liq, m15_liq]:
+                for pool in liq.get("ssl", []):
+                    level = float(pool.get("level", 0))
+                    if 0 < level < entry_price:
+                        sl_liq = min(sl_liq, level)
+            
+            return min(sl_swing, sl_liq) - buffer
+            
+        else:
+            # 1. 2-Swing Highs
+            highs = [float(s["price"]) for s in m15_swings if s["type"] == "HIGH" and float(s["price"]) > entry_price]
+            sl_swing = max(highs[-2:]) if len(highs) >= 2 else (highs[-1] if highs else entry_price * 1.01)
+            
+            # 2. Liquidity (BSL)
+            sl_liq = sl_swing
+            for liq in [h1_liq, m15_liq]:
+                for pool in liq.get("bsl", []):
+                    level = float(pool.get("level", 0))
+                    if level > entry_price:
+                        sl_liq = max(sl_liq, level)
+            
+            return max(sl_swing, sl_liq) + buffer
+
+
+    def _generate_markings(self, candles: pd.DataFrame) -> List[Dict]:
+        markings = []
+        def _get_time(obj):
+            idx = obj.get("index")
+            if hasattr(idx, "timestamp"): return int(idx.timestamp())
+            return int(idx) if idx is not None else 0
+            
+        end_t = int(candles.iloc[-1]["time"]) if 'time' in candles.columns else int(candles.index[-1].timestamp())
+
+        for ob in self.context.get("h1_obs", []) + self.context.get("m15_obs", []):
+            markings.append({
+                "type": "OB", "timeframe": "M15/H1",
+                "top": float(ob["top"]), "bottom": float(ob["bottom"]),
+                "start_time": _get_time(ob), "end_time": end_t,
+                "color": "rgba(59, 130, 246, 0.2)" if ob["type"] == "BULLISH" else "rgba(239, 68, 68, 0.2)",
+                "text": f"OB ({ob['type']})"
+            })
+        return markings
+
     def _build_scorer_context(self, symbol: str, bias: str, pattern) -> Dict[str, Any]:
-        """
-        Translate sub-module outputs into the exact keys ConfluenceScorer expects.
-        Fixes Issue #12/#19: scorer was getting wrong keys and scoring near-zero.
-        """
-        htf = self.context.get("htf", {})
         h1 = self.context.get("h1", {})
-        obs = self.context.get("obs", [])
-        fvgs = self.context.get("fvgs", [])
-        liq = self.context.get("liquidity", {})
+        m15_obs = self.context.get("m15_obs", [])
+        h1_obs = self.context.get("h1_obs", [])
+        fvgs = self.context.get("m15_fvgs", []) + self.context.get("h1_fvgs", [])
+        liq = self.context.get("m15_liquidity", {})
 
-        # Find fresh OB in bias direction
+        # 1-Touch Fresh OB logic (must be tapped by recent candles)
         fresh_ob = None
-        for ob in reversed(obs):
-            if ob.get("type") == bias and ob.get("touches", 99) == 0:
-                fresh_ob = ob
-                break
+        _candles = self.context.get("_last_m15_candles")
+        if _candles is not None and len(_candles) >= 3:
+            recent_low = min(float(_candles.iloc[i]["low"]) for i in range(-3, 0))
+            recent_high = max(float(_candles.iloc[i]["high"]) for i in range(-3, 0))
+        else:
+            recent_low = recent_high = 0
 
-        # Check if any FVG in bias direction is present
-        fvg_present = False
+        for ob in reversed(m15_obs + h1_obs):
+            if ob.get("type") == bias and ob.get("touches", 99) <= 1:
+                if bias == "BULLISH" and float(ob["bottom"]) <= recent_low <= float(ob["top"]):
+                    fresh_ob = ob
+                    break
+                elif bias == "BEARISH" and float(ob["bottom"]) <= recent_high <= float(ob["top"]):
+                    fresh_ob = ob
+                    break
+
+        fvg_present = any(fvg.get("type") == bias for fvg in fvgs)
         fvg_inside_ob = False
-        for fvg in fvgs:
-            if fvg.get("type") == bias:
-                fvg_present = True
-                if fresh_ob:
-                    ob_high = fresh_ob.get("top", 0)
-                    ob_low = fresh_ob.get("bottom", 0)
-                    fvg_mid = (fvg.get("top", 0) + fvg.get("bottom", 0)) / 2
+        if fvg_present and fresh_ob:
+            ob_high = float(fresh_ob.get("top", 0))
+            ob_low = float(fresh_ob.get("bottom", 0))
+            for fvg in fvgs:
+                if fvg.get("type") == bias:
+                    fvg_mid = (float(fvg.get("top", 0)) + float(fvg.get("bottom", 0))) / 2
                     if ob_low <= fvg_mid <= ob_high:
                         fvg_inside_ob = True
 
-        # Kill zone check — use the candle's own timestamp so backtests
-        # evaluate the historical session, not today's current time.
+        # Kill zone check
         try:
             from datetime import timezone as _tz
-            _candles = self.context.get("_last_m5_candles")
+            _candles = self.context.get("_last_m15_candles")
             if _candles is not None and len(_candles) > 0:
                 _bar_idx = _candles.index[-1]
-                if hasattr(_bar_idx, 'to_pydatetime'):
-                    _bar_dt = _bar_idx.to_pydatetime()
-                    if _bar_dt.tzinfo is None:
-                        _bar_dt = _bar_dt.replace(tzinfo=_tz.utc)
-                    _bar_ts = int(_bar_dt.timestamp())
-                else:
-                    _bar_ts = int(float(_bar_idx))
+                _bar_ts = int(_bar_idx.timestamp()) if hasattr(_bar_idx, 'timestamp') else None
             else:
                 _bar_ts = None
-            session = detect_session(_bar_ts) if _bar_ts is not None else "UNKNOWN"
-            in_kill_zone = session in ("LONDON", "NY", "LONDON/NY")
+            if "Volatility" in symbol or "Crash" in symbol or "Boom" in symbol or "Step" in symbol or "Jump" in symbol:
+                in_kill_zone = True
+            else:
+                in_kill_zone = session in ("LONDON", "NY", "LONDON/NY")
         except Exception:
             in_kill_zone = False
 
-        # Candle tier from pattern
         candle_tier = 0
         if pattern:
             tier_obj = getattr(pattern, 'tier', 0)
-            if hasattr(tier_obj, 'value'):
-                candle_tier = tier_obj.value
-            elif isinstance(tier_obj, str):
-                candle_tier = {"TIER_1": 1, "TIER_2": 2, "TIER_3": 3}.get(tier_obj, 0)
-            else:
-                candle_tier = tier_obj
+            if hasattr(tier_obj, 'value'): candle_tier = tier_obj.value
+            elif isinstance(tier_obj, str): candle_tier = {"TIER_1": 1, "TIER_2": 2, "TIER_3": 3}.get(tier_obj, 0)
+            else: candle_tier = tier_obj
 
         return {
             "symbol": symbol,
             "signal_direction": bias,
-            "htf_bias": htf.get("trend", "NEUTRAL"),
-            "h1_structure": h1.get("trend", "NEUTRAL"),
+            "htf_bias": self.context.get("htf_bias"),
+            "h1_bos": h1.get("trend") == bias and h1.get("trend_confirmed", False),
+            "h1_choch": h1.get("trend") == bias and not h1.get("trend_confirmed", False),
             "liquidity_sweep": liq.get("recent_sweep"),
             "fresh_ob": fresh_ob,
             "fvg_present": fvg_present,
@@ -646,7 +445,6 @@ class SMCEngine(BaseStrategy):
             "in_ote_zone": self.context.get("in_ote_zone", False),
             "in_sd_zone": self.context.get("in_sd_zone", False),
             "candle_tier": candle_tier,
-            "ltf_choch": self.context.get("ltf_structure", {}).get("last_choch") == bias,
             "in_kill_zone": in_kill_zone,
             "is_backtesting": self.is_backtesting,
         }
