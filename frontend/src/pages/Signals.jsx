@@ -23,7 +23,8 @@ function ConfluenceBreakdown({ breakdownJson }) {
 
   const factors = [
     { key: 'htf_bias', label: 'HTF Bias', max: 15 },
-    { key: 'h1_structure', label: 'H1 Structure', max: 10 },
+    { key: 'm15_bos', label: 'M15 BOS', max: 15 },
+    { key: 'm15_choch', label: 'M15 ChoCH', max: 10 },
     { key: 'sweep', label: 'Liquidity Sweep', max: 15 },
     { key: 'fresh_ob', label: 'Fresh OB', max: 15 },
     { key: 'fvg_inside_ob', label: 'FVG ∩ OB', max: 10 },

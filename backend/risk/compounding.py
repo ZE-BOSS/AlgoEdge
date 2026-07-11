@@ -109,11 +109,11 @@ class InstrumentProfile:
     swing_length_htf_override:     Optional[int]   = None
     swing_length_ltf_override:     Optional[int]   = None
     ob_impulse_ratio_override:     Optional[float] = None
-    liq_sweep_min_pips_override:   Optional[float] = None
-    fvg_min_gap_pips_override:     Optional[float] = None
+    liq_sweep_min_atr_mult_override:   Optional[float] = None
+    fvg_min_gap_atr_mult_override:     Optional[float] = None
     sl_buffer_pips_override:       Optional[float] = None
     atr_trail_multiplier_override: Optional[float] = None
-    max_spread_pips_override:      Optional[float] = None
+    max_spread_atr_mult_override:      Optional[float] = None
 
     def get_pip_value_per_mini_lot(self) -> float:
         """Value of 1 pip/point move on 0.01 lot."""
@@ -141,8 +141,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         swing_length_htf_override=3,
         swing_length_ltf_override=2,
         ob_impulse_ratio_override=1.5,
-        liq_sweep_min_pips_override=10.0,
-        fvg_min_gap_pips_override=5.0,
+        liq_sweep_min_atr_mult_override=1.0,
+        fvg_min_gap_atr_mult_override=0.5,
         sl_buffer_pips_override=3.0,
     ),
 
@@ -161,7 +161,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         swing_length_htf_override=3,
         swing_length_ltf_override=2,
         ob_impulse_ratio_override=1.5,
-        fvg_min_gap_pips_override=3.0,
+        fvg_min_gap_atr_mult_override=0.3,
     ),
 
     "Volatility 50 Index": InstrumentProfile(
@@ -195,9 +195,9 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         swing_length_htf_override=3,
         swing_length_ltf_override=2,
         ob_impulse_ratio_override=2.0,
-        liq_sweep_min_pips_override=15.0,
+        liq_sweep_min_atr_mult_override=1.5,
         sl_buffer_pips_override=5.0,
-        max_spread_pips_override=5.0,
+        max_spread_atr_mult_override=0.5,
     ),
 
     "Boom 1000 Index": InstrumentProfile(
@@ -215,7 +215,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         swing_length_htf_override=5,  # Longer for spike handling
         swing_length_ltf_override=3,
         ob_impulse_ratio_override=2.5,  # Stronger impulse required (spike-driven)
-        liq_sweep_min_pips_override=20.0,
+        liq_sweep_min_atr_mult_override=2.0,
     ),
 
     "Crash 1000 Index": InstrumentProfile(
@@ -249,7 +249,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         trades_24_7=True,
         swing_length_htf_override=3,
         swing_length_ltf_override=2,
-        fvg_min_gap_pips_override=1.0,
+        fvg_min_gap_atr_mult_override=0.1,
     ),
 
     # ── Volatility Standard (New) ────────────────────────────────────────────
@@ -470,11 +470,11 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         trades_24_7=False,
         swing_length_htf_override=5,
         ob_impulse_ratio_override=2.0,
-        liq_sweep_min_pips_override=50.0,   # Gold sweeps are larger
-        fvg_min_gap_pips_override=30.0,
+        liq_sweep_min_atr_mult_override=5.0,   # Gold sweeps are larger
+        fvg_min_gap_atr_mult_override=3.0,
         sl_buffer_pips_override=10.0,
         atr_trail_multiplier_override=2.0,  # Wider trail for gold
-        max_spread_pips_override=5.0,
+        max_spread_atr_mult_override=0.5,
     ),
 
     # ── Forex Majors ──────────────────────────────────────────────────────────
@@ -505,7 +505,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         session_filter=True,
         news_filter=True,
         trades_24_7=False,
-        liq_sweep_min_pips_override=8.0,  # GBP can have larger sweeps
+        liq_sweep_min_atr_mult_override=0.8,  # GBP can have larger sweeps
         sl_buffer_pips_override=7.0,
     ),
 
@@ -538,10 +538,10 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         news_filter=True,
         trades_24_7=False,
         swing_length_htf_override=5,
-        liq_sweep_min_pips_override=20.0,
-        fvg_min_gap_pips_override=15.0,
+        liq_sweep_min_atr_mult_override=2.0,
+        fvg_min_gap_atr_mult_override=1.5,
         sl_buffer_pips_override=10.0,
-        max_spread_pips_override=8.0,
+        max_spread_atr_mult_override=0.8,
     ),
 
     "BTCUSD": InstrumentProfile(
@@ -557,11 +557,11 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         news_filter=True,
         trades_24_7=True,
         swing_length_htf_override=5,
-        liq_sweep_min_pips_override=200.0,
-        fvg_min_gap_pips_override=100.0,
+        liq_sweep_min_atr_mult_override=20.0,
+        fvg_min_gap_atr_mult_override=10.0,
         sl_buffer_pips_override=50.0,
         atr_trail_multiplier_override=2.5,
-        max_spread_pips_override=100.0,
+        max_spread_atr_mult_override=10.0,
     ),
 }
 

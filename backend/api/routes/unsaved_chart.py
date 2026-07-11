@@ -18,6 +18,6 @@ async def get_unsaved_trade_chart(
         
     return {
         "chart_data": trade.get("chart_data", []),
-        "chart_data_h1": trade.get("chart_data_h1", []),
-        "chart_data_m15": trade.get("chart_data_m15", [])
+        "chart_data_m15": trade.get("chart_data_m15", []),
+        "chart_data_m5": trade.get("chart_data_m5", [])
     }

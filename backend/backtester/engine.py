@@ -87,14 +87,21 @@ class BacktestEngine:
         self.open_positions: List[Dict[str, Any]] = []
         self.equity_curve: List[float] = []
         self.invalid_signals: int = 0
+        self.rejection_funnel: Dict[str, Any] = {
+            "total_evaluated": 0,
+            "strategy_rejections": {},
+            "risk_rejections": {},
+            "errors": 0,
+            "approved": 0
+        }
 
     def run(
         self,
         candles: pd.DataFrame,
         signals: List[Dict[str, Any]],
         initial_balance: float = 10000.0,
-        candles_h1: pd.DataFrame = None,
         candles_m15: pd.DataFrame = None,
+        candles_m5: pd.DataFrame = None,
         compounding_enabled: bool = False,
     ) -> Dict[str, Any]:
         """Run a backtest on historical candles with pre-generated signals."""
@@ -103,6 +110,13 @@ class BacktestEngine:
         self.open_positions = []
         self.equity_curve = [balance]
         self.invalid_signals = 0
+        self.rejection_funnel = {
+            "total_evaluated": 0,
+            "strategy_rejections": {},
+            "risk_rejections": {},
+            "errors": 0,
+            "approved": 0
+        }
 
         logger.info(f"[ENGINE] ═══ Starting backtest engine ═══")
         logger.info(f"[ENGINE] Balance: ${initial_balance} | Signals: {len(signals)} | Candles: {len(candles)}")
@@ -343,15 +357,37 @@ class BacktestEngine:
                 sig["group_id"] = group_id
 
                 current_time_dt = datetime.fromtimestamp(float(current_time), timezone.utc) if isinstance(current_time, (int, float)) else pd.to_datetime(current_time).to_pydatetime()
+                
+                self.rejection_funnel["total_evaluated"] += 1
+                
+                # Check Strategy Rejections first
+                passed_gates = sig.get("metadata", {}).get("passed_gates", True)
+                if not passed_gates:
+                    reasons = sig.get("metadata", {}).get("rejection_reasons", [])
+                    for r in reasons:
+                        gate = r.split(":")[0] if ":" in r else "Unknown Strategy Rule"
+                        self.rejection_funnel["strategy_rejections"][gate] = self.rejection_funnel["strategy_rejections"].get(gate, 0) + 1
+                    logger.trace(f"[ENGINE] ❌ Signal REJECTED (Strategy): {reasons}")
+                    continue
+
                 # Evaluate signal through RiskEngine
-                approved, reason, tp_levels = self.risk_engine.evaluate_signal(
-                    signal_data=sig,
-                    account_balance=balance,
-                    current_time=current_time_dt
-                )
+                approved, reason, tp_levels = False, "Error during evaluation", []
+                try:
+                    approved, reason, tp_levels = self.risk_engine.evaluate_signal(
+                        signal_data=sig,
+                        account_balance=balance,
+                        current_time=current_time_dt
+                    )
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    self.rejection_funnel["errors"] += 1
+                    logger.error(f"[ENGINE] ❌ Error evaluating signal: {str(e)}")
+                    continue
 
                 if approved:
-                    logger.info(f"[ENGINE] ✅ Signal APPROVED at bar {i}: {sig.get('direction')} @ {sig.get('entry_price', current_price):.5f} | {len(tp_levels)} TP levels | balance=${balance:.2f}")
+                    self.rejection_funnel["approved"] += 1
+                    logger.trace(f"[ENGINE] ✅ Signal APPROVED at bar {i}: {sig.get('direction')} @ {sig.get('entry_price', current_price):.5f} | {len(tp_levels)} TP levels | balance=${balance:.2f}")
 
                     for tp in tp_levels:
                         # Validate before opening
@@ -374,7 +410,8 @@ class BacktestEngine:
                         self.open_positions.append(position)
                         logger.debug(f"[ENGINE]   Position opened: TP{tp.level} @ {bar_open_price:.5f} (bar open) | vol={tp.volume:.4f}")
                 else:
-                    logger.info(f"[ENGINE] ❌ Signal REJECTED at bar {i}: {reason}")
+                    self.rejection_funnel["risk_rejections"][reason] = self.rejection_funnel["risk_rejections"].get(reason, 0) + 1
+                    logger.trace(f"[ENGINE] ❌ Signal REJECTED (Risk): {reason}")
 
             self.equity_curve.append(balance)
 
@@ -401,9 +438,10 @@ class BacktestEngine:
         self.equity_curve.append(balance)
 
         # Group trades by group_id for combined P&L display
-        grouped_trades = self._group_trades(self.trades, candles, candles_h1, candles_m15)
+        grouped_trades = self._group_trades(self.trades, candles, candles_m15, candles_m5)
 
         report = generate_risk_report(grouped_trades)
+        report.rejection_funnel = self.rejection_funnel
 
         # ── Engine completion summary ──
         total_pnl = balance - initial_balance
@@ -429,6 +467,7 @@ class BacktestEngine:
             "grouped_trades": grouped_trades,
             "equity_curve": self.equity_curve,
             "report": report,
+            "rejection_funnel": self.rejection_funnel,
         }
 
     def _create_position(
@@ -494,7 +533,7 @@ class BacktestEngine:
             "original_signal": sig,
         }
 
-    def _group_trades(self, trades: List[Dict], candles: Any = None, candles_h1: Any = None, candles_m15: Any = None) -> List[Dict]:
+    def _group_trades(self, trades: List[Dict], candles: Any = None, candles_m15: Any = None, candles_m5: Any = None) -> List[Dict]:
         """Group trades by group_id for combined P&L display, extracting chart data for frontend."""
         from collections import OrderedDict
         groups = OrderedDict()
@@ -608,8 +647,8 @@ class BacktestEngine:
                         return c_data
 
                     g["chart_data"] = _extract_chart_data(candles, entry_time, exit_time, 30, 15)
-                    g["chart_data_h1"] = _extract_chart_data(candles_h1, entry_time, exit_time, 20, 5)
-                    g["chart_data_m15"] = _extract_chart_data(candles_m15, entry_time, exit_time, 30, 10)
+                    g["chart_data_m15"] = _extract_chart_data(candles_m15, entry_time, exit_time, 20, 5)
+                    g["chart_data_m5"] = _extract_chart_data(candles_m5, entry_time, exit_time, 30, 10)
                     
                     # Generate SMC zones based on the first trade's signal data
                     sig = g.get("original_signal", {})

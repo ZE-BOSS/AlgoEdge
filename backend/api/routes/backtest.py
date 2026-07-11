@@ -38,7 +38,7 @@ router = APIRouter(prefix="/api", tags=["backtest"])
 class BacktestRequest(BaseModel):
     strategy_id: str = "SMC_v1"
     symbol: str
-    timeframe: str = "H1"
+    timeframe: str = "M15"
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     candle_count: int = 5000
@@ -133,8 +133,8 @@ async def get_backtest_latest_result(current_user: User = Depends(get_current_us
             for t in trades:
                 if isinstance(t, dict):
                     t.pop("chart_data", None)
-                    t.pop("chart_data_h1", None)
                     t.pop("chart_data_m15", None)
+                    t.pop("chart_data_m5", None)
         
         # Strip massive run_logs array
         if "run_logs" in result_data:
@@ -236,16 +236,13 @@ async def run_backtest_endpoint(
                     import pandas as pd
                     # Fetch historical context so indicators can warm up immediately on start_date
                     h4_start = start - pd.Timedelta(days=150)
-                    h1_start = start - pd.Timedelta(days=50)
                     m15_start = start - pd.Timedelta(days=10)
                     m5_start = start - pd.Timedelta(days=5)
                     candles_h4 = await DataFetcher.get_data_range(req.symbol, "H4", h4_start, end)
-                    candles_h1 = await DataFetcher.get_data_range(req.symbol, "H1", h1_start, end)
                     candles_m15 = await DataFetcher.get_data_range(req.symbol, "M15", m15_start, end)
                     candles_m5 = await DataFetcher.get_data_range(req.symbol, "M5", m5_start, end)
                 else:
                     candles_h4 = await DataFetcher.get_historical_data(req.symbol, "H4", count=req.candle_count)
-                    candles_h1 = await DataFetcher.get_historical_data(req.symbol, "H1", count=req.candle_count)
                     candles_m15 = await DataFetcher.get_historical_data(req.symbol, "M15", count=req.candle_count)
                     candles_m5 = await DataFetcher.get_historical_data(req.symbol, "M5", count=req.candle_count)
             except DataFetchError as e:
@@ -253,7 +250,7 @@ async def run_backtest_endpoint(
                 await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
                 return
 
-            if any(c is None or c.empty for c in [candles_h4, candles_h1, candles_m15, candles_m5]):
+            if any(c is None or c.empty for c in [candles_h4, candles_m15, candles_m5]):
                 bot_service.log_system_event("Incomplete MTF data available for backtest", category="BACKTEST", level="ERROR")
                 await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": "Incomplete MTF data"})
                 return
@@ -296,7 +293,6 @@ async def run_backtest_endpoint(
                 return df
                 
             candles_h4_idx = _index_candles(candles_h4)
-            candles_h1_idx = _index_candles(candles_h1)
             candles_m15_idx = _index_candles(candles_m15)
             candles_m5_idx = _index_candles(candles_m5)
             
@@ -305,7 +301,6 @@ async def run_backtest_endpoint(
             async def generate_signals_simulated():
                 sigs = []
                 prev_h4_time = None
-                prev_h1_time = None
                 prev_m15_time = None
                 prev_m5_time = None
 
@@ -313,20 +308,17 @@ async def run_backtest_endpoint(
                 import numpy as np
 
                 candles_h4_sorted = candles_h4_idx.sort_index()
-                candles_h1_sorted = candles_h1_idx.sort_index()
                 candles_m5_sorted = candles_m5_idx.sort_index()
                 candles_m15_sorted = candles_m15_idx.sort_index()
 
                 # Pre-compute index arrays for fast binary search
                 h4_times = candles_h4_sorted.index.values
-                h1_times = candles_h1_sorted.index.values
                 m15_times = candles_m15_sorted.index.values
                 m5_times = candles_m5_sorted.index.values
 
                 # Max lookback windows (bars)
                 H4_WINDOW = 200
-                H1_WINDOW = 300
-                M15_WINDOW = 200
+                M15_WINDOW = 300
                 M5_WINDOW = 500
 
                 import time
@@ -368,11 +360,6 @@ async def run_backtest_endpoint(
                     h4_start = max(0, h4_end - H4_WINDOW)
                     slice_h4 = candles_h4_sorted.iloc[h4_start:h4_end]
 
-                    h1_cutoff = current_time - np.timedelta64(1, 'h')
-                    h1_end = int(np.searchsorted(h1_times, h1_cutoff, side='right'))
-                    h1_start = max(0, h1_end - H1_WINDOW)
-                    slice_h1 = candles_h1_sorted.iloc[h1_start:h1_end]
-
                     m15_cutoff = current_time - np.timedelta64(15, 'm')
                     m15_end = int(np.searchsorted(m15_times, m15_cutoff, side='right'))
                     m15_start = max(0, m15_end - M15_WINDOW)
@@ -383,7 +370,7 @@ async def run_backtest_endpoint(
                     m5_start = max(0, m5_end - M5_WINDOW)
                     slice_m5 = candles_m5_sorted.iloc[m5_start:m5_end]
 
-                    if len(slice_h4) < 20 or len(slice_h1) < 20 or len(slice_m15) < 20 or len(slice_m5) < 20:
+                    if len(slice_h4) < 20 or len(slice_m15) < 20 or len(slice_m5) < 20:
                         continue
 
                     sig = None
@@ -393,12 +380,6 @@ async def run_backtest_endpoint(
                         s = await engine.on_bar(req.symbol, "H4", slice_h4)
                         if s: sig = s
                         prev_h4_time = last_h4_time
-
-                    last_h1_time = slice_h1.index[-1]
-                    if last_h1_time != prev_h1_time:
-                        s = await engine.on_bar(req.symbol, "H1", slice_h1)
-                        if s: sig = s
-                        prev_h1_time = last_h1_time
 
                     last_m15_time = slice_m15.index[-1]
                     if last_m15_time != prev_m15_time:
@@ -840,8 +821,8 @@ async def get_unsaved_trade_chart(
         
     return {
         "chart_data": trade.get("chart_data", []),
-        "chart_data_h1": trade.get("chart_data_h1", []),
-        "chart_data_m15": trade.get("chart_data_m15", [])
+        "chart_data_m15": trade.get("chart_data_m15", []),
+        "chart_data_m5": trade.get("chart_data_m5", [])
     }
 
 
@@ -966,8 +947,8 @@ async def save_backtest_from_client(
             mfe_pips=t.get("mfe_pips"),
             confluence_score=t.get("confluence_score"),
             chart_data=json.dumps(t.get("chart_data", [])),
-            chart_data_h1=json.dumps(t.get("chart_data_h1", [])),
             chart_data_m15=json.dumps(t.get("chart_data_m15", [])),
+            chart_data_m5=json.dumps(t.get("chart_data_m5", [])),
             tp1_price=t.get("tp1_price"),
             tp2_price=t.get("tp2_price"),
             tp3_price=t.get("tp3_price"),

@@ -7,14 +7,20 @@ Source: SMC_Strategy.md Section 2
 
 import pandas as pd
 from typing import List, Dict, Any
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class FVGDetector:
     """Detects 3-candle Fair Value Gaps."""
 
-    def __init__(self, min_gap_pips: float = 0.2):
-        # We repurposed min_gap_pips to act as an ATR multiplier.
-        # e.g., 0.2 means the gap must be at least 0.2 * ATR.
-        self.atr_multiplier = min_gap_pips
+    def __init__(self, fvg_min_gap_atr_mult: float = 0.2, min_gap_pips: float = None):
+        # Backward compatibility for one release
+        if min_gap_pips is not None:
+            logger.warning("min_gap_pips is deprecated; use fvg_min_gap_atr_mult instead.")
+            self.atr_multiplier = min_gap_pips
+        else:
+            self.atr_multiplier = fvg_min_gap_atr_mult
         self.active_fvgs = []
 
     def update(self, candles: pd.DataFrame) -> List[Dict[str, Any]]:
@@ -32,6 +38,7 @@ class FVGDetector:
                     fvg["top"] = latest["low"]
                 if fvg["top"] <= fvg["bottom"]:
                     self.active_fvgs.remove(fvg)
+                    logger.debug(f"BULLISH FVG filled/removed at {latest.name}")
                     continue
                 fvg["ce"] = fvg["bottom"] + (fvg["top"] - fvg["bottom"]) / 2
             else:
@@ -39,6 +46,7 @@ class FVGDetector:
                     fvg["bottom"] = latest["high"]
                 if fvg["bottom"] >= fvg["top"]:
                     self.active_fvgs.remove(fvg)
+                    logger.debug(f"BEARISH FVG filled/removed at {latest.name}")
                     continue
                 fvg["ce"] = fvg["top"] - (fvg["top"] - fvg["bottom"]) / 2
 
@@ -58,7 +66,15 @@ class FVGDetector:
             )
             tr_list.append(tr)
         
-        atr = sum(tr_list) / len(tr_list) if tr_list else (candles.iloc[-1]["high"] - candles.iloc[-1]["low"])
+        if tr_list:
+            atr = sum(tr_list) / len(tr_list)
+        else:
+            logger.warning("tr_list is empty, falling back to current candle range for ATR")
+            atr = candles.iloc[-1]["high"] - candles.iloc[-1]["low"]
+            
+        if atr <= 0:
+            atr = 0.0001
+            
         min_required_gap = self.atr_multiplier * atr
 
         # 3. Detect new FVG from the last 3 candles
@@ -67,24 +83,30 @@ class FVGDetector:
         # Bullish FVG
         if c3["low"] > c1["high"]:
             gap = c3["low"] - c1["high"]
+            logger.debug(f"[TRACE] FVG Check | ATR: {atr:.5f} | min_gap: {min_required_gap:.5f} | actual gap: {gap:.5f} | PASS: {gap >= min_required_gap}")
             if gap >= min_required_gap:
-                self.active_fvgs.append({
+                new_fvg = {
                     "type": "BULLISH",
                     "top": c3["low"],
                     "bottom": c1["high"],
                     "ce": c1["high"] + gap / 2,
                     "index": c2.name
-                })
+                }
+                self.active_fvgs.append(new_fvg)
+                logger.debug(f"New BULLISH FVG created: {new_fvg}")
             
         # Bearish FVG
         elif c1["low"] > c3["high"]:
             gap = c1["low"] - c3["high"]
+            logger.debug(f"[TRACE] FVG Check | ATR: {atr:.5f} | min_gap: {min_required_gap:.5f} | actual gap: {gap:.5f} | PASS: {gap >= min_required_gap}")
             if gap >= min_required_gap:
-                self.active_fvgs.append({
+                new_fvg = {
                     "type": "BEARISH",
                     "top": c1["low"],
                     "bottom": c3["high"],
                     "ce": c3["high"] + gap / 2,
                     "index": c2.name
-                })
+                }
+                self.active_fvgs.append(new_fvg)
+                logger.debug(f"New BEARISH FVG created: {new_fvg}")
         return self.active_fvgs

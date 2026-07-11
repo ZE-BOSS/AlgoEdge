@@ -59,8 +59,8 @@ async def run_backtest(
     risk_config: Dict[str, Any],
     initial_balance: float = 10000.0,
     save_mode: str = "FULL",
-    candles_h1: pd.DataFrame = None,
     candles_m15: pd.DataFrame = None,
+    candles_m5: pd.DataFrame = None,
     compounding_enabled: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -89,7 +89,7 @@ async def run_backtest(
     # Run CPU-bound engine in a thread pool so it doesn't block the event loop
     # (without this, ALL other API requests hang until the backtest finishes)
     import asyncio
-    results = await asyncio.to_thread(engine.run, candles, signals, initial_balance, candles_h1, candles_m15, compounding_enabled)
+    results = await asyncio.to_thread(engine.run, candles, signals, initial_balance, candles_m15, candles_m5, compounding_enabled)
 
     # Broadcast: engine complete
     await _broadcast_progress(user_id, {
@@ -169,6 +169,7 @@ async def run_backtest(
         be_hit_rate=report.be_hit_rate,
         sl_hit_rate=report.sl_hit_rate,
         trail_hit_rate=report.trail_hit_rate,
+        rejection_funnel=report.rejection_funnel,
     )
 
     async with get_session() as session:

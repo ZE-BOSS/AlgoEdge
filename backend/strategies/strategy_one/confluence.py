@@ -42,15 +42,15 @@ class ConfluenceScorer:
         score += bias_score
         breakdown["htf_bias"] = bias_score
 
-        # 2. H1 BOS (Max 15)
-        h1_bos_score = 15 if context.get("h1_bos") else 0
-        score += h1_bos_score
-        breakdown["h1_bos"] = h1_bos_score
+        # 2. M15 BOS (Max 15)
+        m15_bos_score = 15 if context.get("m15_bos") else 0
+        score += m15_bos_score
+        breakdown["m15_bos"] = m15_bos_score
 
-        # 3. H1 ChoCH (Max 10)
-        h1_choch_score = 10 if context.get("h1_choch") else 0
-        score += h1_choch_score
-        breakdown["h1_choch"] = h1_choch_score
+        # 3. M15 ChoCH (Max 10)
+        m15_choch_score = 10 if context.get("m15_choch") else 0
+        score += m15_choch_score
+        breakdown["m15_choch"] = m15_choch_score
 
         # 4. Liquidity Sweep (Max 15)
         sweep_score = 0

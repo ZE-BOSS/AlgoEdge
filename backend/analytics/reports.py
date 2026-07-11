@@ -78,6 +78,9 @@ class RiskReport:
     # Bias breakdown (BUY vs SELL)
     bias_stats: Dict[str, Any] = field(default_factory=dict)
 
+    # Rejection Funnel
+    rejection_funnel: Dict[str, Any] = field(default_factory=dict)
+
 
 def generate_risk_report(trades: List[Dict[str, Any]]) -> RiskReport:
     """

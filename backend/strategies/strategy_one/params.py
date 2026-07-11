@@ -254,7 +254,7 @@ class SMCParams:
     """H4 swing high/low detection lookback (candles on each side)."""
 
     swing_length_mtf: int = 3
-    """H1 swing detection lookback."""
+    """M15 swing detection lookback."""
 
     swing_length_ltf: int = 3
     """M15/M5 swing detection lookback."""
@@ -383,7 +383,7 @@ class SMCParams:
     ])
 
     timeframes: List[str] = field(default_factory=lambda: [
-        "M5", "M15", "H1", "H4",
+        "M5", "M15", "H4",
     ])
 
     # ── Snapshot Settings ─────────────────────────────────────────────
@@ -502,7 +502,7 @@ SYNTHETIC_SMC_PARAMS = SMCParams(
     news_filter_enabled=False,
     # All 24/7
     watched_symbols=["Volatility 75 Index", "Volatility 25 Index", "Volatility 50 Index"],
-    timeframes=["M5", "M15", "H1", "H4"],
+    timeframes=["M5", "M15", "H4"],
     # Scoring
     min_signal_score=60,  # Slightly lower threshold for synthetics cleaner structure
     full_size_score=80,
@@ -519,7 +519,7 @@ GOLD_SMC_PARAMS = SMCParams(
     session_filter_enabled=True,
     news_filter_enabled=True,
     watched_symbols=["XAUUSD"],
-    timeframes=["M5", "M15", "H1", "H4"],
+    timeframes=["M5", "M15", "H4"],
     min_signal_score=70,       # Higher threshold for gold volatility
 )
 
@@ -533,7 +533,7 @@ FOREX_SMC_PARAMS = SMCParams(
     session_filter_enabled=True,
     news_filter_enabled=True,
     watched_symbols=["EURUSD", "GBPUSD", "USDJPY"],
-    timeframes=["M5", "M15", "H1", "H4"],
+    timeframes=["M5", "M15", "H4"],
     min_signal_score=65,
 )
 

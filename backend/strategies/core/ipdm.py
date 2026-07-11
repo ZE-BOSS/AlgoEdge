@@ -115,7 +115,8 @@ class IPDMDetector:
                 self.current_phase = "EXPANSION"
             else:
                 # Default fallback if no strict state matched
-                self.current_phase = "MANIPULATION" if self.current_phase == "ACCUMULATION" else self.current_phase
+                if self.current_phase == "ACCUMULATION":
+                    self.current_phase = "TRANSITIONAL"
 
         return {
             "phase": self.current_phase,

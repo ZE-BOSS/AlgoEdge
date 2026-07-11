@@ -21,17 +21,17 @@ class TradeGate:
     def __init__(self, config: UserConfig):
         self.config = config
 
-    def validate_all(self, context: Dict[str, Any]) -> tuple[bool, str]:
-        """Run all safety gates. Returns (passed, rejection_reason)."""
-
+    def validate_all(self, context: Dict[str, Any]) -> tuple[bool, list[str]]:
+        """Run all safety gates. Returns (passed, list_of_rejection_reasons)."""
         direction = context.get("signal_direction", "")
+        reasons = []
 
         # Gate 1: HTF bias must be confirmed (not NEUTRAL)
         htf_bias = context.get("htf_bias", "NEUTRAL")
         if htf_bias == "NEUTRAL":
-            return False, "HTF bias is NEUTRAL — no directional conviction"
-        if htf_bias != direction:
-            return False, f"HTF bias {htf_bias} conflicts with signal {direction}"
+            reasons.append("Gate 1: HTF bias is NEUTRAL — no directional conviction")
+        elif htf_bias != direction:
+            reasons.append(f"Gate 1: HTF bias {htf_bias} conflicts with signal {direction}")
 
         # Gate 3: Price must be at a POI (OB, FVG, Fib/OTE, or S&D)
         fresh_ob = context.get("fresh_ob")
@@ -39,7 +39,7 @@ class TradeGate:
         in_ote = context.get("in_ote_zone", False)
         in_sd = context.get("in_sd_zone", False)
         if fresh_ob is None and not fvg_inside_ob and not in_ote and not in_sd:
-            return False, "Price is not at any POI (no OB, FVG, Fib, or S&D zone)"
+            reasons.append("Gate 3: Price is not at any POI (no OB, FVG, Fib, or S&D zone)")
 
         # Gate 4: Minimum RR must be met
         entry = context.get("entry_price", 0)
@@ -50,34 +50,36 @@ class TradeGate:
             reward = abs(tp1 - entry)
             rr = reward / risk if risk > 0 else 0
             if rr < self.config.risk.min_rr:
-                return False, f"RR {rr:.1f} below minimum {self.config.risk.min_rr}"
+                reasons.append(f"Gate 4: RR {rr:.1f} below minimum {self.config.risk.min_rr}")
+        else:
+            reasons.append("Gate 4: Missing entry/SL/TP for RR calculation")
 
         # Gate 5: Spread must be acceptable (Dynamic ATR Check)
         current_spread = context.get("current_spread_pips", 0)
         atr = context.get("atr", 0)
         
-        # We repurpose max_spread_pips to act as an ATR multiplier (e.g. 0.1)
-        max_allowed_spread = atr * self.config.risk.max_spread_pips if atr > 0 else self.config.risk.max_spread_pips
+        atr_mult = getattr(self.config.risk, "max_spread_atr_mult", getattr(self.config.risk, "max_spread_pips", 0.5))
+        max_allowed_spread = atr * atr_mult if atr > 0 else atr_mult
         
         if current_spread > max_allowed_spread:
-            return False, f"Spread ({current_spread}) exceeds maximum dynamic limit ({max_allowed_spread:.2f} based on ATR)"
+            reasons.append(f"Gate 5: Spread ({current_spread}) exceeds maximum dynamic limit ({max_allowed_spread:.2f} based on ATR)")
 
         # Gate 6: Must be in active session (if session filter enabled)
-        if self.config.smc.session_filter_enabled:
+        if getattr(self.config.smc, "session_filter_enabled", False):
             if not context.get("in_kill_zone", False):
-                return False, "Outside active kill zone session"
+                reasons.append("Gate 6: Outside active kill zone session")
 
         # Gate 7: Must not be blocked by high-impact news
-        if self.config.smc.news_filter_enabled:
+        if getattr(self.config.smc, "news_filter_enabled", False):
             if context.get("news_blocked", False):
-                return False, "Blocked by high-impact news event"
+                reasons.append("Gate 7: Blocked by high-impact news event")
 
         # Gate 8: Confluence score must meet minimum
         score = context.get("confluence_score", 0)
         if score < self.config.smc.min_signal_score:
-            return False, f"Confluence score {score} below minimum {self.config.smc.min_signal_score}"
+            reasons.append(f"Gate 8: Confluence score {score} below minimum {self.config.smc.min_signal_score}")
 
-        return True, "ALL_GATES_PASSED"
+        return len(reasons) == 0, reasons
 
 
 class SignalGenerator:
@@ -92,13 +94,12 @@ class SignalGenerator:
 
         context["confluence_score"] = score
 
-        passed, reason = self.gate.validate_all(context)
+        passed, reasons = self.gate.validate_all(context)
         if not passed:
-            is_bt = context.get("is_backtesting", False)
-            if not is_bt:
-                from backend.services.bot_service import bot_service
-                bot_service.log_system_event(f"Signal rejected: {reason}", "DEBUG", "SIGNAL")
-            return None
+            for reason in reasons:
+                logger.debug(f"[REJECTED] {reason}")
+            # We no longer return None here so that the backtester can track the rejection funnel.
+            # Live trading (bot_service) will safely ignore it by checking signal.metadata["passed_gates"].
 
         direction = context.get("signal_direction", "")
         trade_direction = "BUY" if direction == "BULLISH" else ("SELL" if direction == "BEARISH" else direction)
@@ -126,8 +127,11 @@ class SignalGenerator:
                 "session": context.get("current_session"),
                 "ipdm_phase": context.get("ipdm_phase"),
                 "score_breakdown": context.get("score_breakdown", {}),
+                "passed_gates": passed,
+                "rejection_reasons": reasons,
             }
         )
 
-        logger.info(f"Signal generated: {direction} {symbol} @ {entry} | Score: {score}")
+        if passed:
+            logger.info(f"Signal generated: {direction} {symbol} @ {entry} | Score: {score}")
         return signal

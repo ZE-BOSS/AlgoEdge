@@ -36,7 +36,7 @@ function MetricCard({ label, value, color = '', subtext = '', icon: Icon }) {
   );
 }
 
-function LiveChart({ symbol = 'XAUUSD', timeframe = 'H1' }) {
+function LiveChart({ symbol = 'XAUUSD', timeframe = 'M15' }) {
   const chartRef = useRef(null);
   const containerRef = useRef(null);
   const seriesRef = useRef(null);
@@ -466,7 +466,7 @@ export default function Dashboard() {
               <span className="card-title">Live Chart</span>
               <span className="badge badge-green">{configSymbols[0] || 'XAUUSD'}</span>
             </div>
-            <LiveChart symbol={configSymbols[0] || 'XAUUSD'} timeframe="H1" />
+            <LiveChart symbol={configSymbols[0] || 'XAUUSD'} timeframe="M15" />
           </div>
         </div>
 

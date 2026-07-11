@@ -50,16 +50,16 @@ class MultiTPManager:
         self.tp3_rr = config.get("tp3_rr", 5.0)
         self.tp4_rr = config.get("tp4_rr", 10.0)
         self.tp5_rr = config.get("tp5_rr", 15.0)
-        raw_splits = config.get("tp_splits", [30, 25, 20, 15, 10])
+        raw_splits = config.get("tp_splits", [40, 30, 20, 5, 5])
         if isinstance(raw_splits, str):
             try:
-                self.tp_splits = [int(x.strip()) for x in raw_splits.split(",") if x.strip()]
+                self.tp_splits = [float(x.strip()) for x in raw_splits.split(",") if x.strip()]
             except ValueError:
-                self.tp_splits = [30, 25, 20, 15, 10]
+                self.tp_splits = [40, 30, 20, 5, 5]
         elif isinstance(raw_splits, list):
-            self.tp_splits = [int(x) for x in raw_splits]
+            self.tp_splits = [float(x) for x in raw_splits]
         else:
-            self.tp_splits = [30, 25, 20, 15, 10]
+            self.tp_splits = [40, 30, 20, 5, 5]
         self.tp_count = config.get("tp_count", 3)  # User-configurable: how many TPs (1–5)
         self.min_rr = config.get("min_rr", 3.0)
         self.multi_position_mode = config.get("multi_position_mode", True)
@@ -123,7 +123,8 @@ class MultiTPManager:
                 trail_method=None,
                 deferred=False,
             )
-            self._validate_tp(tp, entry, direction)
+            if not self._validate_tp(tp, entry, direction):
+                return []
             return [tp]
 
         # Build TP levels with volume splits — ALL immediate
@@ -200,7 +201,8 @@ class MultiTPManager:
 
         # Sanity validation — catch direction bugs at the source
         for tp in levels:
-            self._validate_tp(tp, entry, direction)
+            if not self._validate_tp(tp, entry, direction):
+                return []
 
         logger.debug(
             f"TP levels: {len(levels)} | dir={direction} | entry={entry} | "
@@ -209,18 +211,21 @@ class MultiTPManager:
 
         return levels
 
-    def _validate_tp(self, tp: TPLevel, entry: float, direction: str):
+    def _validate_tp(self, tp: TPLevel, entry: float, direction: str) -> bool:
         """
         Post-calculation sanity check: TP must be on the correct side of entry.
-        Raises ValueError if a TP is placed on the wrong side.
+        Returns False and logs ERROR if a TP is placed on the wrong side.
         """
         if _is_buy(direction) and tp.tp_price <= entry:
-            raise ValueError(
+            logger.error(
                 f"CRITICAL: BUY TP{tp.level} ({tp.tp_price:.5f}) is at or below "
                 f"entry ({entry:.5f}). This would guarantee a loss."
             )
+            return False
         if _is_sell(direction) and tp.tp_price >= entry:
-            raise ValueError(
+            logger.error(
                 f"CRITICAL: SELL TP{tp.level} ({tp.tp_price:.5f}) is at or above "
                 f"entry ({entry:.5f}). This would guarantee a loss."
             )
+            return False
+        return True

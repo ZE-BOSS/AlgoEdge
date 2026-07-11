@@ -9,6 +9,7 @@ Source: RiskManagement_Spec.md
 
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
+import json
 from backend.risk.position_sizer import calculate_lot_size, calculate_lot_from_dollars, get_pip_size, calculate_risk_dollars
 from backend.risk.multi_tp import MultiTPManager, TPLevel
 from backend.risk.breakeven_manager import BreakevenManager
@@ -58,7 +59,11 @@ class RiskEngine:
         # 1. Circuit Breaker Check
         can_trade, reason = self.circuit.check_all(account_balance, current_time)
         if not can_trade:
-            logger.warning(f"[RISK] Circuit breaker blocked: {reason}")
+            logger.warning(json.dumps({
+                "event": "risk_rejected",
+                "reason": "circuit_breaker_blocked",
+                "details": reason
+            }))
             return False, reason, []
 
         # 2. Minimum RR Check and Direction Validation
@@ -66,16 +71,33 @@ class RiskEngine:
         is_buy = _is_buy(direction)
         
         if is_buy and sl >= entry:
-            logger.warning(f"[RISK] Rejected: BUY SL ({sl:.5f}) >= entry ({entry:.5f})")
+            logger.warning(json.dumps({
+                "event": "risk_rejected",
+                "reason": "invalid_sl",
+                "direction": "BUY",
+                "entry": entry,
+                "sl": sl
+            }))
             return False, "BUY Stop Loss must be below entry", []
             
         if not is_buy and sl <= entry:
-            logger.warning(f"[RISK] Rejected: SELL SL ({sl:.5f}) <= entry ({entry:.5f})")
+            logger.warning(json.dumps({
+                "event": "risk_rejected",
+                "reason": "invalid_sl",
+                "direction": "SELL",
+                "entry": entry,
+                "sl": sl
+            }))
             return False, "SELL Stop Loss must be above entry", []
             
         risk = abs(entry - sl)
         if risk == 0:
-            logger.warning(f"[RISK] Rejected: zero risk (entry={entry:.5f}, SL={sl:.5f})")
+            logger.warning(json.dumps({
+                "event": "risk_rejected",
+                "reason": "zero_risk",
+                "entry": entry,
+                "sl": sl
+            }))
             return False, "Risk is zero (entry == SL)", []
 
         # 3. Position Sizing
@@ -99,14 +121,21 @@ class RiskEngine:
         # If the minimum broker lot size forces us to risk more than what was requested, REJECT outright.
         # Adding a tiny 1% leniency buffer to account for MT5 precision floating point rounding.
         if actual_risk_dollars > (requested_risk_dollars * 1.01):
-            logger.warning(
-                f"[RISK] Rejected: Broker minimum lot forces risk of ${actual_risk_dollars:.2f} "
-                f"which exceeds the requested risk of ${requested_risk_dollars:.2f}."
-            )
-            return False, f"Proposed risk (${requested_risk_dollars:.2f}) does not meet the broker minimum requirement (${actual_risk_dollars:.2f}) based on your capital. Please increase your risk percentage or capital to trade this setup.", []
+            logger.warning(json.dumps({
+                "event": "risk_rejected",
+                "reason": "broker_minimum_lot_exceeds_risk",
+                "requested_risk_dollars": requested_risk_dollars,
+                "actual_risk_dollars": actual_risk_dollars,
+                "balance": account_balance
+            }))
+            return False, f"Proposed risk (${requested_risk_dollars:.2f}) does not meet the broker minimum requirement (${actual_risk_dollars:.2f}).", []
 
         if total_lots == 0.0:
-            logger.warning(f"[RISK] Rejected: lot size 0 (balance=${account_balance:.2f})")
+            logger.warning(json.dumps({
+                "event": "risk_rejected",
+                "reason": "zero_lot_size",
+                "balance": account_balance
+            }))
             return False, "Lot size calculation returned 0", []
 
         # 4. Multi-Position Splits (TP1/TP2/TP3)
@@ -123,12 +152,31 @@ class RiskEngine:
         last_tp_reward = abs(last_tp_price - entry)
         last_tp_rr = last_tp_reward / risk
         if last_tp_rr < self.min_rr:
-            logger.warning(f"[RISK] Rejected: Last TP RR {last_tp_rr:.1f} < min_rr {self.min_rr} (entry={entry:.5f}, SL={sl:.5f}, TP={last_tp_price:.5f})")
+            logger.warning(json.dumps({
+                "event": "risk_rejected",
+                "reason": "insufficient_rr",
+                "min_rr": self.min_rr,
+                "actual_rr": round(last_tp_rr, 2),
+                "entry": entry,
+                "sl": sl,
+                "last_tp": last_tp_price
+            }))
             return False, f"Last TP RR {last_tp_rr:.1f} below minimum {self.min_rr}", []
 
         group_id = signal_data.get("group_id", "unknown")
         self.circuit.position_opened(group_id, len(tp_levels), symbol=symbol)
-        logger.info(f"[RISK] ✅ Trade approved: {direction} {symbol} @ {entry:.5f} | SL={sl:.5f} | risk={risk:.5f} | Last_TP_RR={last_tp_rr:.1f} | {len(tp_levels)} TPs | Lots={total_lots:.4f}")
+        
+        logger.info(json.dumps({
+            "event": "trade_approved",
+            "direction": direction,
+            "symbol": symbol,
+            "entry": entry,
+            "sl": sl,
+            "risk_dollars": actual_risk_dollars,
+            "lots": total_lots,
+            "tp_count": len(tp_levels),
+            "last_tp_rr": round(last_tp_rr, 2)
+        }))
         return True, "APPROVED", tp_levels
 
     def manage_open_position(

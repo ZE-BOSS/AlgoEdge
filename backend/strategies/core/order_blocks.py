@@ -33,49 +33,57 @@ class OrderBlockDetector:
                 if latest_candle["low"] <= ob["top"]:
                     ob["touches"] += 1
                 # Mitigation: price closes below bullish OB bottom
-                if latest_candle["close"] < ob["bottom"]:
+                if latest_candle["close"] < ob["bottom"] or ob["touches"] >= self.max_touches:
                     ob["mitigated"] = True
             else:
                 # Touch: price rises into bearish OB
                 if latest_candle["high"] >= ob["bottom"]:
                     ob["touches"] += 1
                 # Mitigation: price closes above bearish OB top
-                if latest_candle["close"] > ob["top"]:
+                if latest_candle["close"] > ob["top"] or ob["touches"] >= self.max_touches:
                     ob["mitigated"] = True
 
         self.active_obs = [ob for ob in self.active_obs if not ob["mitigated"]]
 
-        # 2. Scan for new OBs (simplified logic for last 3 candles)
-        c1 = candles.iloc[-3] # The base candle
-        c2 = candles.iloc[-2] # The impulse candle
+        # 2. Scan for new OBs (multi-candle lookback for impulse)
+        lookback = min(len(candles), 6)
+        c_last = candles.iloc[-2] # Most recent closed candle
         
-        c1_body = abs(c1["close"] - c1["open"])
-        c2_body = abs(c2["close"] - c2["open"])
-        
-        if c1_body == 0:
-            c1_body = 0.0001
+        for i in range(-lookback, -2):
+            c_base = candles.iloc[i]
+            c_base_body = abs(c_base["close"] - c_base["open"])
             
-        is_impulse = (c2_body / c1_body) >= self.impulse_ratio
+            if c_base_body == 0:
+                c_base_body = 0.0001
+                
+            # Measure impulse from base candle close to last closed candle close
+            impulse_size = abs(c_last["close"] - c_base["close"])
+            is_impulse = (impulse_size / c_base_body) >= self.impulse_ratio
+            
+            if is_impulse:
+                # Check if this OB is already tracked
+                if any(ob["index"] == c_base.name for ob in self.active_obs):
+                    continue
+                    
+                if c_last["close"] > c_base["close"] and c_base["close"] < c_base["open"]:
+                    # Bullish impulse after bearish candle
+                    self.active_obs.append({
+                        "type": "BULLISH",
+                        "top": c_base["high"],
+                        "bottom": c_base["low"],
+                        "index": c_base.name,
+                        "mitigated": False,
+                        "touches": 0
+                    })
+                elif c_last["close"] < c_base["close"] and c_base["close"] > c_base["open"]:
+                    # Bearish impulse after bullish candle
+                    self.active_obs.append({
+                        "type": "BEARISH",
+                        "top": c_base["high"],
+                        "bottom": c_base["low"],
+                        "index": c_base.name,
+                        "mitigated": False,
+                        "touches": 0
+                    })
         
-        if is_impulse:
-            if c2["close"] > c2["open"] and c1["close"] < c1["open"]:
-                # Bullish impulse after bearish candle -> Bullish OB
-                self.active_obs.append({
-                    "type": "BULLISH",
-                    "top": c1["high"],
-                    "bottom": c1["low"],
-                    "index": c1.name,
-                    "mitigated": False,
-                    "touches": 0
-                })
-            elif c2["close"] < c2["open"] and c1["close"] > c1["open"]:
-                # Bearish impulse after bullish candle -> Bearish OB
-                self.active_obs.append({
-                    "type": "BEARISH",
-                    "top": c1["high"],
-                    "bottom": c1["low"],
-                    "index": c1.name,
-                    "mitigated": False,
-                    "touches": 0
-                })
         return self.active_obs

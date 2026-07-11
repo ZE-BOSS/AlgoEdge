@@ -223,67 +223,67 @@ class BotService:
                     self._log_event(f"Scanning {symbol}...", category="SCAN")
 
                     try:
-                        candles_h4 = await DataFetcher.get_historical_data(symbol, "H4", count=5000)
-                        await asyncio.sleep(0.05)
-                        candles_h1 = await DataFetcher.get_historical_data(symbol, "H1", count=5000)
-                        await asyncio.sleep(0.05)
-                        candles_m15 = await DataFetcher.get_historical_data(symbol, "M15", count=5000)
-                        await asyncio.sleep(0.05)
-                        candles_m5 = await DataFetcher.get_historical_data(symbol, "M5", count=5000)
-                        await asyncio.sleep(0.05)
+                        from backend.risk.engine import RiskEngine
+                        from backend.mt5.order_manager import OrderManager
+                        import pandas as pd
+                        
+                        def _index_candles(df):
+                            if 'time' in df.columns:
+                                return df.set_index(pd.to_datetime(df['time'], unit='s'))
+                            return df
 
-                        if any(c is None or c.empty for c in [candles_h4, candles_h1, candles_m15, candles_m5]):
-                            self._log_event(f"Incomplete MTF data for {symbol}", "WARN", "SCAN")
+                        # ── DYNAMIC STRATEGY RESOLUTION ──
+                        strategy_id = "SMC_v1"
+                        if hasattr(config, 'instrument_settings') and config.instrument_settings:
+                            for settings in config.instrument_settings:
+                                if settings.symbol == symbol:
+                                    strategy_id = getattr(settings, 'strategy_id', "SMC_v1")
+                                    break
+                        
+                        # Instantiate engine if not exists
+                        if symbol not in self.engines or getattr(self.engines[symbol], 'strategy_id', None) != strategy_id:
+                            engine_class = get_strategy(strategy_id)
+                            self.engines[symbol] = engine_class(config)
+                            self.engines[symbol].strategy_id = strategy_id
+                            self._log_event(f"[{symbol}] Instantiated {strategy_id} Engine", "INFO", "BOT")
+                            
+                        current_engine = self.engines[symbol]
+                        
+                        # Get required timeframes for the strategy
+                        req_tfs = current_engine.get_required_timeframes() if hasattr(current_engine, 'get_required_timeframes') else ["H4", "M15", "M5"]
+                        
+                        fetched_data = {}
+                        has_missing_data = False
+                        for tf in req_tfs:
+                            tf_data = await DataFetcher.get_historical_data(symbol, tf, count=5000)
+                            await asyncio.sleep(0.05)
+                            if tf_data is None or tf_data.empty:
+                                has_missing_data = True
+                                break
+                            fetched_data[tf] = tf_data
+                            
+                        if has_missing_data:
+                            self._log_event(f"Incomplete MTF data for {symbol} on required timeframes {req_tfs}", "WARN", "SCAN")
                             continue
-
-                        self._log_event(f"Fetched MTF data for {symbol} (H4/H1/M15/M5)", category="DATA")
+                            
+                        self._log_event(f"Fetched MTF data for {symbol} ({'/'.join(req_tfs)})", category="DATA")
 
                         # Try to run strategy engine
                         try:
-                            from backend.risk.engine import RiskEngine
-                            from backend.mt5.order_manager import OrderManager
-
-                            import pandas as pd
-                            
-                            def _index_candles(df):
-                                if 'time' in df.columns:
-                                    return df.set_index(pd.to_datetime(df['time'], unit='s'))
-                                return df
-
-                            # ── DYNAMIC STRATEGY RESOLUTION ──
-                            # Find the strategy ID assigned to this symbol, or default to "SMC_v1"
-                            strategy_id = "SMC_v1"
-                            if hasattr(config, 'instrument_settings') and config.instrument_settings:
-                                for settings in config.instrument_settings:
-                                    if settings.symbol == symbol:
-                                        strategy_id = getattr(settings, 'strategy_id', "SMC_v1")
-                                        break
-                            
-                            # Instantiate engine if not exists
-                            if symbol not in self.engines or getattr(self.engines[symbol], 'strategy_id', None) != strategy_id:
-                                engine_class = get_strategy(strategy_id)
-                                self.engines[symbol] = engine_class(config)
-                                self.engines[symbol].strategy_id = strategy_id
-                                self._log_event(f"[{symbol}] Instantiated {strategy_id} Engine", "INFO", "BOT")
-                                
-                            current_engine = self.engines[symbol]
-
                             # ── ENFORCE CLOSED CANDLE LOGIC (Fix Repainting) ──
-                            # The last row returned by MT5 DataFetcher is the currently forming (unclosed) bar.
-                            # We slice it off so the strategy engine only evaluates fully formed market structure.
-                            closed_h4 = candles_h4.iloc[:-1] if len(candles_h4) > 1 else candles_h4
-                            closed_h1 = candles_h1.iloc[:-1] if len(candles_h1) > 1 else candles_h1
-                            closed_m15 = candles_m15.iloc[:-1] if len(candles_m15) > 1 else candles_m15
-                            closed_m5 = candles_m5.iloc[:-1] if len(candles_m5) > 1 else candles_m5
-
-                            # Feed the engine in hierarchical order
-                            await current_engine.on_bar(symbol, "H4", _index_candles(closed_h4))
-                            await current_engine.on_bar(symbol, "H1", _index_candles(closed_h1))
-                            await current_engine.on_bar(symbol, "M15", _index_candles(closed_m15))
+                            signal = None
+                            for i, tf in enumerate(req_tfs):
+                                tf_data = fetched_data[tf]
+                                closed_data = tf_data.iloc[:-1] if len(tf_data) > 1 else tf_data
+                                
+                                await asyncio.sleep(0.01)
+                                res = await current_engine.on_bar(symbol, tf, _index_candles(closed_data))
+                                # Only the last timeframe might return a signal in hierarchical strategies
+                                if i == len(req_tfs) - 1:
+                                    signal = res
+                                    
+                            await asyncio.sleep(0.01)
                             
-                            await asyncio.sleep(0.01)
-                            signal = await current_engine.on_bar(symbol, "M5", _index_candles(closed_m5))
-                            await asyncio.sleep(0.01)
                             if signal:
                                 # Cooldown check
                                 sig_time = getattr(signal, 'timestamp', None)
@@ -295,7 +295,8 @@ class BotService:
                                     self._last_signal_time[symbol] = sig_time
                                     
                                 try:
-                                    cd_df = candles_m5.tail(100).copy()
+                                    last_tf = req_tfs[-1]
+                                    cd_df = fetched_data[last_tf].tail(100).copy()
                                     if "time" not in cd_df.columns and cd_df.index.name == "time":
                                         cd_df = cd_df.reset_index()
                                     # DataFetcher already returns epoch seconds for time, so no conversion is needed
@@ -304,6 +305,14 @@ class BotService:
                                     logger.error(f"Failed to inject chart_data: {e}")
 
                                 self.total_signals_today += 1
+
+                                passed_gates = getattr(signal, "metadata", {}).get("passed_gates", True)
+                                if not passed_gates:
+                                    reasons = getattr(signal, "metadata", {}).get("rejection_reasons", [])
+                                    for reason in reasons:
+                                        self._log_event(f"[REJECTED] {reason}", "SIGNAL", "SIGNAL")
+                                    continue
+
                                 self._log_event(
                                     f"Signal: {signal.direction} {symbol} @ {signal.entry_price} "
                                     f"| SL: {signal.stop_loss} | Score: {signal.confluence_score}",

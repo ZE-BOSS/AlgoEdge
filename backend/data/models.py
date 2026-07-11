@@ -8,7 +8,7 @@ Source: TradingBot_MasterPlan-2.md Section 5 — Database Schema
 
 from sqlalchemy import (
     Column, Integer, BigInteger, Float, Text, String, Boolean, LargeBinary,
-    ForeignKey, Index, UniqueConstraint, DateTime, func,
+    ForeignKey, Index, UniqueConstraint, DateTime, func, JSON
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime
@@ -234,6 +234,7 @@ class BacktestRun(Base):
     notes = Column(Text)
     llm_analysis = Column(Text)
     run_logs = Column(Text)  # JSON serialized logs
+    rejection_funnel = Column(JSON, default={})
     created_at = Column(DateTime, server_default=func.now())
     trades = relationship("BacktestTrade", back_populates="backtest_run", cascade="all, delete-orphan")
 
@@ -272,8 +273,8 @@ class BacktestTrade(Base):
     
     # Chart & SMC Data
     chart_data = Column(Text)
-    chart_data_h1 = Column(Text)
     chart_data_m15 = Column(Text)
+    chart_data_m5 = Column(Text)
     smc_data = Column(Text)
     sub_trades = Column(Text)
     

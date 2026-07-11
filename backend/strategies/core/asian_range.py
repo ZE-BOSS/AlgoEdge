@@ -35,11 +35,17 @@ class AsianRange:
         current_dt = None
         
         # We need to find candles that fall into the Asian Range window
+        # Scan backwards to find the most recent Asian Range session
         range_high = 0.0
         range_low = float("inf")
         found = False
+        in_current_session = False
         
-        for idx, row in recent.iterrows():
+        # Iterate backwards
+        for i in range(len(recent) - 1, -1, -1):
+            row = recent.iloc[i]
+            idx = recent.index[i]
+            
             ts = 0
             if "time" in row:
                 ts = row["time"]
@@ -51,19 +57,13 @@ class AsianRange:
             if ts == 0:
                 continue
                 
-            # Handle if ts is already a pandas Timestamp
             if hasattr(ts, 'timestamp'):
                 ts = ts.timestamp()
                 
             dt = datetime.fromtimestamp(float(ts), timezone.utc)
             local_dt = get_local_time(dt)
-            
-            # Save the last candle's date to track resets
-            current_dt = local_dt
-            
             hour = local_dt.hour
             
-            # Check if hour is within Asian range
             in_range = False
             if self.start_hour > self.end_hour:
                 in_range = hour >= self.start_hour or hour < self.end_hour
@@ -76,6 +76,14 @@ class AsianRange:
                 if row["low"] < range_low:
                     range_low = row["low"]
                 found = True
+                in_current_session = True
+                if current_dt is None:
+                    current_dt = local_dt
+            else:
+                # If we were traversing the session backwards and just stepped out of it,
+                # we've captured the complete most recent Asian range. Stop here.
+                if in_current_session:
+                    break
 
         if found:
             self.high = range_high

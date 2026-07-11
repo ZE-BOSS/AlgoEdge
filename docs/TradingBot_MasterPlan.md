@@ -141,7 +141,7 @@ mt5.login(account_id, password, server)
 tick = mt5.symbol_info_tick("EURUSD")
 
 # Get OHLCV history for strategy calculation
-rates = mt5.copy_rates_from_pos("EURUSD", mt5.TIMEFRAME_H1, 0, 500)
+rates = mt5.copy_rates_from_pos("EURUSD", mt5.TIMEFRAME_M15, 0, 500)
 
 # Place a buy order
 request = {
@@ -163,7 +163,7 @@ result = mt5.order_send(request)
 The MT5 Bridge is a dedicated Python service that:
 1. Maintains a persistent connection to the running MT5 terminal.
 2. Runs a tick polling loop (~every 50–100ms per symbol) using `asyncio` — fast enough for Forex/derivatives without exceeding MT5 API rate limits.
-3. On each new bar (H4, H1, M15, M5), triggers strategy evaluation for all active users.
+3. On each new bar (H4, M15, M5, M5), triggers strategy evaluation for all active users.
 4. Publishes all data to Redis channels for distribution.
 5. Handles order placement with retry logic and error handling (slippage, requotes, off-quotes).
 
@@ -173,11 +173,11 @@ The MT5 Bridge is a dedicated Python service that:
 
 ```python
 WATCHED_SYMBOLS = {
-    "EURUSD": ["H4", "H1", "M15", "M5"],
-    "GBPUSD": ["H4", "H1", "M15", "M5"],
-    "XAUUSD": ["H4", "H1", "M15", "M5"],   # Gold
-    "US30":   ["H4", "H1", "M15", "M5"],   # Dow Jones
-    "BTCUSD": ["H4", "H1", "M15", "M5"],   # Crypto derivative
+    "EURUSD": ["H4", "M15", "M5"],
+    "GBPUSD": ["H4", "M15", "M5"],
+    "XAUUSD": ["H4", "M15", "M5"],   # Gold
+    "US30":   ["H4", "M15", "M5"],   # Dow Jones
+    "BTCUSD": ["H4", "M15", "M5"],   # Crypto derivative
 }
 ```
 
@@ -228,8 +228,8 @@ Smart Money Concepts (SMC) is an ICT-derived methodology that models **instituti
 
 ```
 Step 1: H4 Bias → BULLISH / BEARISH / NEUTRAL (no trade if neutral)
-Step 2: Map liquidity pools on H4 + H1 (SSL/BSL targets)
-Step 3: Identify highest-scoring POI (OB / FVG / S&D zone on H1)
+Step 2: Map liquidity pools on H4 + M15 (SSL/BSL targets)
+Step 3: Identify highest-scoring POI (OB / FVG / S&D zone on M15)
 Step 4: Wait for liquidity sweep at session kill zone
 Step 5: LTF ChoCH on M5 → identifies precision entry OB/FVG
 Step 6: Candlestick confirmation at LTF zone → execute if score ≥ 65
@@ -265,7 +265,7 @@ Every signal is scored before execution. Minimum 65/100 required:
 | Factor | Score |
 |--------|-------|
 | H4 bias confirmed | +15 |
-| H1 structure aligned | +10 |
+| M15 structure aligned | +10 |
 | Liquidity sweep detected | +15 |
 | Fresh OB (first touch) | +15 |
 | OB + FVG confluence | +10 |
@@ -572,7 +572,7 @@ CREATE TABLE user_configs (
 
 ```
 ticks:{EURUSD}           → {"bid":1.0850,"ask":1.0851,"time":1718000000}
-ohlcv:{EURUSD}:{H1}      → JSON array of last 500 candles (refreshed per bar)
+ohlcv:{EURUSD}:{M15}      → JSON array of last 500 candles (refreshed per bar)
 position:{USER1}         → JSON array of open MT5 positions for user 1
 signal:latest:{USER1}    → latest signal object for user 1
 account:{USER1}          → {"balance":10000,"equity":10200,"margin":200}
@@ -1184,7 +1184,7 @@ algoedge/
 ### Phase 1 — SMC Strategy Engine (Week 3–5)
 
 - [ ] Integrate `smartmoneyconcepts` Python library
-- [ ] Build multi-timeframe pipeline (H4 → H1 → M15 entry)
+- [ ] Build multi-timeframe pipeline (H4 → M15 → M5 entry)
 - [ ] Implement market structure detection (BOS / ChoCH)
 - [ ] Implement order block detection and validity tracking
 - [ ] Implement FVG detection
@@ -1304,7 +1304,7 @@ Training Pipeline:
 **Task A — Trade Explanation Engine:**
 After every trade closes, the LLM receives the full trade context and generates a human-readable explanation:
 ```
-"This BUY trade on EURUSD was entered at 1.08504 on H1 after a bullish order block was
+"This BUY trade on EURUSD was entered at 1.08504 on M15 after a bullish order block was
 mitigated following a liquidity sweep of equal lows at 1.08200. The H4 structure was
 bullish (BOS at 1.0900). The trade hit TP at 1.09100, delivering 2.4R. The setup
 was high-quality: strong OB with 2.1x average volume, FVG confirmation, and execution
@@ -1458,7 +1458,7 @@ Safeguard: SL only moves in profitable direction — never backward
 |---|---|---|
 | `FIXED_PIPS` | Trail by N pips behind current price | Simple, consistent |
 | `ATR_TRAIL` | Trail by ATR × multiplier (ratchet — never moves back) | Volatile markets (Gold, BTC) |
-| `STRUCTURE_TRAIL` | Trail to each confirmed M15 swing point | SMC-native, max runners |
+| `STRUCTURE_TRAIL` | Trail to each confirmed M5 swing point | SMC-native, max runners |
 | `PCT_TRAIL` | Trail by % of current price | High-priced instruments |
 
 **TP2 default → ATR_TRAIL. TP3 default → STRUCTURE_TRAIL.**

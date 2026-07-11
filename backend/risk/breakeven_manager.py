@@ -16,8 +16,8 @@ class BreakevenManager:
 
     def __init__(self, config: Dict[str, Any]):
         self.be_trigger_rr = config.get("be_trigger_rr", 1.0)
-        # be_buffer_pips is repurposed as atr multiplier for safety buffer
-        self.be_atr_multiplier = config.get("be_buffer_pips", 0.1)
+        # be_buffer_pips is repurposed as atr multiplier for safety buffer (backward compatible)
+        self.be_atr_multiplier = config.get("be_buffer_atr_mult", config.get("be_buffer_pips", 0.1))
         self.be_on_tp1_hit = config.get("be_on_tp1_hit", True)
 
     def check_breakeven(
@@ -67,7 +67,15 @@ class BreakevenManager:
 
         # Calculate new SL at entry + max(live_spread, atr_buffer)
         atr_buffer = self.be_atr_multiplier * atr
-        buffer = max(live_spread, atr_buffer)
+        
+        if live_spread >= atr_buffer:
+            buffer = live_spread
+            winner = "live_spread"
+        else:
+            buffer = atr_buffer
+            winner = "atr_buffer"
+            
+        logger.debug(f"[BREAKEVEN] Buffer logic | live_spread: {live_spread:.5f} | atr_buffer: {atr_buffer:.5f} | Winner: {winner}")
         
         if direction == "BUY":
             new_sl = entry_price + buffer

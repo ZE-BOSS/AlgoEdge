@@ -5,7 +5,7 @@ Main SMC Orchestrator — 3-Layer Multi-Timeframe model.
 Integrates all SMC sub-components with proper context translation
 for ConfluenceScorer.
 
-Flow: H4 Bias → H1 ChoCH/Zones → M15 Execution (Candle or Wick/BOS)
+Flow: H4 Bias → M15 ChoCH/Zones → M5 Execution (Candle or Wick/BOS)
 """
 
 import pandas as pd
@@ -50,7 +50,7 @@ except ImportError:
 class SMCEngine(BaseStrategy):
     """
     Core Smart Money Concepts trading strategy engine.
-    Implements the 3-Layer Multi-Timeframe model with H1 structural validation.
+    Implements the 3-Layer Multi-Timeframe model with M15 structural validation.
     """
 
     def __init__(self, user_config: UserConfig):
@@ -67,22 +67,22 @@ class SMCEngine(BaseStrategy):
             swing_length=swing_len_htf, min_bos_count=2
         )
 
-        # Layer 2: H1 (ITF)
+        # Layer 2: M15 (HTF Context)
         swing_len_itf = getattr(self.smc_params, 'swing_length_mtf', max(3, swing_len_htf - 2))
-        self.h1_structure = MarketStructureDetector(
-            swing_length=swing_len_itf, min_bos_count=2
-        )
-        self.h1_order_blocks = OrderBlockDetector()
-        self.h1_fvg = FVGDetector(self.smc_params.fvg_min_gap_pips)
-        self.h1_liquidity = LiquidityMapper(self.smc_params.liq_sweep_min_pips)
-
-        # Layer 3: M15 (Execution)
         self.m15_structure = MarketStructureDetector(
-            swing_length=swing_len_ltf, min_bos_count=2
+            swing_length=swing_len_itf, min_bos_count=2
         )
         self.m15_order_blocks = OrderBlockDetector()
         self.m15_fvg = FVGDetector(self.smc_params.fvg_min_gap_pips)
         self.m15_liquidity = LiquidityMapper(self.smc_params.liq_sweep_min_pips)
+
+        # Layer 3: M5 (Execution)
+        self.m5_structure = MarketStructureDetector(
+            swing_length=swing_len_ltf, min_bos_count=2
+        )
+        self.m5_order_blocks = OrderBlockDetector()
+        self.m5_fvg = FVGDetector(self.smc_params.fvg_min_gap_pips)
+        self.m5_liquidity = LiquidityMapper(self.smc_params.liq_sweep_min_pips)
 
         self.scorer = ConfluenceScorer(self.smc_params)
         self.signal_gen = SignalGenerator(user_config)
@@ -109,13 +109,11 @@ class SMCEngine(BaseStrategy):
                 "category": category,
                 "message": message
             })
-            if level != "DEBUG":
-                bot_service.log_system_event(message, level, f"BT-{category}")
         else:
             bot_service.log_system_event(message, level, category)
 
     def get_required_timeframes(self) -> List[str]:
-        return ["H4", "H1", "M15"]
+        return ["H4", "M15", "M5"]
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Optional[TradeSignal]:
         self.log_event(f"SMC Engine evaluating {symbol} on {timeframe}", "DEBUG", "SMC")
@@ -151,21 +149,21 @@ class SMCEngine(BaseStrategy):
 
             return None
             
-        elif timeframe == "H1":
-            ms_h1 = self.h1_structure.update(candles)
-            self.context["h1"] = ms_h1
+        elif timeframe == "M15":
+            ms_m15 = self.m15_structure.update(candles)
+            self.context["m15"] = ms_m15
             
-            last_bos = ms_h1.get("last_bos")
-            last_choch = ms_h1.get("last_choch")
+            last_bos = ms_m15.get("last_bos")
+            last_choch = ms_m15.get("last_choch")
             if last_bos:
-                self.log_event(f"[{symbol} H1] BOS confirmed.", "INFO", "SMC")
+                self.log_event(f"[{symbol} M15] BOS confirmed.", "INFO", "SMC")
             if last_choch:
-                self.log_event(f"[{symbol} H1] ChoCH detected! Trend shifting.", "INFO", "SMC")
+                self.log_event(f"[{symbol} M15] ChoCH detected! Trend shifting.", "INFO", "SMC")
             
-            # Map H1 Zones & Liquidity
-            self.context["h1_obs"] = self.h1_order_blocks.update(candles)
-            self.context["h1_fvgs"] = self.h1_fvg.update(candles)
-            self.context["h1_liquidity"] = self.h1_liquidity.update(candles, ms_h1["swings"])
+            # Map M15 Zones & Liquidity
+            self.context["m15_obs"] = self.m15_order_blocks.update(candles)
+            self.context["m15_fvgs"] = self.m15_fvg.update(candles)
+            self.context["m15_liquidity"] = self.m15_liquidity.update(candles, ms_m15["swings"])
             
             # Cache ATR
             lookback = min(14, len(candles) - 1)
@@ -180,13 +178,13 @@ class SMCEngine(BaseStrategy):
                 self.context["atr"] = sum(tr_list) / len(tr_list) if tr_list else (candles.iloc[-1]["high"] - candles.iloc[-1]["low"])
             return None
 
-        elif timeframe == "M15":
-            ms_m15 = self.m15_structure.update(candles)
-            self.context["m15"] = ms_m15
+        elif timeframe == "M5":
+            ms_m5 = self.m5_structure.update(candles)
+            self.context["m5"] = ms_m5
             
-            self.context["m15_obs"] = self.m15_order_blocks.update(candles)
-            self.context["m15_fvgs"] = self.m15_fvg.update(candles)
-            self.context["m15_liquidity"] = self.m15_liquidity.update(candles, ms_m15["swings"])
+            self.context["m5_obs"] = self.m5_order_blocks.update(candles)
+            self.context["m5_fvgs"] = self.m5_fvg.update(candles)
+            self.context["m5_liquidity"] = self.m5_liquidity.update(candles, ms_m5["swings"])
             
             # ── LAYER 1: Check H4 Bias ──
             htf_bias = self.context.get("htf_bias", "NEUTRAL")
@@ -199,14 +197,14 @@ class SMCEngine(BaseStrategy):
             if htf_bias == "NEUTRAL":
                 return None
 
-            # ── LAYER 2: H1 Mandatory ChoCH Check ──
-            h1 = self.context.get("h1", {})
-            h1_trend = h1.get("trend")
+            # ── LAYER 2: M15 Mandatory ChoCH Check ──
+            m15 = self.context.get("m15", {})
+            m15_trend = m15.get("trend")
             
-            if not is_manual_override and h1_trend != htf_bias:
-                return None  # Waiting for H1 to align via ChoCH (trend shift)
+            if not is_manual_override and m15_trend != htf_bias:
+                return None  # Waiting for M15 to align via ChoCH (trend shift)
 
-            # Supply & Demand Context (Mapped on H1 for bias)
+            # Supply & Demand Context (Mapped on M15 for bias)
             in_sd_zone = False
             if self.supply_demand:
                 sd_zones = self.supply_demand.update(candles) 
@@ -239,26 +237,45 @@ class SMCEngine(BaseStrategy):
                             in_ote = pd_zones["ote_short_bottom"] <= current_price <= pd_zones["ote_short_top"]
             self.context["in_ote_zone"] = in_ote
 
-            # ── LAYER 3: M15 Execution ──
+            # ── LAYER 3: M5 Execution ──
             current_price = float(candles.iloc[-1]["close"])
             
             # Check Candlestick
-            self.context["_last_m15_candles"] = candles
+            self.context["_last_m5_candles"] = candles
             pattern = detect_confirmation_pattern(candles, bias=htf_bias)
             
-            # Check Fallback (Wick Tap or M15 BOS)
+            # Check Fallback (Wick Tap or M5 BOS)
             fallback_triggered = False
             if not pattern:
                 # LTF BOS after ChoCH?
-                m15_last_choch = ms_m15.get("last_choch")
-                m15_last_bos = ms_m15.get("last_bos")
-                if m15_last_choch == htf_bias and m15_last_bos == htf_bias:
+                m5_last_choch = ms_m5.get("last_choch")
+                m5_last_bos = ms_m5.get("last_bos")
+                
+                # --- CHOCH SWING ZONE VALIDATION ---
+                valid_choch = False
+                if m5_last_choch == htf_bias:
+                    choch_level = ms_m5.get("last_choch_level")  # Assuming we can get it, or we just check current price/recent low
+                    # If the ChoCH is recent, check if we are in an M15 POI
+                    if in_sd_zone or in_ote:
+                        valid_choch = True
+                    else:
+                        active_m15_obs = self.context.get("m15_obs", [])
+                        for ob in active_m15_obs:
+                            if ob.get("type") == htf_bias and ob.get("touches", 99) <= 1:
+                                if htf_bias == "BULLISH" and float(ob["bottom"]) <= current_price <= float(ob["top"]):
+                                    valid_choch = True
+                                    break
+                                elif htf_bias == "BEARISH" and float(ob["bottom"]) <= current_price <= float(ob["top"]):
+                                    valid_choch = True
+                                    break
+                                    
+                if valid_choch and m5_last_bos == htf_bias:
                     fallback_triggered = True
                 else:
-                    # Wick Tap: check if current candle low/high tapped a fresh M15 or H1 OB
+                    # Wick Tap: check if current candle low/high tapped a fresh M5 or M15 OB
                     c_high = float(candles.iloc[-1]["high"])
                     c_low = float(candles.iloc[-1]["low"])
-                    active_obs = self.context.get("h1_obs", []) + self.context.get("m15_obs", [])
+                    active_obs = self.context.get("m15_obs", []) + self.context.get("m5_obs", [])
                     for ob in active_obs:
                         if ob.get("type") == htf_bias and ob.get("touches", 99) <= 1:
                             if htf_bias == "BULLISH" and float(ob["bottom"]) <= c_low <= float(ob["top"]):
@@ -302,12 +319,12 @@ class SMCEngine(BaseStrategy):
             
             # Score
             score = self.scorer.calculate_score(scorer_context)
-
-            if score >= getattr(self.smc_params, "min_signal_score", 55):
-                sig = self.signal_gen.generate(scorer_context, score)
-                if sig:
-                    sig.metadata["chart_zones"] = markings
-                    return sig
+            
+            # Let signals.py handle all validation (including Gate 8 min score) so the Backtester Funnel can track it
+            sig = self.signal_gen.generate(scorer_context, score)
+            if sig:
+                sig.metadata["chart_zones"] = markings
+                return sig
 
         return None
 
@@ -315,40 +332,43 @@ class SMCEngine(BaseStrategy):
         return []
 
     def _calculate_structural_sl(self, bias: str, entry_price: float) -> float:
-        """Calculates SL based on last 2 swings and H1/M15 liquidity pools."""
-        m15_swings = self.context.get("m15", {}).get("swings", [])
-        h1_liq = self.context.get("h1_liquidity", {})
+        """Calculates SL based on last 2 swings and nearby liquidity pools."""
+        m5_swings = self.context.get("m5", {}).get("swings", [])
         m15_liq = self.context.get("m15_liquidity", {})
+        m5_liq = self.context.get("m5_liquidity", {})
         
         atr = self.context.get("atr", 0)
         buffer = atr * 0.1 # Dynamic buffer
+        max_liq_dist = atr * 2.0 # Only sweep pools within 2 ATR of the structural swing
         
         if bias == "BULLISH":
             # 1. 2-Swing Lows
-            lows = [float(s["price"]) for s in m15_swings if s["type"] == "LOW" and float(s["price"]) < entry_price]
+            lows = [float(s["price"]) for s in m5_swings if s["type"] == "LOW" and float(s["price"]) < entry_price]
             sl_swing = min(lows[-2:]) if len(lows) >= 2 else (lows[-1] if lows else entry_price * 0.99)
             
             # 2. Liquidity (SSL)
             sl_liq = sl_swing
-            for liq in [h1_liq, m15_liq]:
+            for liq in [m15_liq, m5_liq]:
                 for pool in liq.get("ssl", []):
                     level = float(pool.get("level", 0))
-                    if 0 < level < entry_price:
+                    # Only sweep if the pool is below entry, and NOT extremely far from our swing low
+                    if 0 < level < entry_price and level >= (sl_swing - max_liq_dist):
                         sl_liq = min(sl_liq, level)
             
             return min(sl_swing, sl_liq) - buffer
             
         else:
             # 1. 2-Swing Highs
-            highs = [float(s["price"]) for s in m15_swings if s["type"] == "HIGH" and float(s["price"]) > entry_price]
+            highs = [float(s["price"]) for s in m5_swings if s["type"] == "HIGH" and float(s["price"]) > entry_price]
             sl_swing = max(highs[-2:]) if len(highs) >= 2 else (highs[-1] if highs else entry_price * 1.01)
             
             # 2. Liquidity (BSL)
             sl_liq = sl_swing
-            for liq in [h1_liq, m15_liq]:
+            for liq in [m15_liq, m5_liq]:
                 for pool in liq.get("bsl", []):
                     level = float(pool.get("level", 0))
-                    if level > entry_price:
+                    # Only sweep if the pool is above entry, and NOT extremely far from our swing high
+                    if level > entry_price and level <= (sl_swing + max_liq_dist):
                         sl_liq = max(sl_liq, level)
             
             return max(sl_swing, sl_liq) + buffer
@@ -363,9 +383,9 @@ class SMCEngine(BaseStrategy):
             
         end_t = int(candles.iloc[-1]["time"]) if 'time' in candles.columns else int(candles.index[-1].timestamp())
 
-        for ob in self.context.get("h1_obs", []) + self.context.get("m15_obs", []):
+        for ob in self.context.get("m15_obs", []) + self.context.get("m5_obs", []):
             markings.append({
-                "type": "OB", "timeframe": "M15/H1",
+                "type": "OB", "timeframe": "M5/M15",
                 "top": float(ob["top"]), "bottom": float(ob["bottom"]),
                 "start_time": _get_time(ob), "end_time": end_t,
                 "color": "rgba(59, 130, 246, 0.2)" if ob["type"] == "BULLISH" else "rgba(239, 68, 68, 0.2)",
@@ -374,22 +394,22 @@ class SMCEngine(BaseStrategy):
         return markings
 
     def _build_scorer_context(self, symbol: str, bias: str, pattern) -> Dict[str, Any]:
-        h1 = self.context.get("h1", {})
+        m15 = self.context.get("m15", {})
+        m5_obs = self.context.get("m5_obs", [])
         m15_obs = self.context.get("m15_obs", [])
-        h1_obs = self.context.get("h1_obs", [])
-        fvgs = self.context.get("m15_fvgs", []) + self.context.get("h1_fvgs", [])
-        liq = self.context.get("m15_liquidity", {})
+        fvgs = self.context.get("m5_fvgs", []) + self.context.get("m15_fvgs", [])
+        liq = self.context.get("m5_liquidity", {})
 
         # 1-Touch Fresh OB logic (must be tapped by recent candles)
         fresh_ob = None
-        _candles = self.context.get("_last_m15_candles")
+        _candles = self.context.get("_last_m5_candles")
         if _candles is not None and len(_candles) >= 3:
             recent_low = min(float(_candles.iloc[i]["low"]) for i in range(-3, 0))
             recent_high = max(float(_candles.iloc[i]["high"]) for i in range(-3, 0))
         else:
             recent_low = recent_high = 0
 
-        for ob in reversed(m15_obs + h1_obs):
+        for ob in reversed(m5_obs + m15_obs):
             if ob.get("type") == bias and ob.get("touches", 99) <= 1:
                 if bias == "BULLISH" and float(ob["bottom"]) <= recent_low <= float(ob["top"]):
                     fresh_ob = ob
@@ -412,12 +432,19 @@ class SMCEngine(BaseStrategy):
         # Kill zone check
         try:
             from datetime import timezone as _tz
-            _candles = self.context.get("_last_m15_candles")
+            _candles = self.context.get("_last_m5_candles")
             if _candles is not None and len(_candles) > 0:
                 _bar_idx = _candles.index[-1]
                 _bar_ts = int(_bar_idx.timestamp()) if hasattr(_bar_idx, 'timestamp') else None
             else:
                 _bar_ts = None
+                
+            session = None
+            if _bar_ts is not None:
+                from datetime import datetime as _dt
+                from backend.utils.timeutils import get_current_session
+                session = get_current_session(_dt.fromtimestamp(_bar_ts, tz=_tz.utc))
+                
             if "Volatility" in symbol or "Crash" in symbol or "Boom" in symbol or "Step" in symbol or "Jump" in symbol:
                 in_kill_zone = True
             else:
@@ -436,8 +463,8 @@ class SMCEngine(BaseStrategy):
             "symbol": symbol,
             "signal_direction": bias,
             "htf_bias": self.context.get("htf_bias"),
-            "h1_bos": h1.get("trend") == bias and h1.get("trend_confirmed", False),
-            "h1_choch": h1.get("trend") == bias and not h1.get("trend_confirmed", False),
+            "m15_bos": m15.get("trend") == bias and m15.get("trend_confirmed", False),
+            "m15_choch": m15.get("trend") == bias and not m15.get("trend_confirmed", False),
             "liquidity_sweep": liq.get("recent_sweep"),
             "fresh_ob": fresh_ob,
             "fvg_present": fvg_present,

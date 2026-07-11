@@ -8,8 +8,8 @@ export default function TradeChart({ group, timeframe = 'M5', height = 300 }) {
   useEffect(() => {
     let rawChartData = group.chart_data || [];
     if (timeframe === 'H4') rawChartData = group.chart_data_h4 || [];
-    if (timeframe === 'H1') rawChartData = group.chart_data_h1 || [];
     if (timeframe === 'M15') rawChartData = group.chart_data_m15 || [];
+    if (timeframe === 'M5') rawChartData = group.chart_data_m5 || [];
     if (timeframe === 'M1') rawChartData = group.chart_data_m1 || [];
 
     if (!group || !rawChartData || rawChartData.length === 0 || !chartContainerRef.current) return;

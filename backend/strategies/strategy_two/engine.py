@@ -87,6 +87,9 @@ class CrashBoomEngine(BaseStrategy):
             return "DOWN"
         return "UP" # Default fallback
 
+    def get_required_timeframes(self) -> List[str]:
+        return ["M5"]
+
     def detect_jump(self, bar: pd.Series, symbol: str, atr_val: float) -> bool:
         """Detect if the bar is a massive jump against the drift."""
         symbol_upper = symbol.upper()
@@ -124,6 +127,9 @@ class CrashBoomEngine(BaseStrategy):
         """
         CrashBoom Strategy 1 + 2 evaluation.
         """
+        if timeframe != "M5":
+            return None
+            
         # Clear run_logs for the new bar evaluation if not backtesting
         if not self.is_backtesting:
             self.run_logs = []

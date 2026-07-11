@@ -179,7 +179,7 @@ This is the canonical config. Implement it as a single JSON/YAML object that the
 |---|---|---|---|
 | HTF (Bias / IPDM) | `4H` | `timeframes.htf` | Determines directional bias; only trade in this direction |
 | ITF (Zones & Structure) | `1H` | `timeframes.itf` | Mandatory ChoCH for shift, optional BOS for score. Spot POIs (OB, FVG, S&D, FIB) & Liquidity. |
-| Execution TF (M15) | `15m` | `timeframes.execution_tf` | Timeframe the order is actually triggered on (Candlestick / Fallbacks) |
+| Execution TF (M5) | `15m` | `timeframes.execution_tf` | Timeframe the order is actually triggered on (Candlestick / Fallbacks) |
 
 Rule: a signal is only valid if `require_htf_ltf_alignment = true` and the LTF confirmation direction matches the HTF bias.
 
@@ -337,18 +337,18 @@ A trade must score a minimum of 55 points to execute.
 
 **Mandatory Conditions:**
 1. **HTF (H4)**: Bias identified (Direction).
-2. **ITF (H1)**: A Change of Character (ChoCH) is mandatory in the direction of the HTF bias.
-3. **Execution (M15)**: A Candlestick confirmation (Engulfing or Pinbar) is the primary trigger. 
+2. **ITF (M15)**: A Change of Character (ChoCH) is mandatory in the direction of the HTF bias.
+3. **Execution (M5)**: A Candlestick confirmation (Engulfing or Pinbar) is the primary trigger. 
    - *Fallback*: If no candlestick exists, enter on "LTF BOS after ChoCH" or aggressively on a "POI wick tap".
 
 **Scoring Breakdown (Max 100):**
 - **HTF Bias Alignment**: 15 points
-- **H1 BOS (Optional Confirmation)**: 15 points (huge booster)
-- **H1 ChoCH**: 10 points
+- **M15 BOS (Optional Confirmation)**: 15 points (huge booster)
+- **M15 ChoCH**: 10 points
 - **Liquidity Sweep**: 15 points
 - **Fresh Order Block (1-Touch, 50% Entry)**: 15 points
 - **FVG Present / Inside OB**: 10 points
-- **M15 Candlestick Confirmation**: 15 points (Tier 1), 10 points (Tier 2), 5 points (Tier 3)
+- **M5 Candlestick Confirmation**: 15 points (Tier 1), 10 points (Tier 2), 5 points (Tier 3)
 - **OTE/FIB Confluence**: 5 points
 
 If the total score >= 55, the trade fires.

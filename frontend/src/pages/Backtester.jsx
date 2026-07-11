@@ -139,7 +139,8 @@ const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef
   const mergedGroup = {
     ...group,
     chart_data: fetchedCharts?.chart_data || group.chart_data,
-    chart_data_h1: fetchedCharts?.chart_data_h1 || group.chart_data_h1,
+    chart_data_m15: fetchedCharts?.chart_data_m15 || group.chart_data_m15,
+    chart_data_m5: fetchedCharts?.chart_data_m5 || group.chart_data_m5,
     chart_data_m15: fetchedCharts?.chart_data_m15 || group.chart_data_m15
   };
 
@@ -246,7 +247,7 @@ const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef
             ) : mergedGroup.chart_data && mergedGroup.chart_data.length > 0 ? (
               <div style={{ background: 'rgba(0,0,0,0.1)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
                 <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.2)' }}>
-                  {['H4', 'H1', 'M15', 'M5', 'M1'].map(tf => (
+                  {['H4', 'M15', 'M5', 'M1'].map(tf => (
                     <button
                       key={tf}
                       onClick={() => setActiveChart(tf)}
@@ -258,12 +259,11 @@ const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef
                         cursor: 'pointer', fontSize: '0.8rem'
                       }}
                     >
-                      {tf === 'H1' ? 'HTF Context (H1)' : tf === 'M15' ? 'Intermediate (M15)' : 'Entry (M5)'}
+                      {tf === 'M15' ? 'HTF Context (M15)' : tf === 'M5' ? 'Entry (M5)' : 'Entry (M5)'}
                     </button>
                   ))}
                 </div>
                 <div style={{ padding: '8px' }}>
-                  {activeChart === 'H1' && <TradeChart group={mergedGroup} timeframe="H1" height={400} />}
                   {activeChart === 'M15' && <TradeChart group={mergedGroup} timeframe="M15" height={400} />}
                   {activeChart === 'M5' && <TradeChart group={mergedGroup} timeframe="M5" height={400} />}
                 </div>
@@ -396,6 +396,39 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
               <span>{String(v)}</span>
             </div>
           ))}
+        </div>
+      </div>
+    )}
+
+    {report.rejection_funnel && Object.keys(report.rejection_funnel).length > 0 && (
+      <div style={{ marginBottom: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
+        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center' }}>
+          <Shield size={14} style={{ marginRight: 6, color: 'var(--blue)' }} /> Signal Rejection Funnel
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>Overview</div>
+            <div style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}><span>Total Evaluated:</span> <strong>{report.rejection_funnel.total_evaluated}</strong></div>
+            <div style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}><span>Approved:</span> <strong style={{ color: 'var(--green)' }}>{report.rejection_funnel.approved}</strong></div>
+            <div style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}><span>Errors:</span> <strong style={{ color: report.rejection_funnel.errors > 0 ? 'var(--red)' : 'var(--text-primary)' }}>{report.rejection_funnel.errors}</strong></div>
+          </div>
+          <div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>Rejection Breakdown</div>
+            <div style={{ maxHeight: 100, overflowY: 'auto', paddingRight: 4 }}>
+              {Object.entries(report.rejection_funnel.strategy_rejections || {}).map(([reason, count]) => (
+                <div key={reason} style={{ fontSize: '0.75rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2, borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '80%' }} title={reason}>{reason}</span>
+                  <span style={{ color: 'var(--yellow)' }}>{count}</span>
+                </div>
+              ))}
+              {Object.entries(report.rejection_funnel.risk_rejections || {}).map(([reason, count]) => (
+                <div key={reason} style={{ fontSize: '0.75rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2, borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '80%' }} title={reason}>Risk: {reason}</span>
+                  <span style={{ color: 'var(--yellow)' }}>{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     )}
@@ -624,7 +657,7 @@ export default function Backtester() {
       if (saved) return JSON.parse(saved);
     } catch { }
     return {
-      symbol: 'XAUUSD', timeframe: 'H1', initial_balance: 10000,
+      symbol: 'XAUUSD', timeframe: 'M15', initial_balance: 10000,
       start_date: '', end_date: '', candle_count: 5000,
       confluence_threshold: 55, swing_length: 5, ob_impulse_ratio: 1.5,
       fvg_min_gap_pips: 3.0, liq_sweep_min_pips: 2.0, max_spread_pips: 3.0,
@@ -872,7 +905,7 @@ export default function Backtester() {
               </datalist>
             </div>
           </div>
-          <div><label>Timeframe</label><select value={form.timeframe} onChange={e => setForm({ ...form, timeframe: e.target.value })}>{['M5', 'M15', 'H1', 'H4', 'D1'].map(tf => <option key={tf} value={tf}>{tf}</option>)}</select></div>
+          <div><label>Timeframe</label><select value={form.timeframe} onChange={e => setForm({ ...form, timeframe: e.target.value })}>{['M5', 'M15', 'H4', 'D1'].map(tf => <option key={tf} value={tf}>{tf}</option>)}</select></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div><label>Start Date</label><input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} /></div>
             <div><label>End Date</label><input type="date" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} /></div>
