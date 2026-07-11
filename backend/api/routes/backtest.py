@@ -455,7 +455,6 @@ async def run_backtest_endpoint(
                 signals=signals,
                 risk_config=merged_risk_config,
                 initial_balance=req.initial_balance,
-                candles_h1=candles_h1_idx,
                 candles_m15=candles_m15_idx,
                 save_mode="DISCARD",
                 compounding_enabled=req.compounding_enabled,
