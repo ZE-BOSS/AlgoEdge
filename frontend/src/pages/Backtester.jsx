@@ -555,7 +555,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
           </table>
         </div>
       ) : (
-        <VirtualizedTradeList displayGroups={displayGroups} groupBy={groupBy} backtestId={result.run?.id} />
+        <VirtualizedTradeList displayGroups={displayGroups} groupBy={groupBy} backtestId={result.id} />
       )}
     </>)}
   </div>);

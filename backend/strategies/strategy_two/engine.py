@@ -152,6 +152,9 @@ class CrashBoomEngine(BaseStrategy):
         df['ema_slow'] = df['close'].ewm(span=slow_period, adjust=False).mean()
         df['atr'] = calculate_atr(df, SPEC_DEFAULTS['atr_period'])
         
+        # Update current_bar to include the freshly computed indicators
+        current_bar = df.iloc[-1]
+        
         # C5: NaN Guard on ATR
         atr_val = current_bar['atr']
         if pd.isna(atr_val) or atr_val <= 0:
