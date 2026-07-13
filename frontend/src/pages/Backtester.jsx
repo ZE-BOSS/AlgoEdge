@@ -140,8 +140,7 @@ const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef
     ...group,
     chart_data: fetchedCharts?.chart_data || group.chart_data,
     chart_data_m15: fetchedCharts?.chart_data_m15 || group.chart_data_m15,
-    chart_data_m5: fetchedCharts?.chart_data_m5 || group.chart_data_m5,
-    chart_data_m15: fetchedCharts?.chart_data_m15 || group.chart_data_m15
+    chart_data_m5: fetchedCharts?.chart_data_m5 || group.chart_data_m5
   };
 
   
@@ -244,24 +243,28 @@ const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', flexGrow: 1, minWidth: 0 }}>
             {isLoadingChart ? (
               <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Loading charts...</div>
-            ) : mergedGroup.chart_data && mergedGroup.chart_data.length > 0 ? (
+            ) : (mergedGroup.chart_data?.length > 0 || mergedGroup.chart_data_m15?.length > 0 || mergedGroup.chart_data_m5?.length > 0) ? (
               <div style={{ background: 'rgba(0,0,0,0.1)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
                 <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.2)' }}>
-                  {['H4', 'M15', 'M5', 'M1'].map(tf => (
-                    <button
-                      key={tf}
-                      onClick={() => setActiveChart(tf)}
-                      style={{
-                        padding: '8px 16px', background: 'none', border: 'none',
-                        color: activeChart === tf ? 'var(--text-primary)' : 'var(--text-muted)',
-                        fontWeight: activeChart === tf ? 600 : 400,
-                        borderBottom: activeChart === tf ? '2px solid var(--blue)' : '2px solid transparent',
-                        cursor: 'pointer', fontSize: '0.8rem'
-                      }}
-                    >
-                      {tf === 'M15' ? 'HTF Context (M15)' : tf === 'M5' ? 'Entry (M5)' : 'Entry (M5)'}
-                    </button>
-                  ))}
+                  {['M15', 'M5'].map(tf => {
+                    const hasData = tf === 'M15' ? mergedGroup.chart_data_m15?.length > 0 : mergedGroup.chart_data_m5?.length > 0;
+                    if (!hasData && !(tf === 'M5' && mergedGroup.chart_data?.length > 0)) return null;
+                    return (
+                      <button
+                        key={tf}
+                        onClick={() => setActiveChart(tf)}
+                        style={{
+                          padding: '8px 16px', background: 'none', border: 'none',
+                          color: activeChart === tf ? 'var(--text-primary)' : 'var(--text-muted)',
+                          fontWeight: activeChart === tf ? 600 : 400,
+                          borderBottom: activeChart === tf ? '2px solid var(--blue)' : '2px solid transparent',
+                          cursor: 'pointer', fontSize: '0.8rem'
+                        }}
+                      >
+                        {tf === 'M15' ? 'HTF Context (M15)' : 'Entry (M5)'}
+                      </button>
+                    )
+                  })}
                 </div>
                 <div style={{ padding: '8px' }}>
                   {activeChart === 'M15' && <TradeChart group={mergedGroup} timeframe="M15" height={400} />}

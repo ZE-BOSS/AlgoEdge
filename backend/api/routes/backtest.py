@@ -456,6 +456,7 @@ async def run_backtest_endpoint(
                 risk_config=merged_risk_config,
                 initial_balance=req.initial_balance,
                 candles_m15=candles_m15_idx,
+                candles_m5=candles_m5_idx,
                 save_mode="DISCARD",
                 compounding_enabled=req.compounding_enabled,
             )
@@ -692,7 +693,7 @@ async def get_backtest(
             duration = int((t.exit_time - t.entry_time).total_seconds() / 60)
             
         grouped_trades_out.append({
-            "group_id": t.id,
+            "group_id": str(t.id),
             "symbol": t.symbol,
             "direction": t.direction,
             "entry_price": t.entry_price,
@@ -786,8 +787,8 @@ async def get_saved_trade_chart(
         
     return {
         "chart_data": safe_json_loads(t.chart_data, []),
-        "chart_data_h1": safe_json_loads(t.chart_data_h1, []),
-        "chart_data_m15": safe_json_loads(t.chart_data_m15, [])
+        "chart_data_m15": safe_json_loads(t.chart_data_m15, []),
+        "chart_data_m5": safe_json_loads(t.chart_data_m5, [])
     }
 
 
@@ -905,7 +906,25 @@ async def save_backtest_from_client(
     
     db.add(run)
     
+    # Inject chart data back from state since frontend strips it to save bandwidth
+    state_trades = []
+    try:
+        from backend.api.routes.backtest import USER_BACKTEST_STATE
+        state = USER_BACKTEST_STATE.get(current_user.id)
+        if state and state.get("result"):
+            state_trades = state["result"].get("grouped_trades", [])
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to load state for chart injection: {e}")
+    
     for t in trades:
+        group_id = t.get("group_id")
+        state_t = next((st for st in state_trades if st.get("group_id") == group_id), {})
+        
+        t["chart_data"] = state_t.get("chart_data", t.get("chart_data", []))
+        t["chart_data_m15"] = state_t.get("chart_data_m15", t.get("chart_data_m15", []))
+        t["chart_data_m5"] = state_t.get("chart_data_m5", t.get("chart_data_m5", []))
+
         try:
             etime = t.get("entry_time_iso") or t.get("entry_time")
             if isinstance(etime, (int, float)):
