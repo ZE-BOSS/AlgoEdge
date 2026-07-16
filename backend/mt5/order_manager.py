@@ -49,7 +49,7 @@ class OrderManager:
         price = tick.ask if direction.upper() in ("BUY", "BULLISH") else tick.bid
         
         sym_info = mt5.symbol_info(symbol)
-        filling_type = mt5.ORDER_FILLING_FOK if sym_info and (sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK) else mt5.ORDER_FILLING_IOC
+        filling_type = mt5.ORDER_FILLING_FOK if sym_info and (sym_info.filling_mode & 1) else mt5.ORDER_FILLING_IOC
         
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -169,7 +169,7 @@ class OrderManager:
         price = tick.bid if action == mt5.ORDER_TYPE_SELL else tick.ask
         
         sym_info = await loop.run_in_executor(_executor, lambda: mt5.symbol_info(symbol))
-        filling_type = mt5.ORDER_FILLING_FOK if sym_info and (sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK) else mt5.ORDER_FILLING_IOC
+        filling_type = mt5.ORDER_FILLING_FOK if sym_info and (sym_info.filling_mode & 1) else mt5.ORDER_FILLING_IOC
         
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
