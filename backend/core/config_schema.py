@@ -96,7 +96,12 @@ class UserConfig:
     def from_dict(cls, data: dict) -> "UserConfig":
         smc_data  = data.pop("smc",  {})
         risk_data = data.pop("risk", {})
-        config = cls(**data)
+        
+        import dataclasses
+        known_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered_data = {k: v for k, v in data.items() if k in known_fields}
+        
+        config = cls(**filtered_data)
         config.smc  = SMCParams(**smc_data)
         config.risk = RiskParams(**risk_data)
         return config
@@ -118,8 +123,11 @@ class UserConfigV2(UserConfig):
         compounding_data = data.pop("compounding", None)
         instrument_data = data.pop("instrument_settings", None)
         crashboom_data = data.pop("crashboom", {})
+        import dataclasses
+        known_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered_data = {k: v for k, v in data.items() if k in known_fields}
         
-        config = cls(**data)
+        config = cls(**filtered_data)
         config.smc  = SMCParams(**smc_data)
         config.risk = RiskParams(**risk_data)
         config.crashboom = CrashBoomParams(**crashboom_data)
