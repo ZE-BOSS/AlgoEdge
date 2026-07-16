@@ -196,7 +196,8 @@ class BotService:
                         try:
                             config_dict = json.loads(config_db.config_json)
                             config = UserConfigV2.from_dict(config_dict)
-                        except Exception:
+                        except Exception as e:
+                            self._log_event(f"Error parsing config: {e}", "ERROR", "BOT")
                             config = UserConfig()
                     elif config_db and getattr(config_db, 'config', None):
                         config = UserConfig.parse_obj(config_db.config)
@@ -234,6 +235,10 @@ class BotService:
 
                         # ── DYNAMIC STRATEGY RESOLUTION ──
                         strategy_id = "SMC_v1"
+                        
+                        # Debug exactly what is in the config
+                        self._log_event(f"Debug Config: symbols={getattr(config, 'symbols', self.symbols)}, instruments={[s.symbol + ':' + s.strategy_id for s in getattr(config, 'instrument_settings', [])]}", "DEBUG", "BOT")
+                        
                         if hasattr(config, 'instrument_settings') and config.instrument_settings:
                             for settings in config.instrument_settings:
                                 if settings.symbol == symbol:

@@ -128,17 +128,23 @@ class UserConfigV2(UserConfig):
         filtered_data = {k: v for k, v in data.items() if k in known_fields}
         
         config = cls(**filtered_data)
-        config.smc  = SMCParams(**smc_data)
-        config.risk = RiskParams(**risk_data)
-        config.crashboom = CrashBoomParams(**crashboom_data)
+        
+        def filter_kwargs(dataclass_type, data_dict):
+            if not isinstance(data_dict, dict): return {}
+            known = {f.name for f in dataclasses.fields(dataclass_type)}
+            return {k: v for k, v in data_dict.items() if k in known}
+
+        config.smc  = SMCParams(**filter_kwargs(SMCParams, smc_data))
+        config.risk = RiskParams(**filter_kwargs(RiskParams, risk_data))
+        config.crashboom = CrashBoomParams(**filter_kwargs(CrashBoomParams, crashboom_data))
         
         if compounding_data:
-            config.compounding = CompoundingParams(**compounding_data)
+            config.compounding = CompoundingParams(**filter_kwargs(CompoundingParams, compounding_data))
         else:
             config.compounding = CompoundingParams()
             
         if instrument_data:
-            config.instrument_settings = [InstrumentSettings(**i) for i in instrument_data]
+            config.instrument_settings = [InstrumentSettings(**filter_kwargs(InstrumentSettings, i)) for i in instrument_data]
         else:
             config.instrument_settings = []
             
