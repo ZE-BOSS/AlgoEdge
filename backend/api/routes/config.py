@@ -58,7 +58,21 @@ async def update_user_config(
     config = result.scalar_one_or_none()
 
     if config:
-        config.config_json = json.dumps(req.config)
+        try:
+            existing_config = json.loads(config.config_json) if config.config_json else {}
+        except Exception:
+            existing_config = {}
+            
+        def deep_update(d, u):
+            for k, v in u.items():
+                if isinstance(v, dict) and k in d and isinstance(d[k], dict):
+                    deep_update(d[k], v)
+                else:
+                    d[k] = v
+            return d
+
+        merged_config = deep_update(existing_config, req.config)
+        config.config_json = json.dumps(merged_config)
         config.preset_name = req.preset_name
         logger.info(f"Config updated for {current_user.email}: {list(req.config.keys())}")
     else:
