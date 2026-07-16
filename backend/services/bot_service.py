@@ -117,13 +117,13 @@ class BotService:
 
         # Server restart recovery: Check DB for OPEN trades and verify with MT5
         try:
-            from backend.data.database import async_session_maker
+            from backend.data.database import async_session
             from backend.data.models import TradePosition
             from sqlalchemy import select
             import MetaTrader5 as mt5
             
             if mt5.terminal_info():
-                async with async_session_maker() as session:
+                async with async_session() as session:
                     result = await session.execute(select(TradePosition).where(TradePosition.status == "OPEN"))
                     open_pos = result.scalars().all()
                     for pos in open_pos:
@@ -183,13 +183,13 @@ class BotService:
 
         while self.running:
             try:
-                from backend.data.database import async_session_maker
+                from backend.data.database import async_session
                 from backend.data.models import UserConfigModel
                 from sqlalchemy import select
                 from backend.core.config_schema import UserConfigV2, UserConfig
                 import json
                 
-                async with async_session_maker() as session:
+                async with async_session() as session:
                     result = await session.execute(select(UserConfigModel).where(UserConfigModel.user_id == user_id))
                     config_db = result.scalar_one_or_none()
                     if config_db and getattr(config_db, 'config_json', None):
@@ -429,10 +429,10 @@ class BotService:
                                         if db_positions and self.user_id:
                                             try:
                                                 import json
-                                                from backend.data.database import async_session_maker
+                                                from backend.data.database import async_session
                                                 from backend.data.models import Trade, TradePosition
                                                 
-                                                async with async_session_maker() as session:
+                                                async with async_session() as session:
                                                     trade = Trade(
                                                         user_id=self.user_id,
                                                         symbol=signal.symbol,
@@ -545,12 +545,12 @@ class BotService:
                             
                             # Also update database
                             try:
-                                from backend.data.database import async_session_maker
+                                from backend.data.database import async_session
                                 from backend.data.models import Trade, TradePosition
                                 from sqlalchemy import select
                                 import json
                                 
-                                async with async_session_maker() as session:
+                                async with async_session() as session:
                                     pos_id = deal.get("position_id")
                                     if pos_id:
                                         result = await session.execute(
