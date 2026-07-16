@@ -201,6 +201,14 @@ export const subscribePush = (data) => api.post('/push/subscribe', data);
 
 export const startBot = (data) => api.post('/bot/start', data || {});
 export const stopBot = () => api.post('/bot/stop');
+export const syncHistoricalTrades = () => api.post('/bot/sync_history');
+
+// ── MT5 Diagnostics ─────────────────────────────────────────────────────────
+
+export const testMt5Entry = (data) => api.post('/mt5_test/entry', data);
+export const testMt5Close = (data) => api.post('/mt5_test/close', data);
+export const testMt5Breakeven = (data) => api.post('/mt5_test/breakeven', data);
+export const testMt5Trail = (data) => api.post('/mt5_test/trail', data);
 export const getBotStatus = () => api.get('/bot/status');
 export const getBotLogs = (limit = 50) => api.get('/bot/logs', { params: { limit } });
 

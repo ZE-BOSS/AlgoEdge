@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Server, Save, Loader2, Check, Wifi, WifiOff, Trash2, Shield, Eye, EyeOff } from 'lucide-react';
-import { getBrokerStatus, saveBrokerStandard, saveBrokerDeriv, testBrokerConnection, removeBrokerStandard, removeBrokerDeriv } from '../../services/api';
+import { getBrokerStatus, saveBrokerStandard, saveBrokerDeriv, testBrokerConnection, removeBrokerStandard, removeBrokerDeriv, testMt5Entry, testMt5Close, testMt5Breakeven, testMt5Trail } from '../../services/api';
 import { useConnectionStore, useAuthStore } from '../../store';
 
 function BrokerCard({ title, description, type, brokerStatus, onSave, onTest, onRemove }) {
@@ -187,6 +187,130 @@ function BrokerCard({ title, description, type, brokerStatus, onSave, onTest, on
   );
 }
 
+function Mt5DiagnosticCard() {
+  const [symbol, setSymbol] = useState('Crash 1000 Index');
+  const [direction, setDirection] = useState('BUY');
+  const [ticket, setTicket] = useState(null);
+  const [loading, setLoading] = useState('');
+  const [resultMsg, setResultMsg] = useState(null);
+
+  const handleError = (e) => {
+    setResultMsg({ type: 'error', text: e.response?.data?.detail || e.message || "Unknown error" });
+  };
+
+  const handleEntry = async () => {
+    setLoading('entry');
+    setResultMsg(null);
+    try {
+      const res = await testMt5Entry({ symbol, direction });
+      if (res.data.success) {
+        setTicket(res.data.ticket);
+        setResultMsg({ type: 'success', text: `Opened ticket #${res.data.ticket}` });
+      } else {
+        setResultMsg({ type: 'error', text: res.data.error || "Failed to open position" });
+      }
+    } catch (e) { handleError(e); }
+    setLoading('');
+  };
+
+  const handleClose = async () => {
+    if (!ticket) return;
+    setLoading('close');
+    setResultMsg(null);
+    try {
+      const res = await testMt5Close({ ticket });
+      if (res.data.success) {
+        setTicket(null);
+        setResultMsg({ type: 'success', text: `Closed ticket #${ticket}` });
+      } else {
+        setResultMsg({ type: 'error', text: res.data.error || "Failed to close position" });
+      }
+    } catch (e) { handleError(e); }
+    setLoading('');
+  };
+
+  const handleBreakeven = async () => {
+    if (!ticket) return;
+    setLoading('breakeven');
+    setResultMsg(null);
+    try {
+      const res = await testMt5Breakeven({ ticket });
+      if (res.data.success) {
+        setResultMsg({ type: 'success', text: `Breakeven set at ${res.data.new_sl}` });
+      } else {
+        setResultMsg({ type: 'error', text: res.data.error || "Failed to set breakeven" });
+      }
+    } catch (e) { handleError(e); }
+    setLoading('');
+  };
+
+  const handleTrail = async () => {
+    if (!ticket) return;
+    setLoading('trail');
+    setResultMsg(null);
+    try {
+      const res = await testMt5Trail({ ticket });
+      if (res.data.success) {
+        setResultMsg({ type: 'success', text: `Trail SL updated to ${res.data.new_sl}` });
+      } else {
+        setResultMsg({ type: 'error', text: res.data.error || "Failed to trail SL" });
+      }
+    } catch (e) { handleError(e); }
+    setLoading('');
+  };
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title"><Server size={14} /> MT5 Manual Diagnostics</span>
+      </div>
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 16 }}>
+        Test MT5 connection by manually triggering entries and modifying orders using your saved Risk %.
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        <div>
+          <label>Symbol</label>
+          <input type="text" value={symbol} onChange={e => setSymbol(e.target.value)} />
+        </div>
+        <div>
+          <label>Direction</label>
+          <select value={direction} onChange={e => setDirection(e.target.value)} style={{ width: '100%', padding: '8px 12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)' }}>
+            <option value="BUY">BUY</option>
+            <option value="SELL">SELL</option>
+          </select>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {!ticket ? (
+          <button className="btn btn-primary" onClick={handleEntry} disabled={!!loading}>
+            {loading === 'entry' ? <Loader2 size={14} className="spin" /> : 'Trigger Entry'}
+          </button>
+        ) : (
+          <>
+            <button className="btn btn-secondary" onClick={handleBreakeven} disabled={!!loading}>
+              {loading === 'breakeven' ? <Loader2 size={14} className="spin" /> : 'Set Breakeven'}
+            </button>
+            <button className="btn btn-secondary" onClick={handleTrail} disabled={!!loading}>
+              {loading === 'trail' ? <Loader2 size={14} className="spin" /> : 'Trail SL'}
+            </button>
+            <button className="btn btn-danger" onClick={handleClose} disabled={!!loading} style={{ background: 'var(--red)', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
+              {loading === 'close' ? <Loader2 size={14} className="spin" /> : 'Close Position'}
+            </button>
+          </>
+        )}
+      </div>
+
+      {resultMsg && (
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 4, background: resultMsg.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)', color: resultMsg.type === 'error' ? 'var(--red)' : 'var(--green)', fontSize: '0.85rem' }}>
+          {resultMsg.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function BrokerSettings() {
   const { status } = useConnectionStore();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -258,6 +382,8 @@ export default function BrokerSettings() {
           your MT5 terminal for live trading to work.
         </div>
       </div>
+      
+      <Mt5DiagnosticCard />
     </div>
   );
 }
