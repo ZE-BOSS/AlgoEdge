@@ -732,7 +732,7 @@ async def get_backtest(
             "entry_snapshot_b64": ""
         })
 
-    return {
+    resp = {
         "run": {
             "id": run.id,
             "symbol": run.symbol,
@@ -766,6 +766,25 @@ async def get_backtest(
         "session_win_rates": session_win_rates,
         "run_logs": [],  # Stripped to prevent UI freeze
     }
+
+    try:
+        from backend.analytics.reports import generate_risk_report
+        import dataclasses
+        risk_report = generate_risk_report(grouped_trades_out)
+        resp["report"] = dataclasses.asdict(risk_report)
+        # Update session_win_rates from the freshly generated report just in case
+        resp["session_win_rates"] = {
+            "LONDON": risk_report.london_win_rate,
+            "NY": risk_report.ny_win_rate,
+            "OVERLAP": risk_report.overlap_win_rate,
+            "ASIAN": risk_report.asian_win_rate,
+            "UNKNOWN": risk_report.other_win_rate
+        }
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to generate full risk report on the fly: {e}")
+
+    return resp
 
 
 @router.get("/backtests/{backtest_id}/trade/{group_id}/chart")

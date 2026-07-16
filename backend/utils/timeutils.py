@@ -137,10 +137,13 @@ def is_news_blocked(
 
 def detect_session(timestamp) -> str:
     """
-    Detect trading session from a timestamp (datetime or int/float).
+    Detect trading session from a timestamp (datetime or int/float/numpy).
     Returns 'LONDON', 'NY', 'OVERLAP', 'ASIAN', or '24/7'.
     Used by the backtester for session tagging on trades.
     """
+    import pandas as pd
+    import numpy as np
+    
     if isinstance(timestamp, (int, float)):
         try:
             dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
@@ -148,6 +151,10 @@ def detect_session(timestamp) -> str:
             return "UNKNOWN"
     elif isinstance(timestamp, datetime):
         dt = timestamp
+    elif isinstance(timestamp, pd.Timestamp):
+        dt = timestamp.to_pydatetime()
+    elif isinstance(timestamp, np.datetime64):
+        dt = pd.to_datetime(timestamp).to_pydatetime()
     else:
         return "UNKNOWN"
 
