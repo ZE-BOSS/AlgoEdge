@@ -94,6 +94,61 @@ class BotService:
         """Public method for other modules to log events visible on the frontend."""
         self._log_event(message, level, category)
 
+    async def _save_signal_state(self, signal_domain, status: str, reject_reason: str = ""):
+        """Saves or updates a signal in the database."""
+        try:
+            from backend.data.database import async_session
+            from backend.data.models import Signal
+            from sqlalchemy import select
+            import json
+            
+            async with async_session() as session:
+                sig_time = getattr(signal_domain, 'timestamp', None)
+                if not sig_time and hasattr(signal_domain, 'chart_data') and signal_domain.chart_data:
+                    sig_time = signal_domain.chart_data[-1].get('time')
+                if not sig_time:
+                    sig_time = datetime.now(timezone.utc).timestamp()
+                
+                dt_time = datetime.fromtimestamp(sig_time, timezone.utc)
+                
+                query = select(Signal).where(
+                    Signal.user_id == self.user_id,
+                    Signal.symbol == signal_domain.symbol,
+                    Signal.timeframe == getattr(signal_domain, 'timeframe', 'M5'),
+                    Signal.signal_time == dt_time
+                )
+                result = await session.execute(query)
+                sig_db = result.scalar_one_or_none()
+                
+                if not sig_db:
+                    sig_db = Signal(
+                        user_id=self.user_id,
+                        strategy_id=getattr(signal_domain, 'strategy_id', 'UNKNOWN'),
+                        symbol=signal_domain.symbol,
+                        timeframe=getattr(signal_domain, 'timeframe', 'M5'),
+                        signal_type=getattr(signal_domain, 'signal_type', 'UNKNOWN'),
+                        direction=signal_domain.direction,
+                        price_at_signal=getattr(signal_domain, 'price_at_signal', signal_domain.entry_price),
+                        entry_price=signal_domain.entry_price,
+                        stop_loss=signal_domain.stop_loss,
+                        tp1_price=getattr(signal_domain, 'take_profit', None), # fallback
+                        confluence_score=getattr(signal_domain, 'score', 0.0),
+                        acted_on=(status == "EXECUTED"),
+                        skip_reason=reject_reason if status != "EXECUTED" else None,
+                        signal_time=dt_time
+                    )
+                    session.add(sig_db)
+                else:
+                    sig_db.acted_on = (status == "EXECUTED")
+                    if reject_reason:
+                        sig_db.skip_reason = reject_reason
+                
+                await session.commit()
+                return sig_db.id
+        except Exception as e:
+            logger.error(f"Failed to save signal to DB: {e}")
+            return None
+
     async def start(self, user_id: str, symbols: Optional[List[str]] = None,
                     scan_interval: int = 60) -> Dict[str, Any]:
         """Start the bot scanning loop."""
@@ -314,8 +369,10 @@ class BotService:
                                 passed_gates = getattr(signal, "metadata", {}).get("passed_gates", True)
                                 if not passed_gates:
                                     reasons = getattr(signal, "metadata", {}).get("rejection_reasons", [])
+                                    reason_str = "; ".join(reasons)
                                     for reason in reasons:
                                         self._log_event(f"[REJECTED] {reason}", "SIGNAL", "SIGNAL")
+                                    await self._save_signal_state(signal, "SKIPPED", reason_str)
                                     continue
 
                                 self._log_event(
@@ -362,8 +419,8 @@ class BotService:
                                     risk_engine = RiskEngine(risk_config)
                                     risk_engine.circuit = self.circuit_breaker
 
-                                    import uuid
-                                    group_id = str(uuid.uuid4())[:8]
+                                    # Enforces 1 active signal per symbol, so symbol is uniquely identifying
+                                    group_id = signal.symbol
 
                                     signal_data = {
                                         "group_id": group_id,
@@ -425,13 +482,31 @@ class BotService:
                                                         f"Order failed: TP{tp.level} — {result.get('error', 'unknown')}",
                                                         "ERROR", "TRADE"
                                                     )
+                                                    asyncio.ensure_future(self._broadcast_notification(
+                                                        "MT5 Execution Failed",
+                                                        f"Order failed for {signal.symbol}: {result.get('error', 'unknown')}",
+                                                        "error"
+                                                    ))
                                             except Exception as order_err:
                                                 self._log_event(
                                                     f"Order placement error: {str(order_err)[:100]}",
                                                     "ERROR", "TRADE"
                                                 )
+                                                asyncio.ensure_future(self._broadcast_notification(
+                                                        "MT5 Execution Failed",
+                                                        f"Order placement error for {signal.symbol}: {str(order_err)[:100]}",
+                                                        "error"
+                                                ))
+                                    
+                                        if not db_positions:
+                                            self.circuit_breaker.rollback_position(group_id)
+                                            self._log_event(f"All orders failed. Rolled back risk state for {group_id}.", "WARN", "RISK")
+                                            await self._save_signal_state(signal, "FAILED", "MT5 execution failed")
+                                        elif len(db_positions) < len(tp_levels):
+                                            self.circuit_breaker.active_groups[group_id]["sub_trades"] = len(db_positions)
                                     
                                         if db_positions and self.user_id:
+                                            await self._save_signal_state(signal, "EXECUTED")
                                             try:
                                                 import json
                                                 from backend.data.database import async_session
@@ -446,6 +521,7 @@ class BotService:
                                                         stop_loss=signal.stop_loss,
                                                         volume=sum(p["volume"] for p in db_positions),
                                                         status="OPEN",
+                                                        entry_time=datetime.utcnow(),
                                                         chart_data=json.dumps(signal.chart_data) if signal.chart_data else None,
                                                     )
                                                     session.add(trade)
@@ -473,6 +549,7 @@ class BotService:
                                             f"Trade rejected by risk engine: {reason}",
                                             "WARN", "RISK"
                                         )
+                                        await self._save_signal_state(signal, "REJECTED", reason)
                                         # Only trigger explicit popup for risk-based rejections, not basic RR rejections to avoid spam
                                         if "Broker minimum lot forces risk" in reason or "Proposed risk" in reason:
                                             asyncio.ensure_future(self._broadcast_notification(
@@ -568,6 +645,10 @@ class BotService:
                                             pos.exit_price = deal.get("price", 0.0)
                                             pos.exit_time = datetime.fromtimestamp(deal["time"], timezone.utc)
                                             
+                                            trade = await session.get(Trade, pos.parent_trade_id)
+                                            if self.circuit_breaker and trade:
+                                                self.circuit_breaker.position_closed(trade.symbol, net_profit, pos.exit_time)
+
                                             result2 = await session.execute(
                                                 select(TradePosition).where(TradePosition.parent_trade_id == pos.parent_trade_id)
                                             )

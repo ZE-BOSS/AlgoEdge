@@ -144,6 +144,18 @@ class CircuitBreaker:
                     if self.open_positions_by_symbol[sym] == 0:
                         del self.open_positions_by_symbol[sym]
 
+    def rollback_position(self, group_id: str):
+        """Rollback an opened position if MT5 execution failed entirely."""
+        if group_id in self.active_groups:
+            sym = self.active_groups[group_id].get("symbol", "")
+            del self.active_groups[group_id]
+            self.open_positions = max(0, self.open_positions - 1)
+            self.daily_trades_count = max(0, self.daily_trades_count - 1)
+            if sym and sym in self.open_positions_by_symbol:
+                self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
+                if self.open_positions_by_symbol[sym] == 0:
+                    del self.open_positions_by_symbol[sym]
+
     def _record_trade_result(self, pnl: float, is_win: bool):
         """Update state after a grouped trade fully closes."""
         self.daily_pnl += pnl
