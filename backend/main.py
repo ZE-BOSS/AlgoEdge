@@ -83,6 +83,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o for o in [
         os.getenv("FRONTEND_URL", ""),
+        "http://52.201.102.37",
         "http://localhost:5173",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
