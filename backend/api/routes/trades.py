@@ -67,6 +67,7 @@ async def get_trades(
         "balance_after": t.balance_after,
         "confluence_score": t.confluence_score,
         "chart_data": t.chart_data,
+        "created_at": t.created_at,
     } for t in trades]
 
 

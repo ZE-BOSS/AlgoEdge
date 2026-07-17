@@ -86,6 +86,9 @@ class UserConfig:
     notify_daily_summary:  bool = True
     notify_llm_ready:      bool = True
 
+    telegram_bot_token:    str  = ""
+    telegram_chat_id:      str  = ""
+
     backtest_auto_save:    bool = False
 
     def to_dict(self) -> dict:

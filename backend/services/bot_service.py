@@ -135,7 +135,8 @@ class BotService:
                         confluence_score=getattr(signal_domain, 'score', 0.0),
                         acted_on=(status == "EXECUTED"),
                         skip_reason=reject_reason if status != "EXECUTED" else None,
-                        signal_time=dt_time
+                        signal_time=dt_time,
+                        chart_data=json.dumps(signal_domain.chart_data) if getattr(signal_domain, 'chart_data', None) else None
                     )
                     session.add(sig_db)
                 else:
@@ -144,6 +145,16 @@ class BotService:
                         sig_db.skip_reason = reject_reason
                 
                 await session.commit()
+                
+                # Send Telegram Alert
+                from backend.services.telegram import telegram_service
+                msg = f"🟢 *Signal Generated*\n" if status == "EXECUTED" else f"⚪ *Signal {status}*\n"
+                msg += f"Symbol: {signal_domain.symbol}\nDirection: {signal_domain.direction}\n"
+                msg += f"Price: {signal_domain.entry_price}\n"
+                if reject_reason:
+                    msg += f"Reason: {reject_reason}\n"
+                asyncio.create_task(telegram_service.send_message(msg))
+                
                 return sig_db.id
         except Exception as e:
             logger.error(f"Failed to save signal to DB: {e}")
@@ -169,6 +180,8 @@ class BotService:
         # Start background scanning task
         self._task = asyncio.create_task(self._scan_loop(user_id))
         self._sync_task = asyncio.create_task(self._trade_sync_loop())
+        from backend.services.position_manager import position_manager
+        position_manager.start(user_id)
 
         # Server restart recovery: Check DB for OPEN trades and verify with MT5
         try:
@@ -211,6 +224,9 @@ class BotService:
             except asyncio.CancelledError:
                 pass
         self._sync_task = None
+        
+        from backend.services.position_manager import position_manager
+        position_manager.stop()
 
         self._log_event("Bot stopped by user", category="BOT")
         return {"running": False, "message": "Bot stopped"}
@@ -248,12 +264,16 @@ class BotService:
                     result = await session.execute(select(UserConfigModel).where(UserConfigModel.user_id == user_id))
                     config_db = result.scalar_one_or_none()
                     if config_db and getattr(config_db, 'config_json', None):
-                        try:
-                            config_dict = json.loads(config_db.config_json)
-                            config = UserConfigV2.from_dict(config_dict)
-                        except Exception as e:
-                            self._log_event(f"Error parsing config: {e}", "ERROR", "BOT")
-                            config = UserConfig()
+                        config_dict = json.loads(config_db.config_json)
+                        
+                        # Update Telegram config dynamically
+                        from backend.services.telegram import telegram_service
+                        telegram_service.update_config(
+                            config_dict.get('telegram_bot_token', ''),
+                            config_dict.get('telegram_chat_id', '')
+                        )
+                        
+                        config = UserConfigV2.from_dict(config_dict)
                     elif config_db and getattr(config_db, 'config', None):
                         config = UserConfig.parse_obj(config_db.config)
                     else:
@@ -541,6 +561,11 @@ class BotService:
                                                         )
                                                         session.add(pos)
                                                     await session.commit()
+                                                    
+                                                    # Force frontend Journal/Dashboard to refetch
+                                                    from backend.api.websocket import manager as ws_manager
+                                                    await ws_manager.broadcast_all({"type": "trade_update"})
+                                                    
                                             except Exception as db_err:
                                                 logger.error(f"Failed to save live trade to DB: {db_err}")
                                                 
@@ -675,6 +700,15 @@ class BotService:
                                                         logger.warning(f"Failed to fetch exit chart data: {chart_err}")
                                             
                                             await session.commit()
+                                            
+                                            from backend.api.websocket import manager as ws_manager
+                                            await ws_manager.broadcast_all({"type": "trade_update"})
+                                            
+                                            from backend.services.telegram import telegram_service
+                                            emoji = "✅" if net_profit >= 0 else "❌"
+                                            msg = f"{emoji} *Position Closed*\nSymbol: {deal['symbol']}\nTicket: {deal.get('ticket', 'Unknown')}\nP&L: ${net_profit:.2f}"
+                                            asyncio.create_task(telegram_service.send_message(msg))
+
                             except Exception as db_err:
                                 logger.error(f"Failed to update trade in DB: {db_err}")
                             

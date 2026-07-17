@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Server, Save, Loader2, Check, Wifi, WifiOff, Trash2, Shield, Eye, EyeOff } from 'lucide-react';
-import { getBrokerStatus, saveBrokerStandard, saveBrokerDeriv, testBrokerConnection, removeBrokerStandard, removeBrokerDeriv, testMt5Entry, testMt5Close, testMt5Breakeven, testMt5Trail } from '../../services/api';
+import { Server, Save, Loader2, Check, Wifi, WifiOff, Trash2, Shield, Eye, EyeOff, MessageSquare } from 'lucide-react';
+import { getBrokerStatus, saveBrokerStandard, saveBrokerDeriv, testBrokerConnection, removeBrokerStandard, removeBrokerDeriv, testMt5Entry, testMt5Close, testMt5Breakeven, testMt5Trail, getConfig, updateConfig } from '../../services/api';
 import { useConnectionStore, useAuthStore } from '../../store';
 
 function BrokerCard({ title, description, type, brokerStatus, onSave, onTest, onRemove }) {
@@ -311,6 +311,70 @@ function Mt5DiagnosticCard() {
   );
 }
 
+function TelegramSettingsCard() {
+  const [token, setToken] = useState('');
+  const [chatId, setChatId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [resultMsg, setResultMsg] = useState(null);
+
+  useEffect(() => {
+    getConfig().then(res => {
+      if (res.data) {
+        setToken(res.data.telegram_bot_token || '');
+        setChatId(res.data.telegram_chat_id || '878410133');
+      }
+    }).catch(() => {});
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setResultMsg(null);
+    try {
+      await updateConfig({ config: { telegram_bot_token: token, telegram_chat_id: chatId } });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+      setResultMsg({ type: 'success', text: 'Telegram settings saved.' });
+    } catch (e) {
+      setResultMsg({ type: 'error', text: 'Failed to save: ' + (e.response?.data?.detail || e.message) });
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title"><MessageSquare size={14} /> Telegram Notifications</span>
+      </div>
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 16 }}>
+        Receive instant alerts for signals, executed trades, and breakeven/trailing stops.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        <div>
+          <label>Bot Token</label>
+          <input type="text" value={token} onChange={e => setToken(e.target.value)} placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" />
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 4 }}>Get from @BotFather</div>
+        </div>
+        <div>
+          <label>Chat ID(s)</label>
+          <input type="text" value={chatId} onChange={e => setChatId(e.target.value)} placeholder="878410133, 987654321" />
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 4 }}>Separate multiple IDs with commas</div>
+        </div>
+      </div>
+      <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+        {saving ? <Loader2 size={14} className="spin" /> : saved ? <Check size={14} /> : <Save size={14} />}
+        {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Telegram Settings'}
+      </button>
+      {resultMsg && (
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 4, background: resultMsg.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)', color: resultMsg.type === 'error' ? 'var(--red)' : 'var(--green)', fontSize: '0.85rem' }}>
+          {resultMsg.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 export default function BrokerSettings() {
   const { status } = useConnectionStore();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -383,6 +447,7 @@ export default function BrokerSettings() {
         </div>
       </div>
       
+      <TelegramSettingsCard />
       <Mt5DiagnosticCard />
     </div>
   );

@@ -432,7 +432,16 @@ export default function Dashboard() {
   useEffect(() => {
     if (statsData) setStats(statsData);
     if (compoundingData) setCompounding(compoundingData);
-  }, [statsData, compoundingData]);
+  }, [statsData, compoundingData, setStats, setCompounding]);
+
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.type === 'trade_update') queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    };
+    window.addEventListener('ws-message', handler);
+    return () => window.removeEventListener('ws-message', handler);
+  }, [queryClient]);
 
   const s = statsData || {};
 

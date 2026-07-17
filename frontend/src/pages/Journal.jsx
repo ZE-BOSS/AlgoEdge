@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, ChevronDown, ChevronRight, Bot, ExternalLink } from 'lucide-react';
 import { getTrades, analyzeTrade } from '../services/api';
 import { useConnectionStore, useAuthStore } from '../store';
@@ -160,6 +160,15 @@ export default function Journal() {
     queryFn: () => getTrades({ status: filter !== 'ALL' ? filter : undefined, limit: 500 }).then(r => r.data),
     enabled: status === 'ONLINE' && isAuthenticated,
   });
+
+  const queryClient = useQueryClient();
+  React.useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.type === 'trade_update') queryClient.invalidateQueries({ queryKey: ['trades'] });
+    };
+    window.addEventListener('ws-message', handler);
+    return () => window.removeEventListener('ws-message', handler);
+  }, [queryClient]);
 
   const [viewMode, setViewMode] = useState('TRADES'); // 'TRADES' or 'SUMMARY'
   const [summaryGrouping, setSummaryGrouping] = useState('Month'); // 'Day', 'Week', 'Month', 'Year'
