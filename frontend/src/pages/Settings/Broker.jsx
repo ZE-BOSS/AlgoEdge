@@ -320,9 +320,9 @@ function TelegramSettingsCard() {
 
   useEffect(() => {
     getConfig().then(res => {
-      if (res.data) {
-        setToken(res.data.telegram_bot_token || '');
-        setChatId(res.data.telegram_chat_id || '878410133');
+      if (res.data && res.data.config) {
+        setToken(res.data.config.telegram_bot_token || '');
+        setChatId(res.data.config.telegram_chat_id || '');
       }
     }).catch(() => {});
   }, []);
