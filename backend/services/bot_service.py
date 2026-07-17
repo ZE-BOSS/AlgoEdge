@@ -379,8 +379,9 @@ class BotService:
                                     cd_df = fetched_data[last_tf].tail(100).copy()
                                     if "time" not in cd_df.columns and cd_df.index.name == "time":
                                         cd_df = cd_df.reset_index()
-                                    # DataFetcher already returns epoch seconds for time, so no conversion is needed
-                                    signal.chart_data = cd_df.to_dict(orient="records")
+                                    import json
+                                    # Use to_json and loads to get clean Python types
+                                    signal.chart_data = json.loads(cd_df.to_json(orient="records"))
                                 except Exception as e:
                                     logger.error(f"Failed to inject chart_data: {e}")
 
@@ -694,8 +695,8 @@ class BotService:
                                                             cd_df = candles.copy()
                                                             if "time" not in cd_df.columns and cd_df.index.name == "time":
                                                                 cd_df = cd_df.reset_index()
-                                                            # DataFetcher already returns epoch seconds for time, so no conversion is needed
-                                                            trade.chart_data = json.dumps(cd_df.to_dict(orient="records"))
+                                                            # Use to_json to avoid numpy serialization errors
+                                                            trade.chart_data = cd_df.to_json(orient="records")
                                                     except Exception as chart_err:
                                                         logger.warning(f"Failed to fetch exit chart data: {chart_err}")
                                             
