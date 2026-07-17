@@ -61,7 +61,8 @@ class PositionManager:
             config_db = result.scalar_one_or_none()
             if not config_db or not config_db.config_json:
                 return
-            config = UserConfigV2.from_dict(config_db.config_json)
+            import json
+            config = UserConfigV2.from_dict(json.loads(config_db.config_json))
             risk = config.risk
 
             # 2. Fetch open positions from DB
