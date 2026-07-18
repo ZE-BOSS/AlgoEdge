@@ -260,8 +260,17 @@ class PositionManager:
                 tp_level = getattr(pos, 'tp_level', 2) if pos else 2
                 trail_method = getattr(risk, f'trail_method_tp{tp_level}', getattr(risk, 'trail_method_tp2', 'NONE'))
                 if trail_method != "NONE":
-                    new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method)
-                    if new_trail_sl is not None:
+                    if pos and pos.stop_loss != 0.0:
+                        risk_pips = abs(entry_price - pos.stop_loss) / pip_size
+                    else:
+                        risk_pips = 20.0
+                    pips_in_profit = (current_price - entry_price) / pip_size if is_buy else (entry_price - current_price) / pip_size
+                    current_rr = pips_in_profit / risk_pips if risk_pips > 0 else 0
+                    
+                    activation_rr = getattr(risk, 'trail_activation_rr', 1.0)
+                    if current_rr >= activation_rr:
+                        new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method)
+                        if new_trail_sl is not None:
                         move_sl = False
                         if is_buy and new_trail_sl > current_sl:
                             move_sl = True
@@ -346,13 +355,10 @@ class PositionManager:
         Returns the new SL price, or None if no trailing adjustment should be made.
         """
         pip_size = self._get_pip_size(symbol)
-        
-        # We only start trailing if the market has moved in our favor
-        # You can add a minimum profit condition here if needed.
+        step = getattr(risk, 'trail_step_pips', 5.0) * pip_size
+        if step <= 0: step = pip_size
 
         if trail_method == "FIXED_PIPS":
-            step = 2.0 * pip_size
-            if step <= 0: return None
             
             # Simple fixed distance trailing
             trail_distance = getattr(risk, 'trail_pips', 15.0) * pip_size
@@ -390,13 +396,23 @@ class PositionManager:
             new_sl = current_price - trail_distance if is_buy else current_price + trail_distance
             
             # Add a step buffer so we aren't modifying it every tick
-            step = 2.0 * pip_size
             if is_buy:
                 if new_sl >= current_sl + step: return new_sl
             else:
                 if current_sl == 0.0 or new_sl <= current_sl - step: return new_sl
             return None
             
+        elif trail_method == "PCT_TRAIL":
+            trail_pct = getattr(risk, 'trail_pct', 0.5) / 100.0
+            trail_distance = current_price * trail_pct
+            new_sl = current_price - trail_distance if is_buy else current_price + trail_distance
+            
+            if is_buy:
+                if new_sl >= current_sl + step: return new_sl
+            else:
+                if current_sl == 0.0 or new_sl <= current_sl - step: return new_sl
+            return None
+
         elif trail_method == "STRUCTURE_TRAIL":
             # Complex Structure Trailing
             from backend.mt5.data_fetcher import DataFetcher
@@ -406,7 +422,8 @@ class PositionManager:
             candles = await DataFetcher.get_historical_data(symbol, "M15", 100)
             if candles.empty: return None
             
-            structure = Structure(left_bars=3, right_bars=3)
+            bars = getattr(risk, 'trail_structure_bars', 3)
+            structure = Structure(left_bars=bars, right_bars=bars)
             _, swings = structure.analyze(candles)
             
             if is_buy:
@@ -416,7 +433,7 @@ class PositionManager:
                     last_low = recent_lows[-1]["price"]
                     buffer = 2.0 * pip_size
                     new_sl = last_low - buffer
-                    if new_sl > current_sl + (1.0 * pip_size): return new_sl
+                    if new_sl > current_sl + step: return new_sl
             else:
                 # Find the most recent Valid Swing High
                 recent_highs = [s for s in swings if s["type"] == "HIGH" and s["price"] > current_price]
@@ -424,7 +441,7 @@ class PositionManager:
                     last_high = recent_highs[-1]["price"]
                     buffer = 2.0 * pip_size
                     new_sl = last_high + buffer
-                    if current_sl == 0.0 or new_sl < current_sl - (1.0 * pip_size): return new_sl
+                    if current_sl == 0.0 or new_sl < current_sl - step: return new_sl
             return None
 
         return None

@@ -165,6 +165,12 @@ class RiskParams:
     Prevents trailing from activating too early (before TP1 level).
     """
 
+    trail_step_pips: float = 5.0
+    """Minimum pip movement required to update trailing SL in MT5."""
+
+    trail_structure_bars: int = 3
+    """Lookback bars (left/right) for STRUCTURE_TRAIL fractal detection."""
+
     structure_trail_timeframe: str = "M15"
     """Timeframe for STRUCTURE_TRAIL swing detection."""
 
