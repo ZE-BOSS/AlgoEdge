@@ -161,6 +161,16 @@ class PositionManager:
                             
                         pos.exit_reason = reason
                         modifications_made = True
+                    else:
+                        # Position missing from MT5 and no history found! It was voided/rejected.
+                        reason = "REJECTED"
+                        pos.status = "CLOSED"
+                        pos.pnl = 0.0
+                        pos.exit_price = pos.entry_price
+                        pos.exit_time = datetime.utcnow()
+                        pos.exit_reason = reason
+                        modifications_made = True
+                        logger.warning(f"Position {pos.mt5_ticket} missing from MT5 with no history. Marked as REJECTED.")
                         
                         # Fetch parent trade to check if all siblings are closed
                         trade_query = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
@@ -225,12 +235,7 @@ class PositionManager:
                 if current_sl != pos.stop_loss or current_tp != pos.take_profit:
                     pos.stop_loss = current_sl
                     pos.take_profit = current_tp
-                    # Update parent trade as well
-                    trade_query = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
-                    parent_trade = trade_query.scalar_one_or_none()
-                    if parent_trade:
-                        parent_trade.stop_loss = current_sl
-                        parent_trade.take_profit = current_tp
+                    # Note: We do not update parent_trade SL/TP here
                     modifications_made = True
                 
                 pip_size = self._get_pip_size(symbol)
@@ -262,10 +267,6 @@ class PositionManager:
                                 modifications_made = True
                                 pos.stop_loss = new_sl
                                 pos.be_applied = True
-                                trade_query = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
-                                parent_trade = trade_query.scalar_one_or_none()
-                                if parent_trade:
-                                    parent_trade.stop_loss = new_sl
                                 msg = f"🛡️ *Breakeven Triggered*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {live_pos.ticket}\nNew SL: {new_sl:.5f}"
                                 logger.info(f"Moved SL to Breakeven: {live_pos.ticket} -> {new_sl}")
                                 asyncio.create_task(telegram_service.send_message(msg))
@@ -311,10 +312,6 @@ class PositionManager:
                                 await self._modify_sl(live_pos.ticket, symbol, new_trail_sl)
                                 modifications_made = True
                                 pos.stop_loss = new_trail_sl
-                                trade_query = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
-                                parent_trade = trade_query.scalar_one_or_none()
-                                if parent_trade:
-                                    parent_trade.stop_loss = new_trail_sl
                                 msg = f"🏃 *Trailing SL Updated*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {live_pos.ticket}\nNew SL: {new_trail_sl:.5f}"
                                 logger.info(f"Trailed SL: {live_pos.ticket} -> {new_trail_sl}")
                                 asyncio.create_task(telegram_service.send_message(msg))
@@ -346,10 +343,6 @@ class PositionManager:
                                 alive_pos.stop_loss = new_sl
                                 alive_pos.be_applied = True
                                 modifications_made = True
-                                trade_query = await session.execute(select(Trade).where(Trade.id == alive_pos.parent_trade_id))
-                                parent_trade = trade_query.scalar_one_or_none()
-                                if parent_trade:
-                                    parent_trade.stop_loss = new_sl
                                 msg = f"🛡️ *Cascade Breakeven*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {alive_pos.mt5_ticket}\nNew SL: {new_sl:.5f}"
                                 logger.info(f"Cascade BE: {alive_pos.mt5_ticket} -> {new_sl}")
                                 asyncio.create_task(telegram_service.send_message(msg))

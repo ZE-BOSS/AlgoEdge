@@ -37,16 +37,44 @@ async def lifespan(app: FastAPI):
         from backend.data.models import Trade, TradePosition
         from sqlalchemy import select
         async with async_session() as session:
+            # 1. Clean Ghosts
             result = await session.execute(select(Trade).where(Trade.status == "OPEN", Trade.strategy_id == "MANUAL"))
             ghosts = result.scalars().all()
             for t in ghosts:
                 pos_res = await session.execute(select(TradePosition).where(TradePosition.parent_trade_id == t.id))
                 for p in pos_res.scalars().all(): await session.delete(p)
                 await session.delete(t)
+            
+            # 2. Repair Corrupted Initial SLs for open trades
+            result2 = await session.execute(select(Trade).where(Trade.status == "OPEN"))
+            open_trades = result2.scalars().all()
+            repaired = 0
+            for t in open_trades:
+                tp1_res = await session.execute(select(TradePosition).where(TradePosition.parent_trade_id == t.id, TradePosition.tp_level == 1))
+                tp1 = tp1_res.scalar_one_or_none()
+                if tp1 and tp1.take_profit:
+                    # Risk = TP1 - Entry, so SL = Entry - Risk (for buy) => 2*Entry - TP1
+                    t.stop_loss = 2 * tp1.entry_price - tp1.take_profit
+                    repaired += 1
+            
+            # Dump DB state
+            try:
+                dump_lines = ["=== OPEN TRADES ==="]
+                for t in open_trades:
+                    dump_lines.append(f"Trade ID: {t.id} | Strategy: {t.strategy_id} | Symbol: {t.symbol} | Dir: {t.direction} | Vol: {t.volume} | Entry: {t.entry_price}")
+                    pos_res = await session.execute(select(TradePosition).where(TradePosition.parent_trade_id == t.id))
+                    for p in pos_res.scalars().all():
+                        dump_lines.append(f"   -> Sub-Pos: TP{p.tp_level} | Ticket: {p.mt5_ticket} | Vol: {p.volume} | SL: {p.stop_loss} | TP: {p.take_profit}")
+                with open("db_state.txt", "w") as f:
+                    f.write("\n".join(dump_lines))
+            except Exception as e:
+                logger.error(f"Dump failed: {e}")
+                
             await session.commit()
             if ghosts: logger.info(f"Cleaned {len(ghosts)} ghost manual trades.")
+            if repaired: logger.info(f"Repaired Initial SL for {repaired} live trades.")
     except Exception as e:
-        logger.error(f"Ghost cleanup failed: {e}")
+        logger.error(f"Ghost cleanup / SL repair failed: {e}")
 
     # 2. Connect Redis (optional — graceful skip if unavailable)
     redis_ok = False
