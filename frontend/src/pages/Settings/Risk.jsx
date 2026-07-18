@@ -144,8 +144,19 @@ export default function RiskSettings() {
         <div className="card-header"><span className="card-title">Trailing Stops</span></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <div>
+            <label>TP1 Trail Method</label>
+            <select value={config.trail_method_tp1} onChange={e => update('trail_method_tp1', e.target.value)}>
+              <option value="NONE">None</option>
+              <option value="ATR_TRAIL">ATR Trail</option>
+              <option value="FIXED_PIPS">Fixed Pips</option>
+              <option value="STRUCTURE_TRAIL">Structure Trail</option>
+              <option value="PCT_TRAIL">Percentage Trail</option>
+            </select>
+          </div>
+          <div>
             <label>TP2 Trail Method</label>
             <select value={config.trail_method_tp2} onChange={e => update('trail_method_tp2', e.target.value)}>
+              <option value="NONE">None</option>
               <option value="ATR_TRAIL">ATR Trail</option>
               <option value="FIXED_PIPS">Fixed Pips</option>
               <option value="STRUCTURE_TRAIL">Structure Trail</option>
@@ -155,6 +166,7 @@ export default function RiskSettings() {
           <div>
             <label>TP3 Trail Method</label>
             <select value={config.trail_method_tp3} onChange={e => update('trail_method_tp3', e.target.value)}>
+              <option value="NONE">None</option>
               <option value="STRUCTURE_TRAIL">Structure Trail</option>
               <option value="ATR_TRAIL">ATR Trail</option>
               <option value="FIXED_PIPS">Fixed Pips</option>
@@ -165,6 +177,7 @@ export default function RiskSettings() {
             <div>
               <label>TP4 Trail Method</label>
               <select value={config.trail_method_tp4} onChange={e => update('trail_method_tp4', e.target.value)}>
+                <option value="NONE">None</option>
                 <option value="ATR_TRAIL">ATR Trail</option>
                 <option value="STRUCTURE_TRAIL">Structure Trail</option>
                 <option value="FIXED_PIPS">Fixed Pips</option>
@@ -176,6 +189,7 @@ export default function RiskSettings() {
             <div>
               <label>TP5 Trail Method</label>
               <select value={config.trail_method_tp5} onChange={e => update('trail_method_tp5', e.target.value)}>
+                <option value="NONE">None</option>
                 <option value="STRUCTURE_TRAIL">Structure Trail</option>
                 <option value="ATR_TRAIL">ATR Trail</option>
                 <option value="FIXED_PIPS">Fixed Pips</option>

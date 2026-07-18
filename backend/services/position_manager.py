@@ -275,8 +275,8 @@ class PositionManager:
                                 continue
 
                 # --- 2. TRAILING SL LOGIC ---
-                tp_level = getattr(pos, 'tp_level', 2) if pos else 2
-                trail_method = getattr(risk, f'trail_method_tp{tp_level}', getattr(risk, 'trail_method_tp2', 'NONE'))
+                tp_level = getattr(pos, 'tp_level', 1) if pos else 1
+                trail_method = getattr(risk, f'trail_method_tp{tp_level}', 'NONE')
                 if trail_method != "NONE":
                     if pos and getattr(pos, 'trail_activated', False):
                         current_rr = 999.0

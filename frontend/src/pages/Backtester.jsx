@@ -564,7 +564,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
   </div>);
 });
 
-const TRAIL_METHODS = [{ v: 'ATR_TRAIL', l: 'ATR Trail' }, { v: 'FIXED_PIPS', l: 'Fixed Pips' }, { v: 'STRUCTURE_TRAIL', l: 'Structure Trail' }, { v: 'PCT_TRAIL', l: '% Trail' }];
+const TRAIL_METHODS = [{ v: 'NONE', l: 'None' }, { v: 'ATR_TRAIL', l: 'ATR Trail' }, { v: 'FIXED_PIPS', l: 'Fixed Pips' }, { v: 'STRUCTURE_TRAIL', l: 'Structure Trail' }, { v: 'PCT_TRAIL', l: '% Trail' }];
 
 const VirtualizedTradeList = memo(function VirtualizedTradeList({ displayGroups, groupBy, backtestId }) {
   const parentRef = useRef(null);
@@ -671,8 +671,8 @@ export default function Backtester() {
       tp_count: 3, tp1_rr: 1.0, tp2_rr: 3.0, tp3_rr: 5.0, tp4_rr: 10.0, tp5_rr: 15.0,
       tp_splits: '30,25,20,15,10',
       be_trigger_rr: 1.0, be_buffer_pips: 2.0,
-      trail_method_tp2: 'ATR_TRAIL', trail_method_tp3: 'STRUCTURE_TRAIL',
-      trail_method_tp4: 'ATR_TRAIL', trail_method_tp5: 'STRUCTURE_TRAIL',
+      trail_method_tp1: 'NONE', trail_method_tp2: 'ATR_TRAIL', trail_method_tp3: 'STRUCTURE_TRAIL',
+      trail_method_tp4: 'NONE', trail_method_tp5: 'NONE',
       atr_trail_multiplier: 1.5, trail_pips: 15,
       compounding_enabled: false,
       target_profit_enabled: false, max_daily_profit: 500.0, max_weekly_profit: 2000.0,
@@ -995,7 +995,7 @@ export default function Backtester() {
             </div>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--red)' }}>━ Trailing Stops</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {[2, 3, 4, 5].filter(n => n <= form.tp_count).map(n => (
+              {[1, 2, 3, 4, 5].filter(n => n <= form.tp_count).map(n => (
                 <div key={n}><label style={{ fontSize: '0.7rem' }}>TP{n} Trail</label><select value={form[`trail_method_tp${n}`]} onChange={e => u(`trail_method_tp${n}`, e.target.value)}>{TRAIL_METHODS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select></div>
               ))}
               <div><label style={{ fontSize: '0.7rem' }}>ATR Multiplier</label><input type="number" step="0.1" value={form.atr_trail_multiplier} onChange={e => u('atr_trail_multiplier', +e.target.value)} /></div>

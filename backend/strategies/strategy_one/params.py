@@ -137,15 +137,30 @@ class RiskParams:
     """Automatically move remaining positions to BE when TP1 is hit."""
 
     # ── Trailing Stop Loss ────────────────────────────────────────────
+    trail_method_tp1: Literal[
+        "NONE", "FIXED_PIPS", "ATR_TRAIL", "STRUCTURE_TRAIL", "PCT_TRAIL"
+    ] = "NONE"
+    """Trailing method applied to TP1 sub-position."""
+
     trail_method_tp2: Literal[
         "NONE", "FIXED_PIPS", "ATR_TRAIL", "STRUCTURE_TRAIL", "PCT_TRAIL"
     ] = "ATR_TRAIL"
-    """Trailing method applied to TP2 sub-position after TP1 is hit."""
+    """Trailing method applied to TP2 sub-position."""
 
     trail_method_tp3: Literal[
         "NONE", "FIXED_PIPS", "ATR_TRAIL", "STRUCTURE_TRAIL", "PCT_TRAIL"
     ] = "STRUCTURE_TRAIL"
-    """Trailing method applied to TP3 sub-position after TP2 is hit."""
+    """Trailing method applied to TP3 sub-position."""
+
+    trail_method_tp4: Literal[
+        "NONE", "FIXED_PIPS", "ATR_TRAIL", "STRUCTURE_TRAIL", "PCT_TRAIL"
+    ] = "NONE"
+    """Trailing method applied to TP4 sub-position."""
+
+    trail_method_tp5: Literal[
+        "NONE", "FIXED_PIPS", "ATR_TRAIL", "STRUCTURE_TRAIL", "PCT_TRAIL"
+    ] = "NONE"
+    """Trailing method applied to TP5 sub-position."""
 
     trail_pips: float = 15.0
     """Fixed pip distance for FIXED_PIPS trailing method."""
@@ -427,8 +442,11 @@ RISK_OPTIMIZATION_GRID = {
     "risk.tp3_rr":                  [6.0, 7.0, 10.0],
     "risk.tp_splits":               [[50,30,20], [40,35,25], [33,33,34]],
     "risk.be_trigger_rr":           [0.5, 1.0, 1.5],
-    "risk.trail_method_tp2":        ["ATR_TRAIL", "STRUCTURE_TRAIL"],
-    "risk.trail_method_tp3":        ["STRUCTURE_TRAIL", "FIXED_PIPS"],
+    "risk.trail_method_tp1":        ["NONE", "FIXED_PIPS", "ATR_TRAIL", "STRUCTURE_TRAIL", "PCT_TRAIL"],
+    "risk.trail_method_tp2":        ["NONE", "FIXED_PIPS", "ATR_TRAIL", "STRUCTURE_TRAIL", "PCT_TRAIL"],
+    "risk.trail_method_tp3":        ["NONE", "FIXED_PIPS", "ATR_TRAIL", "STRUCTURE_TRAIL", "PCT_TRAIL"],
+    "risk.trail_method_tp4":        ["NONE", "FIXED_PIPS", "ATR_TRAIL", "STRUCTURE_TRAIL", "PCT_TRAIL"],
+    "risk.trail_method_tp5":        ["NONE", "FIXED_PIPS", "ATR_TRAIL", "STRUCTURE_TRAIL", "PCT_TRAIL"],
     "risk.atr_trail_multiplier":    [1.0, 1.5, 2.0],
     "risk.risk_per_trade_pct":      [0.5, 1.0, 1.5],
     "risk.sl_buffer_pips":          [3.0, 5.0, 8.0],
