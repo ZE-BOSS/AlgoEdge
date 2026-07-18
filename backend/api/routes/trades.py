@@ -66,6 +66,7 @@ async def get_trades(
         "balance_before": t.balance_before,
         "balance_after": t.balance_after,
         "confluence_score": t.confluence_score,
+        "llm_analysis": t.llm_analysis,
         "chart_data": t.chart_data,
         "created_at": t.created_at,
     } for t in trades]
@@ -97,6 +98,8 @@ async def get_open_positions(
                 "entry_price": t.entry_price,
                 "stop_loss": t.stop_loss,
                 "volume": t.volume,
+                "llm_analysis": t.llm_analysis,
+                "confluence_score": t.confluence_score,
             },
             "sub_positions": [{
                 "tp_level": sp.tp_level,

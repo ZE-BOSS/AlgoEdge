@@ -56,7 +56,13 @@ class TelegramService:
                 logger.error(f"Failed to send Telegram message to {cid}: {e}")
 
         try:
-            async with aiohttp.ClientSession() as session:
+            import ssl
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            
+            async with aiohttp.ClientSession(connector=connector) as session:
                 tasks = [_send(session, cid) for cid in chat_ids]
                 await asyncio.gather(*tasks)
         except Exception as e:

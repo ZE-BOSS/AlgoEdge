@@ -128,6 +128,13 @@ function SignalDetail({ signal }) {
           <ConfluenceBreakdown breakdownJson={d.confluence_breakdown} />
         </div>
 
+        <div className="detail-section">
+          <h4>AI Analysis</h4>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+            {d.llm_analysis || 'No detailed analysis available.'}
+          </div>
+        </div>
+
         {d.skip_reason && (
           <div className="detail-section">
             <h4>Rejection Reason</h4>

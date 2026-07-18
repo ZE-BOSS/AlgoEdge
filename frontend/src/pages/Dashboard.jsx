@@ -434,10 +434,16 @@ export default function Dashboard() {
     if (compoundingData) setCompounding(compoundingData);
   }, [statsData, compoundingData, setStats, setCompounding]);
 
+  const [livePositions, setLivePositions] = useState({});
   const queryClient = useQueryClient();
   useEffect(() => {
     const handler = (e) => {
       if (e.detail?.type === 'trade_update') queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      if (e.detail?.type === 'live_mt5_positions') {
+        const nextLive = {};
+        e.detail.data.forEach(p => nextLive[p.ticket] = p);
+        setLivePositions(nextLive);
+      }
     };
     window.addEventListener('ws-message', handler);
     return () => window.removeEventListener('ws-message', handler);
@@ -482,24 +488,8 @@ export default function Dashboard() {
         <div>
           <BotControl />
 
-          <div className="card" style={{ marginBottom: 20 }}>
-            <div className="card-header">
-              <span className="card-title">Open Positions</span>
-              <span className="badge badge-blue">{positionsData?.length || 0}</span>
-            </div>
-            {positionsData?.length ? (
-              positionsData.map((p, i) => <PositionCard key={i} position={p} />)
-            ) : (
-              <div className="empty-state">
-                <Activity />
-                <h3>No Open Positions</h3>
-                <p>Start the bot to begin scanning for trade setups</p>
-              </div>
-            )}
-          </div>
-
           {compoundingData?.enabled && (
-            <div className="card">
+            <div className="card" style={{ marginBottom: 20 }}>
               <div className="card-header">
                 <span className="card-title">Compounding Progress</span>
                 <span className="badge badge-green">Step {compoundingData.current_step}</span>
@@ -515,6 +505,85 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Full-width Open Positions */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card-header">
+          <span className="card-title">Open Positions</span>
+          <span className="badge badge-blue">{positionsData?.length || 0}</span>
+        </div>
+        {positionsData?.length ? (
+          <div style={{ overflowX: 'auto' }}>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Direction</th>
+                  <th>Volume</th>
+                  <th>Entry</th>
+                  <th>Current</th>
+                  <th>SL</th>
+                  <th>Live P&L</th>
+                  <th>AI Analysis</th>
+                </tr>
+              </thead>
+              <tbody>
+                {positionsData.map((p, i) => {
+                  const { trade, sub_positions } = p;
+                  if (!trade) return null;
+                  const isLong = trade.direction === 'BUY';
+                  
+                  // Link with live WebSocket data if available
+                  let currentPrice = null;
+                  let currentSl = trade.stop_loss;
+                  let livePnl = null;
+                  
+                  if (livePositions) {
+                    const liveSp = sub_positions?.map(sp => livePositions[sp.mt5_ticket]).filter(Boolean);
+                    if (liveSp && liveSp.length > 0) {
+                      currentPrice = liveSp[0].price_current;
+                      currentSl = liveSp[0].sl;
+                      livePnl = liveSp.reduce((sum, ls) => sum + (ls.profit || 0), 0);
+                    }
+                  }
+
+                  return (
+                    <tr key={i}>
+                      <td><strong>{trade.symbol}</strong></td>
+                      <td>
+                        <span className={`badge ${isLong ? 'badge-green' : 'badge-red'}`}>
+                          {isLong ? '▲ LONG' : '▼ SHORT'}
+                        </span>
+                      </td>
+                      <td>{trade.volume}</td>
+                      <td>{trade.entry_price}</td>
+                      <td style={{ color: currentPrice ? (isLong ? (currentPrice > trade.entry_price ? 'var(--green)' : 'var(--red)') : (currentPrice < trade.entry_price ? 'var(--green)' : 'var(--red)')) : 'inherit' }}>
+                        {currentPrice ? currentPrice.toFixed(5) : '—'}
+                      </td>
+                      <td>{currentSl}</td>
+                      <td style={{ color: livePnl !== null ? (livePnl >= 0 ? 'var(--green)' : 'var(--red)') : 'inherit', fontWeight: 'bold' }}>
+                        {livePnl !== null ? `$${livePnl.toFixed(2)}` : '—'}
+                      </td>
+                      <td style={{ maxWidth: 250, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.75rem', color: 'var(--text-secondary)' }} title={trade.llm_analysis}>
+                        {trade.llm_analysis || '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            </div>
+          </div>
+        ) : (
+          <div className="empty-state">
+            <Activity />
+            <h3>No Open Positions</h3>
+            <p>Start the bot to begin scanning for trade setups</p>
+          </div>
+        )}
+      </div>
+
 
       {/* Full-width System Activity Log */}
       <ActivityLog />

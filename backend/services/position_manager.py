@@ -121,9 +121,60 @@ class PositionManager:
                     modifications_made = True
                     logger.info(f"God Sync: Adopted ghost/manual trade {ticket}")
 
-            # --- LIVE MANAGEMENT (Trailing & Standard BE & Manual Sync) ---
+            # --- EXIT HANDLER ---
             for pos in db_positions:
                 if pos.mt5_ticket not in mt5_tickets:
+                    # Position is closed in MT5, but OPEN in DB
+                    deals = mt5.history_deals_get(position=pos.mt5_ticket)
+                    if deals:
+                        exit_deal = deals[-1]
+                        pos.status = "CLOSED"
+                        pos.pnl = exit_deal.profit
+                        pos.exit_price = exit_deal.price
+                        pos.exit_time = datetime.fromtimestamp(exit_deal.time, timezone.utc)
+                        
+                        # Map MT5 Deal Reason to our DB Reason
+                        reason = "CLOSED"
+                        if exit_deal.reason == mt5.DEAL_REASON_SL:
+                            # If BE/Trailing was applied and the current SL != initial, it's a TRAIL stop
+                            reason = "TRAIL" if pos.be_applied else "SL"
+                        elif exit_deal.reason == mt5.DEAL_REASON_TP:
+                            reason = f"TP{pos.tp_level}" if pos.tp_level else "TP"
+                        elif exit_deal.reason == mt5.DEAL_REASON_CLIENT:
+                            reason = "CLIENT"
+                            
+                        pos.exit_reason = reason
+                        modifications_made = True
+                        
+                        # Fetch parent trade to check if all siblings are closed
+                        trade_query = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
+                        parent_trade = trade_query.scalar_one_or_none()
+                        
+                        if parent_trade:
+                            # Recalculate if all siblings closed
+                            siblings = trades_map.get(parent_trade.id, [])
+                            all_closed = True
+                            total_pnl = 0.0
+                            for sib in siblings:
+                                if sib.mt5_ticket in mt5_tickets:
+                                    all_closed = False
+                                    break
+                                # If it just closed, use the calculated PNL. Otherwise use its DB PNL.
+                                sib_pnl = sib.pnl if sib.pnl is not None else 0.0
+                                total_pnl += sib_pnl
+                                
+                            if all_closed and parent_trade.status != "CLOSED":
+                                parent_trade.status = "CLOSED"
+                                parent_trade.pnl = total_pnl
+                                parent_trade.exit_time = pos.exit_time
+                                parent_trade.exit_reason = reason
+                                
+                        logger.info(f"Sync: Closed position {pos.mt5_ticket} with reason {reason} PNL: {pos.pnl}")
+                    continue
+
+            # --- LIVE MANAGEMENT (Trailing & Standard BE & Manual Sync) ---
+            for pos in db_positions:
+                if pos.status == "CLOSED" or pos.mt5_ticket not in mt5_tickets:
                     continue
 
                 live_pos = mt5_tickets[pos.mt5_ticket]
@@ -244,6 +295,27 @@ class PositionManager:
             if modifications_made:
                 await session.commit()
                 await ws_manager.broadcast_all({"type": "trade_update"})
+
+            # Broadcast live positions to frontend for real-time dashboard ticking
+            if mt5_tickets:
+                live_data = []
+                for ticket, live_pos in mt5_tickets.items():
+                    live_data.append({
+                        "ticket": live_pos.ticket,
+                        "symbol": live_pos.symbol,
+                        "type": "BUY" if live_pos.type == mt5.POSITION_TYPE_BUY else "SELL",
+                        "volume": live_pos.volume,
+                        "price_open": live_pos.price_open,
+                        "price_current": live_pos.price_current,
+                        "sl": live_pos.sl,
+                        "tp": live_pos.tp,
+                        "profit": live_pos.profit,
+                        "time": live_pos.time,
+                    })
+                await ws_manager.broadcast_all({
+                    "type": "live_mt5_positions",
+                    "data": live_data
+                })
 
     async def _calculate_trailing_sl(self, symbol: str, is_buy: bool, current_price: float, entry_price: float, current_sl: float, risk) -> float | None:
         """

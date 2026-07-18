@@ -72,11 +72,11 @@ class RiskParams:
     tp1_rr: float = 1.0
     """TP1 Risk:Reward multiplier. Default: 1.0 (1:1 RR per spec v2.0)."""
 
-    tp2_rr: float = 5.0
-    """TP2 Risk:Reward multiplier. Standard: 5.0 (1:5 RR)."""
+    tp2_rr: float = 3.0
+    """TP2 Risk:Reward multiplier. Standard: 3.0 (1:3 RR)."""
 
-    tp3_rr: float = 7.0
-    """TP3 Risk:Reward multiplier. Extended: 7.0 or 10.0 (1:7 / 1:10 RR)."""
+    tp3_rr: float = 5.0
+    """TP3 Risk:Reward multiplier. Extended: 5.0 (1:5 RR)."""
 
     tp4_rr: float = 10.0
     """TP4 Risk:Reward multiplier. High-conviction runner. (1:10 RR)."""
@@ -84,7 +84,7 @@ class RiskParams:
     tp5_rr: float = 15.0
     """TP5 Risk:Reward multiplier. Maximum swing target. (1:15 RR)."""
 
-    tp3_use_liquidity_target: bool = True
+    tp3_use_liquidity_target: bool = False
     """
     If True, TP3 is set at the next external liquidity pool (SMC target)
     rather than a fixed RR multiplier. Preferred for SMC strategies.

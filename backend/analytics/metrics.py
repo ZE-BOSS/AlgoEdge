@@ -79,7 +79,7 @@ def calculate_sortino(returns: List[float], periods_per_year: float = 252) -> fl
     mean = np.mean(arr)
     downside = arr[arr < 0]
     if len(downside) < 2:
-        return float('inf')
+        return 999.0
     downside_std = np.std(downside, ddof=1)
     if downside_std == 0:
         return 999.0

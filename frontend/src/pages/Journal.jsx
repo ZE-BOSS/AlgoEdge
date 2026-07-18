@@ -53,7 +53,7 @@ function MiniChart({ data }) {
 
 function TradeRow({ trade }) {
   const [expanded, setExpanded] = useState(false);
-  const [analysis, setAnalysis] = useState(null);
+  const [analysis, setAnalysis] = useState(trade.llm_analysis || null);
   const [analyzing, setAnalyzing] = useState(false);
   const isWin = trade.pnl > 0;
 
