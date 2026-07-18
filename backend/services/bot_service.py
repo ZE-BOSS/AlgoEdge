@@ -695,9 +695,11 @@ class BotService:
                                     pos_id = deal.get("position_id")
                                     if pos_id:
                                         result = await session.execute(
-                                            select(TradePosition).where(TradePosition.mt5_ticket == pos_id)
+                                            select(TradePosition)
+                                            .where(TradePosition.mt5_ticket == pos_id)
+                                            .order_by(TradePosition.id.desc())
                                         )
-                                        pos = result.scalar_one_or_none()
+                                        pos = result.scalars().first()
                                         if pos and pos.status == "OPEN":
                                             pos.status = "CLOSED"
                                             pos.pnl = net_profit
