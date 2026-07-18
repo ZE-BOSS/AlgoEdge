@@ -106,10 +106,14 @@ class BotService:
             price = telegram_service.escape_markdown(str(getattr(signal_domain, 'entry_price', '')))
             reason = telegram_service.escape_markdown(reject_reason) if reject_reason else ""
             stat = telegram_service.escape_markdown(status)
+            tp = telegram_service.escape_markdown(str(getattr(signal_domain, 'take_profit', 'N/A')))
+            sl = telegram_service.escape_markdown(str(getattr(signal_domain, 'stop_loss', 'N/A')))
             
             msg = f"🟢 *Signal {stat}*\n" if status == "EXECUTED" else f"⚪ *Signal {stat}*\n"
             msg += f"Symbol: {sym}\nDirection: {direction}\n"
             msg += f"Price: {price}\n"
+            if status == "EXECUTED":
+                msg += f"SL: {sl}\nTP: {tp}\n"
             if reason:
                 msg += f"Reason: {reason}\n"
                 
@@ -740,9 +744,20 @@ class BotService:
                                             from backend.api.websocket import manager as ws_manager
                                             await ws_manager.broadcast_all({"type": "trade_update"})
                                             
+                                            import MetaTrader5 as mt5
+                                            
+                                            reason_code = deal.get("reason", -1)
+                                            reason_str = "Closed"
+                                            if reason_code == mt5.DEAL_REASON_SL:
+                                                reason_str = "Stop Loss Hit"
+                                            elif reason_code == mt5.DEAL_REASON_TP:
+                                                reason_str = "Take Profit Hit"
+                                            elif reason_code == mt5.DEAL_REASON_CLIENT:
+                                                reason_str = "Manual Close"
+                                                
                                             from backend.services.telegram import telegram_service
                                             emoji = "✅" if net_profit >= 0 else "❌"
-                                            msg = f"{emoji} *Position Closed*\nSymbol: {deal['symbol']}\nTicket: {deal.get('ticket', 'Unknown')}\nP&L: ${net_profit:.2f}"
+                                            msg = f"{emoji} *{reason_str}*\nSymbol: {deal['symbol']}\nTicket: {deal.get('ticket', 'Unknown')}\nExit Price: {deal.get('price', 0.0)}\nP&L: ${net_profit:.2f}"
                                             asyncio.create_task(telegram_service.send_message(msg))
 
                             except Exception as db_err:

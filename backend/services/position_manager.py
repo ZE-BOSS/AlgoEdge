@@ -41,13 +41,14 @@ class PositionManager:
     async def _management_loop(self, user_id: str):
         while self.running:
             try:
-                await asyncio.sleep(3)
                 await self._manage_positions(user_id)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"PositionManager loop error: {e}")
                 await asyncio.sleep(5)
+            finally:
+                await asyncio.sleep(20)
 
     async def _manage_positions(self, user_id: str):
         if not mt5.terminal_info():
@@ -68,10 +69,16 @@ class PositionManager:
             risk = config.risk
 
             # 2. Fetch open positions from DB
-            result = await session.execute(
-                select(TradePosition).where(TradePosition.user_id == user_id, TradePosition.status == "OPEN")
+            # Fetch ALL OPEN positions and any position created in the last 24 hours (for robust sync)
+            from datetime import timedelta
+            last_24h = datetime.utcnow() - timedelta(hours=24)
+            db_positions_query = await session.execute(
+                select(TradePosition).where(
+                    TradePosition.user_id == user_id,
+                    ((TradePosition.status == "OPEN") | (TradePosition.created_at >= last_24h))
+                )
             )
-            db_positions = result.scalars().all()
+            db_positions = list(db_positions_query.scalars().all())
             db_tickets = {p.mt5_ticket: p for p in db_positions}
 
             # Group by parent trade for Breakeven Cascade
@@ -144,80 +151,69 @@ class PositionManager:
                     deals = mt5.history_deals_get(position=pos.mt5_ticket)
                     if deals:
                         exit_deal = deals[-1]
-                        pos.status = "CLOSED"
-                        pos.pnl = exit_deal.profit
-                        pos.exit_price = exit_deal.price
-                        # Use system UTC to align with entry_time instead of broker time
-                        pos.exit_time = datetime.utcnow()
                         
-                        # Map MT5 Deal Reason to our DB Reason
-                        reason = "CLOSED"
-                        if exit_deal.reason == mt5.DEAL_REASON_SL:
-                            # If BE/Trailing was applied and the current SL != initial, it's a TRAIL stop
-                            reason = "TRAIL" if pos.be_applied else "SL"
-                        elif exit_deal.reason == mt5.DEAL_REASON_TP:
-                            reason = f"TP{pos.tp_level}" if pos.tp_level else "TP"
-                        elif exit_deal.reason == mt5.DEAL_REASON_CLIENT:
-                            reason = "CLIENT"
+                        # Only update if status is OPEN or PNL differs
+                        if pos.status != "CLOSED" or pos.pnl != exit_deal.profit:
+                            was_open = pos.status != "CLOSED"
+                            pos.status = "CLOSED"
+                            pos.pnl = exit_deal.profit
+                            pos.exit_price = exit_deal.price
+                            # Use system UTC to align with entry_time instead of broker time
+                            if was_open:
+                                pos.exit_time = datetime.utcnow()
                             
-                        pos.exit_reason = reason
-                        modifications_made = True
+                            # Map MT5 Deal Reason to our DB Reason
+                            reason = "CLOSED"
+                            if exit_deal.reason == mt5.DEAL_REASON_SL:
+                                # If BE/Trailing was applied and the current SL != initial, it's a TRAIL stop
+                                reason = "TRAIL" if pos.be_applied else "SL"
+                            elif exit_deal.reason == mt5.DEAL_REASON_TP:
+                                reason = f"TP{pos.tp_level}" if pos.tp_level else "TP"
+                            elif exit_deal.reason == mt5.DEAL_REASON_CLIENT:
+                                reason = "CLIENT"
+                                
+                            pos.exit_reason = reason
+                            modifications_made = True
                     else:
-                        # Position missing from MT5 and no history found! It was voided/rejected.
-                        reason = "REJECTED"
-                        pos.status = "CLOSED"
-                        pos.pnl = 0.0
-                        pos.exit_price = pos.entry_price
-                        pos.exit_time = datetime.utcnow()
-                        pos.exit_reason = reason
-                        modifications_made = True
-                        logger.warning(f"Position {pos.mt5_ticket} missing from MT5 with no history. Marked as REJECTED.")
+                        # Position missing from MT5 and no history found! It was voided/rejected or is a ghost.
+                        logger.warning(f"Position {pos.mt5_ticket} missing from MT5 with no history. Deleting ghost trade.")
                         
-                        # Fetch parent trade to check if all siblings are closed
-                        trade_query = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
+                        parent_id = pos.parent_trade_id
+                        await session.delete(pos)
+                        modifications_made = True
+                        
+                        # Remove from in-memory maps to avoid recalculation errors
+                        if parent_id in trades_map:
+                            trades_map[parent_id] = [p for p in trades_map[parent_id] if p.id != pos.id]
+                        
+                        # Fetch parent trade to check if all siblings are closed or deleted
+                        trade_query = await session.execute(select(Trade).where(Trade.id == parent_id))
                         parent_trade = trade_query.scalar_one_or_none()
                         
                         if parent_trade:
-                            # Recalculate if all siblings closed
-                            siblings = trades_map.get(parent_trade.id, [])
-                            all_closed = True
-                            total_pnl = 0.0
-                            for sib in siblings:
-                                if sib.mt5_ticket in mt5_tickets:
-                                    all_closed = False
-                                    break
-                                # If it just closed, use the calculated PNL. Otherwise use its DB PNL.
-                                sib_pnl = sib.pnl if sib.pnl is not None else 0.0
-                                total_pnl += sib_pnl
-                                
-                            if all_closed and parent_trade.status != "CLOSED":
-                                parent_trade.status = "CLOSED"
-                                parent_trade.pnl = total_pnl
-                                parent_trade.exit_time = pos.exit_time
-                                parent_trade.exit_reason = reason
-                                parent_trade.exit_price = pos.exit_price
-                                
-                                # Fetch latest balance
-                                account_info = mt5.account_info()
-                                if account_info:
-                                    parent_trade.balance_after = account_info.balance
-                                
-                                # Calculate RR and PnL pips
-                                if parent_trade.entry_price and parent_trade.stop_loss:
-                                    risk = abs(parent_trade.entry_price - parent_trade.stop_loss)
-                                    reward = abs(parent_trade.exit_price - parent_trade.entry_price) if parent_trade.exit_price else 0
-                                    if risk > 0:
-                                        # Only count positive reward if in right direction
-                                        is_win = parent_trade.pnl > 0
-                                        parent_trade.risk_reward = (reward / risk) if is_win else -(reward / risk)
-                                        
-                                        pip_size_val = get_pip_size(parent_trade.symbol)
-                                        if pip_size_val > 0:
-                                            pips = reward / pip_size_val
-                                            parent_trade.pnl_pips = pips if is_win else -pips
-                                
-                        logger.info(f"Sync: Closed position {pos.mt5_ticket} with reason {reason} PNL: {pos.pnl}")
-                    continue
+                            siblings = trades_map.get(parent_id, [])
+                            if not siblings:
+                                # All siblings were deleted ghosts! Delete the parent trade too.
+                                logger.warning(f"All positions for Trade {parent_id} were ghosts. Deleting parent trade.")
+                                await session.delete(parent_trade)
+                            else:
+                                # Recalculate if remaining siblings are closed
+                                all_closed = True
+                                total_pnl = 0.0
+                                for sib in siblings:
+                                    if sib.mt5_ticket in mt5_tickets:
+                                        all_closed = False
+                                        break
+                                    sib_pnl = sib.pnl if sib.pnl is not None else 0.0
+                                    total_pnl += sib_pnl
+                                    
+                                if all_closed and parent_trade.status != "CLOSED":
+                                    parent_trade.status = "CLOSED"
+                                    parent_trade.pnl = total_pnl
+                                    parent_trade.exit_time = datetime.utcnow()
+                                    parent_trade.exit_reason = "REJECTED"
+                                    parent_trade.exit_price = parent_trade.entry_price
+                        continue
 
             # --- LIVE MANAGEMENT (Trailing & Standard BE & Manual Sync) ---
             for pos in db_positions:
@@ -269,9 +265,7 @@ class PositionManager:
                                     modifications_made = True
                                     pos.stop_loss = new_sl
                                     pos.be_applied = True
-                                    msg = f"🛡️ *Breakeven Triggered*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {live_pos.ticket}\nNew SL: {new_sl:.5f}"
                                     logger.info(f"Moved SL to Breakeven: {live_pos.ticket} -> {new_sl}")
-                                    asyncio.create_task(telegram_service.send_message(msg))
                                 continue
 
                 # --- 2. TRAILING SL LOGIC ---
@@ -313,11 +307,8 @@ class PositionManager:
                                     pos.stop_loss = new_trail_sl
                                     logger.info(f"Trailed SL: {live_pos.ticket} -> {new_trail_sl}")
                                     
-                                    # Only send notification once when trailing is first activated
                                     if not getattr(pos, 'trail_activated', False):
                                         pos.trail_activated = True
-                                        msg = f"🏃 *Trailing Activated*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {live_pos.ticket}\nFirst Trailed SL: {new_trail_sl:.5f}"
-                                        asyncio.create_task(telegram_service.send_message(msg))
 
             # --- BREAKEVEN CASCADE CHECK ---
             for parent_id, positions in trades_map.items():
@@ -347,9 +338,7 @@ class PositionManager:
                                     alive_pos.stop_loss = new_sl
                                     alive_pos.be_applied = True
                                     modifications_made = True
-                                    msg = f"🛡️ *Cascade Breakeven*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {alive_pos.mt5_ticket}\nNew SL: {new_sl:.5f}"
                                     logger.info(f"Cascade BE: {alive_pos.mt5_ticket} -> {new_sl}")
-                                    asyncio.create_task(telegram_service.send_message(msg))
 
             if modifications_made:
                 await session.commit()

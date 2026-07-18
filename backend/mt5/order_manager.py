@@ -227,6 +227,7 @@ class OrderManager:
                     "swap": d.swap,
                     "time": d.time,
                     "price": d.price,
+                    "reason": getattr(d, 'reason', -1),
                 })
         return closed_deals
 
