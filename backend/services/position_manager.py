@@ -149,7 +149,7 @@ class PositionManager:
                 pip_size = self._get_pip_size(symbol)
 
                 # --- 1. BREAKEVEN LOGIC ---
-                if risk.breakeven_trigger_rr > 0 and not pos.be_applied:
+                if hasattr(risk, 'be_trigger_rr') and risk.be_trigger_rr > 0 and not pos.be_applied:
                     pips_in_profit = (current_price - entry_price) / pip_size if is_buy else (entry_price - current_price) / pip_size
                     
                     original_sl = pos.stop_loss
@@ -160,8 +160,8 @@ class PositionManager:
                     
                     if risk_pips > 0:
                         current_rr = pips_in_profit / risk_pips
-                        if current_rr >= risk.breakeven_trigger_rr:
-                            be_buffer = risk.breakeven_buffer_pips * pip_size
+                        if current_rr >= risk.be_trigger_rr:
+                            be_buffer = risk.be_buffer_pips * pip_size
                             new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                             
                             move_sl = False
@@ -185,7 +185,7 @@ class PositionManager:
                                 continue
 
                 # --- 2. TRAILING SL LOGIC ---
-                if risk.trailing_sl_method != "NONE":
+                if hasattr(risk, 'trail_method_tp2') and risk.trail_method_tp2 != "NONE":
                     new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk)
                     if new_trail_sl is not None:
                         move_sl = False
@@ -216,7 +216,7 @@ class PositionManager:
                         entry_price = alive_positions[0].entry_price
                         symbol = mt5_tickets[alive_positions[0].mt5_ticket].symbol
                         pip_size = self._get_pip_size(symbol)
-                        be_buffer = risk.breakeven_buffer_pips * pip_size
+                        be_buffer = getattr(risk, 'be_buffer_pips', 2.0) * pip_size
                         new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                         
                         for alive_pos in alive_positions:
@@ -255,12 +255,12 @@ class PositionManager:
         # We only start trailing if the market has moved in our favor
         # You can add a minimum profit condition here if needed.
 
-        if risk.trailing_sl_method == "PIPS":
-            step = risk.trailing_sl_step_pips * pip_size
+        if risk.trail_method_tp2 == "FIXED_PIPS":
+            step = 2.0 * pip_size
             if step <= 0: return None
             
             # Simple fixed distance trailing
-            trail_distance = 15.0 * pip_size # Hardcoded default distance for basic pip trail
+            trail_distance = getattr(risk, 'trail_pips', 15.0) * pip_size
             new_sl = current_price - trail_distance if is_buy else current_price + trail_distance
             
             # Apply step logic: SL only moves in increments of `step`
@@ -270,7 +270,7 @@ class PositionManager:
                 if current_sl == 0.0 or new_sl <= current_sl - step: return new_sl
             return None
 
-        elif risk.trailing_sl_method == "ATR_TRAIL":
+        elif risk.trail_method_tp2 == "ATR_TRAIL":
             # Complex ATR Trailing
             from backend.mt5.data_fetcher import DataFetcher
             import pandas as pd
@@ -301,7 +301,7 @@ class PositionManager:
                 if current_sl == 0.0 or new_sl <= current_sl - step: return new_sl
             return None
             
-        elif risk.trailing_sl_method == "STRUCTURE_TRAIL":
+        elif risk.trail_method_tp2 == "STRUCTURE_TRAIL":
             # Complex Structure Trailing
             from backend.mt5.data_fetcher import DataFetcher
             from backend.strategies.core.structure import Structure
