@@ -19,6 +19,19 @@ class TelegramService:
         self.bot_token = token
         self.chat_id = chat_id
 
+    def escape_markdown(self, text: str) -> str:
+        """Escape special characters for Telegram Markdown V1."""
+        if not text:
+            return ""
+        # In Markdown V1, _, *, `, [ are special.
+        # But we only want to escape _ and * inside strings to prevent format breaking.
+        text = str(text)
+        text = text.replace('_', '\\_')
+        text = text.replace('*', '\\*')
+        text = text.replace('`', '\\`')
+        text = text.replace('[', '\\[')
+        return text
+
     async def send_message(self, message: str, parse_mode: str = "Markdown"):
         if not self.bot_token or not self.chat_id:
             return

@@ -95,7 +95,29 @@ class BotService:
         self._log_event(message, level, category)
 
     async def _save_signal_state(self, signal_domain, status: str, reject_reason: str = ""):
-        """Saves or updates a signal in the database."""
+        """Saves or updates a signal in the database and dispatches Telegram alert instantly."""
+        # 1. Dispatch Telegram Alert Immediately (Decoupled from DB success)
+        try:
+            from backend.services.telegram import telegram_service
+            
+            # Use escape_markdown to prevent MarkdownV1 parse crashes
+            sym = telegram_service.escape_markdown(signal_domain.symbol)
+            direction = telegram_service.escape_markdown(signal_domain.direction)
+            price = telegram_service.escape_markdown(str(getattr(signal_domain, 'entry_price', '')))
+            reason = telegram_service.escape_markdown(reject_reason) if reject_reason else ""
+            stat = telegram_service.escape_markdown(status)
+            
+            msg = f"🟢 *Signal {stat}*\n" if status == "EXECUTED" else f"⚪ *Signal {stat}*\n"
+            msg += f"Symbol: {sym}\nDirection: {direction}\n"
+            msg += f"Price: {price}\n"
+            if reason:
+                msg += f"Reason: {reason}\n"
+                
+            asyncio.create_task(telegram_service.send_message(msg))
+        except Exception as e:
+            logger.error(f"Failed to dispatch Telegram: {e}")
+
+        # 2. Save to Database
         try:
             from backend.data.database import async_session
             from backend.data.models import Signal
@@ -107,9 +129,9 @@ class BotService:
                 if not sig_time and hasattr(signal_domain, 'chart_data') and signal_domain.chart_data:
                     sig_time = signal_domain.chart_data[-1].get('time')
                 if not sig_time:
-                    sig_time = datetime.now(timezone.utc).timestamp()
+                    sig_time = datetime.utcnow().timestamp()
                 
-                dt_time = datetime.fromtimestamp(sig_time, timezone.utc)
+                dt_time = datetime.utcfromtimestamp(sig_time)
                 
                 query = select(Signal).where(
                     Signal.user_id == self.user_id,
@@ -145,16 +167,6 @@ class BotService:
                         sig_db.skip_reason = reject_reason
                 
                 await session.commit()
-                
-                # Send Telegram Alert
-                from backend.services.telegram import telegram_service
-                msg = f"🟢 *Signal Generated*\n" if status == "EXECUTED" else f"⚪ *Signal {status}*\n"
-                msg += f"Symbol: {signal_domain.symbol}\nDirection: {signal_domain.direction}\n"
-                msg += f"Price: {signal_domain.entry_price}\n"
-                if reject_reason:
-                    msg += f"Reason: {reject_reason}\n"
-                asyncio.create_task(telegram_service.send_message(msg))
-                
                 return sig_db.id
         except Exception as e:
             logger.error(f"Failed to save signal to DB: {e}")

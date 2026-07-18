@@ -70,25 +70,62 @@ class PositionManager:
                 select(TradePosition).where(TradePosition.user_id == user_id, TradePosition.status == "OPEN")
             )
             db_positions = result.scalars().all()
-            if not db_positions:
-                return
+            db_tickets = {p.mt5_ticket: p for p in db_positions}
+
+            # Group by parent trade for Breakeven Cascade
+            trades_map = {}
+            for p in db_positions:
+                trades_map.setdefault(p.parent_trade_id, []).append(p)
 
             # 3. Fetch all open positions from MT5
-            # Doing this synchronously inside async is fine because MT5 is fast, but better to offload if many
             mt5_positions = mt5.positions_get()
             mt5_tickets = {p.ticket: p for p in mt5_positions} if mt5_positions else {}
 
             modifications_made = False
 
+            # --- GOD SYNC (Adopt Missing MT5 Positions) ---
+            for ticket, live_pos in mt5_tickets.items():
+                if ticket not in db_tickets:
+                    # Adopt manual trade!
+                    is_buy = (live_pos.type == mt5.POSITION_TYPE_BUY)
+                    new_trade = Trade(
+                        user_id=user_id,
+                        strategy_id="MANUAL",
+                        symbol=live_pos.symbol,
+                        direction="BUY" if is_buy else "SELL",
+                        entry_price=live_pos.price_open,
+                        stop_loss=live_pos.sl,
+                        take_profit=live_pos.tp,
+                        volume=live_pos.volume,
+                        status="OPEN",
+                        entry_time=datetime.utcfromtimestamp(live_pos.time)
+                    )
+                    session.add(new_trade)
+                    await session.flush() # Get trade.id
+                    
+                    new_pos = TradePosition(
+                        parent_trade_id=new_trade.id,
+                        user_id=user_id,
+                        tp_level=1,
+                        mt5_ticket=ticket,
+                        volume=live_pos.volume,
+                        entry_price=live_pos.price_open,
+                        stop_loss=live_pos.sl,
+                        take_profit=live_pos.tp,
+                        status="OPEN"
+                    )
+                    session.add(new_pos)
+                    db_tickets[ticket] = new_pos
+                    db_positions.append(new_pos)
+                    trades_map.setdefault(new_trade.id, []).append(new_pos)
+                    modifications_made = True
+                    logger.info(f"God Sync: Adopted ghost/manual trade {ticket}")
+
+            # --- LIVE MANAGEMENT (Trailing & Standard BE & Manual Sync) ---
             for pos in db_positions:
-                # RECONCILIATION: Check if position closed in MT5 but still OPEN in DB
                 if pos.mt5_ticket not in mt5_tickets:
-                    # It was closed! Let trade_sync_loop catch it or we close it here.
-                    # We will just let _trade_sync_loop handle the actual DB closure to calculate P&L correctly.
-                    # But we could also proactively fetch history deal. We will rely on _trade_sync_loop.
                     continue
 
-                # LIVE MANAGEMENT: Get current MT5 position
                 live_pos = mt5_tickets[pos.mt5_ticket]
                 symbol = live_pos.symbol
                 current_price = live_pos.price_current
@@ -101,30 +138,32 @@ class PositionManager:
                 if current_sl != pos.stop_loss or current_tp != pos.take_profit:
                     pos.stop_loss = current_sl
                     pos.take_profit = current_tp
+                    # Update parent trade as well
+                    trade_query = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
+                    parent_trade = trade_query.scalar_one_or_none()
+                    if parent_trade:
+                        parent_trade.stop_loss = current_sl
+                        parent_trade.take_profit = current_tp
                     modifications_made = True
                 
-                # Fetch pip size
                 pip_size = self._get_pip_size(symbol)
 
                 # --- 1. BREAKEVEN LOGIC ---
-                if risk.breakeven_trigger_rr > 0:
-                    # Calculate how many pips in profit we are
+                if risk.breakeven_trigger_rr > 0 and not pos.be_applied:
                     pips_in_profit = (current_price - entry_price) / pip_size if is_buy else (entry_price - current_price) / pip_size
                     
-                    # Original Risk in pips
                     original_sl = pos.stop_loss
-                    risk_pips = abs(entry_price - original_sl) / pip_size
+                    if original_sl == 0.0:
+                        risk_pips = 20.0 # fallback
+                    else:
+                        risk_pips = abs(entry_price - original_sl) / pip_size
                     
                     if risk_pips > 0:
                         current_rr = pips_in_profit / risk_pips
-                        
-                        # Has the price reached the RR trigger?
                         if current_rr >= risk.breakeven_trigger_rr:
-                            # Calculate Breakeven SL
                             be_buffer = risk.breakeven_buffer_pips * pip_size
                             new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                             
-                            # Only move SL if it's better than current SL
                             move_sl = False
                             if is_buy and new_sl > current_sl:
                                 move_sl = True
@@ -135,16 +174,20 @@ class PositionManager:
                                 await self._modify_sl(live_pos.ticket, symbol, new_sl)
                                 modifications_made = True
                                 pos.stop_loss = new_sl
-                                msg = f"🛡️ *Breakeven Triggered*\nSymbol: {symbol}\nTicket: {live_pos.ticket}\nNew SL: {new_sl:.5f}"
+                                pos.be_applied = True
+                                trade_query = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
+                                parent_trade = trade_query.scalar_one_or_none()
+                                if parent_trade:
+                                    parent_trade.stop_loss = new_sl
+                                msg = f"🛡️ *Breakeven Triggered*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {live_pos.ticket}\nNew SL: {new_sl:.5f}"
                                 logger.info(f"Moved SL to Breakeven: {live_pos.ticket} -> {new_sl}")
                                 asyncio.create_task(telegram_service.send_message(msg))
-                                continue # Don't trail in the same loop iteration
+                                continue
 
-                # --- 2. TRAILING SL LOGIC (Complex ATR/Structure or fallback to Pip) ---
+                # --- 2. TRAILING SL LOGIC ---
                 if risk.trailing_sl_method != "NONE":
                     new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk)
                     if new_trail_sl is not None:
-                        # Ensure we only trail FORWARD (reduce risk, lock profit)
                         move_sl = False
                         if is_buy and new_trail_sl > current_sl:
                             move_sl = True
@@ -155,9 +198,48 @@ class PositionManager:
                             await self._modify_sl(live_pos.ticket, symbol, new_trail_sl)
                             modifications_made = True
                             pos.stop_loss = new_trail_sl
-                            msg = f"🏃 *Trailing SL Updated*\nSymbol: {symbol}\nTicket: {live_pos.ticket}\nNew SL: {new_trail_sl:.5f}"
+                            trade_query = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
+                            parent_trade = trade_query.scalar_one_or_none()
+                            if parent_trade:
+                                parent_trade.stop_loss = new_trail_sl
+                            msg = f"🏃 *Trailing SL Updated*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {live_pos.ticket}\nNew SL: {new_trail_sl:.5f}"
                             logger.info(f"Trailed SL: {live_pos.ticket} -> {new_trail_sl}")
                             asyncio.create_task(telegram_service.send_message(msg))
+
+            # --- BREAKEVEN CASCADE CHECK ---
+            for parent_id, positions in trades_map.items():
+                tp1_pos = next((p for p in positions if p.tp_level == 1), None)
+                if tp1_pos and tp1_pos.mt5_ticket not in mt5_tickets:
+                    alive_positions = [p for p in positions if p.mt5_ticket in mt5_tickets]
+                    if alive_positions:
+                        is_buy = alive_positions[0].entry_price < alive_positions[0].take_profit if alive_positions[0].take_profit else (mt5_tickets[alive_positions[0].mt5_ticket].type == mt5.POSITION_TYPE_BUY)
+                        entry_price = alive_positions[0].entry_price
+                        symbol = mt5_tickets[alive_positions[0].mt5_ticket].symbol
+                        pip_size = self._get_pip_size(symbol)
+                        be_buffer = risk.breakeven_buffer_pips * pip_size
+                        new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
+                        
+                        for alive_pos in alive_positions:
+                            # Use pos.stop_loss in case it was modified in the Live Management block
+                            current_sl = alive_pos.stop_loss
+                            move_sl = False
+                            if is_buy and new_sl > current_sl:
+                                move_sl = True
+                            elif not is_buy and (current_sl == 0.0 or new_sl < current_sl):
+                                move_sl = True
+                            
+                            if move_sl and not alive_pos.be_applied:
+                                await self._modify_sl(alive_pos.mt5_ticket, symbol, new_sl)
+                                alive_pos.stop_loss = new_sl
+                                alive_pos.be_applied = True
+                                modifications_made = True
+                                trade_query = await session.execute(select(Trade).where(Trade.id == alive_pos.parent_trade_id))
+                                parent_trade = trade_query.scalar_one_or_none()
+                                if parent_trade:
+                                    parent_trade.stop_loss = new_sl
+                                msg = f"🛡️ *Cascade Breakeven*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {alive_pos.mt5_ticket}\nNew SL: {new_sl:.5f}"
+                                logger.info(f"Cascade BE: {alive_pos.mt5_ticket} -> {new_sl}")
+                                asyncio.create_task(telegram_service.send_message(msg))
 
             if modifications_made:
                 await session.commit()
