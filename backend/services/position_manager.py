@@ -257,8 +257,10 @@ class PositionManager:
                                 continue
 
                 # --- 2. TRAILING SL LOGIC ---
-                if hasattr(risk, 'trail_method_tp2') and risk.trail_method_tp2 != "NONE":
-                    new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk)
+                tp_level = getattr(pos, 'tp_level', 2) if pos else 2
+                trail_method = getattr(risk, f'trail_method_tp{tp_level}', getattr(risk, 'trail_method_tp2', 'NONE'))
+                if trail_method != "NONE":
+                    new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method)
                     if new_trail_sl is not None:
                         move_sl = False
                         if is_buy and new_trail_sl > current_sl:
@@ -338,7 +340,7 @@ class PositionManager:
                     "data": live_data
                 })
 
-    async def _calculate_trailing_sl(self, symbol: str, is_buy: bool, current_price: float, entry_price: float, current_sl: float, risk) -> float | None:
+    async def _calculate_trailing_sl(self, symbol: str, is_buy: bool, current_price: float, entry_price: float, current_sl: float, risk, trail_method: str) -> float | None:
         """
         Calculate the trailing SL based on user method.
         Returns the new SL price, or None if no trailing adjustment should be made.
@@ -348,7 +350,7 @@ class PositionManager:
         # We only start trailing if the market has moved in our favor
         # You can add a minimum profit condition here if needed.
 
-        if risk.trail_method_tp2 == "FIXED_PIPS":
+        if trail_method == "FIXED_PIPS":
             step = 2.0 * pip_size
             if step <= 0: return None
             
@@ -363,7 +365,7 @@ class PositionManager:
                 if current_sl == 0.0 or new_sl <= current_sl - step: return new_sl
             return None
 
-        elif risk.trail_method_tp2 == "ATR_TRAIL":
+        elif trail_method == "ATR_TRAIL":
             # Complex ATR Trailing
             from backend.mt5.data_fetcher import DataFetcher
             import pandas as pd
@@ -383,7 +385,8 @@ class PositionManager:
             if pd.isna(atr): return None
             
             # Trail distance is ATR * multiplier
-            trail_distance = atr * 1.5  # You could expose this multiplier in Risk config
+            multiplier = getattr(risk, 'atr_trail_multiplier', 1.5)
+            trail_distance = atr * multiplier
             new_sl = current_price - trail_distance if is_buy else current_price + trail_distance
             
             # Add a step buffer so we aren't modifying it every tick
@@ -394,7 +397,7 @@ class PositionManager:
                 if current_sl == 0.0 or new_sl <= current_sl - step: return new_sl
             return None
             
-        elif risk.trail_method_tp2 == "STRUCTURE_TRAIL":
+        elif trail_method == "STRUCTURE_TRAIL":
             # Complex Structure Trailing
             from backend.mt5.data_fetcher import DataFetcher
             from backend.strategies.core.structure import Structure
