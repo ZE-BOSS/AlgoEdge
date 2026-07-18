@@ -75,6 +75,21 @@ function TradeRow({ trade }) {
     } catch (e) {}
   }
 
+  let durationStr = '—';
+  if (trade.entry_time && trade.exit_time) {
+    const diffMs = new Date(trade.exit_time) - new Date(trade.entry_time);
+    const diffMins = Math.floor(diffMs / 60000);
+    const hours = Math.floor(diffMins / 60);
+    const mins = diffMins % 60;
+    durationStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+  }
+
+  const formatTime = (iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
     <>
       <tr onClick={() => setExpanded(!expanded)} style={{ cursor: 'pointer' }}>
@@ -111,14 +126,17 @@ function TradeRow({ trade }) {
               <div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 12, fontWeight: 600, textTransform: 'uppercase' }}>Trade Details</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: '0.85rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Entry Time:</span><span>{formatTime(trade.entry_time)}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Exit Time:</span><span>{formatTime(trade.exit_time)}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Duration:</span><span>{durationStr}</span>
                   <span style={{ color: 'var(--text-muted)' }}>Stop Loss:</span><span>{trade.stop_loss}</span>
                   <span style={{ color: 'var(--text-muted)' }}>Take Profit:</span><span>{trade.take_profit}</span>
                   <span style={{ color: 'var(--text-muted)' }}>Volume:</span><span>{trade.volume}</span>
                   <span style={{ color: 'var(--text-muted)' }}>MT5 Ticket:</span><span>{trade.mt5_ticket || '—'}</span>
-                  <span style={{ color: 'var(--text-muted)' }}>P&L Pips:</span><span>{trade.pnl_pips || '—'}</span>
-                  <span style={{ color: 'var(--text-muted)' }}>Balance Before:</span><span>${trade.balance_before ? trade.balance_before.toFixed(2) : '—'}</span>
-                  <span style={{ color: 'var(--text-muted)' }}>Balance After:</span><span>${trade.balance_after ? trade.balance_after.toFixed(2) : '—'}</span>
-                  <span style={{ color: 'var(--text-muted)' }}>Confluence Score:</span><span>{trade.confluence_score || '—'} / 100</span>
+                  <span style={{ color: 'var(--text-muted)' }}>P&L Pips:</span><span>{trade.pnl_pips != null ? trade.pnl_pips.toFixed(1) : '—'}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Balance Before:</span><span>{trade.balance_before != null ? '$' + trade.balance_before.toFixed(2) : '—'}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Balance After:</span><span>{trade.balance_after != null ? '$' + trade.balance_after.toFixed(2) : '—'}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Confluence Score:</span><span>{trade.confluence_score != null ? trade.confluence_score + ' / 100' : '—'}</span>
                 </div>
               </div>
               <div>

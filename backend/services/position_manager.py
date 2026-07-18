@@ -131,7 +131,8 @@ class PositionManager:
                         pos.status = "CLOSED"
                         pos.pnl = exit_deal.profit
                         pos.exit_price = exit_deal.price
-                        pos.exit_time = datetime.fromtimestamp(exit_deal.time, timezone.utc)
+                        # Use system UTC to align with entry_time instead of broker time
+                        pos.exit_time = datetime.utcnow()
                         
                         # Map MT5 Deal Reason to our DB Reason
                         reason = "CLOSED"
@@ -168,6 +169,26 @@ class PositionManager:
                                 parent_trade.pnl = total_pnl
                                 parent_trade.exit_time = pos.exit_time
                                 parent_trade.exit_reason = reason
+                                parent_trade.exit_price = pos.exit_price
+                                
+                                # Fetch latest balance
+                                account_info = mt5.account_info()
+                                if account_info:
+                                    parent_trade.balance_after = account_info.balance
+                                
+                                # Calculate RR and PnL pips
+                                if parent_trade.entry_price and parent_trade.stop_loss:
+                                    risk = abs(parent_trade.entry_price - parent_trade.stop_loss)
+                                    reward = abs(parent_trade.exit_price - parent_trade.entry_price) if parent_trade.exit_price else 0
+                                    if risk > 0:
+                                        # Only count positive reward if in right direction
+                                        is_win = parent_trade.pnl > 0
+                                        parent_trade.risk_reward = (reward / risk) if is_win else -(reward / risk)
+                                        
+                                        pip_size = self._get_pip_size(parent_trade.symbol) if hasattr(self, '_get_pip_size') else 0.0001
+                                        if pip_size > 0:
+                                            pips = reward / pip_size
+                                            parent_trade.pnl_pips = pips if is_win else -pips
                                 
                         logger.info(f"Sync: Closed position {pos.mt5_ticket} with reason {reason} PNL: {pos.pnl}")
                     continue

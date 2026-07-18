@@ -574,6 +574,9 @@ class BotService:
                                                         status="OPEN",
                                                         entry_time=datetime.utcnow(),
                                                         chart_data=json.dumps(signal.chart_data) if signal.chart_data else None,
+                                                        confluence_score=getattr(signal, 'confluence_score', None),
+                                                        balance_before=account_balance,
+                                                        mt5_ticket=db_positions[0]["ticket"] if db_positions else None,
                                                     )
                                                     session.add(trade)
                                                     await session.flush()

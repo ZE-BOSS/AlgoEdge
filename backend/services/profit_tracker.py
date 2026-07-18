@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 class DailyProfitTracker:
     def __init__(self):
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        self.redis = redis.from_url(redis_url, decode_responses=True)
+        self.redis = redis.from_url(redis_url, decode_responses=True, protocol=2)
 
     def _get_daily_key(self) -> str:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
