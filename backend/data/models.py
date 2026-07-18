@@ -12,17 +12,24 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime
+import time
+import random
 
 
 class Base(DeclarativeBase):
     pass
 
 
+def generate_id():
+    """Generates a pseudo-random integer ID."""
+    return int(time.time() * 1000) * 100 + random.randint(0, 99)
+
+
 # ── OHLCV History ────────────────────────────────────────────────────────────
 
 class OHLCV(Base):
     __tablename__ = "ohlcv"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, default=generate_id)
     symbol = Column(String(20), nullable=False)
     timeframe = Column(String(10), nullable=False)
     timestamp = Column(BigInteger, nullable=False)  # Unix epoch ms
@@ -41,7 +48,7 @@ class OHLCV(Base):
 
 class Trade(Base):
     __tablename__ = "trades"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, default=generate_id)
     user_id = Column(String(36), nullable=False, index=True)
     strategy_id = Column(String(50), nullable=False, default="SMC_v1")
     symbol = Column(String(20), nullable=False)
@@ -78,7 +85,7 @@ class Trade(Base):
 
 class TradePosition(Base):
     __tablename__ = "trade_positions"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, default=generate_id)
     parent_trade_id = Column(BigInteger, ForeignKey("trades.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(String(36), nullable=False)
     tp_level = Column(Integer, nullable=False)  # 1, 2, 3, 4, or 5
@@ -106,7 +113,7 @@ class TradePosition(Base):
 
 class Signal(Base):
     __tablename__ = "signals"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, default=generate_id)
     user_id = Column(String(36), nullable=False, index=True)
     strategy_id = Column(String(50), nullable=False)
     symbol = Column(String(20), nullable=False)
@@ -241,7 +248,7 @@ class BacktestRun(Base):
 
 class BacktestTrade(Base):
     __tablename__ = "backtest_trades"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, default=generate_id)
     backtest_id = Column(String(36), ForeignKey("backtest_runs.id", ondelete="CASCADE"), nullable=False)
     symbol = Column(String(20))
     direction = Column(String(10))
