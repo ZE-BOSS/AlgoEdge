@@ -34,7 +34,7 @@ def get_pip_size(symbol: str) -> float:
     symbol_upper = symbol.upper()
 
     if any(s in symbol_upper for s in synthetics):
-        return 0.01  # Points for synthetics
+        return 1.0  # Points for synthetics
     if any(s in symbol_upper for s in gold_like):
         return 0.01
     if any(s in symbol_upper for s in jpy_pairs):
