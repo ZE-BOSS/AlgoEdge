@@ -275,15 +275,30 @@ class PositionManager:
                 tp_level = getattr(pos, 'tp_level', 2) if pos else 2
                 trail_method = getattr(risk, f'trail_method_tp{tp_level}', getattr(risk, 'trail_method_tp2', 'NONE'))
                 if trail_method != "NONE":
-                    if pos and pos.stop_loss != 0.0:
-                        risk_pips = abs(entry_price - pos.stop_loss) / pip_size
+                    if pos and getattr(pos, 'trail_activated', False):
+                        current_rr = 999.0
+                        activation_rr = 0.0
                     else:
-                        risk_pips = 20.0
-                    pips_in_profit = (current_price - entry_price) / pip_size if is_buy else (entry_price - current_price) / pip_size
-                    current_rr = pips_in_profit / risk_pips if risk_pips > 0 else 0
-                    
-                    activation_rr = getattr(risk, 'trail_activation_rr', 1.0)
+                        original_sl = 0.0
+                        if pos:
+                            tq = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
+                            pt = tq.scalar_one_or_none()
+                            if pt: original_sl = pt.stop_loss
+                            
+                        if original_sl != 0.0:
+                            risk_pips = abs(entry_price - original_sl) / pip_size
+                        else:
+                            risk_pips = 20.0
+                            
+                        pips_in_profit = (current_price - entry_price) / pip_size if is_buy else (entry_price - current_price) / pip_size
+                        current_rr = pips_in_profit / risk_pips if risk_pips > 0 else 0
+                        activation_rr = getattr(risk, 'trail_activation_rr', 1.0)
+                        
                     if current_rr >= activation_rr:
+                        if pos and not getattr(pos, 'trail_activated', False):
+                            pos.trail_activated = True
+                            modifications_made = True
+                            
                         new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method)
                         if new_trail_sl is not None:
                             move_sl = False

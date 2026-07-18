@@ -156,8 +156,8 @@ class RiskParams:
     atr_trail_period: int = 14
     """ATR period used in ATR_TRAIL calculations."""
 
-    trail_pct: float = 0.005
-    """Percentage for PCT_TRAIL method. 0.005 = 0.5% of current price."""
+    trail_pct: float = 0.5
+    """Percentage for PCT_TRAIL method. 0.5 = 0.5% of current price."""
 
     trail_activation_rr: float = 1.0
     """
