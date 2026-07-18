@@ -432,15 +432,16 @@ class PositionManager:
         elif trail_method == "STRUCTURE_TRAIL":
             # Complex Structure Trailing
             from backend.mt5.data_fetcher import DataFetcher
-            from backend.strategies.core.structure import Structure
+            from backend.strategies.core.market_structure import MarketStructureDetector
             
             # Fetch more candles to find swing points
             candles = await DataFetcher.get_historical_data(symbol, "M15", 100)
             if candles.empty: return None
             
             bars = getattr(risk, 'trail_structure_bars', 3)
-            structure = Structure(left_bars=bars, right_bars=bars)
-            _, swings = structure.analyze(candles)
+            structure = MarketStructureDetector(swing_length=bars)
+            structure.update(candles)
+            swings = structure.swings
             
             if is_buy:
                 # Find the most recent Valid Swing Low
