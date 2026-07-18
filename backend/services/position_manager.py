@@ -152,20 +152,16 @@ class PositionManager:
                     if deals:
                         exit_deal = deals[-1]
                         
-                        # Only update if status is OPEN or PNL differs
                         if pos.status != "CLOSED" or pos.pnl != exit_deal.profit:
                             was_open = pos.status != "CLOSED"
                             pos.status = "CLOSED"
                             pos.pnl = exit_deal.profit
                             pos.exit_price = exit_deal.price
-                            # Use system UTC to align with entry_time instead of broker time
                             if was_open:
                                 pos.exit_time = datetime.utcnow()
                             
-                            # Map MT5 Deal Reason to our DB Reason
                             reason = "CLOSED"
                             if exit_deal.reason == mt5.DEAL_REASON_SL:
-                                # If BE/Trailing was applied and the current SL != initial, it's a TRAIL stop
                                 reason = "TRAIL" if pos.be_applied else "SL"
                             elif exit_deal.reason == mt5.DEAL_REASON_TP:
                                 reason = f"TP{pos.tp_level}" if pos.tp_level else "TP"
@@ -174,6 +170,45 @@ class PositionManager:
                                 
                             pos.exit_reason = reason
                             modifications_made = True
+
+                            if was_open:
+                                # Fetch siblings to check if parent trade should be closed
+                                result2 = await session.execute(
+                                    select(TradePosition).where(TradePosition.parent_trade_id == pos.parent_trade_id)
+                                )
+                                siblings = result2.scalars().all()
+                                if all(s.status == "CLOSED" for s in siblings):
+                                    trade = await session.get(Trade, pos.parent_trade_id)
+                                    if trade:
+                                        trade.status = "CLOSED"
+                                        trade.exit_time = pos.exit_time
+                                        trade.pnl = sum(s.pnl for s in siblings if getattr(s, 'pnl', None) is not None)
+                                        
+                                        # Update chart data
+                                        try:
+                                            from backend.mt5.data_fetcher import DataFetcher
+                                            import pandas as pd
+                                            candles = await DataFetcher.get_historical_data(trade.symbol, "M5", 100)
+                                            if not candles.empty:
+                                                cd_df = candles.copy()
+                                                if "time" not in cd_df.columns and cd_df.index.name == "time":
+                                                    cd_df = cd_df.reset_index()
+                                                trade.chart_data = cd_df.to_json(orient="records")
+                                        except Exception as chart_err:
+                                            logger.warning(f"Failed to fetch exit chart data: {chart_err}")
+
+                                # Send Telegram notification for the closed position
+                                from backend.services.telegram import telegram_service
+                                import asyncio
+                                net_profit = exit_deal.profit
+                                emoji = "✅" if net_profit >= 0 else "❌"
+                                reason_str = reason
+                                if reason == "SL": reason_str = "Stop Loss Hit"
+                                elif reason == "TRAIL": reason_str = "Trailing Stop Hit"
+                                elif reason.startswith("TP"): reason_str = "Take Profit Hit"
+                                elif reason == "CLIENT": reason_str = "Manual Close"
+                                msg = f"{emoji} *{reason_str}*\nSymbol: {pos.symbol if hasattr(pos, 'symbol') else live_pos.symbol if 'live_pos' in locals() else 'Unknown'}\nTicket: {pos.mt5_ticket}\nExit Price: {exit_deal.price}\nP&L: ${net_profit:.2f}"
+                                asyncio.create_task(telegram_service.send_message(msg))
                     else:
                         # Position missing from MT5 and no history found! It was voided/rejected or is a ghost.
                         logger.warning(f"Position {pos.mt5_ticket} missing from MT5 with no history. Deleting ghost trade.")
@@ -292,7 +327,7 @@ class PositionManager:
                         activation_rr = getattr(risk, 'trail_activation_rr', 1.0)
                         
                     if current_rr >= activation_rr:
-                        new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method)
+                        new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method, tp_level)
                         if new_trail_sl is not None:
                             move_sl = False
                             if is_buy and new_trail_sl > current_sl:
@@ -365,7 +400,7 @@ class PositionManager:
                     "data": live_data
                 })
 
-    async def _calculate_trailing_sl(self, symbol: str, is_buy: bool, current_price: float, entry_price: float, current_sl: float, risk, trail_method: str) -> float | None:
+    async def _calculate_trailing_sl(self, symbol: str, is_buy: bool, current_price: float, entry_price: float, current_sl: float, risk, trail_method: str, tp_level: int = 1) -> float | None:
         """
         Calculate the trailing SL based on user method.
         Returns the new SL price, or None if no trailing adjustment should be made.
@@ -407,7 +442,7 @@ class PositionManager:
             if pd.isna(atr): return None
             
             # Trail distance is ATR * multiplier
-            multiplier = getattr(risk, 'atr_trail_multiplier', 1.5)
+            multiplier = getattr(risk, f'atr_trail_multiplier_tp{tp_level}', getattr(risk, 'atr_trail_multiplier', 1.5))
             trail_distance = atr * multiplier
             new_sl = current_price - trail_distance if is_buy else current_price + trail_distance
             

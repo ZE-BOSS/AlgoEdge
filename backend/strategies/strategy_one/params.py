@@ -166,7 +166,22 @@ class RiskParams:
     """Fixed pip distance for FIXED_PIPS trailing method."""
 
     atr_trail_multiplier: float = 1.5
-    """ATR multiplier for ATR_TRAIL method. trail_distance = ATR × this."""
+    """Fallback/Global ATR multiplier for ATR_TRAIL method."""
+
+    atr_trail_multiplier_tp1: float = 1.5
+    """ATR multiplier specifically for TP1."""
+    
+    atr_trail_multiplier_tp2: float = 1.5
+    """ATR multiplier specifically for TP2."""
+    
+    atr_trail_multiplier_tp3: float = 1.5
+    """ATR multiplier specifically for TP3."""
+    
+    atr_trail_multiplier_tp4: float = 1.5
+    """ATR multiplier specifically for TP4."""
+    
+    atr_trail_multiplier_tp5: float = 1.5
+    """ATR multiplier specifically for TP5."""
 
     atr_trail_period: int = 14
     """ATR period used in ATR_TRAIL calculations."""

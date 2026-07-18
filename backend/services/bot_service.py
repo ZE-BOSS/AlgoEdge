@@ -662,6 +662,7 @@ class BotService:
         from backend.mt5.order_manager import OrderManager
         
         last_check_time = datetime.now(timezone.utc).timestamp() - 86400 * 3 # lookback 3 days initially to catch missed closures
+        processed_deal_tickets = set()
         
         while self.running:
             try:
@@ -673,7 +674,14 @@ class BotService:
                     deals.sort(key=lambda x: x["time"])
                     
                     for deal in deals:
+                        ticket = deal.get("ticket")
+                        
                         if deal["time"] > last_check_time:
+                            processed_deal_tickets.clear()
+                            last_check_time = deal["time"]
+                            
+                        if deal["time"] >= last_check_time and ticket not in processed_deal_tickets:
+                            processed_deal_tickets.add(ticket)
                             net_profit = deal["profit"] + deal["commission"] + deal["swap"]
                             await profit_tracker.add_profit(net_profit)
                             
@@ -762,8 +770,6 @@ class BotService:
 
                             except Exception as db_err:
                                 logger.error(f"Failed to update trade in DB: {db_err}")
-                            
-                            last_check_time = max(last_check_time, deal["time"])
                             
             except asyncio.CancelledError:
                 break
