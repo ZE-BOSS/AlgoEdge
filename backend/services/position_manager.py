@@ -298,10 +298,6 @@ class PositionManager:
                         activation_rr = getattr(risk, 'trail_activation_rr', 1.0)
                         
                     if current_rr >= activation_rr:
-                        if pos and not getattr(pos, 'trail_activated', False):
-                            pos.trail_activated = True
-                            modifications_made = True
-                            
                         new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method)
                         if new_trail_sl is not None:
                             move_sl = False
@@ -315,9 +311,13 @@ class PositionManager:
                                 if success:
                                     modifications_made = True
                                     pos.stop_loss = new_trail_sl
-                                    msg = f"🏃 *Trailing SL Updated*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {live_pos.ticket}\nNew SL: {new_trail_sl:.5f}"
                                     logger.info(f"Trailed SL: {live_pos.ticket} -> {new_trail_sl}")
-                                    asyncio.create_task(telegram_service.send_message(msg))
+                                    
+                                    # Only send notification once when trailing is first activated
+                                    if not getattr(pos, 'trail_activated', False):
+                                        pos.trail_activated = True
+                                        msg = f"🏃 *Trailing Activated*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {live_pos.ticket}\nFirst Trailed SL: {new_trail_sl:.5f}"
+                                        asyncio.create_task(telegram_service.send_message(msg))
 
             # --- BREAKEVEN CASCADE CHECK ---
             for parent_id, positions in trades_map.items():
