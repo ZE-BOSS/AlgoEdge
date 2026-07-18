@@ -31,6 +31,23 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
+    # Clean up ghost manual trades on boot
+    try:
+        from backend.data.database import async_session
+        from backend.data.models import Trade, TradePosition
+        from sqlalchemy import select
+        async with async_session() as session:
+            result = await session.execute(select(Trade).where(Trade.status == "OPEN", Trade.strategy_id == "MANUAL"))
+            ghosts = result.scalars().all()
+            for t in ghosts:
+                pos_res = await session.execute(select(TradePosition).where(TradePosition.parent_trade_id == t.id))
+                for p in pos_res.scalars().all(): await session.delete(p)
+                await session.delete(t)
+            await session.commit()
+            if ghosts: logger.info(f"Cleaned {len(ghosts)} ghost manual trades.")
+    except Exception as e:
+        logger.error(f"Ghost cleanup failed: {e}")
+
     # 2. Connect Redis (optional — graceful skip if unavailable)
     redis_ok = False
     try:

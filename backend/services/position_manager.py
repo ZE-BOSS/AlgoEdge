@@ -22,6 +22,7 @@ class PositionManager:
     def __init__(self):
         self.running = False
         self._task = None
+        self.pending_adoptions = {}
 
     def start(self, user_id: str):
         if not self.running:
@@ -83,9 +84,23 @@ class PositionManager:
 
             modifications_made = False
 
+            # Clean up pending adoptions that are now in DB or no longer in MT5
+            self.pending_adoptions = {
+                t: time for t, time in self.pending_adoptions.items() 
+                if t in mt5_tickets and t not in db_tickets
+            }
+
             # --- GOD SYNC (Adopt Missing MT5 Positions) ---
+            current_time = datetime.utcnow().timestamp()
             for ticket, live_pos in mt5_tickets.items():
                 if ticket not in db_tickets:
+                    # Delay adoption by 15s to avoid race condition with bot execution
+                    if ticket not in self.pending_adoptions:
+                        self.pending_adoptions[ticket] = current_time
+                        continue
+                    if current_time - self.pending_adoptions[ticket] < 15:
+                        continue
+
                     # Adopt manual trade!
                     is_buy = (live_pos.type == mt5.POSITION_TYPE_BUY)
                     new_trade = Trade(
@@ -271,23 +286,23 @@ class PositionManager:
                     if current_rr >= activation_rr:
                         new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method)
                         if new_trail_sl is not None:
-                        move_sl = False
-                        if is_buy and new_trail_sl > current_sl:
-                            move_sl = True
-                        elif not is_buy and (current_sl == 0.0 or new_trail_sl < current_sl):
-                            move_sl = True
-                            
-                        if move_sl:
-                            await self._modify_sl(live_pos.ticket, symbol, new_trail_sl)
-                            modifications_made = True
-                            pos.stop_loss = new_trail_sl
-                            trade_query = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
-                            parent_trade = trade_query.scalar_one_or_none()
-                            if parent_trade:
-                                parent_trade.stop_loss = new_trail_sl
-                            msg = f"🏃 *Trailing SL Updated*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {live_pos.ticket}\nNew SL: {new_trail_sl:.5f}"
-                            logger.info(f"Trailed SL: {live_pos.ticket} -> {new_trail_sl}")
-                            asyncio.create_task(telegram_service.send_message(msg))
+                            move_sl = False
+                            if is_buy and new_trail_sl > current_sl:
+                                move_sl = True
+                            elif not is_buy and (current_sl == 0.0 or new_trail_sl < current_sl):
+                                move_sl = True
+                                
+                            if move_sl:
+                                await self._modify_sl(live_pos.ticket, symbol, new_trail_sl)
+                                modifications_made = True
+                                pos.stop_loss = new_trail_sl
+                                trade_query = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
+                                parent_trade = trade_query.scalar_one_or_none()
+                                if parent_trade:
+                                    parent_trade.stop_loss = new_trail_sl
+                                msg = f"🏃 *Trailing SL Updated*\nSymbol: {telegram_service.escape_markdown(symbol)}\nTicket: {live_pos.ticket}\nNew SL: {new_trail_sl:.5f}"
+                                logger.info(f"Trailed SL: {live_pos.ticket} -> {new_trail_sl}")
+                                asyncio.create_task(telegram_service.send_message(msg))
 
             # --- BREAKEVEN CASCADE CHECK ---
             for parent_id, positions in trades_map.items():
