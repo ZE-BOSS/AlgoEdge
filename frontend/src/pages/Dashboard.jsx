@@ -507,7 +507,7 @@ export default function Dashboard() {
       </div>
 
       {/* Full-width Open Positions */}
-      <div className="card" style={{ marginBottom: 20 }}>
+      <div className="card" style={{ marginTop: 32, marginBottom: 20 }}>
         <div className="card-header">
           <span className="card-title">Open Positions</span>
           <span className="badge badge-blue">{positionsData?.length || 0}</span>
