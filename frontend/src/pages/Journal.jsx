@@ -106,13 +106,13 @@ function TradeRow({ trade }) {
         <td>{trade.exit_price || '—'}</td>
         <td>
           <span style={{ color: isWin ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
-            {isWin ? '+' : ''}{(trade.realized_pnl || trade.pnl || 0).toFixed(2)}
+            {isWin ? '+' : ''}{(trade.pnl ?? trade.realized_pnl ?? 0).toFixed(2)}
           </span>
         </td>
         <td>{trade.risk_reward ? `1:${trade.risk_reward.toFixed(1)}` : '—'}</td>
         <td>
-          <span className={`badge ${trade.exit_reason?.includes('TP') ? 'badge-green' : trade.exit_reason === 'SL' ? 'badge-red' : 'badge-yellow'}`}>
-            {trade.exit_reason || 'OPEN'}
+          <span className={`badge ${trade.status === 'OPEN' ? 'badge-red' : trade.exit_reason?.includes('TP') ? 'badge-green' : trade.exit_reason === 'SL' ? 'badge-red' : 'badge-yellow'}`}>
+            {trade.status === 'OPEN' ? '● OPEN' : (trade.exit_reason || 'CLOSED')}
           </span>
         </td>
         <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>

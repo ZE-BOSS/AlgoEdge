@@ -146,6 +146,7 @@ export const checkHealth = () => api.get('/health');
 
 export const getTrades = (params) => api.get('/trades', { params });
 export const getPositions = () => api.get('/positions');
+export const forceCloseAll = () => api.get('/force-close-all');
 
 // ── Stats ───────────────────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, DollarSign, Target, Shield, Activity, AlertTriangle, Play, Square, Eye, Loader2, Terminal, Trash2 } from 'lucide-react';
 import { useConnectionStore, useRiskStore, useAuthStore } from '../store';
-import { getDashboardData, getChartData, startBot, stopBot, getBotLogs } from '../services/api';
+import { getDashboardData, getChartData, startBot, stopBot, getBotLogs, forceCloseAll } from '../services/api';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
 
 // ── Category color mapping for activity log ───────────────────────────────
@@ -548,8 +548,28 @@ export default function Dashboard() {
       {/* Full-width Open Positions */}
       <div className="card" style={{ marginTop: 32, marginBottom: 20 }}>
         <div className="card-header">
-          <span className="card-title">Open Positions</span>
-          <span className="badge badge-blue">{positionsData?.length || 0}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="card-title">Open Positions</span>
+            <span className="badge badge-blue">{positionsData?.length || 0}</span>
+          </div>
+          {positionsData?.length > 0 && (
+            <button
+              className="btn btn-sm"
+              style={{ background: 'rgba(248,81,73,0.15)', color: 'var(--red)', border: '1px solid rgba(248,81,73,0.3)', fontSize: '0.75rem' }}
+              onClick={async () => {
+                if (window.confirm('Force close ALL open positions in the database? This does NOT close MT5 positions — it only clears the dashboard.')) {
+                  try {
+                    await forceCloseAll();
+                    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+                  } catch (err) {
+                    alert('Failed: ' + (err?.response?.data?.detail || err.message));
+                  }
+                }
+              }}
+            >
+              <Trash2 size={12} /> Force Close All
+            </button>
+          )}
         </div>
         {positionsData?.length ? (
           <div style={{ overflowX: 'auto' }}>

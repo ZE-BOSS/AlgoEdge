@@ -472,21 +472,25 @@ class BotService:
                                     "SIGNAL", "SIGNAL"
                                 )
 
-                                # === Enforce Max Concurrent Positions from DB ===
+                                # === Enforce Max Concurrent Positions (MT5 = source of truth) ===
                                 try:
-                                    from backend.data.database import async_session
-                                    from backend.data.models import Trade
-                                    from sqlalchemy import select
-                                    async with async_session() as session:
-                                        open_res = await session.execute(
-                                            select(Trade).where(Trade.user_id == user_id, Trade.status == "OPEN")
-                                        )
-                                        open_trades = open_res.scalars().all()
-                                        max_concurrent = getattr(config.risk, 'max_concurrent_positions', 1)
-                                        if len(open_trades) >= max_concurrent:
-                                            self._log_event(f"[REJECTED] Max open positions reached ({len(open_trades)}/{max_concurrent})", "SIGNAL", "RISK")
-                                            await self._save_signal_state(signal, "SKIPPED", f"Max open positions reached ({len(open_trades)}/{max_concurrent})")
-                                            continue
+                                    import MetaTrader5 as mt5
+                                    mt5_positions = mt5.positions_get()
+                                    # Count unique position groups by symbol+time to match our Trade grouping
+                                    # Each group of TP positions counts as 1 trade
+                                    if mt5_positions:
+                                        seen_groups = set()
+                                        for p in mt5_positions:
+                                            group_key = (p.symbol, round(p.time / 5) * 5)
+                                            seen_groups.add(group_key)
+                                        live_trade_count = len(seen_groups)
+                                    else:
+                                        live_trade_count = 0
+                                    max_concurrent = getattr(config.risk, 'max_concurrent_positions', 1)
+                                    if live_trade_count >= max_concurrent:
+                                        self._log_event(f"[REJECTED] Max open positions reached ({live_trade_count}/{max_concurrent})", "SIGNAL", "RISK")
+                                        await self._save_signal_state(signal, "SKIPPED", f"Max open positions reached ({live_trade_count}/{max_concurrent})")
+                                        continue
                                 except Exception as e:
                                     logger.error(f"Error checking open positions: {e}")
 

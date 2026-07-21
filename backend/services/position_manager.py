@@ -86,6 +86,14 @@ class PositionManager:
             db_positions = list(db_positions_query.scalars().all())
             db_tickets = {p.mt5_ticket: p for p in db_positions}
 
+            # Build a COMPLETE set of all known tickets for this user (no time limit).
+            # This prevents Ghost Sync and God Sync from re-creating trades that
+            # already exist in the DB but fell outside the 24h window above.
+            all_tickets_q = await session.execute(
+                select(TradePosition.mt5_ticket).where(TradePosition.user_id == user_id)
+            )
+            all_known_tickets = {row[0] for row in all_tickets_q.all() if row[0] is not None}
+
             # Group by parent trade for Breakeven Cascade
             trades_map = {}
             for p in db_positions:
@@ -127,7 +135,7 @@ class PositionManager:
             current_time = datetime.utcnow().timestamp()
             unrecorded_live_tickets = []
             for ticket, live_pos in mt5_tickets.items():
-                if ticket not in db_tickets:
+                if ticket not in all_known_tickets:
                     # God Sync DB Check
                     existing_q = await session.execute(select(TradePosition).where(TradePosition.mt5_ticket == ticket))
                     existing_pos = existing_q.scalars().first()
@@ -204,7 +212,7 @@ class PositionManager:
                     in_deals = [d for d in pos_deals if d.entry == mt5.DEAL_ENTRY_IN]
                     out_deals = [d for d in pos_deals if d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT)]
                     
-                    if in_deals and out_deals and pos_id not in db_tickets:
+                    if in_deals and out_deals and pos_id not in all_known_tickets:
                         existing_q = await session.execute(select(TradePosition).where(TradePosition.mt5_ticket == pos_id))
                         existing_pos = existing_q.scalars().first()
                         if existing_pos:
@@ -275,6 +283,9 @@ class PositionManager:
 
             # --- EXIT HANDLER ---
             for pos in db_positions:
+                # Skip positions that are already fully closed — no work needed
+                if pos.status != "OPEN":
+                    continue
                 if pos.mt5_ticket not in mt5_tickets:
                     # Position is closed in MT5, but OPEN in DB
                     deals = mt5.history_deals_get(position=pos.mt5_ticket)
@@ -327,19 +338,22 @@ class PositionManager:
                                     except Exception as chart_err:
                                         logger.warning(f"Failed to fetch exit chart data: {chart_err}")
 
+                        # Send Telegram notification for the closed position (inside deals branch so net_profit is defined)
                         if pos.mt5_ticket not in self._notified_closes:
                             self._notified_closes.add(pos.mt5_ticket)
-                            # Send Telegram notification for the closed position
-                            from backend.services.telegram import telegram_service
-                            import asyncio
-                            emoji = "✅" if net_profit >= 0 else "❌"
-                            reason_str = reason if 'reason' in locals() else "CLOSED"
-                            if reason_str == "SL": reason_str = "Stop Loss Hit"
-                            elif reason_str == "TRAIL": reason_str = "Trailing Stop Hit"
-                            elif reason_str.startswith("TP"): reason_str = "Take Profit Hit"
-                            elif reason_str == "CLIENT": reason_str = "Manual Close"
-                            msg = f"{emoji} *{reason_str}*\nSymbol: {pos.symbol if hasattr(pos, 'symbol') else 'Unknown'}\nTicket: {pos.mt5_ticket}\nExit Price: {exit_deal.price}\nP&L: ${net_profit:.2f}"
-                            asyncio.create_task(telegram_service.send_message(msg))
+                            try:
+                                from backend.services.telegram import telegram_service
+                                import asyncio
+                                emoji = "✅" if net_profit >= 0 else "❌"
+                                reason_str = reason if 'reason' in dir() else "CLOSED"
+                                if reason_str == "SL": reason_str = "Stop Loss Hit"
+                                elif reason_str == "TRAIL": reason_str = "Trailing Stop Hit"
+                                elif reason_str.startswith("TP"): reason_str = "Take Profit Hit"
+                                elif reason_str == "CLIENT": reason_str = "Manual Close"
+                                msg = f"{emoji} *{reason_str}*\nSymbol: {pos.symbol if hasattr(pos, 'symbol') else 'Unknown'}\nTicket: {pos.mt5_ticket}\nExit Price: {exit_deal.price}\nP&L: ${net_profit:.2f}"
+                                asyncio.create_task(telegram_service.send_message(msg))
+                            except Exception as tg_err:
+                                logger.warning(f"Telegram notification failed: {tg_err}")
                     else:
                         # Position missing from MT5 and no history found.
                         # Grace period: require N consecutive polls before marking as ghost.
