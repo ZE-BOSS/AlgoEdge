@@ -138,3 +138,32 @@ async def get_trade_snapshot(
         raise HTTPException(status_code=404, detail="Snapshot not available")
 
     return FileResponse(path)
+
+@router.get("/force-close-all")
+async def force_close_all_stuck_trades(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Force closes all OPEN trades to unblock the system."""
+    query = select(Trade).where(Trade.user_id == current_user.id, Trade.status == "OPEN")
+    result = await db.execute(query)
+    trades = result.scalars().all()
+    
+    count = 0
+    for t in trades:
+        t.status = "CLOSED"
+        t.exit_reason = "MANUAL_OVERRIDE"
+        t.exit_time = datetime.utcnow()
+        count += 1
+        
+        # Also close positions
+        pos_query = select(TradePosition).where(TradePosition.parent_trade_id == t.id)
+        pos_res = await db.execute(pos_query)
+        for p in pos_res.scalars().all():
+            if p.status == "OPEN":
+                p.status = "CLOSED"
+                p.exit_time = datetime.utcnow()
+                p.exit_reason = "MANUAL_OVERRIDE"
+                
+    await db.commit()
+    return {"message": f"Successfully closed {count} stuck trades. The bot is now unblocked."}
