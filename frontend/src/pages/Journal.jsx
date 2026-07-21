@@ -106,7 +106,7 @@ function TradeRow({ trade }) {
         <td>{trade.exit_price || '—'}</td>
         <td>
           <span style={{ color: isWin ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
-            {isWin ? '+' : ''}{(trade.pnl || 0).toFixed(2)}
+            {isWin ? '+' : ''}{(trade.realized_pnl || trade.pnl || 0).toFixed(2)}
           </span>
         </td>
         <td>{trade.risk_reward ? `1:${trade.risk_reward.toFixed(1)}` : '—'}</td>
@@ -153,10 +153,15 @@ function TradeRow({ trade }) {
                     {analyzing ? 'Analyzing...' : 'Analyze with AI'}
                   </button>
                 )}
-                {chartDataObj && (
+                {chartDataObj && chartDataObj.length > 0 ? (
                   <div style={{ marginTop: 20 }}>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase' }}>Trade Chart</div>
                     <MiniChart data={chartDataObj} />
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 20 }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase' }}>Trade Chart</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '12px 0' }}>Chart data unavailable for this trade.</div>
                   </div>
                 )}
               </div>

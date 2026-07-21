@@ -24,6 +24,7 @@ from backend.risk.position_sizer import get_pip_size
 from backend.risk.compounding import get_instrument_profile
 from backend.analytics.metrics import compute_portfolio_stats
 from backend.analytics.reports import generate_risk_report, RiskReport
+from backend.risk.prop_firm_validator import PropFirmValidator
 from backend.utils.logger import get_logger
 from backend.utils.timeutils import detect_session
 
@@ -83,6 +84,9 @@ class BacktestEngine:
     def __init__(self, risk_config: Dict[str, Any]):
         self.risk_engine = RiskEngine(risk_config)
         self.risk_config = risk_config
+        prop_firm_config = risk_config.get("prop_firm", {})
+        self.prop_firm_validator = PropFirmValidator(prop_firm_config)
+        self.risk_engine.prop_firm_validator = self.prop_firm_validator
         self.trades: List[Dict[str, Any]] = []
         self.open_positions: List[Dict[str, Any]] = []
         self.equity_curve: List[float] = []
@@ -175,6 +179,14 @@ class BacktestEngine:
             # Look up pre-computed ATR and swing points
             current_atr = atr_array[i] if i < len(atr_array) else 0.0
             swing_points = swing_cache.get(i, [])
+
+            # Calculate floating equity for Prop Firm tracking
+            open_pnl = sum(self._calc_pnl(p["direction"], p["entry_price"], current_price, p["volume"], p.get("symbol", "")) for p in self.open_positions)
+            current_time_dt = datetime.fromtimestamp(float(current_time), timezone.utc) if isinstance(current_time, (int, float)) else pd.to_datetime(current_time).to_pydatetime()
+            self.prop_firm_validator.update_equity_balance(balance + open_pnl, balance, current_time_dt)
+            if self.prop_firm_validator.is_paused:
+                logger.warning(f"[ENGINE] Prop Firm account paused due to: {self.prop_firm_validator.pause_reason}")
+                break
 
             # 1. Manage existing open positions
             closed_this_bar = []

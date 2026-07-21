@@ -55,6 +55,23 @@ async def get_dashboard(
         bot_result = await get_bot_status(current_user)
     except Exception:
         bot_result = {}
+        
+    try:
+        from backend.services.bot_service import bot_service
+        if getattr(bot_service, "prop_firm_validator", None):
+            pf_state = {
+                "high_water_mark": bot_service.prop_firm_validator.high_water_mark,
+                "eod_baseline": bot_service.prop_firm_validator.eod_baseline,
+                "daily_profit": bot_service.prop_firm_validator.daily_profit,
+                "total_profit": bot_service.prop_firm_validator.total_profit,
+                "active_trading_days": bot_service.prop_firm_validator.active_trading_days,
+                "is_paused": bot_service.prop_firm_validator.is_paused,
+                "pause_reason": bot_service.prop_firm_validator.pause_reason,
+            }
+        else:
+            pf_state = None
+    except Exception:
+        pf_state = None
     
     return {
         "stats": stats_data,
@@ -62,5 +79,6 @@ async def get_dashboard(
         "positions": positions_data,
         "compounding": compounding_data,
         "broker": broker_data,
-        "bot": bot_result
+        "bot": bot_result,
+        "prop_firm_status": pf_state
     }

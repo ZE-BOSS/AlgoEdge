@@ -7,7 +7,11 @@ Source: SMC_Strategy-1.md Section 13
 """
 
 from typing import Dict, Any
+import json
 from backend.strategies.strategy_one.params import SMCParams
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ConfluenceScorer:
@@ -100,6 +104,8 @@ class ConfluenceScorer:
         score = min(score, 100)
         context["score_breakdown"] = breakdown
         
-        print(f"DEBUG SCORER: total={score}, breakdown={breakdown}, pattern_tier={context.get('candle_tier')}, fallback={context.get('fallback_triggered', False)}")
+        logger.debug(json.dumps({"stage": "confluence.score", "total": score, "breakdown": breakdown,
+                          "candle_tier": context.get("candle_tier"),
+                          "fallback": context.get("fallback_triggered", False)}))
 
         return min(score, 100)

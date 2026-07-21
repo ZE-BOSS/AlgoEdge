@@ -47,6 +47,13 @@ export default function RiskSettings() {
     trail_structure_bars: 3,
     compounding_enabled: false,
     session_filter_enabled: true,
+    prop_firm: {
+      account_mode: 'personal',
+      challenge_type: 'none',
+      account_size: 10000.0,
+      initial_balance: 10000.0,
+      max_lot_sizes: {}
+    }
   });
 
   // Load current config from backend
@@ -58,12 +65,18 @@ export default function RiskSettings() {
 
   useEffect(() => {
     if (remoteConfig?.config) {
-      // Merge remote config with defaults (only override keys that exist)
+      const cfg = remoteConfig.config;
+      // Merge remote config with defaults
       setConfig(prev => ({
         ...prev,
+        // Flat mapping for risk parameters
         ...Object.fromEntries(
-          Object.entries(remoteConfig.config).filter(([k]) => k in prev)
+          Object.entries(cfg.risk || {}).filter(([k]) => k in prev)
         ),
+        // Additional top-level mapping
+        prop_firm: cfg.prop_firm || prev.prop_firm,
+        compounding_enabled: cfg.compounding?.compounding_enabled ?? prev.compounding_enabled,
+        session_filter_enabled: cfg.smc?.session_filter_enabled ?? prev.session_filter_enabled,
       }));
     }
   }, [remoteConfig]);
@@ -79,7 +92,15 @@ export default function RiskSettings() {
 
   const update = (key, val) => setConfig({ ...config, [key]: val });
 
-  const handleSave = () => mutation.mutate(config);
+  const handleSave = () => {
+    const { prop_firm, compounding_enabled, session_filter_enabled, ...riskParams } = config;
+    mutation.mutate({
+      risk: riskParams,
+      prop_firm: prop_firm,
+      compounding: { compounding_enabled },
+      smc: { session_filter_enabled }
+    });
+  };
 
   return (
     <div style={{ display: 'grid', gap: 20, maxWidth: 800 }}>
@@ -148,22 +169,6 @@ export default function RiskSettings() {
       <div className="card">
         <div className="card-header"><span className="card-title">Trailing Stops</span></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div>
-            <label>TP1 Trail Method</label>
-            <select value={config.trail_method_tp1} onChange={e => update('trail_method_tp1', e.target.value)}>
-              <option value="NONE">None</option>
-              <option value="ATR_TRAIL">ATR Trail</option>
-              <option value="FIXED_PIPS">Fixed Pips</option>
-              <option value="STRUCTURE_TRAIL">Structure Trail</option>
-              <option value="PCT_TRAIL">Percentage Trail</option>
-            </select>
-            {config.trail_method_tp1 === 'ATR_TRAIL' && (
-              <div style={{ marginTop: 8 }}>
-                <label>ATR Multiplier</label>
-                <input type="number" step="0.1" value={config.atr_trail_multiplier_tp1} onChange={e => update('atr_trail_multiplier_tp1', +e.target.value)} />
-              </div>
-            )}
-          </div>
           <div>
             <label>TP2 Trail Method</label>
             <select value={config.trail_method_tp2} onChange={e => update('trail_method_tp2', e.target.value)}>
@@ -270,6 +275,74 @@ export default function RiskSettings() {
             : 'Trading during all sessions including Asian session (22:00–06:00 GMT).'
           }
         </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Prop Firm Settings</span></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
+            <input type="checkbox" checked={config.prop_firm?.account_mode === 'prop_firm'} onChange={e => update('prop_firm', { ...config.prop_firm, account_mode: e.target.checked ? 'prop_firm' : 'personal' })} style={{ width: 16, height: 16 }} />
+            Enable Prop Firm Rules (BloomFunded strict rules)
+          </label>
+        </div>
+        {config.prop_firm?.account_mode === 'prop_firm' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
+            <div>
+              <label>Challenge Type</label>
+              <select value={config.prop_firm.challenge_type} onChange={e => update('prop_firm', { ...config.prop_firm, challenge_type: e.target.value })}>
+                <option value="none">None / Funded</option>
+                <option value="1-step">1-Step / Flex (Trailing DD)</option>
+                <option value="2-step">2-Step (Static DD)</option>
+              </select>
+            </div>
+            <div>
+              <label>Account Size</label>
+              <input type="number" step="1000" value={config.prop_firm.account_size} onChange={e => update('prop_firm', { ...config.prop_firm, account_size: +e.target.value })} />
+            </div>
+            <div>
+              <label>Initial Balance (DD Baseline)</label>
+              <input type="number" step="1000" value={config.prop_firm.initial_balance} onChange={e => update('prop_firm', { ...config.prop_firm, initial_balance: +e.target.value })} />
+            </div>
+            <div style={{ gridColumn: '1 / -1', marginTop: '4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <label style={{ margin: 0 }}>Max Lot Sizes per Asset</label>
+                <button type="button" className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => {
+                  update('prop_firm', {
+                    ...config.prop_firm,
+                    max_lot_sizes: { ...(config.prop_firm.max_lot_sizes || {}), 'SYMBOL': 1.0 }
+                  });
+                }}>+ Add Symbol Limit</button>
+              </div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {Object.entries(config.prop_firm.max_lot_sizes || {}).map(([symbol, maxLots]) => (
+                  <div key={symbol} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, alignItems: 'center' }}>
+                    <input type="text" placeholder="Symbol" defaultValue={symbol} onBlur={(e) => {
+                      const newSym = e.target.value.toUpperCase();
+                      if (newSym && newSym !== symbol) {
+                        const newLots = { ...config.prop_firm.max_lot_sizes };
+                        delete newLots[symbol];
+                        newLots[newSym] = maxLots;
+                        update('prop_firm', { ...config.prop_firm, max_lot_sizes: newLots });
+                      }
+                    }} />
+                    <input type="number" step="0.1" placeholder="Max Lots" value={maxLots} onChange={(e) => {
+                      const newLots = { ...config.prop_firm.max_lot_sizes, [symbol]: +e.target.value };
+                      update('prop_firm', { ...config.prop_firm, max_lot_sizes: newLots });
+                    }} />
+                    <button type="button" className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => {
+                      const newLots = { ...config.prop_firm.max_lot_sizes };
+                      delete newLots[symbol];
+                      update('prop_firm', { ...config.prop_firm, max_lot_sizes: newLots });
+                    }}>X</button>
+                  </div>
+                ))}
+                {Object.keys(config.prop_firm.max_lot_sizes || {}).length === 0 && (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No max lot limits defined (defaults to unlimited).</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <button className="btn btn-primary" style={{ justifySelf: 'start' }} onClick={handleSave} disabled={mutation.isPending}>

@@ -72,17 +72,23 @@ class SMCEngine(BaseStrategy):
         self.m15_structure = MarketStructureDetector(
             swing_length=swing_len_itf, min_bos_count=2
         )
-        self.m15_order_blocks = OrderBlockDetector()
-        self.m15_fvg = FVGDetector(self.smc_params.fvg_min_gap_pips)
-        self.m15_liquidity = LiquidityMapper(self.smc_params.liq_sweep_min_pips)
+        self.m15_order_blocks = OrderBlockDetector(
+            impulse_ratio=self.smc_params.ob_impulse_min_ratio,
+            max_touches=self.smc_params.ob_max_touch_count,
+        )
+        self.m15_fvg = FVGDetector(fvg_min_gap_atr_mult=self.smc_params.fvg_min_gap_atr_mult)
+        self.m15_liquidity = LiquidityMapper(liq_sweep_min_atr_mult=self.smc_params.liq_sweep_min_atr_mult)
 
         # Layer 3: M5 (Execution)
         self.m5_structure = MarketStructureDetector(
             swing_length=swing_len_ltf, min_bos_count=2
         )
-        self.m5_order_blocks = OrderBlockDetector()
-        self.m5_fvg = FVGDetector(self.smc_params.fvg_min_gap_pips)
-        self.m5_liquidity = LiquidityMapper(self.smc_params.liq_sweep_min_pips)
+        self.m5_order_blocks = OrderBlockDetector(
+            impulse_ratio=self.smc_params.ob_impulse_min_ratio,
+            max_touches=self.smc_params.ob_max_touch_count,
+        )
+        self.m5_fvg = FVGDetector(fvg_min_gap_atr_mult=self.smc_params.fvg_min_gap_atr_mult)
+        self.m5_liquidity = LiquidityMapper(liq_sweep_min_atr_mult=self.smc_params.liq_sweep_min_atr_mult)
 
         self.scorer = ConfluenceScorer(self.smc_params)
         self.signal_gen = SignalGenerator(user_config)
@@ -338,7 +344,8 @@ class SMCEngine(BaseStrategy):
         m5_liq = self.context.get("m5_liquidity", {})
         
         atr = self.context.get("atr", 0)
-        buffer = atr * 0.1 # Dynamic buffer
+        sl_buffer_atr_mult = getattr(self.config.risk, 'sl_buffer_atr_mult', 0.1)
+        buffer = atr * sl_buffer_atr_mult  # Configurable via Risk Settings
         max_liq_dist = atr * 2.0 # Only sweep pools within 2 ATR of the structural swing
         
         if bias == "BULLISH":

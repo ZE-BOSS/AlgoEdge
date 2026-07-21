@@ -32,7 +32,7 @@ async def get_trades(
 ):
     """Get trade history with optional filters."""
     logger.info(f"Fetching trades for {current_user.email} | symbol={symbol} status={status} limit={limit}")
-    query = select(Trade).where(Trade.user_id == current_user.id)
+    query = select(Trade).options(selectinload(Trade.positions)).where(Trade.user_id == current_user.id)
 
     if symbol:
         query = query.where(Trade.symbol == symbol)
@@ -55,6 +55,7 @@ async def get_trades(
         "volume": t.volume,
         "pnl": t.pnl,
         "pnl_pips": t.pnl_pips,
+        "realized_pnl": sum(p.pnl for p in t.positions if p.status == "CLOSED" and p.pnl is not None) if t.status == "OPEN" else t.pnl,
         "risk_reward": t.risk_reward,
         "status": t.status,
         "exit_reason": t.exit_reason,

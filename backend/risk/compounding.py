@@ -657,8 +657,8 @@ class CompoundingEngine:
             # Only advance if enough consecutive wins at current level
             current_step = self.get_step_for_balance(balance)
             if (state.total_wins_at_level < self.config.conservative_wins_required and
-                    state.current_step == current_step.step_number):
-                # Stay at previous step even if balance qualifies for higher
+                    current_step.step_number > state.current_step):
+                # §7.3 fix: Stay at previous step if we haven't met the win quota to advance to the new step.
                 prev_step_idx = max(0, current_step.step_number - 2)
                 return self.steps[prev_step_idx].risk_amount
             return current_step.risk_amount

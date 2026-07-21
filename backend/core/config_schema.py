@@ -58,6 +58,22 @@ class InstrumentSettings:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PROP FIRM SETTINGS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class PropFirmParams:
+    """
+    BloomFunded Synthetic Challenge Parameters
+    """
+    account_mode: Literal["personal", "prop_firm"] = "personal"
+    challenge_type: Literal["none", "1-step", "2-step", "flex"] = "none"
+    account_size: float = 10000.0
+    initial_balance: float = 10000.0
+    max_lot_sizes: Dict[str, float] = field(default_factory=dict)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # FULL USER CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -118,6 +134,7 @@ class UserConfigV2(UserConfig):
     compounding: CompoundingParams = None
     instrument_settings: List[InstrumentSettings] = None
     crashboom: CrashBoomParams = field(default_factory=CrashBoomParams)
+    prop_firm: PropFirmParams = field(default_factory=PropFirmParams)
 
     @classmethod
     def from_dict(cls, data: dict) -> "UserConfigV2":
@@ -126,6 +143,7 @@ class UserConfigV2(UserConfig):
         compounding_data = data.pop("compounding", None)
         instrument_data = data.pop("instrument_settings", None)
         crashboom_data = data.pop("crashboom", {})
+        prop_firm_data = data.pop("prop_firm", {})
         import dataclasses
         known_fields = {f.name for f in dataclasses.fields(cls)}
         filtered_data = {k: v for k, v in data.items() if k in known_fields}
@@ -140,6 +158,7 @@ class UserConfigV2(UserConfig):
         config.smc  = SMCParams(**filter_kwargs(SMCParams, smc_data))
         config.risk = RiskParams(**filter_kwargs(RiskParams, risk_data))
         config.crashboom = CrashBoomParams(**filter_kwargs(CrashBoomParams, crashboom_data))
+        config.prop_firm = PropFirmParams(**filter_kwargs(PropFirmParams, prop_firm_data))
         
         if compounding_data:
             config.compounding = CompoundingParams(**filter_kwargs(CompoundingParams, compounding_data))
@@ -160,6 +179,8 @@ class UserConfigV2(UserConfig):
             self.instrument_settings = []
         if self.crashboom is None:
             self.crashboom = CrashBoomParams()
+        if self.prop_firm is None:
+            self.prop_firm = PropFirmParams()
 
     def get_risk_amount(self, account_balance: float, state=None) -> float:
         if self.compounding.enabled:

@@ -675,6 +675,13 @@ export default function Backtester() {
       trail_method_tp4: 'NONE', trail_method_tp5: 'NONE',
       atr_trail_multiplier: 1.5, trail_pips: 15,
       compounding_enabled: false,
+      prop_firm: {
+        account_mode: 'personal',
+        challenge_type: 'none',
+        account_size: 10000.0,
+        initial_balance: 10000.0,
+        max_lot_sizes: {}
+      },
       target_profit_enabled: false, max_daily_profit: 500.0, max_weekly_profit: 2000.0,
       manual_bias: 'NONE',
       strategy_id: 'SMC_v1',
@@ -745,7 +752,15 @@ export default function Backtester() {
   useEffect(() => {
     if (userCfg?.config && !configLoaded && !localStorage.getItem(STORAGE_KEY)) {
       const c = userCfg.config;
-      setForm(prev => ({ ...prev, ...Object.fromEntries(Object.entries(c).filter(([k]) => k in prev)) }));
+      setForm(prev => ({
+        ...prev,
+        ...Object.fromEntries(Object.entries(c).filter(([k]) => k in prev)),
+        ...Object.fromEntries(Object.entries(c.risk || {}).filter(([k]) => k in prev)),
+        prop_firm: c.prop_firm || prev.prop_firm,
+        compounding_enabled: c.compounding?.compounding_enabled ?? prev.compounding_enabled,
+        session_filter_enabled: c.smc?.session_filter_enabled ?? prev.session_filter_enabled,
+        news_filter_enabled: c.smc?.news_filter_enabled ?? prev.news_filter_enabled,
+      }));
     }
     if (userCfg) setConfigLoaded(true);
   }, [userCfg, configLoaded]);
@@ -796,7 +811,7 @@ export default function Backtester() {
     mutationFn: () => {
       setResult(null);
       setEvents([]);
-      const payload = { ...form, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: {}, strategy_params: {} };
+      const payload = { ...form, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: { prop_firm: form.prop_firm }, strategy_params: {} };
       if (form.manual_bias && form.manual_bias !== 'NONE') {
         payload.manual_bias_overrides = { [form.symbol]: form.manual_bias };
       }
@@ -928,6 +943,28 @@ export default function Backtester() {
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flex: 1 }}><input type="checkbox" checked={form.news_filter_enabled} onChange={e => u('news_filter_enabled', e.target.checked)} style={{ width: 14, height: 14 }} /> News Filter</label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flex: 1 }}><input type="checkbox" checked={form.compounding_enabled} onChange={e => u('compounding_enabled', e.target.checked)} style={{ width: 14, height: 14 }} /> Compounding</label>
           </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', textTransform: 'none' }}>
+              <input type="checkbox" checked={form.prop_firm?.account_mode === 'prop_firm'} onChange={e => u('prop_firm', { ...form.prop_firm, account_mode: e.target.checked ? 'prop_firm' : 'personal' })} style={{ width: 14, height: 14 }} />
+              Enable Prop Firm Rules
+            </label>
+          </div>
+          {form.prop_firm?.account_mode === 'prop_firm' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
+              <div>
+                <label style={{ fontSize: '0.7rem' }}>Challenge Type</label>
+                <select value={form.prop_firm.challenge_type} onChange={e => u('prop_firm', { ...form.prop_firm, challenge_type: e.target.value })}>
+                  <option value="none">None / Funded</option>
+                  <option value="1-step">1-Step / Flex (Trailing DD)</option>
+                  <option value="2-step">2-Step (Static DD)</option>
+                </select>
+              </div>
+              <div><label style={{ fontSize: '0.7rem' }}>Account Size</label><input type="number" step="1000" value={form.prop_firm.account_size} onChange={e => u('prop_firm', { ...form.prop_firm, account_size: +e.target.value })} /></div>
+              <div><label style={{ fontSize: '0.7rem' }}>Initial Balance</label><input type="number" step="1000" value={form.prop_firm.initial_balance} onChange={e => u('prop_firm', { ...form.prop_firm, initial_balance: +e.target.value })} /></div>
+            </div>
+          )}
+
 
           <button className="btn btn-secondary btn-sm" onClick={() => setShowAdvanced(!showAdvanced)} style={{ width: '100%' }}><Settings2 size={14} /> {showAdvanced ? 'Hide' : 'Show'} Advanced Parameters</button>
           {showAdvanced && (<div style={{ display: 'grid', gap: 14, padding: 14, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>

@@ -103,15 +103,19 @@ class RiskEngine:
         # 3. Position Sizing
         size_modifier = signal_data.get("metadata", {}).get("size_modifier", 1.0)
         
-        if self.compounding_enabled and compounding_risk_dollars > 0:
+        base_balance = account_balance
+        if hasattr(self, "prop_firm_validator") and self.prop_firm_validator and self.prop_firm_validator.enabled:
+            base_balance = self.prop_firm_validator.initial_balance
+
+        if self.compounding_enabled and compounding_risk_dollars > 0 and base_balance == account_balance:
             requested_risk_dollars = compounding_risk_dollars * size_modifier
             total_lots = calculate_lot_from_dollars(
                 requested_risk_dollars, entry, sl, symbol
             )
         else:
-            requested_risk_dollars = account_balance * (self.risk_pct / 100.0) * size_modifier
+            requested_risk_dollars = base_balance * (self.risk_pct / 100.0) * size_modifier
             total_lots = calculate_lot_size(
-                account_balance, self.risk_pct * size_modifier, entry, sl, symbol
+                base_balance, self.risk_pct * size_modifier, entry, sl, symbol
             )
 
         # Calculate actual dollar risk taken (after any Smart Clamping in the position sizer)
@@ -137,6 +141,20 @@ class RiskEngine:
                 "balance": account_balance
             }))
             return False, "Lot size calculation returned 0", []
+
+        # 3.5 Prop Firm Check
+        if hasattr(self, "prop_firm_validator") and self.prop_firm_validator:
+            is_valid, reason, allowed_lots = self.prop_firm_validator.validate_trade(symbol, total_lots)
+            if not is_valid:
+                logger.warning(json.dumps({
+                    "event": "risk_rejected",
+                    "reason": "prop_firm_blocked",
+                    "details": reason
+                }))
+                return False, reason, []
+            if allowed_lots < total_lots:
+                logger.info(f"Prop Firm downsized lot from {total_lots} to {allowed_lots}")
+                total_lots = allowed_lots
 
         # 4. Multi-Position Splits (TP1/TP2/TP3)
         liquidity_target = signal_data.get("liquidity_target")
@@ -165,6 +183,9 @@ class RiskEngine:
 
         group_id = signal_data.get("group_id", "unknown")
         self.circuit.position_opened(group_id, len(tp_levels), symbol=symbol)
+        
+        if hasattr(self, "prop_firm_validator") and self.prop_firm_validator:
+            self.prop_firm_validator.record_trade_opened(symbol, total_lots)
         
         logger.info(json.dumps({
             "event": "trade_approved",
@@ -232,6 +253,20 @@ class RiskEngine:
 
         # Step 2: Check Trailing (only if trail method is assigned)
         if trail_method and be_applied:
+            # §2.3 fix: Check trail_activation_rr — trailing only activates after
+            # price reaches this many R in profit. Matches position_manager live behavior.
+            risk_distance = abs(entry - original_sl)
+            if risk_distance > 0:
+                if direction == "BUY":
+                    unrealized_r = (current_price - entry) / risk_distance
+                else:
+                    unrealized_r = (entry - current_price) / risk_distance
+                
+                trail_activation = self.config.get("trail_activation_rr", 1.0)
+                if unrealized_r < trail_activation:
+                    return actions  # Trailing not yet activated
+
+            # §2.2 fix: pass tp_level for per-TP multiplier resolution
             new_sl = self.trailing.calculate_trailing_sl(
                 method=trail_method,
                 direction=direction,
@@ -242,6 +277,7 @@ class RiskEngine:
                 lowest_price=lowest,
                 atr_value=atr_value,
                 swing_points=swing_points,
+                tp_level=tp_level,
             )
             if new_sl is not None:
                 actions.append({"action": "MODIFY_SL", "new_sl": new_sl, "reason": "TRAIL"})

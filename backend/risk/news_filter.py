@@ -90,7 +90,7 @@ class NewsFilter:
         for curr in currencies:
             if curr in title.upper():
                 return curr
-        return "USD"  # Default to USD
+        return "UNKNOWN"  # Default to UNKNOWN
 
     def is_blocked(self, symbol: str = "") -> bool:
         """

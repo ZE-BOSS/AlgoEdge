@@ -426,6 +426,7 @@ export default function Dashboard() {
   const userConfig = dashboardData?.config;
   const positionsData = dashboardData?.positions;
   const compoundingData = dashboardData?.compounding;
+  const propFirmStatus = dashboardData?.prop_firm_status;
 
   const configSymbols = userConfig?.config?.watched_symbols || userConfig?.config?.symbols || ['XAUUSD', 'EURUSD', 'GBPUSD'];
 
@@ -503,6 +504,44 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+
+          {propFirmStatus && userConfig?.config?.prop_firm?.account_mode === 'prop_firm' && (
+            <div className="card" style={{ marginBottom: 20 }}>
+              <div className="card-header">
+                <span className="card-title">Prop Firm Challenge</span>
+                {propFirmStatus.is_paused ? (
+                  <span className="badge badge-red">Paused</span>
+                ) : (
+                  <span className="badge badge-green">Active</span>
+                )}
+              </div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span>EOD Baseline:</span>
+                  <strong style={{ color: 'var(--text-primary)' }}>${propFirmStatus.eod_baseline?.toFixed(2)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span>High Water Mark:</span>
+                  <strong style={{ color: 'var(--text-primary)' }}>${propFirmStatus.high_water_mark?.toFixed(2)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span>Total Profit:</span>
+                  <strong style={{ color: propFirmStatus.total_profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                    ${propFirmStatus.total_profit?.toFixed(2)}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span>Trading Days:</span>
+                  <strong style={{ color: 'var(--text-primary)' }}>{propFirmStatus.active_trading_days || 0}</strong>
+                </div>
+                {propFirmStatus.pause_reason && (
+                  <div style={{ marginTop: 8, padding: 8, background: 'rgba(248,81,73,0.1)', color: 'var(--red)', borderRadius: 4, fontSize: '0.75rem' }}>
+                    <strong>Halted:</strong> {propFirmStatus.pause_reason}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -537,16 +576,20 @@ export default function Dashboard() {
                   // Link with live WebSocket data if available
                   let currentPrice = null;
                   let currentSl = trade.stop_loss;
-                  let livePnl = null;
+                  let livePnl = sub_positions?.reduce((sum, sp) => sum + (sp.pnl || 0), 0) || 0;
+                  let hasLive = false;
                   
                   if (livePositions) {
                     const liveSp = sub_positions?.map(sp => livePositions[sp.mt5_ticket]).filter(Boolean);
                     if (liveSp && liveSp.length > 0) {
+                      hasLive = true;
                       currentPrice = liveSp[0].price_current;
                       currentSl = liveSp[0].sl;
-                      livePnl = liveSp.reduce((sum, ls) => sum + (ls.profit || 0), 0);
+                      livePnl += liveSp.reduce((sum, ls) => sum + (ls.profit || 0), 0);
                     }
                   }
+                  
+                  if (!hasLive && livePnl === 0) livePnl = null;
 
                   return (
                     <tr key={i}>

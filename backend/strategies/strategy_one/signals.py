@@ -58,26 +58,43 @@ class TradeGate:
         current_spread = context.get("current_spread_pips", 0)
         atr = context.get("atr", 0)
         
-        atr_mult = getattr(self.config.risk, "max_spread_atr_mult", getattr(self.config.risk, "max_spread_pips", 0.5))
+        atr_mult = getattr(self.config.risk, "max_spread_atr_mult", 0.5)
         max_allowed_spread = atr * atr_mult if atr > 0 else atr_mult
         
         if current_spread > max_allowed_spread:
             reasons.append(f"Gate 5: Spread ({current_spread}) exceeds maximum dynamic limit ({max_allowed_spread:.2f} based on ATR)")
 
-        # Gate 6: Must be in active session (if session filter enabled)
+        # Gate 6: Hard Filters (Strategy Optimization)
+        if getattr(self.config.smc, "enforce_htf_pd", False):
+            # Enforce buying in Discount, selling in Premium
+            ipdm_phase = context.get("ipdm_phase", "")
+            if direction == "BUY" and "PREMIUM" in ipdm_phase:
+                reasons.append("Gate 6: Hard Filter — Buy signal in Premium zone rejected")
+            elif direction == "SELL" and "DISCOUNT" in ipdm_phase:
+                reasons.append("Gate 6: Hard Filter — Sell signal in Discount zone rejected")
+                
+        if getattr(self.config.smc, "enforce_fvg_displacement", False):
+            if not context.get("active_fvgs", []):
+                reasons.append("Gate 6: Hard Filter — Signal lacks FVG displacement")
+                
+        if getattr(self.config.smc, "enforce_asian_range_sweep", False):
+            if not context.get("asian_range_swept", False):
+                reasons.append("Gate 6: Hard Filter — Asian Range has not been swept")
+
+        # Gate 7: Must be in active session (if session filter enabled)
         if getattr(self.config.smc, "session_filter_enabled", False):
             if not context.get("in_kill_zone", False):
                 reasons.append("Gate 6: Outside active kill zone session")
 
-        # Gate 7: Must not be blocked by high-impact news
+        # Gate 8: Must not be blocked by high-impact news
         if getattr(self.config.smc, "news_filter_enabled", False):
             if context.get("news_blocked", False):
-                reasons.append("Gate 7: Blocked by high-impact news event")
+                reasons.append("Gate 8: Blocked by high-impact news event")
 
-        # Gate 8: Confluence score must meet minimum
+        # Gate 9: Confluence score must meet minimum
         score = context.get("confluence_score", 0)
         if score < self.config.smc.min_signal_score:
-            reasons.append(f"Gate 8: Confluence score {score} below minimum {self.config.smc.min_signal_score}")
+            reasons.append(f"Gate 9: Confluence score {score} below minimum {self.config.smc.min_signal_score}")
 
         return len(reasons) == 0, reasons
 

@@ -106,7 +106,7 @@ class AsianRange:
         If SELL (short), we want to see price sweep ABOVE the Asian high.
         """
         if not self.is_mapped:
-            return True # If not mapped yet, bypass (or we could return False depending on strictness)
+            return False  # §8.4 fix: Fail-closed. If we haven't mapped the range, we can't confirm a sweep.
             
         if direction in ("BUY", "BULLISH"):
             return current_price <= self.low

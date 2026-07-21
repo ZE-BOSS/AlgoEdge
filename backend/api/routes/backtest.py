@@ -44,6 +44,7 @@ class BacktestRequest(BaseModel):
     candle_count: int = 5000
     initial_balance: float = 10000.0
     risk_config: Dict[str, Any] = {}
+    prop_firm: Dict[str, Any] = {}
     # ── Dynamic Strategy Params ──
     strategy_params: Dict[str, Any] = {}
     # ── Risk Params ──
@@ -270,6 +271,7 @@ async def run_backtest_endpoint(
             config.risk.max_consecutive_losses = req.max_consecutive_losses
             config.risk.max_concurrent_positions = req.max_concurrent_positions
             config.risk.max_daily_trades = req.max_daily_trades
+            config.smc.manual_bias_overrides = req.manual_bias_overrides
             
             # Inject dynamic strategy parameters
             if req.strategy_id == "SMC_v1":
@@ -441,6 +443,7 @@ async def run_backtest_endpoint(
                 "max_weekly_profit": req.max_weekly_profit,
                 "compounding_enabled": req.compounding_enabled,
                 "manual_bias_overrides": req.manual_bias_overrides,
+                "prop_firm": req.prop_firm,
                 **req.risk_config,
             }
 

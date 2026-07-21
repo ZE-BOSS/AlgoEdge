@@ -112,7 +112,10 @@ class RiskParams:
     """
 
     sl_buffer_pips: float = 5.0
-    """Extra pips added beyond the SL method level. Prevents stop hunting."""
+    """DEPRECATED: Use sl_buffer_atr_mult instead. Extra pips added beyond the SL method level."""
+
+    sl_buffer_atr_mult: float = 0.1
+    """ATR multiplier for SL buffer beyond structural level. Default 0.1 = 10% ATR."""
 
     atr_sl_multiplier: float = 1.5
     """ATR multiplier when sl_method == 'ATR_BASED'. SL = entry ± (ATR × this)."""
@@ -129,8 +132,15 @@ class RiskParams:
 
     be_buffer_pips: float = 2.0
     """
-    Move SL to (entry + this many pips) rather than exactly entry.
-    Covers spread cost on BE close.
+    DEPRECATED: Use be_buffer_atr_mult instead.
+    Legacy pip-based buffer — if be_buffer_atr_mult is not set, this value
+    will be used as an ATR multiplier (which is wrong at pip scale).
+    """
+
+    be_buffer_atr_mult: float = 0.1
+    """
+    ATR multiplier for break-even buffer. SL moved to entry ± (ATR × this).
+    Default 0.1 = 10% of ATR past entry. Covers spread cost on BE close.
     """
 
     be_on_tp1_hit: bool = True
@@ -258,7 +268,10 @@ class RiskParams:
     """
 
     max_spread_pips: float = 3.0
-    """Absolute maximum spread in pips (hard cap regardless of multiplier)."""
+    """DEPRECATED: Use max_spread_atr_mult instead. Absolute maximum spread in pips."""
+
+    max_spread_atr_mult: float = 0.5
+    """ATR multiplier for dynamic spread filter. Skip entry if spread > ATR × this."""
 
     # ── Stale Trade Management ────────────────────────────────────────
     stale_trade_sessions: int = 3
@@ -295,6 +308,10 @@ class SMCParams:
     swing_length_ltf: int = 3
     """M15/M5 swing detection lookback."""
 
+    # §5.3 fix: moving back into strategy-specific params
+    manual_bias_overrides: Dict[str, str] = field(default_factory=dict)
+    """Manual overrides for HTF Bias. Map of symbol to BULLISH/BEARISH/NONE."""
+
     # ── Order Block Settings ──────────────────────────────────────────
     ob_impulse_min_ratio: float = 2.0
     """OB impulse move must be this many times the OB candle's size."""
@@ -313,7 +330,10 @@ class SMCParams:
 
     # ── FVG Settings ──────────────────────────────────────────────────
     fvg_min_gap_pips: float = 3.0
-    """Minimum displacement gap between wick 1 and wick 3 for a valid FVG."""
+    """DEPRECATED: Use fvg_min_gap_atr_mult instead."""
+
+    fvg_min_gap_atr_mult: float = 0.2
+    """ATR multiplier for minimum FVG gap size. Default 0.2 = 20% of ATR."""
 
     fvg_entry_level: float = 0.50
     """Where within FVG to enter: 0.5 = 50% (CE level)."""
@@ -326,7 +346,10 @@ class SMCParams:
 
     # ── Liquidity Detection ───────────────────────────────────────────
     liq_sweep_min_pips: float = 5.0
-    """Minimum wick penetration beyond a liquidity level to qualify as sweep."""
+    """DEPRECATED: Use liq_sweep_min_atr_mult instead."""
+
+    liq_sweep_min_atr_mult: float = 0.1
+    """ATR multiplier for minimum liquidity sweep penetration. Default 0.1 = 10% ATR."""
 
     equal_highs_tolerance_pips: float = 10.0
     """Price tolerance for identifying equal highs/lows (liquidity pools)."""

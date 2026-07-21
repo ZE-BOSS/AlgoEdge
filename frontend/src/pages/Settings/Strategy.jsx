@@ -119,10 +119,11 @@ export default function StrategySettings() {
   };
 
   const updateBias = (sym, bias) => {
-    const next = { ...(config.manual_bias_overrides || {}) };
+    const smc = config.smc || {};
+    const next = { ...(smc.manual_bias_overrides || {}) };
     if (bias === 'NONE') delete next[sym];
     else next[sym] = bias;
-    setConfig({ ...config, manual_bias_overrides: next });
+    setConfig({ ...config, smc: { ...smc, manual_bias_overrides: next } });
   };
 
   return (
@@ -184,7 +185,7 @@ export default function StrategySettings() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Manual HTF Bias</label>
                     <select 
-                      value={(config.manual_bias_overrides || {})[sym] || 'NONE'} 
+                      value={(config.smc?.manual_bias_overrides || {})[sym] || 'NONE'} 
                       onChange={e => updateBias(sym, e.target.value)}
                       style={{ fontSize: '0.8rem', padding: '4px 8px' }}
                     >

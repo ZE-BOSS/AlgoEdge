@@ -16,11 +16,22 @@ class TrailingManager:
     """Manages all 4 trailing stop methods with ratchet logic (never moves back)."""
 
     def __init__(self, config: Dict[str, Any]):
+        self.config = config
         self.trail_pips = config.get("trail_pips", 15.0)
         self.atr_trail_multiplier = config.get("atr_trail_multiplier", 1.5)
         self.trail_pct = config.get("trail_pct", 0.005)
         self.trail_timeframe = config.get("trail_timeframe", "M15")
-        self.swing_length = config.get("swing_length", 3)
+        # §2.4 fix: read both key names for structure-trail swing length
+        self.swing_length = config.get("swing_length", config.get("trail_structure_bars", 3))
+        # §2.5 fix: step debounce for live/backtest parity
+        self.trail_step_pips = config.get("trail_step_pips", 5.0)
+
+    def _get_atr_multiplier(self, tp_level: int = 1) -> float:
+        """§2.2 fix: Resolve per-TP ATR multiplier, falling back to global."""
+        return self.config.get(
+            f"atr_trail_multiplier_tp{tp_level}",
+            self.atr_trail_multiplier
+        )
 
     def calculate_trailing_sl(
         self,
@@ -33,6 +44,7 @@ class TrailingManager:
         lowest_price: float = 0.0,
         atr_value: float = 0.0,
         swing_points: Optional[List[Dict[str, Any]]] = None,
+        tp_level: int = 1,
     ) -> Optional[float]:
         """
         Calculate new trailing SL. Returns None if no adjustment needed.
@@ -43,7 +55,7 @@ class TrailingManager:
         if method == "FIXED_PIPS":
             new_sl = self._fixed_pips_trail(direction, current_price, pip_value)
         elif method == "ATR_TRAIL":
-            new_sl = self._atr_trail(direction, highest_price, lowest_price, atr_value)
+            new_sl = self._atr_trail(direction, highest_price, lowest_price, atr_value, tp_level)
         elif method == "STRUCTURE_TRAIL":
             new_sl = self._structure_trail(direction, swing_points, atr_value)
         elif method == "PCT_TRAIL":
@@ -54,14 +66,19 @@ class TrailingManager:
         if new_sl is None:
             return None
 
-        # Ratchet: only move SL in the profitable direction
+        # §2.5 fix: Step-based debounce — only move SL if improvement >= trail_step
+        step = self.trail_step_pips * pip_value
+        if step <= 0:
+            step = pip_value
+
+        # Ratchet + step: only move SL in the profitable direction by at least `step`
         if direction == "BUY":
-            if new_sl > current_sl:
-                logger.debug(f"Trail [{method}] BUY: SL {current_sl:.5f} -> {new_sl:.5f}")
+            if new_sl > current_sl + step:
+                logger.debug(f"Trail [{method}] BUY TP{tp_level}: SL {current_sl:.5f} -> {new_sl:.5f}")
                 return new_sl
         else:
-            if new_sl < current_sl:
-                logger.debug(f"Trail [{method}] SELL: SL {current_sl:.5f} -> {new_sl:.5f}")
+            if current_sl > 0 and new_sl < current_sl - step:
+                logger.debug(f"Trail [{method}] SELL TP{tp_level}: SL {current_sl:.5f} -> {new_sl:.5f}")
                 return new_sl
 
         return None
@@ -77,12 +94,14 @@ class TrailingManager:
         else:
             return current_price + trail_distance
 
-    def _atr_trail(self, direction: str, highest: float, lowest: float, atr: float) -> float:
+    def _atr_trail(self, direction: str, highest: float, lowest: float, atr: float, tp_level: int = 1) -> float:
         """
         Method 2: Trail by ATR × multiplier from highest/lowest price since entry.
+        §2.2 fix: Uses per-TP multiplier when available.
         Source: RiskManagement_Spec.md Section 3.3 — Method 2
         """
-        trail_distance = atr * self.atr_trail_multiplier
+        multiplier = self._get_atr_multiplier(tp_level)
+        trail_distance = atr * multiplier
         if direction == "BUY":
             return highest - trail_distance
         else:

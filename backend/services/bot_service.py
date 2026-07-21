@@ -7,7 +7,7 @@ Broadcasts all events to the frontend via WebSocket for real-time visibility.
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 from collections import deque
 
@@ -35,6 +35,7 @@ class BotService:
         self._last_signal_time = {}
         self.engine = None
         self.circuit_breaker = None
+        self.prop_firm_validator = None
 
     def _log_event(self, message: str, level: str = "INFO", category: str = "BOT"):
         """Log an event to memory, terminal, and WebSocket."""
@@ -213,7 +214,27 @@ class BotService:
                     for pos in open_pos:
                         mt5_pos = mt5.positions_get(ticket=pos.mt5_ticket)
                         if not mt5_pos:
-                            self._log_event(f"Position {pos.mt5_ticket} no longer open in MT5. Trade sync will catch it.", "WARN", "BOT")
+                            # Instead of immediately marking as ghost, check history
+                            # to see if it closed while offline.
+                            now = datetime.now(timezone.utc)
+                            from_date = now - timedelta(days=7)
+                            deals = mt5.history_deals_get(from_date, now, group=f"*{pos.mt5_ticket}*")
+                            
+                            if deals and len(deals) > 0:
+                                # We have a history deal for this ticket. Let position_manager resolve it 
+                                # naturally via God Sync / closed_positions check. 
+                                # Don't start a ghost grace period since we know it's in history.
+                                pass
+                            else:
+                                # Not in open positions, not in history. Might be a startup delay.
+                                # Seed ghost grace period so reconciliation handles it gracefully.
+                                from backend.services.position_manager import position_manager
+                                position_manager._ghost_strike_counts[pos.mt5_ticket] = 1
+                                self._log_event(
+                                    f"Position {pos.mt5_ticket} missing from MT5 (no history found yet). "
+                                    f"Ghost grace period started (1/{position_manager.GHOST_GRACE_POLLS}).",
+                                    "WARN", "BOT"
+                                )
         except Exception as e:
             logger.error(f"Recovery error: {e}")
 
@@ -296,10 +317,39 @@ class BotService:
                         config = UserConfig()
 
                 from backend.risk.circuit_breaker import CircuitBreaker
+                from backend.risk.prop_firm_validator import PropFirmValidator
                 from backend.strategies.registry import get_strategy
 
                 if not self.circuit_breaker:
                     self.circuit_breaker = CircuitBreaker(config.risk.to_dict() if hasattr(config.risk, 'to_dict') else config.risk.__dict__)
+                if not getattr(self, "prop_firm_validator", None):
+                    self.prop_firm_validator = PropFirmValidator(getattr(config, "prop_firm", None) or config)
+
+                # Initialize and refresh news filter if enabled
+                if not hasattr(self, 'news_filter'):
+                    from backend.risk.news_filter import NewsFilter
+                    self.news_filter = NewsFilter(
+                        enabled=getattr(config.smc, 'news_filter_enabled', False),
+                        block_window_minutes=getattr(config.smc, 'news_buffer_minutes', 30)
+                    )
+                else:
+                    self.news_filter.enabled = getattr(config.smc, 'news_filter_enabled', False)
+                    self.news_filter.block_window = timedelta(minutes=getattr(config.smc, 'news_buffer_minutes', 30))
+                
+                if self.news_filter.enabled:
+                    await self.news_filter.refresh_calendar()
+                    
+                if getattr(self, "prop_firm_validator", None) and self.prop_firm_validator.enabled:
+                    try:
+                        from backend.mt5.bridge import bridge
+                        if bridge.account_info:
+                            self.prop_firm_validator.update_equity_balance(
+                                equity=bridge.account_info.equity,
+                                balance=bridge.account_info.balance,
+                                current_time=datetime.now(timezone.utc)
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to update prop firm equity: {e}")
 
                 # Maintain a dictionary of engines per symbol
                 if not hasattr(self, 'engines'):
@@ -374,6 +424,10 @@ class BotService:
                                 
                                 await asyncio.sleep(0.01)
                                 res = await current_engine.on_bar(symbol, tf, _index_candles(closed_data))
+                                # Inject live context not available to the backtester engine directly
+                                if hasattr(current_engine, 'context'):
+                                    current_engine.context["news_blocked"] = self.news_filter.is_blocked(symbol) if hasattr(self, 'news_filter') else False
+                                
                                 # Only the last timeframe might return a signal in hierarchical strategies
                                 if i == len(req_tfs) - 1:
                                     signal = res
@@ -473,6 +527,7 @@ class BotService:
                                     }
                                     risk_engine = RiskEngine(risk_config)
                                     risk_engine.circuit = self.circuit_breaker
+                                    risk_engine.prop_firm_validator = getattr(self, "prop_firm_validator", None)
 
                                     # Enforces 1 active signal per symbol, so symbol is uniquely identifying
                                     group_id = signal.symbol
@@ -658,19 +713,23 @@ class BotService:
         self._log_event("Scan loop exited", category="BOT")
 
     async def _trade_sync_loop(self):
-        """Monitors closed MT5 positions and updates ProfitTracker."""
+        """Monitors closed MT5 positions for ProfitTracker and notifications.
+        
+        NOTE: All DB state transitions (TradePosition.status, .pnl, Trade.status, Trade.pnl)
+        are owned exclusively by PositionManager._manage_positions to prevent race conditions.
+        This loop only handles: profit accumulation, activity log, Telegram, circuit breaker.
+        """
         from backend.mt5.order_manager import OrderManager
         
-        last_check_time = datetime.now(timezone.utc).timestamp() - 86400 * 3 # lookback 3 days initially to catch missed closures
+        last_check_time = datetime.now(timezone.utc).timestamp() - 86400 * 3
         processed_deal_tickets = set()
         
         while self.running:
             try:
-                await asyncio.sleep(15) # Poll every 15s
+                await asyncio.sleep(15)
                 
                 deals = await OrderManager.get_closed_positions_since(last_check_time)
                 if deals:
-                    # Sort by time so we process chronologically
                     deals.sort(key=lambda x: x["time"])
                     
                     for deal in deals:
@@ -689,87 +748,20 @@ class BotService:
                                 f"Trade closed: {deal['symbol']} | P&L: ${net_profit:.2f}",
                                 "INFO", "TRADE"
                             )
-                            # Push notification for closed trade
                             asyncio.ensure_future(self._broadcast_notification(
                                 "Trade Closed",
                                 f"{deal['symbol']} closed for ${net_profit:.2f}",
                                 "success" if net_profit >= 0 else "error"
                             ))
                             
-                            # Also update database
-                            try:
-                                from backend.data.database import async_session
-                                from backend.data.models import Trade, TradePosition
-                                from sqlalchemy import select
-                                import json
-                                
-                                async with async_session() as session:
-                                    pos_id = deal.get("position_id")
-                                    if pos_id:
-                                        result = await session.execute(
-                                            select(TradePosition)
-                                            .where(TradePosition.mt5_ticket == pos_id)
-                                            .order_by(TradePosition.id.desc())
-                                        )
-                                        pos = result.scalars().first()
-                                        if pos and pos.status == "OPEN":
-                                            pos.status = "CLOSED"
-                                            pos.pnl = net_profit
-                                            pos.exit_price = deal.get("price", 0.0)
-                                            pos.exit_time = datetime.fromtimestamp(deal["time"], timezone.utc)
-                                            
-                                            trade = await session.get(Trade, pos.parent_trade_id)
-                                            if self.circuit_breaker and trade:
-                                                self.circuit_breaker.position_closed(trade.symbol, net_profit, pos.exit_time)
-
-                                            result2 = await session.execute(
-                                                select(TradePosition).where(TradePosition.parent_trade_id == pos.parent_trade_id)
-                                            )
-                                            siblings = result2.scalars().all()
-                                            if all(s.status == "CLOSED" for s in siblings):
-                                                trade = await session.get(Trade, pos.parent_trade_id)
-                                                if trade:
-                                                    trade.status = "CLOSED"
-                                                    trade.exit_time = pos.exit_time
-                                                    trade.pnl = sum(s.pnl for s in siblings if getattr(s, 'pnl', None) is not None)
-                                                    
-                                                    # UPDATE CHART DATA (9.1 Fill Trade.chart_data on live trade close)
-                                                    try:
-                                                        from backend.mt5.data_fetcher import DataFetcher
-                                                        import pandas as pd
-                                                        candles = await DataFetcher.get_historical_data(trade.symbol, "M5", 100)
-                                                        if not candles.empty:
-                                                            cd_df = candles.copy()
-                                                            if "time" not in cd_df.columns and cd_df.index.name == "time":
-                                                                cd_df = cd_df.reset_index()
-                                                            # Use to_json to avoid numpy serialization errors
-                                                            trade.chart_data = cd_df.to_json(orient="records")
-                                                    except Exception as chart_err:
-                                                        logger.warning(f"Failed to fetch exit chart data: {chart_err}")
-                                            
-                                            await session.commit()
-                                            
-                                            from backend.api.websocket import manager as ws_manager
-                                            await ws_manager.broadcast_all({"type": "trade_update"})
-                                            
-                                            import MetaTrader5 as mt5
-                                            
-                                            reason_code = deal.get("reason", -1)
-                                            reason_str = "Closed"
-                                            if reason_code == mt5.DEAL_REASON_SL:
-                                                reason_str = "Stop Loss Hit"
-                                            elif reason_code == mt5.DEAL_REASON_TP:
-                                                reason_str = "Take Profit Hit"
-                                            elif reason_code == mt5.DEAL_REASON_CLIENT:
-                                                reason_str = "Manual Close"
-                                                
-                                            from backend.services.telegram import telegram_service
-                                            emoji = "✅" if net_profit >= 0 else "❌"
-                                            msg = f"{emoji} *{reason_str}*\nSymbol: {deal['symbol']}\nTicket: {deal.get('ticket', 'Unknown')}\nExit Price: {deal.get('price', 0.0)}\nP&L: ${net_profit:.2f}"
-                                            asyncio.create_task(telegram_service.send_message(msg))
-
-                            except Exception as db_err:
-                                logger.error(f"Failed to update trade in DB: {db_err}")
+                            # Update circuit breaker state
+                            if self.circuit_breaker:
+                                pos_id = deal.get("position_id")
+                                symbol = deal.get("symbol", "UNKNOWN")
+                                close_time = datetime.fromtimestamp(deal["time"], timezone.utc) if deal.get("time") else None
+                                self.circuit_breaker.position_closed(symbol, net_profit, close_time)
+                            if getattr(self, "prop_firm_validator", None):
+                                self.prop_firm_validator.record_trade_closed(deal.get("symbol", "UNKNOWN"), deal.get("volume", 0.0), net_profit)
                             
             except asyncio.CancelledError:
                 break

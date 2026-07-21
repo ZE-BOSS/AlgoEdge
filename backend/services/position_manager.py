@@ -24,6 +24,11 @@ class PositionManager:
         self.running = False
         self._task = None
         self.pending_adoptions = {}
+        self._ghost_strike_counts: dict = {}  # ticket -> consecutive empty-history poll count
+        self._notified_closes: set = set()    # tickets already notified, prevents duplicate telegrams
+        self.GHOST_GRACE_POLLS = 10           # require 10 consecutive polls (~200s) before marking ghost
+        self._cached_atr = {}
+        self._cached_structure = {}
 
     def start(self, user_id: str):
         if not self.running:
@@ -144,6 +149,72 @@ class PositionManager:
                     modifications_made = True
                     logger.info(f"God Sync: Adopted ghost/manual trade {ticket}")
 
+            # --- HISTORICAL GHOST SYNC (Offline Trades) ---
+            from datetime import timedelta
+            three_days_ago = datetime.utcnow() - timedelta(days=3)
+            deals = mt5.history_deals_get(three_days_ago, datetime.utcnow())
+            if deals:
+                deals_by_pos = {}
+                for d in deals:
+                    deals_by_pos.setdefault(d.position_id, []).append(d)
+                
+                for pos_id, pos_deals in deals_by_pos.items():
+                    if not pos_id or pos_id == 0: continue
+                    in_deals = [d for d in pos_deals if d.entry == mt5.DEAL_ENTRY_IN]
+                    out_deals = [d for d in pos_deals if d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT)]
+                    
+                    if in_deals and out_deals and pos_id not in db_tickets:
+                        first_in = in_deals[0]
+                        last_out = out_deals[-1]
+                        
+                        existing_q = await session.execute(select(TradePosition).where(TradePosition.mt5_ticket == pos_id))
+                        existing_pos = existing_q.scalar_one_or_none()
+                        if existing_pos:
+                            db_tickets[pos_id] = existing_pos
+                            continue
+                            
+                        is_buy = (first_in.type == mt5.DEAL_TYPE_BUY)
+                        total_profit = sum(d.profit for d in out_deals)
+                        
+                        new_trade = Trade(
+                            user_id=user_id,
+                            strategy_id="MANUAL_OFFLINE",
+                            symbol=first_in.symbol,
+                            direction="BUY" if is_buy else "SELL",
+                            entry_price=first_in.price,
+                            stop_loss=first_in.sl,
+                            take_profit=first_in.tp,
+                            volume=first_in.volume,
+                            status="CLOSED",
+                            pnl=total_profit,
+                            entry_time=datetime.utcfromtimestamp(first_in.time),
+                            exit_time=datetime.utcfromtimestamp(last_out.time),
+                            exit_price=last_out.price,
+                            exit_reason="CLIENT"
+                        )
+                        session.add(new_trade)
+                        await session.flush()
+                        
+                        new_pos = TradePosition(
+                            parent_trade_id=new_trade.id,
+                            user_id=user_id,
+                            tp_level=1,
+                            mt5_ticket=pos_id,
+                            volume=first_in.volume,
+                            entry_price=first_in.price,
+                            stop_loss=first_in.sl,
+                            take_profit=first_in.tp,
+                            status="CLOSED",
+                            pnl=total_profit,
+                            exit_price=last_out.price,
+                            exit_time=datetime.utcfromtimestamp(last_out.time),
+                            exit_reason="CLIENT"
+                        )
+                        session.add(new_pos)
+                        db_tickets[pos_id] = new_pos
+                        logger.info(f"Historical Ghost Sync: Recovered offline trade {pos_id}")
+                        modifications_made = True
+
             # --- EXIT HANDLER ---
             for pos in db_positions:
                 if pos.mt5_ticket not in mt5_tickets:
@@ -177,12 +248,14 @@ class PositionManager:
                                     select(TradePosition).where(TradePosition.parent_trade_id == pos.parent_trade_id)
                                 )
                                 siblings = result2.scalars().all()
-                                if all(s.status == "CLOSED" for s in siblings):
-                                    trade = await session.get(Trade, pos.parent_trade_id)
-                                    if trade:
+                                trade = await session.get(Trade, pos.parent_trade_id)
+                                if trade:
+                                    # Update realized P&L immediately on any partial close
+                                    trade.pnl = sum(s.pnl for s in siblings if getattr(s, 'pnl', None) is not None)
+                                    
+                                    if all(s.status == "CLOSED" for s in siblings):
                                         trade.status = "CLOSED"
                                         trade.exit_time = pos.exit_time
-                                        trade.pnl = sum(s.pnl for s in siblings if getattr(s, 'pnl', None) is not None)
                                         
                                         # Update chart data
                                         try:
@@ -210,43 +283,60 @@ class PositionManager:
                                 msg = f"{emoji} *{reason_str}*\nSymbol: {pos.symbol if hasattr(pos, 'symbol') else live_pos.symbol if 'live_pos' in locals() else 'Unknown'}\nTicket: {pos.mt5_ticket}\nExit Price: {exit_deal.price}\nP&L: ${net_profit:.2f}"
                                 asyncio.create_task(telegram_service.send_message(msg))
                     else:
-                        # Position missing from MT5 and no history found! It was voided/rejected or is a ghost.
-                        logger.warning(f"Position {pos.mt5_ticket} missing from MT5 with no history. Deleting ghost trade.")
+                        # Position missing from MT5 and no history found.
+                        # Grace period: require N consecutive polls before marking as ghost.
+                        # This prevents data loss when MT5 history hasn't synced yet (e.g. after restart).
+                        strikes = self._ghost_strike_counts.get(pos.mt5_ticket, 0) + 1
+                        self._ghost_strike_counts[pos.mt5_ticket] = strikes
                         
-                        parent_id = pos.parent_trade_id
-                        await session.delete(pos)
+                        # Also try secondary signal: order history
+                        orders = mt5.history_orders_get(position=pos.mt5_ticket)
+                        if orders:
+                            # Order history exists — this is NOT a ghost, just deal history lag
+                            logger.info(f"Position {pos.mt5_ticket} has order history but no deal history yet. Waiting for sync (strike {strikes}/{self.GHOST_GRACE_POLLS}).")
+                            continue
+                        
+                        if strikes < self.GHOST_GRACE_POLLS:
+                            logger.info(f"Position {pos.mt5_ticket} missing from MT5 with no history. Strike {strikes}/{self.GHOST_GRACE_POLLS} — waiting for grace period.")
+                            continue
+                        
+                        # Grace period exhausted — soft-mark, never hard-delete
+                        logger.warning(f"Position {pos.mt5_ticket} confirmed ghost after {strikes} polls. Marking RECONCILE_FAILED (NOT deleting).")
+                        pos.status = "RECONCILE_FAILED"
+                        pos.exit_reason = "GHOST_UNRESOLVED"
+                        pos.exit_time = datetime.utcnow()
                         modifications_made = True
                         
-                        # Remove from in-memory maps to avoid recalculation errors
+                        # Clean up ghost counter
+                        self._ghost_strike_counts.pop(pos.mt5_ticket, None)
+                        
+                        # Check if parent trade needs status update
+                        parent_id = pos.parent_trade_id
                         if parent_id in trades_map:
                             trades_map[parent_id] = [p for p in trades_map[parent_id] if p.id != pos.id]
                         
-                        # Fetch parent trade to check if all siblings are closed or deleted
                         trade_query = await session.execute(select(Trade).where(Trade.id == parent_id))
                         parent_trade = trade_query.scalar_one_or_none()
                         
                         if parent_trade:
                             siblings = trades_map.get(parent_id, [])
                             if not siblings:
-                                # All siblings were deleted ghosts! Delete the parent trade too.
-                                logger.warning(f"All positions for Trade {parent_id} were ghosts. Deleting parent trade.")
-                                await session.delete(parent_trade)
+                                # All siblings are ghosts — mark parent as failed too
+                                parent_trade.status = "RECONCILE_FAILED"
+                                parent_trade.exit_time = datetime.utcnow()
+                                parent_trade.exit_reason = "GHOST_UNRESOLVED"
                             else:
                                 # Recalculate if remaining siblings are closed
-                                all_closed = True
-                                total_pnl = 0.0
-                                for sib in siblings:
-                                    if sib.mt5_ticket in mt5_tickets:
-                                        all_closed = False
-                                        break
-                                    sib_pnl = sib.pnl if sib.pnl is not None else 0.0
-                                    total_pnl += sib_pnl
-                                    
-                                if all_closed and parent_trade.status != "CLOSED":
+                                all_done = all(
+                                    sib.mt5_ticket not in mt5_tickets
+                                    for sib in siblings
+                                )
+                                if all_done and parent_trade.status != "CLOSED":
+                                    total_pnl = sum(s.pnl for s in siblings if s.pnl is not None)
                                     parent_trade.status = "CLOSED"
                                     parent_trade.pnl = total_pnl
                                     parent_trade.exit_time = datetime.utcnow()
-                                    parent_trade.exit_reason = "REJECTED"
+                                    parent_trade.exit_reason = "PARTIAL_GHOST"
                                     parent_trade.exit_price = parent_trade.entry_price
                         continue
 
@@ -256,6 +346,26 @@ class PositionManager:
                     continue
 
                 live_pos = mt5_tickets[pos.mt5_ticket]
+                
+                # Check for partial close (volume decreased but position is still open)
+                if live_pos.volume < pos.volume:
+                    deals = mt5.history_deals_get(position=pos.mt5_ticket)
+                    if deals:
+                        out_deals = [d for d in deals if d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT)]
+                        realized_profit = sum(d.profit for d in out_deals)
+                        
+                        pos.volume = live_pos.volume
+                        pos.pnl = realized_profit
+                        modifications_made = True
+                        logger.info(f"Partial close detected for {pos.mt5_ticket}: new volume {live_pos.volume}, realized pnl ${realized_profit:.2f}")
+                        
+                        tq = await session.execute(select(TradePosition).where(TradePosition.parent_trade_id == pos.parent_trade_id))
+                        siblings = tq.scalars().all()
+                        pt_q = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
+                        parent_trade = pt_q.scalar_one_or_none()
+                        if parent_trade:
+                            parent_trade.pnl = sum(s.pnl for s in siblings if getattr(s, 'pnl', None) is not None)
+
                 symbol = live_pos.symbol
                 current_price = live_pos.price_current
                 entry_price = live_pos.price_open
@@ -346,20 +456,30 @@ class PositionManager:
                                         pos.trail_activated = True
 
             # --- BREAKEVEN CASCADE CHECK ---
+            # Trigger off the LOWEST tp_level sub-position that has closed, not hardcoded TP1.
+            # This handles partial fills where TP1's order failed but TP2/TP3 succeeded.
             for parent_id, positions in trades_map.items():
-                tp1_pos = next((p for p in positions if p.tp_level == 1), None)
-                if tp1_pos and tp1_pos.mt5_ticket not in mt5_tickets:
+                sorted_positions = sorted(positions, key=lambda p: p.tp_level)
+                trigger_pos = None
+                for sp in sorted_positions:
+                    if sp.mt5_ticket not in mt5_tickets and sp.status in ("CLOSED", "RECONCILE_FAILED"):
+                        trigger_pos = sp
+                        break
+                
+                if trigger_pos:
                     alive_positions = [p for p in positions if p.mt5_ticket in mt5_tickets]
                     if alive_positions:
                         is_buy = alive_positions[0].entry_price < alive_positions[0].take_profit if alive_positions[0].take_profit else (mt5_tickets[alive_positions[0].mt5_ticket].type == mt5.POSITION_TYPE_BUY)
                         entry_price = alive_positions[0].entry_price
                         symbol = mt5_tickets[alive_positions[0].mt5_ticket].symbol
                         pip_size_val = get_pip_size(symbol)
-                        be_buffer = getattr(risk, 'be_buffer_pips', 2.0) * pip_size_val
+                        # Use ATR-relative buffer via be_buffer_atr_mult (§1.4 fix)
+                        be_atr_mult = getattr(risk, 'be_buffer_atr_mult', getattr(risk, 'be_buffer_pips', 0.1))
+                        # Estimate ATR from recent candle range as proxy when not available
+                        be_buffer = be_atr_mult * pip_size_val * 10  # conservative fallback
                         new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                         
                         for alive_pos in alive_positions:
-                            # Use pos.stop_loss in case it was modified in the Live Management block
                             current_sl = alive_pos.stop_loss
                             move_sl = False
                             if is_buy and new_sl > current_sl:
@@ -373,7 +493,7 @@ class PositionManager:
                                     alive_pos.stop_loss = new_sl
                                     alive_pos.be_applied = True
                                     modifications_made = True
-                                    logger.info(f"Cascade BE: {alive_pos.mt5_ticket} -> {new_sl}")
+                                    logger.info(f"Cascade BE (triggered by TP{trigger_pos.tp_level}): {alive_pos.mt5_ticket} -> {new_sl}")
 
             if modifications_made:
                 await session.commit()
@@ -409,13 +529,22 @@ class PositionManager:
         step = getattr(risk, 'trail_step_pips', 5.0) * pip_size_val
         if step <= 0: step = pip_size_val
 
+        # --- Prop Firm Aggressive Trailing Hook ---
+        from backend.services.bot_service import bot_service
+        validator = getattr(bot_service, "prop_firm_validator", None)
+        if validator and validator.enabled:
+            # If in profit, check consistency limits
+            is_in_profit = (current_price > entry_price) if is_buy else (current_price < entry_price)
+            if is_in_profit:
+                needs_trail, _ = validator.check_consistency(0.0)
+                if needs_trail:
+                    trail_method = "ATR_TRAIL"
+                    tp_level = "aggressive"
+
         if trail_method == "FIXED_PIPS":
-            
-            # Simple fixed distance trailing
             trail_distance = getattr(risk, 'trail_pips', 15.0) * pip_size_val
             new_sl = current_price - trail_distance if is_buy else current_price + trail_distance
             
-            # Apply step logic: SL only moves in increments of `step`
             if is_buy:
                 if new_sl >= current_sl + step: return new_sl
             else:
@@ -423,30 +552,31 @@ class PositionManager:
             return None
 
         elif trail_method == "ATR_TRAIL":
-            # Complex ATR Trailing
-            from backend.mt5.data_fetcher import DataFetcher
-            import pandas as pd
+            now = datetime.utcnow().timestamp()
             
-            # Fetch recent candles to calculate ATR
-            candles = await DataFetcher.get_historical_data(symbol, "M5", 30)
-            if candles.empty: return None
+            atr_data = self._cached_atr.get(symbol)
+            if not atr_data or (now - atr_data['time']) > 60:
+                from backend.mt5.data_fetcher import DataFetcher
+                import pandas as pd
+                candles = await DataFetcher.get_historical_data(symbol, "M5", 30)
+                if not candles.empty:
+                    candles['prev_close'] = candles['close'].shift(1)
+                    candles['tr1'] = candles['high'] - candles['low']
+                    candles['tr2'] = abs(candles['high'] - candles['prev_close'])
+                    candles['tr3'] = abs(candles['low'] - candles['prev_close'])
+                    candles['tr'] = candles[['tr1', 'tr2', 'tr3']].max(axis=1)
+                    atr_val = candles['tr'].rolling(window=14).mean().iloc[-1]
+                    if not pd.isna(atr_val):
+                        self._cached_atr[symbol] = {'atr': atr_val, 'time': now}
+                        atr_data = self._cached_atr[symbol]
             
-            # Calculate ATR(14)
-            candles['prev_close'] = candles['close'].shift(1)
-            candles['tr1'] = candles['high'] - candles['low']
-            candles['tr2'] = abs(candles['high'] - candles['prev_close'])
-            candles['tr3'] = abs(candles['low'] - candles['prev_close'])
-            candles['tr'] = candles[['tr1', 'tr2', 'tr3']].max(axis=1)
-            atr = candles['tr'].rolling(window=14).mean().iloc[-1]
+            if not atr_data: return None
+            atr = atr_data['atr']
             
-            if pd.isna(atr): return None
-            
-            # Trail distance is ATR * multiplier
-            multiplier = getattr(risk, f'atr_trail_multiplier_tp{tp_level}', getattr(risk, 'atr_trail_multiplier', 1.5))
+            multiplier = 0.5 if tp_level == "aggressive" else getattr(risk, f'atr_trail_multiplier_tp{tp_level}', getattr(risk, 'atr_trail_multiplier', 1.5))
             trail_distance = atr * multiplier
             new_sl = current_price - trail_distance if is_buy else current_price + trail_distance
             
-            # Add a step buffer so we aren't modifying it every tick
             if is_buy:
                 if new_sl >= current_sl + step: return new_sl
             else:
@@ -465,21 +595,24 @@ class PositionManager:
             return None
 
         elif trail_method == "STRUCTURE_TRAIL":
-            # Complex Structure Trailing
-            from backend.mt5.data_fetcher import DataFetcher
-            from backend.strategies.core.market_structure import MarketStructureDetector
+            now = datetime.utcnow().timestamp()
+            struct_data = self._cached_structure.get(symbol)
             
-            # Fetch more candles to find swing points
-            candles = await DataFetcher.get_historical_data(symbol, "M15", 100)
-            if candles.empty: return None
+            if not struct_data or (now - struct_data['time']) > 300: # 5 min cache
+                from backend.mt5.data_fetcher import DataFetcher
+                from backend.strategies.core.market_structure import MarketStructureDetector
+                candles = await DataFetcher.get_historical_data(symbol, "M15", 100)
+                if not candles.empty:
+                    bars = getattr(risk, 'trail_structure_bars', 3)
+                    structure = MarketStructureDetector(swing_length=bars)
+                    structure.update(candles)
+                    self._cached_structure[symbol] = {'swings': structure.swings, 'time': now}
+                    struct_data = self._cached_structure[symbol]
             
-            bars = getattr(risk, 'trail_structure_bars', 3)
-            structure = MarketStructureDetector(swing_length=bars)
-            structure.update(candles)
-            swings = structure.swings
+            if not struct_data: return None
+            swings = struct_data['swings']
             
             if is_buy:
-                # Find the most recent Valid Swing Low
                 recent_lows = [s for s in swings if s["type"] == "LOW" and s["price"] < current_price]
                 if recent_lows:
                     last_low = recent_lows[-1]["price"]
@@ -487,7 +620,6 @@ class PositionManager:
                     new_sl = last_low - buffer
                     if new_sl > current_sl + step: return new_sl
             else:
-                # Find the most recent Valid Swing High
                 recent_highs = [s for s in swings if s["type"] == "HIGH" and s["price"] > current_price]
                 if recent_highs:
                     last_high = recent_highs[-1]["price"]
