@@ -97,6 +97,26 @@ class PositionManager:
 
             modifications_made = False
 
+            # --- ORPHANED PARENT TRADE CLEANUP ---
+            # Fetch all OPEN Trades to ensure no dashboard stuck trades
+            open_trades_res = await session.execute(select(Trade).where(Trade.user_id == user_id, Trade.status == "OPEN"))
+            for t in open_trades_res.scalars().all():
+                pos_res = await session.execute(select(TradePosition).where(TradePosition.parent_trade_id == t.id))
+                siblings = pos_res.scalars().all()
+                if not siblings:
+                    # Parent trade with no positions? Force close it.
+                    t.status = "CLOSED"
+                    t.exit_time = datetime.utcnow()
+                    t.exit_reason = "NO_POSITIONS"
+                    modifications_made = True
+                elif all(s.status in ("CLOSED", "RECONCILE_FAILED") for s in siblings):
+                    t.status = "CLOSED"
+                    t.exit_time = max((s.exit_time for s in siblings if s.exit_time), default=datetime.utcnow())
+                    t.exit_price = siblings[-1].exit_price if siblings[-1].exit_price else t.entry_price
+                    t.exit_reason = "CLIENT"
+                    t.pnl = sum(s.pnl for s in siblings if getattr(s, 'pnl', None) is not None)
+                    modifications_made = True
+
             # Clean up pending adoptions that are now in DB or no longer in MT5
             self.pending_adoptions = {
                 t: time for t, time in self.pending_adoptions.items() 
