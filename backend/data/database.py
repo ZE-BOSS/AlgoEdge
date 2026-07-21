@@ -55,6 +55,8 @@ async def init_db():
             "ALTER TABLE backtest_runs ADD COLUMN trail_hit_rate FLOAT;",
             "ALTER TABLE backtest_runs ADD COLUMN run_logs TEXT;",
             "ALTER TABLE backtest_runs ADD COLUMN rejection_funnel TEXT;",
+            "ALTER TABLE backtest_runs ADD COLUMN sortino_ratio FLOAT;",
+            "ALTER TABLE backtest_runs ADD COLUMN expectancy_r FLOAT;",
             "ALTER TABLE backtest_trades ADD COLUMN chart_data TEXT;",
             "ALTER TABLE backtest_trades ADD COLUMN chart_data_m15 TEXT;",
             "ALTER TABLE backtest_trades ADD COLUMN chart_data_m5 TEXT;",

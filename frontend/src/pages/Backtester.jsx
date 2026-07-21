@@ -368,7 +368,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
 
   return (<div className="card" style={{ marginTop: 20 }}>
     <div className="card-header">
-      <span className="card-title">Results — {result.total_signals || 0} signals, {result.total_trades || 0} sub-positions</span>
+      <span className="card-title">Results — {result.grouped_trades?.length || 0} signals, {result.total_trades || 0} sub-positions</span>
       <div style={{ display: 'flex', gap: 8 }}>
         {!result.is_saved ? (
           <>
@@ -396,7 +396,9 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
           {Object.entries(result.params_snapshot).map(([k, v]) => (
             <div key={k} style={{ fontSize: '0.75rem', display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-muted)' }}>{k}:</span>
-              <span>{String(v)}</span>
+              <span style={{ textAlign: 'right', wordBreak: 'break-all', maxWidth: '70%' }}>
+                {typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)}
+              </span>
             </div>
           ))}
         </div>
@@ -1089,13 +1091,13 @@ export default function Backtester() {
     </div>
 
     <div id="saved-backtests" className="card" style={{ marginTop: 20 }}>
-      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-        <div>
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ marginBottom: 4 }}>
           <span className="card-title">Saved Backtests</span>
-          <span className="badge badge-blue">{backtests?.length || 0}</span>
+          <span className="badge badge-blue" style={{ marginLeft: 8 }}>{backtests?.length || 0}</span>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             <button className={`btn btn-sm ${savedBtFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSavedBtFilter('All')}>All</button>
             <button className={`btn btn-sm ${savedBtFilter === 'Profitable' ? 'btn-green' : 'btn-secondary'}`} onClick={() => setSavedBtFilter('Profitable')}>Profitable</button>
             <button className={`btn btn-sm ${savedBtFilter === 'HighWinRate' ? 'btn-blue' : 'btn-secondary'}`} onClick={() => setSavedBtFilter('HighWinRate')}>WR &gt; 50%</button>

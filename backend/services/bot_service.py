@@ -518,6 +518,11 @@ class BotService:
                                         "max_consecutive_losses": config.risk.max_consecutive_losses if hasattr(config.risk, 'max_consecutive_losses') else 5,
                                         "max_daily_trades": config.risk.max_daily_trades if hasattr(config.risk, 'max_daily_trades') else 5,
                                         "max_concurrent_positions": config.risk.max_concurrent_positions,
+                                        "prop_firm": {
+                                            "account_mode": getattr(config.prop_firm, "account_mode", "personal"),
+                                            "max_lot_sizes": getattr(config.prop_firm, "max_lot_sizes", {}),
+                                            "initial_balance": getattr(config.prop_firm, "initial_balance", 10000.0)
+                                        },
                                         "target_profit_enabled": config.risk.target_profit_enabled if hasattr(config.risk, 'target_profit_enabled') else False,
                                         "max_daily_profit": config.risk.max_daily_profit if hasattr(config.risk, 'max_daily_profit') else 500.0,
                                         "max_weekly_profit": config.risk.max_weekly_profit if hasattr(config.risk, 'max_weekly_profit') else 2000.0,

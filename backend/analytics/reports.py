@@ -252,6 +252,13 @@ def generate_risk_report(trades: List[Dict[str, Any]]) -> RiskReport:
         "SELL": _bias_stats(sell_trades),
     }
 
+    def safe_float(val, default=0.0):
+        try:
+            f = float(val)
+            if np.isinf(f) or np.isnan(f): return default
+            return f
+        except: return default
+
     return RiskReport(
         total_trades=stats["total_trades"],
         winning_trades=stats["winning_trades"],
@@ -264,10 +271,10 @@ def generate_risk_report(trades: List[Dict[str, Any]]) -> RiskReport:
         best_trade_r=max(r_values) if r_values else 0,
         worst_trade_r=min(r_values) if r_values else 0,
         profit_factor=stats["profit_factor"],
-        expectancy_r=float((stats["win_rate"] * (sum(win_r) / len(win_r) if win_r else 0)) - ((1 - stats["win_rate"]) * (sum(loss_r) / len(loss_r) if loss_r else 0))),
-        sharpe_ratio=stats["sharpe_ratio"],
-        sortino_ratio=stats["sortino_ratio"],
-        calmar_ratio=calmar_ratio,
+        expectancy_r=safe_float((stats["win_rate"] * (sum(win_r) / len(win_r) if win_r else 0)) - ((1 - stats["win_rate"]) * (sum(loss_r) / len(loss_r) if loss_r else 0))),
+        sharpe_ratio=safe_float(stats["sharpe_ratio"]),
+        sortino_ratio=safe_float(stats["sortino_ratio"]),
+        calmar_ratio=safe_float(calmar_ratio),
         max_drawdown_pct=stats["max_drawdown_pct"],
         max_drawdown_abs=stats["max_drawdown_abs"],
         avg_drawdown_pct=avg_drawdown_pct,

@@ -68,7 +68,10 @@ def calculate_sharpe(returns: List[float], periods_per_year: float = 252) -> flo
     std = np.std(arr, ddof=1)
     if std == 0:
         return 0.0
-    return float((mean / std) * np.sqrt(periods_per_year))
+    val = float((mean / std) * np.sqrt(periods_per_year))
+    if np.isinf(val) or np.isnan(val):
+        return 0.0
+    return val
 
 
 def calculate_sortino(returns: List[float], periods_per_year: float = 252) -> float:
@@ -84,7 +87,9 @@ def calculate_sortino(returns: List[float], periods_per_year: float = 252) -> fl
     if downside_std == 0:
         return 999.0
     val = float((mean / downside_std) * np.sqrt(periods_per_year))
-    return val if not np.isinf(val) else 999.0
+    if np.isinf(val) or np.isnan(val):
+        return 999.0
+    return val
 
 
 def calculate_max_drawdown(equity_curve: List[float]) -> tuple[float, float]:

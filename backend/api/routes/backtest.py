@@ -775,7 +775,6 @@ async def get_backtest(
         import dataclasses
         risk_report = generate_risk_report(grouped_trades_out)
         resp["report"] = dataclasses.asdict(risk_report)
-        # Update session_win_rates from the freshly generated report just in case
         resp["session_win_rates"] = {
             "LONDON": risk_report.london_win_rate,
             "NY": risk_report.ny_win_rate,
@@ -783,6 +782,12 @@ async def get_backtest(
             "ASIAN": risk_report.asian_win_rate,
             "UNKNOWN": risk_report.other_win_rate
         }
+        
+        # Inject saved fields that cannot be easily regenerated from just grouped_trades
+        resp["report"]["bias_stats"] = params.get("bias_stats", {})
+        resp["report"]["confluence_stats"] = params.get("confluence_stats", {})
+        resp["report"]["sortino_ratio"] = run.sortino_ratio or risk_report.sortino_ratio
+        resp["report"]["expectancy_r"] = run.expectancy_r or risk_report.expectancy_r
     except Exception as e:
         import logging
         logging.error(f"Failed to generate full risk report on the fly: {e}")
@@ -914,6 +919,8 @@ async def save_backtest_from_client(
         win_rate=data.get("win_rate", report.get("win_rate", 0)),
         profit_factor=data.get("profit_factor", report.get("profit_factor", 0)),
         sharpe_ratio=data.get("sharpe_ratio", report.get("sharpe_ratio", 0)),
+        sortino_ratio=data.get("sortino_ratio", report.get("sortino_ratio", 0)),
+        expectancy_r=data.get("expectancy_r", report.get("expectancy_r", 0)),
         max_drawdown_pct=data.get("max_drawdown_pct", report.get("max_drawdown_pct", 0)),
         total_pnl=data.get("total_pnl", report.get("total_pnl", 0)),
         tp1_hit_rate=report.get("tp1_hit_rate", 0),

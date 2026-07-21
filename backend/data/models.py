@@ -228,6 +228,8 @@ class BacktestRun(Base):
     win_rate = Column(Float)
     profit_factor = Column(Float)
     sharpe_ratio = Column(Float)
+    sortino_ratio = Column(Float)
+    expectancy_r = Column(Float)
     max_drawdown_pct = Column(Float)
     total_pnl = Column(Float)
     tp1_hit_rate = Column(Float)
