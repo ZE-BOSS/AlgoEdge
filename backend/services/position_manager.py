@@ -207,8 +207,7 @@ class PositionManager:
                             status="CLOSED",
                             pnl=total_profit,
                             exit_price=last_out.price,
-                            exit_time=datetime.utcfromtimestamp(last_out.time),
-                            exit_reason="CLIENT"
+                            exit_time=datetime.utcfromtimestamp(last_out.time)
                         )
                         session.add(new_pos)
                         db_tickets[pos_id] = new_pos
@@ -236,10 +235,7 @@ class PositionManager:
                                 reason = "TRAIL" if pos.be_applied else "SL"
                             elif exit_deal.reason == mt5.DEAL_REASON_TP:
                                 reason = f"TP{pos.tp_level}" if pos.tp_level else "TP"
-                            elif exit_deal.reason == mt5.DEAL_REASON_CLIENT:
-                                reason = "CLIENT"
-                                
-                            pos.exit_reason = reason
+                            # `TradePosition` does not have an `exit_reason` column
                             modifications_made = True
 
                             if was_open:
@@ -303,7 +299,6 @@ class PositionManager:
                         # Grace period exhausted — soft-mark, never hard-delete
                         logger.warning(f"Position {pos.mt5_ticket} confirmed ghost after {strikes} polls. Marking RECONCILE_FAILED (NOT deleting).")
                         pos.status = "RECONCILE_FAILED"
-                        pos.exit_reason = "GHOST_UNRESOLVED"
                         pos.exit_time = datetime.utcnow()
                         modifications_made = True
                         
