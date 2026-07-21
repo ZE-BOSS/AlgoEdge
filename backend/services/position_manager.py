@@ -66,7 +66,7 @@ class PositionManager:
         async with async_session() as session:
             # 1. Fetch user config for risk settings
             result = await session.execute(select(UserConfigModel).where(UserConfigModel.user_id == user_id))
-            config_db = result.scalar_one_or_none()
+            config_db = result.scalars().first()
             if not config_db or not config_db.config_json:
                 return
             import json
@@ -168,7 +168,7 @@ class PositionManager:
                         last_out = out_deals[-1]
                         
                         existing_q = await session.execute(select(TradePosition).where(TradePosition.mt5_ticket == pos_id))
-                        existing_pos = existing_q.scalar_one_or_none()
+                        existing_pos = existing_q.scalars().first()
                         if existing_pos:
                             db_tickets[pos_id] = existing_pos
                             continue
@@ -316,7 +316,7 @@ class PositionManager:
                             trades_map[parent_id] = [p for p in trades_map[parent_id] if p.id != pos.id]
                         
                         trade_query = await session.execute(select(Trade).where(Trade.id == parent_id))
-                        parent_trade = trade_query.scalar_one_or_none()
+                        parent_trade = trade_query.scalars().first()
                         
                         if parent_trade:
                             siblings = trades_map.get(parent_id, [])
@@ -362,7 +362,7 @@ class PositionManager:
                         tq = await session.execute(select(TradePosition).where(TradePosition.parent_trade_id == pos.parent_trade_id))
                         siblings = tq.scalars().all()
                         pt_q = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
-                        parent_trade = pt_q.scalar_one_or_none()
+                        parent_trade = pt_q.scalars().first()
                         if parent_trade:
                             parent_trade.pnl = sum(s.pnl for s in siblings if getattr(s, 'pnl', None) is not None)
 
@@ -424,7 +424,7 @@ class PositionManager:
                         original_sl = 0.0
                         if pos:
                             tq = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
-                            pt = tq.scalar_one_or_none()
+                            pt = tq.scalars().first()
                             if pt: original_sl = pt.stop_loss
                             
                         if original_sl != 0.0:
