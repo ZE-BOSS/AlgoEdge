@@ -217,7 +217,7 @@ class BotService:
                             # Instead of immediately marking as ghost, check history
                             # to see if it closed while offline.
                             now = datetime.now(timezone.utc)
-                            from_date = now - timedelta(days=7)
+                            from_date = now - timedelta(days=14)
                             deals = mt5.history_deals_get(from_date, now, group=f"*{pos.mt5_ticket}*")
                             
                             if deals and len(deals) > 0:

@@ -151,8 +151,8 @@ class PositionManager:
 
             # --- HISTORICAL GHOST SYNC (Offline Trades) ---
             from datetime import timedelta
-            three_days_ago = datetime.utcnow() - timedelta(days=3)
-            deals = mt5.history_deals_get(three_days_ago, datetime.utcnow())
+            sync_start_time = datetime.utcnow() - timedelta(days=14)
+            deals = mt5.history_deals_get(sync_start_time, datetime.utcnow())
             if deals:
                 deals_by_pos = {}
                 for d in deals:
@@ -291,7 +291,7 @@ class PositionManager:
                         
                         # Also try secondary signal: order history
                         orders = mt5.history_orders_get(position=pos.mt5_ticket)
-                        if orders:
+                        if orders and strikes < self.GHOST_GRACE_POLLS:
                             # Order history exists — this is NOT a ghost, just deal history lag
                             logger.info(f"Position {pos.mt5_ticket} has order history but no deal history yet. Waiting for sync (strike {strikes}/{self.GHOST_GRACE_POLLS}).")
                             continue
