@@ -105,49 +105,69 @@ class PositionManager:
 
             # --- GOD SYNC (Adopt Missing MT5 Positions) ---
             current_time = datetime.utcnow().timestamp()
+            unrecorded_live_tickets = []
             for ticket, live_pos in mt5_tickets.items():
                 if ticket not in db_tickets:
+                    # God Sync DB Check
+                    existing_q = await session.execute(select(TradePosition).where(TradePosition.mt5_ticket == ticket))
+                    existing_pos = existing_q.scalars().first()
+                    if existing_pos:
+                        db_tickets[ticket] = existing_pos
+                        continue
+                        
                     # Delay adoption by 15s to avoid race condition with bot execution
                     if ticket not in self.pending_adoptions:
                         self.pending_adoptions[ticket] = current_time
                         continue
                     if current_time - self.pending_adoptions[ticket] < 15:
                         continue
-
-                    # Adopt manual trade!
-                    is_buy = (live_pos.type == mt5.POSITION_TYPE_BUY)
+                        
+                    unrecorded_live_tickets.append(live_pos)
+            
+            if unrecorded_live_tickets:
+                # Group by time and symbol to merge TP levels
+                god_groups = {}
+                for lp in unrecorded_live_tickets:
+                    # Time might be slightly off by a second, group by rounded time
+                    group_key = (lp.symbol, round(lp.time / 5) * 5)
+                    god_groups.setdefault(group_key, []).append(lp)
+                
+                for key, lps in god_groups.items():
+                    first_lp = lps[0]
+                    is_buy = (first_lp.type == mt5.POSITION_TYPE_BUY)
                     new_trade = Trade(
                         user_id=user_id,
                         strategy_id="MANUAL",
-                        symbol=live_pos.symbol,
+                        symbol=first_lp.symbol,
                         direction="BUY" if is_buy else "SELL",
-                        entry_price=live_pos.price_open,
-                        stop_loss=live_pos.sl,
-                        take_profit=live_pos.tp,
-                        volume=live_pos.volume,
+                        entry_price=first_lp.price_open,
+                        stop_loss=first_lp.sl,
+                        take_profit=first_lp.tp,
+                        volume=sum(lp.volume for lp in lps),
                         status="OPEN",
-                        entry_time=datetime.utcfromtimestamp(live_pos.time)
+                        entry_time=datetime.utcfromtimestamp(first_lp.time)
                     )
                     session.add(new_trade)
                     await session.flush() # Get trade.id
                     
-                    new_pos = TradePosition(
-                        parent_trade_id=new_trade.id,
-                        user_id=user_id,
-                        tp_level=1,
-                        mt5_ticket=ticket,
-                        volume=live_pos.volume,
-                        entry_price=live_pos.price_open,
-                        stop_loss=live_pos.sl,
-                        take_profit=live_pos.tp,
-                        status="OPEN"
-                    )
-                    session.add(new_pos)
-                    db_tickets[ticket] = new_pos
-                    db_positions.append(new_pos)
-                    trades_map.setdefault(new_trade.id, []).append(new_pos)
+                    for i, lp in enumerate(lps):
+                        new_pos = TradePosition(
+                            parent_trade_id=new_trade.id,
+                            user_id=user_id,
+                            tp_level=i+1,
+                            mt5_ticket=lp.ticket,
+                            volume=lp.volume,
+                            entry_price=lp.price_open,
+                            stop_loss=lp.sl,
+                            take_profit=lp.tp,
+                            status="OPEN"
+                        )
+                        session.add(new_pos)
+                        db_tickets[lp.ticket] = new_pos
+                        db_positions.append(new_pos)
+                        trades_map.setdefault(new_trade.id, []).append(new_pos)
+                        logger.info(f"God Sync: Adopted ghost/manual trade {lp.ticket} as TP{i+1}")
                     modifications_made = True
-                    logger.info(f"God Sync: Adopted ghost/manual trade {ticket}")
 
             # --- HISTORICAL GHOST SYNC (Offline Trades) ---
             from datetime import timedelta
@@ -158,23 +178,41 @@ class PositionManager:
                 for d in deals:
                     deals_by_pos.setdefault(d.position_id, []).append(d)
                 
+                unrecorded_closed_positions = []
                 for pos_id, pos_deals in deals_by_pos.items():
                     if not pos_id or pos_id == 0: continue
                     in_deals = [d for d in pos_deals if d.entry == mt5.DEAL_ENTRY_IN]
                     out_deals = [d for d in pos_deals if d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT)]
                     
                     if in_deals and out_deals and pos_id not in db_tickets:
-                        first_in = in_deals[0]
-                        last_out = out_deals[-1]
-                        
                         existing_q = await session.execute(select(TradePosition).where(TradePosition.mt5_ticket == pos_id))
                         existing_pos = existing_q.scalars().first()
                         if existing_pos:
                             db_tickets[pos_id] = existing_pos
                             continue
                             
+                        # Profit includes swap and commission for exact correlation with MT5
+                        total_profit = sum(d.profit + getattr(d, 'commission', 0.0) + getattr(d, 'swap', 0.0) + getattr(d, 'fee', 0.0) for d in out_deals)
+                        
+                        unrecorded_closed_positions.append({
+                            "pos_id": pos_id,
+                            "first_in": in_deals[0],
+                            "last_out": out_deals[-1],
+                            "pnl": total_profit
+                        })
+                
+                if unrecorded_closed_positions:
+                    ghost_groups = {}
+                    for ucp in unrecorded_closed_positions:
+                        first_in = ucp["first_in"]
+                        group_key = (first_in.symbol, round(first_in.time / 5) * 5)
+                        ghost_groups.setdefault(group_key, []).append(ucp)
+                    
+                    for key, ucps in ghost_groups.items():
+                        first_in = ucps[0]["first_in"]
+                        last_out = max([u["last_out"] for u in ucps], key=lambda d: d.time)
                         is_buy = (first_in.type == mt5.DEAL_TYPE_BUY)
-                        total_profit = sum(d.profit for d in out_deals)
+                        total_trade_pnl = sum(u["pnl"] for u in ucps)
                         
                         new_trade = Trade(
                             user_id=user_id,
@@ -184,9 +222,9 @@ class PositionManager:
                             entry_price=first_in.price,
                             stop_loss=0.0,
                             take_profit=0.0,
-                            volume=first_in.volume,
+                            volume=sum(u["first_in"].volume for u in ucps),
                             status="CLOSED",
-                            pnl=total_profit,
+                            pnl=total_trade_pnl,
                             entry_time=datetime.utcfromtimestamp(first_in.time),
                             exit_time=datetime.utcfromtimestamp(last_out.time),
                             exit_price=last_out.price,
@@ -195,23 +233,24 @@ class PositionManager:
                         session.add(new_trade)
                         await session.flush()
                         
-                        new_pos = TradePosition(
-                            parent_trade_id=new_trade.id,
-                            user_id=user_id,
-                            tp_level=1,
-                            mt5_ticket=pos_id,
-                            volume=first_in.volume,
-                            entry_price=first_in.price,
-                            stop_loss=0.0,
-                            take_profit=0.0,
-                            status="CLOSED",
-                            pnl=total_profit,
-                            exit_price=last_out.price,
-                            exit_time=datetime.utcfromtimestamp(last_out.time)
-                        )
-                        session.add(new_pos)
-                        db_tickets[pos_id] = new_pos
-                        logger.info(f"Historical Ghost Sync: Recovered offline trade {pos_id}")
+                        for i, ucp in enumerate(ucps):
+                            new_pos = TradePosition(
+                                parent_trade_id=new_trade.id,
+                                user_id=user_id,
+                                tp_level=i+1,
+                                mt5_ticket=ucp["pos_id"],
+                                volume=ucp["first_in"].volume,
+                                entry_price=ucp["first_in"].price,
+                                stop_loss=0.0,
+                                take_profit=0.0,
+                                status="CLOSED",
+                                pnl=ucp["pnl"],
+                                exit_price=ucp["last_out"].price,
+                                exit_time=datetime.utcfromtimestamp(ucp["last_out"].time)
+                            )
+                            session.add(new_pos)
+                            db_tickets[ucp["pos_id"]] = new_pos
+                            logger.info(f"Historical Ghost Sync: Recovered offline trade {ucp['pos_id']} as TP{i+1}")
                         modifications_made = True
 
             # --- EXIT HANDLER ---
@@ -221,13 +260,13 @@ class PositionManager:
                     deals = mt5.history_deals_get(position=pos.mt5_ticket)
                     if deals:
                         exit_deal = deals[-1]
+                        net_profit = exit_deal.profit + getattr(exit_deal, 'commission', 0.0) + getattr(exit_deal, 'swap', 0.0) + getattr(exit_deal, 'fee', 0.0)
                         
-                        if pos.status != "CLOSED" or pos.pnl != exit_deal.profit:
-                            was_open = pos.status != "CLOSED"
+                        if pos.status != "CLOSED" or pos.pnl != net_profit:
                             pos.status = "CLOSED"
-                            pos.pnl = exit_deal.profit
+                            pos.pnl = net_profit
                             pos.exit_price = exit_deal.price
-                            if was_open:
+                            if not pos.exit_time:
                                 pos.exit_time = datetime.utcnow()
                             
                             reason = "CLOSED"
@@ -235,49 +274,52 @@ class PositionManager:
                                 reason = "TRAIL" if pos.be_applied else "SL"
                             elif exit_deal.reason == mt5.DEAL_REASON_TP:
                                 reason = f"TP{pos.tp_level}" if pos.tp_level else "TP"
-                            # `TradePosition` does not have an `exit_reason` column
                             modifications_made = True
 
-                            if was_open:
-                                # Fetch siblings to check if parent trade should be closed
-                                result2 = await session.execute(
-                                    select(TradePosition).where(TradePosition.parent_trade_id == pos.parent_trade_id)
-                                )
-                                siblings = result2.scalars().all()
-                                trade = await session.get(Trade, pos.parent_trade_id)
-                                if trade:
-                                    # Update realized P&L immediately on any partial close
-                                    trade.pnl = sum(s.pnl for s in siblings if getattr(s, 'pnl', None) is not None)
+                        # ALWAYs check if parent trade needs closing, even if was_open was False (fixes UI stuck trades)
+                        result2 = await session.execute(
+                            select(TradePosition).where(TradePosition.parent_trade_id == pos.parent_trade_id)
+                        )
+                        siblings = result2.scalars().all()
+                        trade = await session.get(Trade, pos.parent_trade_id)
+                        if trade:
+                            # Update realized P&L immediately
+                            trade.pnl = sum(s.pnl for s in siblings if getattr(s, 'pnl', None) is not None)
+                            
+                            if all(s.status in ("CLOSED", "RECONCILE_FAILED") for s in siblings):
+                                if trade.status != "CLOSED":
+                                    trade.status = "CLOSED"
+                                    trade.exit_time = pos.exit_time
+                                    trade.exit_reason = getattr(trade, 'exit_reason', "CLIENT")
+                                    if trade.exit_reason is None:
+                                        trade.exit_reason = "CLIENT"
                                     
-                                    if all(s.status == "CLOSED" for s in siblings):
-                                        trade.status = "CLOSED"
-                                        trade.exit_time = pos.exit_time
-                                        
-                                        # Update chart data
-                                        try:
-                                            from backend.mt5.data_fetcher import DataFetcher
-                                            import pandas as pd
-                                            candles = await DataFetcher.get_historical_data(trade.symbol, "M5", 100)
-                                            if not candles.empty:
-                                                cd_df = candles.copy()
-                                                if "time" not in cd_df.columns and cd_df.index.name == "time":
-                                                    cd_df = cd_df.reset_index()
-                                                trade.chart_data = cd_df.to_json(orient="records")
-                                        except Exception as chart_err:
-                                            logger.warning(f"Failed to fetch exit chart data: {chart_err}")
+                                    # Update chart data
+                                    try:
+                                        from backend.mt5.data_fetcher import DataFetcher
+                                        import pandas as pd
+                                        candles = await DataFetcher.get_historical_data(trade.symbol, "M5", 100)
+                                        if not candles.empty:
+                                            cd_df = candles.copy()
+                                            if "time" not in cd_df.columns and cd_df.index.name == "time":
+                                                cd_df = cd_df.reset_index()
+                                            trade.chart_data = cd_df.to_json(orient="records")
+                                    except Exception as chart_err:
+                                        logger.warning(f"Failed to fetch exit chart data: {chart_err}")
 
-                                # Send Telegram notification for the closed position
-                                from backend.services.telegram import telegram_service
-                                import asyncio
-                                net_profit = exit_deal.profit
-                                emoji = "✅" if net_profit >= 0 else "❌"
-                                reason_str = reason
-                                if reason == "SL": reason_str = "Stop Loss Hit"
-                                elif reason == "TRAIL": reason_str = "Trailing Stop Hit"
-                                elif reason.startswith("TP"): reason_str = "Take Profit Hit"
-                                elif reason == "CLIENT": reason_str = "Manual Close"
-                                msg = f"{emoji} *{reason_str}*\nSymbol: {pos.symbol if hasattr(pos, 'symbol') else live_pos.symbol if 'live_pos' in locals() else 'Unknown'}\nTicket: {pos.mt5_ticket}\nExit Price: {exit_deal.price}\nP&L: ${net_profit:.2f}"
-                                asyncio.create_task(telegram_service.send_message(msg))
+                        if pos.mt5_ticket not in self._notified_closes:
+                            self._notified_closes.add(pos.mt5_ticket)
+                            # Send Telegram notification for the closed position
+                            from backend.services.telegram import telegram_service
+                            import asyncio
+                            emoji = "✅" if net_profit >= 0 else "❌"
+                            reason_str = reason if 'reason' in locals() else "CLOSED"
+                            if reason_str == "SL": reason_str = "Stop Loss Hit"
+                            elif reason_str == "TRAIL": reason_str = "Trailing Stop Hit"
+                            elif reason_str.startswith("TP"): reason_str = "Take Profit Hit"
+                            elif reason_str == "CLIENT": reason_str = "Manual Close"
+                            msg = f"{emoji} *{reason_str}*\nSymbol: {pos.symbol if hasattr(pos, 'symbol') else 'Unknown'}\nTicket: {pos.mt5_ticket}\nExit Price: {exit_deal.price}\nP&L: ${net_profit:.2f}"
+                            asyncio.create_task(telegram_service.send_message(msg))
                     else:
                         # Position missing from MT5 and no history found.
                         # Grace period: require N consecutive polls before marking as ghost.
