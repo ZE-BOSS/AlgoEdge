@@ -8,7 +8,7 @@ import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
 const SYMBOLS = [
-  'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'US30', 'BTCUSD',
+  'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'US30', 'NAS100', 'US100', 'SPX500', 'US500', 'BTCUSD',
   'Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index',
   'Volatility 75 Index', 'Volatility 100 Index', 'Volatility 150 Index', 'Volatility 250 Index',
   'Boom 300 Index', 'Boom 500 Index', 'Boom 1000 Index',
@@ -306,7 +306,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
   if (activeFilter === 'Losses') filteredGrouped = grouped.filter(g => (g.combined_pnl || g.pnl) <= 0);
 
   let displayGroups = [];
-  const displayGrouped = filteredGrouped.slice(0, 300);
+  const displayGrouped = filteredGrouped; // Virtualized list handles large datasets efficiently
   
   if (groupBy === 'None') {
     displayGroups = [{ label: 'All Trades', trades: displayGrouped }];
@@ -508,7 +508,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     )}
     {grouped.length > 0 && (<>
       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-        <span className="card-title">Trade Groups ({filteredGrouped.length}{filteredGrouped.length > 300 ? ' - Showing top 300' : ''})</span>
+        <span className="card-title">Trade Groups ({filteredGrouped.length})</span>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: 4 }}>
             <button className={`btn btn-sm ${activeFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveFilter('All')}>All</button>

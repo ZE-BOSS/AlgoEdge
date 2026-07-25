@@ -543,6 +543,44 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         max_spread_atr_mult_override=0.8,
     ),
 
+    "NAS100": InstrumentProfile(
+        symbol="NAS100",
+        instrument_type="INDEX",
+        point_size=1.0,
+        point_value_per_lot=1.0,
+        lot_min=0.01,
+        lot_max=50.0,
+        lot_step=0.01,
+        contract_size=1,
+        session_filter=True,
+        news_filter=True,
+        trades_24_7=False,
+        swing_length_htf_override=5,
+        liq_sweep_min_atr_mult_override=2.0,
+        fvg_min_gap_atr_mult_override=1.5,
+        sl_buffer_pips_override=10.0,
+        max_spread_atr_mult_override=0.8,
+    ),
+
+    "US500": InstrumentProfile(
+        symbol="US500",
+        instrument_type="INDEX",
+        point_size=1.0,
+        point_value_per_lot=1.0,
+        lot_min=0.01,
+        lot_max=50.0,
+        lot_step=0.01,
+        contract_size=1,
+        session_filter=True,
+        news_filter=True,
+        trades_24_7=False,
+        swing_length_htf_override=5,
+        liq_sweep_min_atr_mult_override=2.0,
+        fvg_min_gap_atr_mult_override=1.5,
+        sl_buffer_pips_override=10.0,
+        max_spread_atr_mult_override=0.8,
+    ),
+
     "BTCUSD": InstrumentProfile(
         symbol="BTCUSD",
         instrument_type="CRYPTO",
@@ -602,6 +640,8 @@ SYMBOL_ALIASES: dict[str, str] = {
     # Commodities / Forex / Crypto
     "Gold": "XAUUSD", "GOLD": "XAUUSD",
     "DJI": "US30", "DOW": "US30",
+    "US100": "NAS100", "USTEC": "NAS100", "NDX": "NAS100",
+    "SPX500": "US500", "SPX": "US500",
     "BTC": "BTCUSD",
 }
 
