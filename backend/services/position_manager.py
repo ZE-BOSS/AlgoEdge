@@ -467,6 +467,13 @@ class PositionManager:
                         current_rr = pips_in_profit / risk_pips
                         if current_rr >= risk.be_trigger_rr:
                             be_buffer = risk.be_buffer_pips * pip_size_val
+                            
+                            # Ensure BE buffer covers spread + commission to prevent net loss
+                            sym_info = mt5.symbol_info(symbol)
+                            if sym_info and sym_info.spread > 0:
+                                min_spread_buffer = (sym_info.spread * sym_info.point) * 2.0
+                                be_buffer = max(be_buffer, min_spread_buffer)
+                                
                             new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                             
                             move_sl = False
@@ -548,6 +555,13 @@ class PositionManager:
                         be_atr_mult = getattr(risk, 'be_buffer_atr_mult', getattr(risk, 'be_buffer_pips', 0.1))
                         # Estimate ATR from recent candle range as proxy when not available
                         be_buffer = be_atr_mult * pip_size_val * 10  # conservative fallback
+                        
+                        # Ensure BE buffer covers spread + commission to prevent net loss
+                        sym_info = mt5.symbol_info(symbol)
+                        if sym_info and sym_info.spread > 0:
+                            min_spread_buffer = (sym_info.spread * sym_info.point) * 2.0
+                            be_buffer = max(be_buffer, min_spread_buffer)
+                            
                         new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                         
                         for alive_pos in alive_positions:
@@ -627,19 +641,22 @@ class PositionManager:
             
             atr_data = self._cached_atr.get(symbol)
             if not atr_data or (now - atr_data['time']) > 60:
-                from backend.mt5.data_fetcher import DataFetcher
-                import pandas as pd
-                candles = await DataFetcher.get_historical_data(symbol, "M5", 30)
-                if not candles.empty:
-                    candles['prev_close'] = candles['close'].shift(1)
-                    candles['tr1'] = candles['high'] - candles['low']
-                    candles['tr2'] = abs(candles['high'] - candles['prev_close'])
-                    candles['tr3'] = abs(candles['low'] - candles['prev_close'])
-                    candles['tr'] = candles[['tr1', 'tr2', 'tr3']].max(axis=1)
-                    atr_val = candles['tr'].rolling(window=14).mean().iloc[-1]
-                    if not pd.isna(atr_val):
-                        self._cached_atr[symbol] = {'atr': atr_val, 'time': now}
-                        atr_data = self._cached_atr[symbol]
+                try:
+                    from backend.mt5.data_fetcher import DataFetcher
+                    import pandas as pd
+                    candles = await DataFetcher.get_historical_data(symbol, "M5", 30)
+                    if not candles.empty:
+                        candles['prev_close'] = candles['close'].shift(1)
+                        candles['tr1'] = candles['high'] - candles['low']
+                        candles['tr2'] = abs(candles['high'] - candles['prev_close'])
+                        candles['tr3'] = abs(candles['low'] - candles['prev_close'])
+                        candles['tr'] = candles[['tr1', 'tr2', 'tr3']].max(axis=1)
+                        atr_val = candles['tr'].rolling(window=14).mean().iloc[-1]
+                        if not pd.isna(atr_val):
+                            self._cached_atr[symbol] = {'atr': atr_val, 'time': now}
+                            atr_data = self._cached_atr[symbol]
+                except Exception as e:
+                    logger.warning(f"Failed to fetch ATR for trailing SL on {symbol}: {e}")
             
             if not atr_data: return None
             atr = atr_data['atr']
@@ -670,15 +687,18 @@ class PositionManager:
             struct_data = self._cached_structure.get(symbol)
             
             if not struct_data or (now - struct_data['time']) > 300: # 5 min cache
-                from backend.mt5.data_fetcher import DataFetcher
-                from backend.strategies.core.market_structure import MarketStructureDetector
-                candles = await DataFetcher.get_historical_data(symbol, "M15", 100)
-                if not candles.empty:
-                    bars = getattr(risk, 'trail_structure_bars', 3)
-                    structure = MarketStructureDetector(swing_length=bars)
-                    structure.update(candles)
-                    self._cached_structure[symbol] = {'swings': structure.swings, 'time': now}
-                    struct_data = self._cached_structure[symbol]
+                try:
+                    from backend.mt5.data_fetcher import DataFetcher
+                    from backend.strategies.core.market_structure import MarketStructureDetector
+                    candles = await DataFetcher.get_historical_data(symbol, "M15", 100)
+                    if not candles.empty:
+                        bars = getattr(risk, 'trail_structure_bars', 3)
+                        structure = MarketStructureDetector(swing_length=bars)
+                        structure.update(candles)
+                        self._cached_structure[symbol] = {'swings': structure.swings, 'time': now}
+                        struct_data = self._cached_structure[symbol]
+                except Exception as e:
+                    logger.warning(f"Failed to fetch structure for trailing SL on {symbol}: {e}")
             
             if not struct_data: return None
             swings = struct_data['swings']
