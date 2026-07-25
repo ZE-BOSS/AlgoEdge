@@ -388,7 +388,8 @@ class BacktestEngine:
                     approved, reason, tp_levels = self.risk_engine.evaluate_signal(
                         signal_data=sig,
                         account_balance=balance,
-                        current_time=current_time_dt
+                        current_time=current_time_dt,
+                        initial_balance=initial_balance
                     )
                 except Exception as e:
                     import traceback

@@ -52,6 +52,7 @@ class RiskEngine:
         account_balance: float,
         compounding_risk_dollars: float = 0.0,
         current_time: datetime | None = None,
+        initial_balance: float | None = None,
     ) -> tuple[bool, str, list[dict[str, Any]]]:
         """
         Evaluate if a signal is safe to trade, and if so, calculate sizes and TPs.
@@ -112,6 +113,8 @@ class RiskEngine:
         base_balance = account_balance
         if hasattr(self, "prop_firm_validator") and self.prop_firm_validator and self.prop_firm_validator.enabled:
             base_balance = self.prop_firm_validator.initial_balance
+        elif not self.compounding_enabled and initial_balance is not None:
+            base_balance = initial_balance
 
         if self.compounding_enabled and compounding_risk_dollars > 0 and base_balance == account_balance:
             requested_risk_dollars = compounding_risk_dollars * size_modifier
