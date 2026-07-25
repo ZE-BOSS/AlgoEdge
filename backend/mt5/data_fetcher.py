@@ -170,31 +170,12 @@ class DataFetcher:
         start_ts = int(start.timestamp()) if hasattr(start, 'timestamp') else start
         end_ts = int(end.timestamp()) if hasattr(end, 'timestamp') else end
 
-        # Calculate estimated candle count
-        tf_seconds = {
-            "M1": 60, "M5": 300, "M15": 900, "M30": 1800,
-            "H1": 3600, "H4": 14400, "D1": 86400, "W1": 604800, "MN1": 2592000
-        }
-        sec_per_candle = tf_seconds.get(timeframe.upper(), 3600)
-        
-        # Calculate count and add a safety buffer (if market has gaps, we need a larger count to reach start_ts)
-        # We cap at 200,000 candles to prevent extreme memory use.
-        duration_sec = end_ts - start_ts
-        if duration_sec <= 0:
-            raise DataFetchError(symbol, timeframe, "End date must be after start date")
-            
-        count = int(duration_sec / sec_per_candle)
-        # For forex (5 days a week), duration has weekends. So count is actually overestimated.
-        # We add 200 bars buffer.
-        count += 200
-        count = min(count, 200000)
-
         loop = asyncio.get_running_loop()
         rates = None
         for attempt in range(2):
             rates = await loop.run_in_executor(
                 _executor, 
-                lambda: mt5.copy_rates_from(symbol, tf_code, end_ts, count)
+                lambda: mt5.copy_rates_range(symbol, tf_code, start_ts, end_ts)
             )
             if rates is not None and len(rates) > 0:
                 break
@@ -205,6 +186,7 @@ class DataFetcher:
                 await asyncio.sleep(2.0)
             else:
                 break
+
         
         if rates is None or len(rates) == 0:
             mt5_error = mt5.last_error()

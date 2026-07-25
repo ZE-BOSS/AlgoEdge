@@ -53,7 +53,7 @@ class RiskEngine:
         compounding_risk_dollars: float = 0.0,
         current_time: datetime | None = None,
         initial_balance: float | None = None,
-    ) -> tuple[bool, str, list[dict[str, Any]]]:
+    ) -> tuple[bool, str, list[Any]]:
         """
         Evaluate if a signal is safe to trade, and if so, calculate sizes and TPs.
         Returns (is_approved, reason, tp_levels).
@@ -233,9 +233,12 @@ class RiskEngine:
         trail_method = position.get("trail_method")
         highest = position.get("highest_price", current_price)
         lowest = position.get("lowest_price", current_price)
+        
+        from backend.risk.multi_tp import _is_buy
+        is_buy = _is_buy(direction)
 
         # Update highest/lowest price tracking
-        if direction == "BUY":
+        if is_buy:
             if current_price > highest:
                 actions.append({"action": "UPDATE_HIGHEST", "price": current_price})
         else:
@@ -266,7 +269,7 @@ class RiskEngine:
             # price reaches this many R in profit. Matches position_manager live behavior.
             risk_distance = abs(entry - original_sl)
             if risk_distance > 0:
-                if direction == "BUY":
+                if is_buy:
                     unrealized_r = (current_price - entry) / risk_distance
                 else:
                     unrealized_r = (entry - current_price) / risk_distance

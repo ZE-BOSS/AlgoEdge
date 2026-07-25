@@ -71,8 +71,11 @@ class TrailingManager:
         if step <= 0:
             step = pip_value
 
+        from backend.risk.multi_tp import _is_buy
+        is_buy = _is_buy(direction)
+
         # Ratchet + step: only move SL in the profitable direction by at least `step`
-        if direction == "BUY":
+        if is_buy:
             if new_sl > current_sl + step:
                 logger.debug(f"Trail [{method}] BUY TP{tp_level}: SL {current_sl:.5f} -> {new_sl:.5f}")
                 return new_sl
@@ -88,8 +91,9 @@ class TrailingManager:
         Method 1: Trail by fixed number of pips behind current price.
         Source: RiskManagement_Spec.md Section 3.3 — Method 1
         """
+        from backend.risk.multi_tp import _is_buy
         trail_distance = self.trail_pips * pip_value
-        if direction == "BUY":
+        if _is_buy(direction):
             return current_price - trail_distance
         else:
             return current_price + trail_distance
@@ -102,7 +106,8 @@ class TrailingManager:
         """
         multiplier = self._get_atr_multiplier(tp_level)
         trail_distance = atr * multiplier
-        if direction == "BUY":
+        from backend.risk.multi_tp import _is_buy
+        if _is_buy(direction):
             return highest - trail_distance
         else:
             return lowest + trail_distance
@@ -119,7 +124,8 @@ class TrailingManager:
             
         atr_buffer = atr * 0.5  # Standard 0.5 ATR buffer behind structural liquidity
 
-        if direction == "BUY":
+        from backend.risk.multi_tp import _is_buy
+        if _is_buy(direction):
             # Trail to below each confirmed Higher Low
             lows = [s["price"] for s in swing_points if s["type"] == "LOW"]
             if lows:
@@ -138,7 +144,8 @@ class TrailingManager:
         Source: RiskManagement_Spec.md Section 3.3 — Method 4
         """
         trail_distance = current_price * self.trail_pct
-        if direction == "BUY":
+        from backend.risk.multi_tp import _is_buy
+        if _is_buy(direction):
             return current_price - trail_distance
         else:
             return current_price + trail_distance

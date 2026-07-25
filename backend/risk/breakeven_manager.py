@@ -46,8 +46,11 @@ class BreakevenManager:
         if risk == 0:
             return None
 
+        from backend.risk.multi_tp import _is_buy
+        is_buy = _is_buy(direction)
+
         # Calculate current R-multiple in profit
-        if direction == "BUY":
+        if is_buy:
             unrealized_r = (current_price - entry_price) / risk
         else:
             unrealized_r = (entry_price - current_price) / risk
@@ -78,7 +81,7 @@ class BreakevenManager:
             
         logger.debug(f"[BREAKEVEN] Buffer logic | live_spread: {live_spread:.5f} | atr_buffer: {atr_buffer:.5f} | Winner: {winner}")
         
-        if direction == "BUY":
+        if is_buy:
             new_sl = entry_price + buffer
             # Only move SL in favorable direction
             if new_sl <= current_sl:

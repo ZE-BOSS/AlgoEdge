@@ -24,7 +24,6 @@ router = APIRouter(prefix="/api", tags=["bot"])
 bot_start_lock = asyncio.Lock()
 
 # Deriv / synthetic symbols that require the Deriv broker
-DERIV_SYMBOLS = {
     "Volatility 10 Index", "Volatility 25 Index", "Volatility 50 Index",
     "Volatility 75 Index", "Volatility 100 Index",
     "Boom 300 Index", "Boom 500 Index", "Boom 1000 Index",
@@ -33,14 +32,10 @@ DERIV_SYMBOLS = {
 }
 
 
-def _needs_standard_broker(symbols: list) -> bool:
     """Check if any symbol requires a standard MT5 broker (forex, metals, indices)."""
-    return any(s not in DERIV_SYMBOLS for s in symbols)
 
 
-def _needs_deriv_broker(symbols: list) -> bool:
     """Check if any symbol requires a Deriv broker (synthetics)."""
-    return any(s in DERIV_SYMBOLS for s in symbols)
 
 
 class StartBotRequest(BaseModel):
@@ -78,19 +73,8 @@ async def start_bot(
     # 2. Validate broker connectivity for selected symbols
     missing_brokers = []
 
-    if _needs_standard_broker(symbols):
-        if not current_user.mt5_account:
-            standard_needed = [s for s in symbols if s not in DERIV_SYMBOLS]
-            missing_brokers.append(
-                f"Standard MT5 broker not configured — required for: {', '.join(standard_needed)}"
-            )
-
-    if _needs_deriv_broker(symbols):
-        if not getattr(current_user, 'deriv_mt5_account', None):
-            deriv_needed = [s for s in symbols if s in DERIV_SYMBOLS]
-            missing_brokers.append(
-                f"Deriv MT5 broker not configured — required for: {', '.join(deriv_needed)}"
-            )
+    if not current_user.mt5_account:
+        missing_brokers.append("MT5 broker not configured")
 
     if missing_brokers:
         bot_service.log_system_event(

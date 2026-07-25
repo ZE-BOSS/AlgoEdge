@@ -24,8 +24,6 @@ class UpdateUserRequest(BaseModel):
     name: str | None = None
     mt5_account: int | None = None
     mt5_server: str | None = None
-    deriv_mt5_account: int | None = None
-    deriv_mt5_server: str | None = None
     risk_per_trade: float | None = None
     max_daily_loss: float | None = None
     is_active: bool | None = None
@@ -46,7 +44,6 @@ async def list_users(
         "email": u.email,
         "name": u.name,
         "mt5_account": u.mt5_account,
-        "deriv_mt5_account": u.deriv_mt5_account,
         "active_strategy": u.active_strategy,
         "is_active": u.is_active,
         "risk_per_trade": u.risk_per_trade,
@@ -72,8 +69,6 @@ async def get_user(
         "name": user.name,
         "mt5_account": user.mt5_account,
         "mt5_server": user.mt5_server,
-        "deriv_mt5_account": user.deriv_mt5_account,
-        "deriv_mt5_server": user.deriv_mt5_server,
         "active_strategy": user.active_strategy,
         "risk_per_trade": user.risk_per_trade,
         "max_daily_loss": user.max_daily_loss,

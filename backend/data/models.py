@@ -169,18 +169,14 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     name = Column(String(100), nullable=False)
 
-    # Standard Broker (forex, commodities, indices)
+    # Standard Broker (forex, commodities, indices, synthetics)
     mt5_account = Column(BigInteger)
     mt5_password_encrypted = Column(LargeBinary)  # Fernet encrypted
     mt5_server = Column(String(100))
     mt5_path = Column(String(500))
 
-    # Deriv Broker (synthetics)
-    deriv_mt5_account = Column(BigInteger)
-    deriv_mt5_password_encrypted = Column(LargeBinary)  # Fernet encrypted
-    deriv_mt5_server = Column(String(100))
-    deriv_mt5_path = Column(String(500))
-
+    license_key = Column(String(100))
+    subscription_status = Column(String(50), default="active")
     active_strategy = Column(String(50), default="SMC_v1")
     risk_per_trade = Column(Float, default=1.0)
     max_daily_loss = Column(Float, default=5.0)

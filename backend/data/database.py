@@ -62,7 +62,11 @@ async def init_db():
             "ALTER TABLE backtest_trades ADD COLUMN chart_data_m15 TEXT;",
             "ALTER TABLE backtest_trades ADD COLUMN chart_data_m5 TEXT;",
             "ALTER TABLE backtest_trades ADD COLUMN smc_data TEXT;",
-            "ALTER TABLE backtest_trades ADD COLUMN sub_trades TEXT;"
+            "ALTER TABLE backtest_trades ADD COLUMN sub_trades TEXT;",
+            "ALTER TABLE users DROP COLUMN IF EXISTS deriv_mt5_account;",
+            "ALTER TABLE users DROP COLUMN IF EXISTS deriv_mt5_password_encrypted;",
+            "ALTER TABLE users DROP COLUMN IF EXISTS deriv_mt5_server;",
+            "ALTER TABLE users DROP COLUMN IF EXISTS deriv_mt5_path;"
         ]
         
         for query in migrations:

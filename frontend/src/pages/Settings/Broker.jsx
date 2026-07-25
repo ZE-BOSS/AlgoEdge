@@ -392,18 +392,8 @@ export default function BrokerSettings() {
     queryClient.invalidateQueries({ queryKey: ['broker-status'] });
   };
 
-  const handleSaveDeriv = async (data) => {
-    await saveBrokerDeriv(data);
-    queryClient.invalidateQueries({ queryKey: ['broker-status'] });
-  };
-
   const handleRemoveStandard = async () => {
     await removeBrokerStandard();
-    queryClient.invalidateQueries({ queryKey: ['broker-status'] });
-  };
-
-  const handleRemoveDeriv = async () => {
-    await removeBrokerDeriv();
     queryClient.invalidateQueries({ queryKey: ['broker-status'] });
   };
 
@@ -417,16 +407,6 @@ export default function BrokerSettings() {
         onSave={handleSaveStandard}
         onTest={testBrokerConnection}
         onRemove={handleRemoveStandard}
-      />
-
-      <BrokerCard
-        title="Deriv Broker (Synthetics)"
-        description="For synthetic indices — Volatility 75, Boom/Crash, Jump indices. Requires a separate Deriv MT5 account."
-        type="deriv"
-        brokerStatus={brokerData?.deriv}
-        onSave={handleSaveDeriv}
-        onTest={testBrokerConnection}
-        onRemove={handleRemoveDeriv}
       />
 
       <div style={{

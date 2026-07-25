@@ -168,45 +168,6 @@ async def save_standard_broker(
     }
 
 
-@router.post("/deriv")
-async def save_deriv_broker(
-    req: BrokerConfigRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Save Deriv broker (synthetics — V75, Boom, Crash) credentials.
-    Password is encrypted with Fernet before storage.
-    """
-    encryption = _get_encryption()
-
-    current_user.deriv_mt5_account = req.account
-    current_user.deriv_mt5_password_encrypted = encryption.encrypt(req.password)
-    current_user.deriv_mt5_server = req.server
-    current_user.deriv_mt5_path = req.path or ""
-
-    await db.commit()
-
-    test_result = await _test_mt5_connection(req.account, req.password, req.server, req.path or "")
-
-    try:
-        from backend.services.bot_service import bot_service
-        bot_service.log_system_event(
-            f"Deriv broker configured: {req.server} (Account: {_mask_account(req.account)})",
-            category="CONFIG"
-        )
-    except Exception:
-        pass
-
-    logger.info(f"Deriv broker saved for {current_user.email}: server={req.server}")
-    return {
-        "saved": True,
-        "broker_type": "deriv",
-        "server": req.server,
-        "account_masked": _mask_account(req.account),
-        "connection_test": test_result,
-    }
-
 
 # ── Status & Test ────────────────────────────────────────────────────────────
 
@@ -223,13 +184,6 @@ async def get_broker_status(
             "server": current_user.mt5_server,
             "path": current_user.mt5_path,
         },
-        "deriv": {
-            "configured": current_user.deriv_mt5_account is not None,
-            "account_masked": _mask_account(current_user.deriv_mt5_account) if current_user.deriv_mt5_account else None,
-            "server": current_user.deriv_mt5_server,
-            "path": current_user.deriv_mt5_path,
-        },
-    }
 
 
 @router.post("/test")
@@ -264,17 +218,3 @@ async def remove_standard_broker(
     return {"removed": True, "broker_type": "standard"}
 
 
-@router.delete("/deriv")
-async def remove_deriv_broker(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Remove stored Deriv broker credentials."""
-    current_user.deriv_mt5_account = None
-    current_user.deriv_mt5_password_encrypted = None
-    current_user.deriv_mt5_server = None
-    current_user.deriv_mt5_path = None
-    await db.commit()
-
-    logger.info(f"Deriv broker removed for {current_user.email}")
-    return {"removed": True, "broker_type": "deriv"}
