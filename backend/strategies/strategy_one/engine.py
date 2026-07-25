@@ -8,29 +8,26 @@ for ConfluenceScorer.
 Flow: H4 Bias → M15 ChoCH/Zones → M5 Execution (Candle or Wick/BOS)
 """
 
-import pandas as pd
-import asyncio
-import numpy as np
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Any
 
-from backend.strategies.base_strategy import BaseStrategy, TradeSignal, TradeAction
-from backend.strategies.registry import register_strategy
+import pandas as pd
+
 from backend.core.config_schema import UserConfig
 from backend.risk.position_sizer import get_pip_size
-
+from backend.services.bot_service import bot_service
+from backend.strategies.base_strategy import BaseStrategy, TradeAction, TradeSignal
+from backend.strategies.core.candlestick import detect_confirmation_pattern
+from backend.strategies.core.fvg import FVGDetector
+from backend.strategies.core.ipdm import IPDMDetector
+from backend.strategies.core.liquidity import LiquidityMapper
 from backend.strategies.core.market_structure import MarketStructureDetector
 from backend.strategies.core.order_blocks import OrderBlockDetector
-from backend.strategies.core.fvg import FVGDetector
-from backend.strategies.core.liquidity import LiquidityMapper
+from backend.strategies.registry import register_strategy
+from backend.utils.logger import get_logger
+
 from .confluence import ConfluenceScorer
 from .signals import SignalGenerator
-from backend.strategies.core.candlestick import detect_confirmation_pattern
-from backend.strategies.core.ipdm import IPDMDetector
-
-from backend.utils.logger import get_logger
-from backend.services.bot_service import bot_service
-from backend.utils.timeutils import detect_session
 
 logger = get_logger(__name__)
 
@@ -102,7 +99,7 @@ class SMCEngine(BaseStrategy):
         
         self.supply_demand = SupplyDemandDetector() if SupplyDemandDetector else None
 
-        self.context: Dict[str, Any] = {}
+        self.context: dict[str, Any] = {}
         self.last_logged_htf_bias = None
         self.last_logged_phase = None
         self.bias = "NEUTRAL"
@@ -118,10 +115,10 @@ class SMCEngine(BaseStrategy):
         else:
             bot_service.log_system_event(message, level, category)
 
-    def get_required_timeframes(self) -> List[str]:
+    def get_required_timeframes(self) -> list[str]:
         return ["H4", "M15", "M5"]
 
-    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Optional[TradeSignal]:
+    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         self.log_event(f"SMC Engine evaluating {symbol} on {timeframe}", "DEBUG", "SMC")
 
         if timeframe == "H4":
@@ -268,10 +265,7 @@ class SMCEngine(BaseStrategy):
                         active_m15_obs = self.context.get("m15_obs", [])
                         for ob in active_m15_obs:
                             if ob.get("type") == htf_bias and ob.get("touches", 99) <= 1:
-                                if htf_bias == "BULLISH" and float(ob["bottom"]) <= current_price <= float(ob["top"]):
-                                    valid_choch = True
-                                    break
-                                elif htf_bias == "BEARISH" and float(ob["bottom"]) <= current_price <= float(ob["top"]):
+                                if htf_bias == "BULLISH" and float(ob["bottom"]) <= current_price <= float(ob["top"]) or htf_bias == "BEARISH" and float(ob["bottom"]) <= current_price <= float(ob["top"]):
                                     valid_choch = True
                                     break
                                     
@@ -284,9 +278,7 @@ class SMCEngine(BaseStrategy):
                     active_obs = self.context.get("m15_obs", []) + self.context.get("m5_obs", [])
                     for ob in active_obs:
                         if ob.get("type") == htf_bias and ob.get("touches", 99) <= 1:
-                            if htf_bias == "BULLISH" and float(ob["bottom"]) <= c_low <= float(ob["top"]):
-                                fallback_triggered = True
-                            elif htf_bias == "BEARISH" and float(ob["bottom"]) <= c_high <= float(ob["top"]):
+                            if htf_bias == "BULLISH" and float(ob["bottom"]) <= c_low <= float(ob["top"]) or htf_bias == "BEARISH" and float(ob["bottom"]) <= c_high <= float(ob["top"]):
                                 fallback_triggered = True
 
             # If no execution trigger, wait.
@@ -334,7 +326,7 @@ class SMCEngine(BaseStrategy):
 
         return None
 
-    async def on_tick(self, symbol: str, tick: Dict[str, Any]) -> Optional[List[TradeAction]]:
+    async def on_tick(self, symbol: str, tick: dict[str, Any]) -> list[TradeAction] | None:
         return []
 
     def _calculate_structural_sl(self, bias: str, entry_price: float) -> float:
@@ -381,7 +373,7 @@ class SMCEngine(BaseStrategy):
             return max(sl_swing, sl_liq) + buffer
 
 
-    def _generate_markings(self, candles: pd.DataFrame) -> List[Dict]:
+    def _generate_markings(self, candles: pd.DataFrame) -> list[dict]:
         markings = []
         def _get_time(obj):
             idx = obj.get("index")
@@ -400,7 +392,7 @@ class SMCEngine(BaseStrategy):
             })
         return markings
 
-    def _build_scorer_context(self, symbol: str, bias: str, pattern) -> Dict[str, Any]:
+    def _build_scorer_context(self, symbol: str, bias: str, pattern) -> dict[str, Any]:
         m15 = self.context.get("m15", {})
         m5_obs = self.context.get("m5_obs", [])
         m15_obs = self.context.get("m15_obs", [])
@@ -418,10 +410,7 @@ class SMCEngine(BaseStrategy):
 
         for ob in reversed(m5_obs + m15_obs):
             if ob.get("type") == bias and ob.get("touches", 99) <= 1:
-                if bias == "BULLISH" and float(ob["bottom"]) <= recent_low <= float(ob["top"]):
-                    fresh_ob = ob
-                    break
-                elif bias == "BEARISH" and float(ob["bottom"]) <= recent_high <= float(ob["top"]):
+                if bias == "BULLISH" and float(ob["bottom"]) <= recent_low <= float(ob["top"]) or bias == "BEARISH" and float(ob["bottom"]) <= recent_high <= float(ob["top"]):
                     fresh_ob = ob
                     break
 
@@ -449,6 +438,7 @@ class SMCEngine(BaseStrategy):
             session = None
             if _bar_ts is not None:
                 from datetime import datetime as _dt
+
                 from backend.utils.timeutils import get_current_session
                 session = get_current_session(_dt.fromtimestamp(_bar_ts, tz=_tz.utc))
                 

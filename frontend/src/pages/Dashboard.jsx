@@ -177,7 +177,6 @@ function BotControl() {
   const isRunning = botStatus?.running === true;
   const isPending = startMutation.isPending || stopMutation.isPending;
   const hasStandard = brokerStatus?.standard?.configured;
-  const hasDeriv = brokerStatus?.deriv?.configured;
 
   return (
     <div className="card" style={{ marginBottom: 20 }}>
@@ -215,8 +214,6 @@ function BotControl() {
             <span>MT5 {hasStandard ? `(${brokerStatus.standard.server || 'Connected'})` : '(Not configured)'}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: hasDeriv ? 'var(--green)' : 'var(--red)', display: 'inline-block' }} />
-            <span>Deriv {hasDeriv ? `(${brokerStatus.deriv.server || 'Connected'})` : '(Not configured)'}</span>
           </div>
         </div>
       )}

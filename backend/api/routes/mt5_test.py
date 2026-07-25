@@ -4,11 +4,11 @@ backend/api/routes/mt5_test.py
 Endpoints for manual MT5 diagnostic testing from the frontend.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 import asyncio
-import os
 import time
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from backend.api.deps import get_current_user
 from backend.data.models import User
@@ -28,15 +28,22 @@ class TicketRequest(BaseModel):
 @router.post("/entry")
 async def test_mt5_entry(req: EntryRequest, current_user: User = Depends(get_current_user)):
     try:
-        from backend.mt5.bridge import mt5, bridge
-        if not mt5 or not bridge.account_info:
+        try:
+            import MetaTrader5 as mt5
+        except ImportError:
+            mt5 = None
+        from backend.brokers.factory import broker_factory
+        broker = broker_factory.get_broker()
+        if not mt5 or not broker.account_info:
             return {"success": False, "error": "MT5 is offline or not connected"}
             
         # Get user config to determine risk
-        from backend.data.database import async_session
-        from sqlalchemy import select
-        from backend.data.models import UserConfigModel
         import json
+
+        from sqlalchemy import select
+
+        from backend.data.database import async_session
+        from backend.data.models import UserConfigModel
         
         async with async_session() as session:
             result = await session.execute(select(UserConfigModel).where(UserConfigModel.user_id == current_user.id))
@@ -46,7 +53,7 @@ async def test_mt5_entry(req: EntryRequest, current_user: User = Depends(get_cur
             config_data = json.loads(config.config_json)
             
         risk_pct = config_data.get("risk", {}).get("risk_per_trade_pct", 2.0)
-        balance = bridge.account_info.balance
+        balance = broker.account_info.balance
         risk_dollar = balance * (risk_pct / 100.0)
         
         loop = asyncio.get_running_loop()
@@ -109,7 +116,10 @@ async def test_mt5_close(req: TicketRequest, current_user: User = Depends(get_cu
 @router.post("/breakeven")
 async def test_mt5_breakeven(req: TicketRequest, current_user: User = Depends(get_current_user)):
     try:
-        from backend.mt5.bridge import mt5
+        try:
+            import MetaTrader5 as mt5
+        except ImportError:
+            mt5 = None
         loop = asyncio.get_running_loop()
         position = await loop.run_in_executor(None, lambda: mt5.positions_get(ticket=req.ticket))
         if not position:
@@ -127,7 +137,10 @@ async def test_mt5_breakeven(req: TicketRequest, current_user: User = Depends(ge
 @router.post("/trail")
 async def test_mt5_trail(req: TicketRequest, current_user: User = Depends(get_current_user)):
     try:
-        from backend.mt5.bridge import mt5
+        try:
+            import MetaTrader5 as mt5
+        except ImportError:
+            mt5 = None
         loop = asyncio.get_running_loop()
         position = await loop.run_in_executor(None, lambda: mt5.positions_get(ticket=req.ticket))
         if not position:

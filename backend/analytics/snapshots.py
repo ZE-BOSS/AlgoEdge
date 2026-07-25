@@ -5,22 +5,21 @@ Entry/exit chart snapshot generation using mplfinance.
 Source: TradingBot_MasterPlan-2.md Section 8 — Chart Snapshot System
 """
 
-import os
-from typing import List, Dict, Any, Optional
-from pathlib import Path
+from typing import Any
 
 import pandas as pd
-from backend.utils.logger import get_logger
+
 from backend.config import settings
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 try:
     import matplotlib
     matplotlib.use('Agg')  # Must be called before pyplot
-    import mplfinance as mpf
-    import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
+    import matplotlib.pyplot as plt
+    import mplfinance as mpf
     HAS_MPL = True
 except ImportError:
     HAS_MPL = False
@@ -31,15 +30,15 @@ def generate_trade_snapshot(
     symbol: str,
     timeframe: str,
     candles: pd.DataFrame,
-    order_blocks: List[Dict[str, Any]],
-    fvgs: List[Dict[str, Any]],
+    order_blocks: list[dict[str, Any]],
+    fvgs: list[dict[str, Any]],
     entry_price: float,
     stop_loss: float,
     take_profit: float,
     direction: str,
     snapshot_type: str,
     trade_id: str,
-) -> Optional[str]:
+) -> str | None:
     """
     Generate and save a chart snapshot with SMC markup.
     Returns file path or None if matplotlib is unavailable.
@@ -144,15 +143,15 @@ def generate_trade_snapshot_b64(
     symbol: str,
     timeframe: str,
     candles: pd.DataFrame,
-    order_blocks: List[Dict[str, Any]],
-    fvgs: List[Dict[str, Any]],
+    order_blocks: list[dict[str, Any]],
+    fvgs: list[dict[str, Any]],
     entry_price: float,
     stop_loss: float,
     take_profit: float,
     direction: str,
     snapshot_type: str,
     trade_id: str,
-) -> Optional[str]:
+) -> str | None:
     """
     Generate a chart snapshot as a base64-encoded PNG string.
     No disk writes — returns the image data directly for API responses and DB storage.

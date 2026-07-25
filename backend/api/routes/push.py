@@ -6,14 +6,15 @@ Source: Frontend_PWA_LLM_Spec.md — Push Notification System
 """
 
 import uuid
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel
 
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.api.deps import get_current_user
 from backend.data.database import get_db
 from backend.data.models import PushSubscription, User
-from backend.api.deps import get_current_user
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)

@@ -5,8 +5,10 @@ Redis connection and Pub/Sub manager for real-time WebSocket updates.
 """
 
 import json
-from typing import Any, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+
 import redis.asyncio as redis
+
 from backend.config import settings
 from backend.utils.logger import get_logger
 

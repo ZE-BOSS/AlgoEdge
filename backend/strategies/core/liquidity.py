@@ -5,8 +5,10 @@ Liquidity mapping: BSL, SSL, Equal Highs/Lows, Inducement (IDM), and Sweep detec
 Source: SMC_Strategy.md Section 4
 """
 
+from typing import Any
+
 import pandas as pd
-from typing import List, Dict, Any
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -24,7 +26,7 @@ class LiquidityMapper:
         self.bsl_pools = []
         self.ssl_pools = []
 
-    def update(self, candles: pd.DataFrame, swings: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def update(self, candles: pd.DataFrame, swings: list[dict[str, Any]]) -> dict[str, Any]:
         """
         Identify new liquidity pools from swings, detect Inducement (IDM), and check for recent sweeps.
         """

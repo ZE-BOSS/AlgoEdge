@@ -5,9 +5,9 @@ Economic calendar feed integration for news filtering.
 Source: TradingBot_MasterPlan-2.md Session & News Filters
 """
 
-import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -36,8 +36,8 @@ class NewsFilter:
     def __init__(self, enabled: bool = True, block_window_minutes: int = 30):
         self.enabled = enabled
         self.block_window = timedelta(minutes=block_window_minutes)
-        self.high_impact_events: List[Dict[str, Any]] = []
-        self.last_fetch: Optional[datetime] = None
+        self.high_impact_events: list[dict[str, Any]] = []
+        self.last_fetch: datetime | None = None
         self.fetch_interval = timedelta(hours=4)  # Refresh every 4 hours
 
     async def refresh_calendar(self):
@@ -118,7 +118,7 @@ class NewsFilter:
 
         return False
 
-    def get_upcoming_events(self, hours_ahead: int = 24) -> List[Dict[str, Any]]:
+    def get_upcoming_events(self, hours_ahead: int = 24) -> list[dict[str, Any]]:
         """Return events within the next N hours."""
         now = datetime.now(timezone.utc)
         cutoff = now + timedelta(hours=hours_ahead)

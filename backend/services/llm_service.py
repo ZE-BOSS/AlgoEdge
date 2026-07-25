@@ -5,8 +5,8 @@ LLM analysis service: Claude + OpenAI + Gemini providers.
 Source: TradingBot_MasterPlan-2.md Section 9
 """
 
-import uuid
-from typing import Optional, Dict, Any
+from typing import Any
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -47,14 +47,14 @@ FAST_MODELS = {
 class LLMService:
     """Multi-provider LLM analysis service."""
 
-    def __init__(self, api_keys: Optional[Dict[str, str]] = None):
+    def __init__(self, api_keys: dict[str, str] | None = None):
         self.api_keys = api_keys or {}
 
     async def analyze_trade(
         self,
         trade: Any,
         provider: str = "anthropic",
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> str:
         """
         Analyze a single trade post-close.
@@ -68,7 +68,7 @@ class LLMService:
         self,
         trades: list,
         provider: str = "anthropic",
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> str:
         """Analyze a series of recent trades."""
         prompt = self._build_series_prompt(trades)
@@ -78,7 +78,7 @@ class LLMService:
     async def custom_question(
         self,
         question: str,
-        context_data: Optional[dict] = None,
+        context_data: dict | None = None,
         provider: str = "anthropic",
     ) -> str:
         """Answer a custom user question about their trading data."""
@@ -133,7 +133,7 @@ Provide:
                 return f"Provider '{provider}' not available. Install the SDK."
         except Exception as e:
             logger.error(f"LLM call failed ({provider}): {e}")
-            return f"Analysis failed: {str(e)}"
+            return f"Analysis failed: {e!s}"
 
     async def _call_anthropic(self, model: str, prompt: str) -> str:
         """Call Anthropic Claude API."""

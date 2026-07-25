@@ -9,9 +9,9 @@ Enhanced: Now includes liquidity sweep detection and wick rejection
 for accurate Manipulation phase identification (not just ATR).
 """
 
+from typing import Any
+
 import pandas as pd
-import numpy as np
-from typing import Dict, Any, List, Optional
 
 
 class IPDMDetector:
@@ -40,9 +40,9 @@ class IPDMDetector:
     def update(
         self,
         candles: pd.DataFrame,
-        swing_highs: Optional[List[Dict]] = None,
-        swing_lows: Optional[List[Dict]] = None,
-    ) -> Dict[str, Any]:
+        swing_highs: list[dict] | None = None,
+        swing_lows: list[dict] | None = None,
+    ) -> dict[str, Any]:
         """
         Determine current IPDM phase based on:
           1. ATR compression/expansion
@@ -129,8 +129,8 @@ class IPDMDetector:
         candle_low: float,
         candle_close: float,
         candle_open: float,
-        swing_highs: List[Dict],
-        swing_lows: List[Dict],
+        swing_highs: list[dict],
+        swing_lows: list[dict],
     ) -> bool:
         """
         Detect manipulation: wick through liquidity pool + close back inside.

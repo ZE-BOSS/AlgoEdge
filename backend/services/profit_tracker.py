@@ -6,8 +6,10 @@ Uses Redis for persistence across restarts.
 """
 
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
+
 import redis.asyncio as redis
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)

@@ -6,8 +6,9 @@ Source: TradingBot_MasterPlan-2.md Section 4 — Confluence Scoring Gate
 Source: SMC_Strategy-1.md Section 13
 """
 
-from typing import Dict, Any
 import json
+from typing import Any
+
 from backend.strategies.strategy_one.params import SMCParams
 from backend.utils.logger import get_logger
 
@@ -20,7 +21,7 @@ class ConfluenceScorer:
     def __init__(self, params: SMCParams):
         self.params = params
 
-    def calculate_score(self, context: Dict[str, Any]) -> int:
+    def calculate_score(self, context: dict[str, Any]) -> int:
         """
         Evaluate context dictionary and return score 0-100 (capped at 100).
 

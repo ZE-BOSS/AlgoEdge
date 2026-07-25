@@ -5,16 +5,15 @@ Admin operations (requires auth). User management CRUD.
 Source: TradingBot_MasterPlan-2.md Section 12
 """
 
-import uuid
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel
-from typing import Optional, List
 
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.api.deps import get_current_user
 from backend.data.database import get_db
 from backend.data.models import User
-from backend.api.deps import get_current_user
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,14 +21,12 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 class UpdateUserRequest(BaseModel):
-    name: Optional[str] = None
-    mt5_account: Optional[int] = None
-    mt5_server: Optional[str] = None
-    deriv_mt5_account: Optional[int] = None
-    deriv_mt5_server: Optional[str] = None
-    risk_per_trade: Optional[float] = None
-    max_daily_loss: Optional[float] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    mt5_account: int | None = None
+    mt5_server: str | None = None
+    risk_per_trade: float | None = None
+    max_daily_loss: float | None = None
+    is_active: bool | None = None
 
 
 @router.get("/users")
@@ -47,7 +44,6 @@ async def list_users(
         "email": u.email,
         "name": u.name,
         "mt5_account": u.mt5_account,
-        "deriv_mt5_account": u.deriv_mt5_account,
         "active_strategy": u.active_strategy,
         "is_active": u.is_active,
         "risk_per_trade": u.risk_per_trade,
@@ -73,8 +69,6 @@ async def get_user(
         "name": user.name,
         "mt5_account": user.mt5_account,
         "mt5_server": user.mt5_server,
-        "deriv_mt5_account": user.deriv_mt5_account,
-        "deriv_mt5_server": user.deriv_mt5_server,
         "active_strategy": user.active_strategy,
         "risk_per_trade": user.risk_per_trade,
         "max_daily_loss": user.max_daily_loss,

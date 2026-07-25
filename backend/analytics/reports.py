@@ -6,7 +6,10 @@ Source: RiskManagement_Spec.md Section 8.2
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Any
+from typing import Any
+
+import numpy as np
+
 from backend.analytics.metrics import compute_portfolio_stats
 from backend.utils.logger import get_logger
 
@@ -70,19 +73,19 @@ class RiskReport:
     other_win_rate: float = 0.0
 
     # Symbol breakdown
-    per_symbol: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    per_symbol: dict[str, dict[str, Any]] = field(default_factory=dict)
     
     # Confluence stats
-    confluence_stats: Dict[str, Any] = field(default_factory=dict)
+    confluence_stats: dict[str, Any] = field(default_factory=dict)
 
     # Bias breakdown (BUY vs SELL)
-    bias_stats: Dict[str, Any] = field(default_factory=dict)
+    bias_stats: dict[str, Any] = field(default_factory=dict)
 
     # Rejection Funnel
-    rejection_funnel: Dict[str, Any] = field(default_factory=dict)
+    rejection_funnel: dict[str, Any] = field(default_factory=dict)
 
 
-def generate_risk_report(trades: List[Dict[str, Any]]) -> RiskReport:
+def generate_risk_report(trades: list[dict[str, Any]]) -> RiskReport:
     """
     Generate a full RiskReport from a list of closed trades.
     """

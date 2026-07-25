@@ -8,7 +8,7 @@ import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
 const SYMBOLS = [
-  'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'US30', 'BTCUSD',
+  'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'US30', 'NAS100', 'US100', 'SPX500', 'US500', 'BTCUSD',
   'Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index',
   'Volatility 75 Index', 'Volatility 100 Index', 'Volatility 150 Index', 'Volatility 250 Index',
   'Boom 300 Index', 'Boom 500 Index', 'Boom 1000 Index',
@@ -306,7 +306,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
   if (activeFilter === 'Losses') filteredGrouped = grouped.filter(g => (g.combined_pnl || g.pnl) <= 0);
 
   let displayGroups = [];
-  const displayGrouped = filteredGrouped.slice(0, 300);
+  const displayGrouped = filteredGrouped; // Virtualized list handles large datasets efficiently
   
   if (groupBy === 'None') {
     displayGroups = [{ label: 'All Trades', trades: displayGrouped }];
@@ -508,7 +508,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     )}
     {grouped.length > 0 && (<>
       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-        <span className="card-title">Trade Groups ({filteredGrouped.length}{filteredGrouped.length > 300 ? ' - Showing top 300' : ''})</span>
+        <span className="card-title">Trade Groups ({filteredGrouped.length})</span>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: 4 }}>
             <button className={`btn btn-sm ${activeFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveFilter('All')}>All</button>
@@ -687,8 +687,11 @@ export default function Backtester() {
       target_profit_enabled: false, max_daily_profit: 500.0, max_weekly_profit: 2000.0,
       manual_bias: 'NONE',
       strategy_id: 'SMC_v1',
-      spike_lookback_bars: 50, drift_ema_fast: 5, drift_ema_slow: 15,
-      spike_threshold_pips: 20.0, recovery_target_pips: 10.0,
+      drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20, jump_entry_percentile_threshold: 95.0, trade_jumps_enabled: false, control_test_passed: false, aggregate_max_lots_per_symbol: 6.0,
+      htf_timeframe: '1H', ltf_timeframe: 'M1', target_r_multiple: 1.5, max_trades_per_session: 1, session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
+      entry_confirmation_tf: 'M1', target_rr: 1.0, require_unfilled_htf_fvg: true,
+      stop_method: 'swing_high_low', target_rr_range_min: 1.0, target_rr_range_max: 3.0, max_trades_per_day: 2,
+      range_window_start: '08:00', range_window_end: '08:15', earliest_valid_break_time: '09:30', session_end: '11:00', stop_buffer_points: 5.0, fixed_target_points: 15.0, dynamic_target_override: true,
     };
   });
 
@@ -813,12 +816,14 @@ export default function Backtester() {
     mutationFn: () => {
       setResult(null);
       setEvents([]);
-      const payload = { ...form, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: { prop_firm: form.prop_firm }, strategy_params: {} };
+      const validStrats = ['SMC_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'];
+      const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'SMC_v1';
+      const payload = { ...form, strategy_id: payload_strategy, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: { prop_firm: form.prop_firm }, strategy_params: {} };
       if (form.manual_bias && form.manual_bias !== 'NONE') {
         payload.manual_bias_overrides = { [form.symbol]: form.manual_bias };
       }
       
-      if (form.strategy_id === 'SMC_v1') {
+      if (payload_strategy === 'SMC_v1') {
         payload.strategy_params = {
           min_signal_score: form.confluence_threshold,
           swing_length_htf: form.swing_length,
@@ -834,13 +839,54 @@ export default function Backtester() {
           asian_range_start_hour: form.asian_range_start_hour,
           asian_range_end_hour: form.asian_range_end_hour
         };
-      } else if (form.strategy_id === 'CrashBoom_v1') {
+      } else if (form.strategy_id === 'DriftJumpAlpha_v1') {
         payload.strategy_params = {
-          spike_lookback_bars: form.spike_lookback_bars,
           drift_ema_fast: form.drift_ema_fast,
           drift_ema_slow: form.drift_ema_slow,
-          spike_threshold_pips: form.spike_threshold_pips,
-          recovery_target_pips: form.recovery_target_pips
+          min_adx_to_trade: form.min_adx_to_trade,
+          jump_entry_percentile_threshold: form.jump_entry_percentile_threshold,
+          trade_jumps_enabled: form.trade_jumps_enabled,
+          control_test_passed: form.control_test_passed,
+          aggregate_max_lots_per_symbol: form.aggregate_max_lots_per_symbol
+        };
+      } else if (form.strategy_id === 'CRT_v1') {
+        payload.strategy_params = {
+          htf_timeframe: form.htf_timeframe,
+          ltf_timeframe: form.ltf_timeframe,
+          target_r_multiple: form.target_r_multiple,
+          max_trades_per_session: form.max_trades_per_session,
+          session_start: form.session_start,
+          session_cutoff: form.session_cutoff,
+          bypass_session_synthetics: form.bypass_session_synthetics
+        };
+      } else if (form.strategy_id === 'HTFFVGFlip_v1') {
+        payload.strategy_params = {
+          htf_timeframe: form.htf_timeframe,
+          entry_confirmation_tf: form.entry_confirmation_tf,
+          target_rr: form.target_rr,
+          require_unfilled_htf_fvg: form.require_unfilled_htf_fvg,
+          session_filter_enabled: form.session_filter_enabled,
+          session_start: form.session_start,
+          session_cutoff: form.session_cutoff
+        };
+      } else if (form.strategy_id === 'BiasIFVG_v1') {
+        payload.strategy_params = {
+          stop_method: form.stop_method,
+          target_rr_range_min: form.target_rr_range_min,
+          target_rr_range_max: form.target_rr_range_max,
+          max_trades_per_day: form.max_trades_per_day,
+          session_start: form.session_start,
+          session_cutoff: form.session_cutoff
+        };
+      } else if (form.strategy_id === 'NYOpenRetest_v1') {
+        payload.strategy_params = {
+          range_window_start: form.range_window_start,
+          range_window_end: form.range_window_end,
+          earliest_valid_break_time: form.earliest_valid_break_time,
+          session_end: form.session_end,
+          stop_buffer_points: form.stop_buffer_points,
+          fixed_target_points: form.fixed_target_points,
+          dynamic_target_override: form.dynamic_target_override
         };
       }
       
@@ -910,7 +956,7 @@ export default function Backtester() {
         <div className="card-header"><span className="card-title">Configuration</span></div>
         <div style={{ display: 'grid', gap: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div><label>Strategy Engine</label><select value={form.strategy_id} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="CrashBoom_v1">CrashBoom Drift</option></select></div>
+            <div><label>Strategy Engine</label><select value={['SMC_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'].includes(form.strategy_id) ? form.strategy_id : 'SMC_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option></select></div>
             <div>
               <label>Symbol</label>
               <input 
@@ -982,13 +1028,82 @@ export default function Backtester() {
                 <div><label style={{ fontSize: '0.7rem' }}>Manual HTF Bias</label><select value={form.manual_bias || 'NONE'} onChange={e => u('manual_bias', e.target.value)}><option value="NONE">Auto</option><option value="BULLISH">Bullish Only</option><option value="BEARISH">Bearish Only</option></select></div>
               </div>
             )}
-            {form.strategy_id === 'CrashBoom_v1' && (
+            {form.strategy_id === 'DriftJumpAlpha_v1' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                <div><label style={{ fontSize: '0.7rem' }}>Spike Lookback (Bars)</label><input type="number" value={form.spike_lookback_bars} onChange={e => u('spike_lookback_bars', +e.target.value)} /></div>
                 <div><label style={{ fontSize: '0.7rem' }}>Drift EMA Fast</label><input type="number" value={form.drift_ema_fast} onChange={e => u('drift_ema_fast', +e.target.value)} /></div>
                 <div><label style={{ fontSize: '0.7rem' }}>Drift EMA Slow</label><input type="number" value={form.drift_ema_slow} onChange={e => u('drift_ema_slow', +e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Spike Threshold (pips)</label><input type="number" value={form.spike_threshold_pips} onChange={e => u('spike_threshold_pips', +e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Recovery Target (pips)</label><input type="number" value={form.recovery_target_pips} onChange={e => u('recovery_target_pips', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Min ADX to Trade</label><input type="number" value={form.min_adx_to_trade} onChange={e => u('min_adx_to_trade', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Jump Entry Threshold (%)</label><input type="number" value={form.jump_entry_percentile_threshold} onChange={e => u('jump_entry_percentile_threshold', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Max Lots per Symbol</label><input type="number" step="0.1" value={form.aggregate_max_lots_per_symbol} onChange={e => u('aggregate_max_lots_per_symbol', +e.target.value)} /></div>
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+                    <input type="checkbox" checked={form.trade_jumps_enabled ?? false} onChange={e => u('trade_jumps_enabled', e.target.checked)} />
+                    Enable Jump Trades
+                  </label>
+                </div>
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+                    <input type="checkbox" checked={form.control_test_passed ?? false} onChange={e => u('control_test_passed', e.target.checked)} />
+                    Control Test Passed
+                  </label>
+                </div>
+              </div>
+            )}
+            {form.strategy_id === 'CRT_v1' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><input type="text" value={form.htf_timeframe} onChange={e => u('htf_timeframe', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>LTF Timeframe</label><input type="text" value={form.ltf_timeframe} onChange={e => u('ltf_timeframe', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Target R-Multiple</label><input type="number" step="0.1" value={form.target_r_multiple} onChange={e => u('target_r_multiple', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Session</label><input type="number" value={form.max_trades_per_session} onChange={e => u('max_trades_per_session', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session Start (ET)</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff (ET)</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+                    <input type="checkbox" checked={form.bypass_session_synthetics ?? true} onChange={e => u('bypass_session_synthetics', e.target.checked)} />
+                    Bypass Session Filter (Synthetics)
+                  </label>
+            {form.strategy_id === 'HTFFVGFlip_v1' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><input type="text" value={form.htf_timeframe} onChange={e => u('htf_timeframe', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Entry Confirm TF</label><input type="text" value={form.entry_confirmation_tf} onChange={e => u('entry_confirmation_tf', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={form.target_rr} onChange={e => u('target_rr', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+                    <input type="checkbox" checked={form.require_unfilled_htf_fvg ?? true} onChange={e => u('require_unfilled_htf_fvg', e.target.checked)} />
+                    Require Unfilled HTF FVG
+                  </label>
+                </div>
+              </div>
+            )}
+            {form.strategy_id === 'BiasIFVG_v1' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <div><label style={{ fontSize: '0.7rem' }}>Stop Method</label><input type="text" value={form.stop_method} onChange={e => u('stop_method', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Target RR Range Min</label><input type="number" step="0.1" value={form.target_rr_range_min} onChange={e => u('target_rr_range_min', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Target RR Range Max</label><input type="number" step="0.1" value={form.target_rr_range_max} onChange={e => u('target_rr_range_max', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" value={form.max_trades_per_day} onChange={e => u('max_trades_per_day', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>
+              </div>
+            )}
+            {form.strategy_id === 'NYOpenRetest_v1' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <div><label style={{ fontSize: '0.7rem' }}>Range Start</label><input type="text" value={form.range_window_start} onChange={e => u('range_window_start', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Range End</label><input type="text" value={form.range_window_end} onChange={e => u('range_window_end', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Earliest Break Time</label><input type="text" value={form.earliest_valid_break_time} onChange={e => u('earliest_valid_break_time', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session End</label><input type="text" value={form.session_end} onChange={e => u('session_end', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Stop Buffer (pts)</label><input type="number" step="0.1" value={form.stop_buffer_points} onChange={e => u('stop_buffer_points', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Fixed Target (pts)</label><input type="number" step="0.1" value={form.fixed_target_points} onChange={e => u('fixed_target_points', +e.target.value)} /></div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+                    <input type="checkbox" checked={form.dynamic_target_override ?? true} onChange={e => u('dynamic_target_override', e.target.checked)} />
+                    Dynamic Target Override
+                  </label>
+                </div>
+              </div>
+            )}
+                </div>
               </div>
             )}
             

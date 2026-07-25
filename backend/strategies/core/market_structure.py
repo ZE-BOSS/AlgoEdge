@@ -11,8 +11,10 @@ Key rules:
   - ChoCH uses candle CLOSE, not HIGH/LOW (full body confirmation)
 """
 
+from typing import Any
+
 import pandas as pd
-from typing import Dict, Any, List, Optional
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -24,14 +26,14 @@ class MarketStructureDetector:
     def __init__(self, swing_length: int = 5, min_bos_count: int = 2):
         self.swing_length = swing_length
         self.min_bos_count = min_bos_count
-        self.swings: List[Dict[str, Any]] = []
+        self.swings: list[dict[str, Any]] = []
         self.trend = "NEUTRAL"
-        self.bos_history: List[Dict[str, Any]] = []
+        self.bos_history: list[dict[str, Any]] = []
         self.consecutive_bos = 0
         self.trend_confirmed = False
-        self._last_bos_level: Optional[float] = None  # Price of last BOS break
+        self._last_bos_level: float | None = None  # Price of last BOS break
 
-    def update(self, candles: pd.DataFrame) -> Dict[str, Any]:
+    def update(self, candles: pd.DataFrame) -> dict[str, Any]:
         """
         Process candles to find swings and structural breaks.
         Returns trend info with BOS counter and confirmation state.
@@ -186,11 +188,11 @@ class MarketStructureDetector:
         """Return the current directional bias (BULLISH/BEARISH/NEUTRAL)."""
         return self.trend
 
-    def get_last_bos_level(self) -> Optional[float]:
+    def get_last_bos_level(self) -> float | None:
         """Return the price level of the last BOS break (for retest detection)."""
         return self._last_bos_level
 
-    def _result(self, last_bos, last_choch) -> Dict[str, Any]:
+    def _result(self, last_bos, last_choch) -> dict[str, Any]:
         return {
             "trend": self.trend,
             "trend_confirmed": self.trend_confirmed,

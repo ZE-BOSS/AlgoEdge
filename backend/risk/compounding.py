@@ -9,10 +9,9 @@ Toggled per user via UserConfig.compounding.enabled.
 Source: CompoundingPlan_Spec.md
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Literal
 import math
-
+from dataclasses import dataclass
+from typing import Literal
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DATA STRUCTURES
@@ -54,7 +53,7 @@ class CompoundingState:
 # DEFAULT 1:3 RR COMPOUNDING PLAN
 # ─────────────────────────────────────────────────────────────────────────────
 
-DEFAULT_1_3RR_STEPS: List[CompoundingStep] = [
+DEFAULT_1_3RR_STEPS: list[CompoundingStep] = [
     # Note: Step 4 in source image shows $230 (typo) — corrected to $320
     CompoundingStep(step_number=1,  risk_amount=20,  reward_at_3r=60,   entry_threshold=0,     account_after_win=80),
     CompoundingStep(step_number=2,  risk_amount=20,  reward_at_3r=60,   entry_threshold=80,    account_after_win=140),
@@ -106,14 +105,14 @@ class InstrumentProfile:
     trades_24_7:         bool    # True for synthetics
     
     # SMC parameter overrides (None = use global defaults)
-    swing_length_htf_override:     Optional[int]   = None
-    swing_length_ltf_override:     Optional[int]   = None
-    ob_impulse_ratio_override:     Optional[float] = None
-    liq_sweep_min_atr_mult_override:   Optional[float] = None
-    fvg_min_gap_atr_mult_override:     Optional[float] = None
-    sl_buffer_pips_override:       Optional[float] = None
-    atr_trail_multiplier_override: Optional[float] = None
-    max_spread_atr_mult_override:      Optional[float] = None
+    swing_length_htf_override:     int | None   = None
+    swing_length_ltf_override:     int | None   = None
+    ob_impulse_ratio_override:     float | None = None
+    liq_sweep_min_atr_mult_override:   float | None = None
+    fvg_min_gap_atr_mult_override:     float | None = None
+    sl_buffer_pips_override:       float | None = None
+    atr_trail_multiplier_override: float | None = None
+    max_spread_atr_mult_override:      float | None = None
 
     def get_pip_value_per_mini_lot(self) -> float:
         """Value of 1 pip/point move on 0.01 lot."""
@@ -544,6 +543,44 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         max_spread_atr_mult_override=0.8,
     ),
 
+    "NAS100": InstrumentProfile(
+        symbol="NAS100",
+        instrument_type="INDEX",
+        point_size=1.0,
+        point_value_per_lot=1.0,
+        lot_min=0.01,
+        lot_max=50.0,
+        lot_step=0.01,
+        contract_size=1,
+        session_filter=True,
+        news_filter=True,
+        trades_24_7=False,
+        swing_length_htf_override=5,
+        liq_sweep_min_atr_mult_override=2.0,
+        fvg_min_gap_atr_mult_override=1.5,
+        sl_buffer_pips_override=10.0,
+        max_spread_atr_mult_override=0.8,
+    ),
+
+    "US500": InstrumentProfile(
+        symbol="US500",
+        instrument_type="INDEX",
+        point_size=1.0,
+        point_value_per_lot=1.0,
+        lot_min=0.01,
+        lot_max=50.0,
+        lot_step=0.01,
+        contract_size=1,
+        session_filter=True,
+        news_filter=True,
+        trades_24_7=False,
+        swing_length_htf_override=5,
+        liq_sweep_min_atr_mult_override=2.0,
+        fvg_min_gap_atr_mult_override=1.5,
+        sl_buffer_pips_override=10.0,
+        max_spread_atr_mult_override=0.8,
+    ),
+
     "BTCUSD": InstrumentProfile(
         symbol="BTCUSD",
         instrument_type="CRYPTO",
@@ -603,11 +640,13 @@ SYMBOL_ALIASES: dict[str, str] = {
     # Commodities / Forex / Crypto
     "Gold": "XAUUSD", "GOLD": "XAUUSD",
     "DJI": "US30", "DOW": "US30",
+    "US100": "NAS100", "USTEC": "NAS100", "NDX": "NAS100",
+    "SPX500": "US500", "SPX": "US500",
     "BTC": "BTCUSD",
 }
 
 
-def get_instrument_profile(symbol: str) -> Optional[InstrumentProfile]:
+def get_instrument_profile(symbol: str) -> InstrumentProfile | None:
     """Look up instrument profile with alias resolution."""
     resolved = SYMBOL_ALIASES.get(symbol, symbol)
     return INSTRUMENT_PROFILES.get(resolved)
@@ -623,7 +662,7 @@ class CompoundingEngine:
     Determines risk amount based on account balance and compounding step.
     """
 
-    def __init__(self, config: "CompoundingParams", steps: Optional[List[CompoundingStep]] = None):
+    def __init__(self, config: "CompoundingParams", steps: list[CompoundingStep] | None = None):
         self.config = config
         self.steps  = steps or DEFAULT_1_3RR_STEPS
 
@@ -860,7 +899,7 @@ class CompoundingParams:
     use_default_plan: bool = True
     """Use the built-in 1:3 RR 18-step plan. False = use custom_steps."""
 
-    custom_steps: Optional[List[dict]] = None
+    custom_steps: list[dict] | None = None
     """Custom step table. List of dicts with keys: step, risk, entry_threshold."""
 
     advance_mode: Literal["AUTO", "CONSERVATIVE", "MANUAL"] = "AUTO"
@@ -882,7 +921,7 @@ class CompoundingParams:
     max_losses_before_downgrade: int = 3
     """In LOSS_COUNT mode: step down after this many consecutive losses."""
 
-    def get_steps(self) -> List[CompoundingStep]:
+    def get_steps(self) -> list[CompoundingStep]:
         if self.use_default_plan or not self.custom_steps:
             return DEFAULT_1_3RR_STEPS
             

@@ -5,19 +5,33 @@ FastAPI application entry point.
 All routes registered, DB initialized, CORS configured for remote frontend access.
 """
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 import os
 import time
+from contextlib import asynccontextmanager
 
-from backend.config import settings
-from backend.utils.logger import get_logger
-from backend.data.database import init_db, close_db
-from backend.api.websocket import manager as ws_manager
+from fastapi import FastAPI, Request, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 
 # Import API route modules
-from backend.api.routes import trades, stats, admin, backtest, config, charts, compounding, llm, push, auth, signals, bot, broker, dashboard, mt5_test
+from backend.api.routes import (
+    admin,
+    auth,
+    backtest,
+    bot,
+    broker,
+    charts,
+    compounding,
+    config,
+    dashboard,
+    llm,
+    mt5_test,
+    push,
+    signals,
+    stats,
+    trades,
+)
+from backend.data.database import close_db, init_db
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -33,9 +47,10 @@ async def lifespan(app: FastAPI):
 
     # Clean up ghost manual trades on boot
     try:
+        from sqlalchemy import select
+
         from backend.data.database import async_session
         from backend.data.models import Trade, TradePosition
-        from sqlalchemy import select
         async with async_session() as session:
             # 1. Clean Ghosts
             result = await session.execute(select(Trade).where(Trade.status == "OPEN", Trade.strategy_id == "MANUAL"))
@@ -90,8 +105,9 @@ async def lifespan(app: FastAPI):
     mt5_ok = False
     if os.name == "nt":
         try:
-            from backend.mt5.bridge import bridge
-            await bridge.connect()
+            from backend.brokers.factory import broker_factory
+            broker = broker_factory.get_broker("MT5")
+            await broker.connect()
             mt5_ok = True
             logger.info("MT5 connected")
         except Exception as e:

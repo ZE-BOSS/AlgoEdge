@@ -8,14 +8,14 @@ Actively manages open MT5 positions. Runs in a frequent loop (e.g. every 3s) to:
 """
 
 import asyncio
+from datetime import datetime
+
 import MetaTrader5 as mt5
-from datetime import datetime, timezone
 from sqlalchemy import select
 
-from backend.utils.logger import get_logger
-from backend.services.telegram import telegram_service
 from backend.api.websocket import manager as ws_manager
 from backend.risk.position_sizer import get_pip_size
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -59,9 +59,9 @@ class PositionManager:
         if not mt5.terminal_info():
             return
 
-        from backend.data.database import async_session
-        from backend.data.models import TradePosition, Trade, UserConfigModel
         from backend.core.config_schema import UserConfigV2
+        from backend.data.database import async_session
+        from backend.data.models import Trade, TradePosition, UserConfigModel
         
         async with async_session() as session:
             # 1. Fetch user config for risk settings
@@ -327,8 +327,8 @@ class PositionManager:
                                     
                                     # Update chart data
                                     try:
+
                                         from backend.mt5.data_fetcher import DataFetcher
-                                        import pandas as pd
                                         candles = await DataFetcher.get_historical_data(trade.symbol, "M5", 100)
                                         if not candles.empty:
                                             cd_df = candles.copy()
@@ -342,15 +342,16 @@ class PositionManager:
                         if pos.mt5_ticket not in self._notified_closes:
                             self._notified_closes.add(pos.mt5_ticket)
                             try:
-                                from backend.services.telegram import telegram_service
                                 import asyncio
+
+                                from backend.services.telegram import telegram_service
                                 emoji = "✅" if net_profit >= 0 else "❌"
                                 reason_str = reason if 'reason' in dir() else "CLOSED"
                                 if reason_str == "SL": reason_str = "Stop Loss Hit"
                                 elif reason_str == "TRAIL": reason_str = "Trailing Stop Hit"
                                 elif reason_str.startswith("TP"): reason_str = "Take Profit Hit"
                                 elif reason_str == "CLIENT": reason_str = "Manual Close"
-                                msg = f"{emoji} *{reason_str}*\nSymbol: {pos.symbol if hasattr(pos, 'symbol') else 'Unknown'}\nTicket: {pos.mt5_ticket}\nExit Price: {exit_deal.price}\nP&L: ${net_profit:.2f}"
+                                msg = f"{emoji} *{reason_str}*\nSymbol: {trade.symbol if trade else 'Unknown'}\nTicket: {pos.mt5_ticket}\nExit Price: {exit_deal.price}\nP&L: ${net_profit:.2f}"
                                 asyncio.create_task(telegram_service.send_message(msg))
                             except Exception as tg_err:
                                 logger.warning(f"Telegram notification failed: {tg_err}")
@@ -467,12 +468,27 @@ class PositionManager:
                         current_rr = pips_in_profit / risk_pips
                         if current_rr >= risk.be_trigger_rr:
                             be_buffer = risk.be_buffer_pips * pip_size_val
+                            
+                            # Ensure BE buffer covers spread + commission to prevent net loss
+                            sym_info = mt5.symbol_info(symbol)
+                            tick = mt5.symbol_info_tick(symbol)
+                            
+                            real_spread = 0.0
+                            if tick and tick.ask > tick.bid:
+                                real_spread = tick.ask - tick.bid
+                            elif sym_info and sym_info.spread > 0:
+                                real_spread = sym_info.spread * sym_info.point
+                            
+                            if real_spread <= 0:
+                                real_spread = 2.0 * pip_size_val # fallback 2 pips
+                                
+                            min_spread_buffer = real_spread * 2.0 # 2x spread for safety against commission/slippage
+                            be_buffer = max(be_buffer, min_spread_buffer)
+                                
                             new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                             
                             move_sl = False
-                            if is_buy and new_sl > current_sl:
-                                move_sl = True
-                            elif not is_buy and (current_sl == 0.0 or new_sl < current_sl):
+                            if is_buy and new_sl > current_sl or not is_buy and (current_sl == 0.0 or new_sl < current_sl):
                                 move_sl = True
                                 
                             if move_sl:
@@ -511,9 +527,7 @@ class PositionManager:
                         new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method, tp_level)
                         if new_trail_sl is not None:
                             move_sl = False
-                            if is_buy and new_trail_sl > current_sl:
-                                move_sl = True
-                            elif not is_buy and (current_sl == 0.0 or new_trail_sl < current_sl):
+                            if is_buy and new_trail_sl > current_sl or not is_buy and (current_sl == 0.0 or new_trail_sl < current_sl):
                                 move_sl = True
                                 
                             if move_sl:
@@ -548,14 +562,29 @@ class PositionManager:
                         be_atr_mult = getattr(risk, 'be_buffer_atr_mult', getattr(risk, 'be_buffer_pips', 0.1))
                         # Estimate ATR from recent candle range as proxy when not available
                         be_buffer = be_atr_mult * pip_size_val * 10  # conservative fallback
+                        
+                        # Ensure BE buffer covers spread + commission to prevent net loss
+                        sym_info = mt5.symbol_info(symbol)
+                        tick = mt5.symbol_info_tick(symbol)
+                        
+                        real_spread = 0.0
+                        if tick and tick.ask > tick.bid:
+                            real_spread = tick.ask - tick.bid
+                        elif sym_info and sym_info.spread > 0:
+                            real_spread = sym_info.spread * sym_info.point
+                        
+                        if real_spread <= 0:
+                            real_spread = 2.0 * pip_size_val # fallback 2 pips
+                            
+                        min_spread_buffer = real_spread * 2.0 # 2x spread for safety against commission/slippage
+                        be_buffer = max(be_buffer, min_spread_buffer)
+                            
                         new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                         
                         for alive_pos in alive_positions:
                             current_sl = alive_pos.stop_loss
                             move_sl = False
-                            if is_buy and new_sl > current_sl:
-                                move_sl = True
-                            elif not is_buy and (current_sl == 0.0 or new_sl < current_sl):
+                            if is_buy and new_sl > current_sl or not is_buy and (current_sl == 0.0 or new_sl < current_sl):
                                 move_sl = True
                             
                             if move_sl and not alive_pos.be_applied:
@@ -627,19 +656,23 @@ class PositionManager:
             
             atr_data = self._cached_atr.get(symbol)
             if not atr_data or (now - atr_data['time']) > 60:
-                from backend.mt5.data_fetcher import DataFetcher
-                import pandas as pd
-                candles = await DataFetcher.get_historical_data(symbol, "M5", 30)
-                if not candles.empty:
-                    candles['prev_close'] = candles['close'].shift(1)
-                    candles['tr1'] = candles['high'] - candles['low']
-                    candles['tr2'] = abs(candles['high'] - candles['prev_close'])
-                    candles['tr3'] = abs(candles['low'] - candles['prev_close'])
-                    candles['tr'] = candles[['tr1', 'tr2', 'tr3']].max(axis=1)
-                    atr_val = candles['tr'].rolling(window=14).mean().iloc[-1]
-                    if not pd.isna(atr_val):
-                        self._cached_atr[symbol] = {'atr': atr_val, 'time': now}
-                        atr_data = self._cached_atr[symbol]
+                try:
+                    import pandas as pd
+
+                    from backend.mt5.data_fetcher import DataFetcher
+                    candles = await DataFetcher.get_historical_data(symbol, "M5", 30)
+                    if not candles.empty:
+                        candles['prev_close'] = candles['close'].shift(1)
+                        candles['tr1'] = candles['high'] - candles['low']
+                        candles['tr2'] = abs(candles['high'] - candles['prev_close'])
+                        candles['tr3'] = abs(candles['low'] - candles['prev_close'])
+                        candles['tr'] = candles[['tr1', 'tr2', 'tr3']].max(axis=1)
+                        atr_val = candles['tr'].rolling(window=14).mean().iloc[-1]
+                        if not pd.isna(atr_val):
+                            self._cached_atr[symbol] = {'atr': atr_val, 'time': now}
+                            atr_data = self._cached_atr[symbol]
+                except Exception as e:
+                    logger.warning(f"Failed to fetch ATR for trailing SL on {symbol}: {e}")
             
             if not atr_data: return None
             atr = atr_data['atr']
@@ -670,15 +703,20 @@ class PositionManager:
             struct_data = self._cached_structure.get(symbol)
             
             if not struct_data or (now - struct_data['time']) > 300: # 5 min cache
-                from backend.mt5.data_fetcher import DataFetcher
-                from backend.strategies.core.market_structure import MarketStructureDetector
-                candles = await DataFetcher.get_historical_data(symbol, "M15", 100)
-                if not candles.empty:
-                    bars = getattr(risk, 'trail_structure_bars', 3)
-                    structure = MarketStructureDetector(swing_length=bars)
-                    structure.update(candles)
-                    self._cached_structure[symbol] = {'swings': structure.swings, 'time': now}
-                    struct_data = self._cached_structure[symbol]
+                try:
+                    from backend.mt5.data_fetcher import DataFetcher
+                    from backend.strategies.core.market_structure import (
+                        MarketStructureDetector,
+                    )
+                    candles = await DataFetcher.get_historical_data(symbol, "M15", 100)
+                    if not candles.empty:
+                        bars = getattr(risk, 'trail_structure_bars', 3)
+                        structure = MarketStructureDetector(swing_length=bars)
+                        structure.update(candles)
+                        self._cached_structure[symbol] = {'swings': structure.swings, 'time': now}
+                        struct_data = self._cached_structure[symbol]
+                except Exception as e:
+                    logger.warning(f"Failed to fetch structure for trailing SL on {symbol}: {e}")
             
             if not struct_data: return None
             swings = struct_data['swings']
@@ -703,14 +741,14 @@ class PositionManager:
 
     async def _modify_sl(self, ticket: int, symbol: str, new_sl: float) -> bool:
         from backend.mt5.order_manager import OrderManager
-        loop = asyncio.get_running_loop()
-        success = await loop.run_in_executor(
-            None,
-            lambda: OrderManager.modify_sl(ticket, symbol, new_sl)
-        )
-        if not success:
-            logger.error(f"Failed to modify SL for {ticket} to {new_sl}")
+        try:
+            success = await OrderManager.modify_sl(ticket, new_sl)
+            if not success:
+                logger.error(f"Failed to modify SL for {ticket} to {new_sl}")
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Error modifying SL for {ticket}: {e}")
             return False
-        return True
 
 position_manager = PositionManager()

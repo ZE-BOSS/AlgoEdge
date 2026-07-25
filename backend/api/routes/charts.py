@@ -5,8 +5,8 @@ OHLCV data and snapshot serving endpoints.
 Source: TradingBot_MasterPlan-2.md Section 6
 """
 
+
 from fastapi import APIRouter, Query
-from typing import Optional
 
 from backend.mt5.data_fetcher import DataFetcher
 from backend.utils.logger import get_logger

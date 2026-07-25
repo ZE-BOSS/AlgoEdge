@@ -5,8 +5,10 @@ Fair Value Gap (FVG) detection and Consequent Encroachment (CE) levels.
 Source: SMC_Strategy.md Section 2
 """
 
+from typing import Any
+
 import pandas as pd
-from typing import List, Dict, Any
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,7 +25,7 @@ class FVGDetector:
             self.atr_multiplier = fvg_min_gap_atr_mult
         self.active_fvgs = []
 
-    def update(self, candles: pd.DataFrame) -> List[Dict[str, Any]]:
+    def update(self, candles: pd.DataFrame) -> list[dict[str, Any]]:
         """
         Scan for new FVGs and remove mitigated ones.
         """
@@ -34,16 +36,14 @@ class FVGDetector:
         latest = candles.iloc[-1]
         for fvg in self.active_fvgs[:]:
             if fvg["type"] == "BULLISH":
-                if latest["low"] < fvg["top"]:
-                    fvg["top"] = latest["low"]
+                fvg["top"] = min(fvg["top"], latest["low"])
                 if fvg["top"] <= fvg["bottom"]:
                     self.active_fvgs.remove(fvg)
                     logger.debug(f"BULLISH FVG filled/removed at {latest.name}")
                     continue
                 fvg["ce"] = fvg["bottom"] + (fvg["top"] - fvg["bottom"]) / 2
             else:
-                if latest["high"] > fvg["bottom"]:
-                    fvg["bottom"] = latest["high"]
+                fvg["bottom"] = max(fvg["bottom"], latest["high"])
                 if fvg["bottom"] >= fvg["top"]:
                     self.active_fvgs.remove(fvg)
                     logger.debug(f"BEARISH FVG filled/removed at {latest.name}")

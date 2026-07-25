@@ -7,17 +7,18 @@ Source: TradingBot_MasterPlan-2.md Section 6 — REST API
 
 import json
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
-from sqlalchemy.orm import selectinload, defer
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
 from datetime import datetime, timezone
+from typing import Any
 
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer, selectinload
+
+from backend.api.deps import get_current_user
 from backend.data.database import get_db
 from backend.data.models import BacktestRun, BacktestTrade, User
-from backend.api.deps import get_current_user
 from backend.utils.logger import get_logger
 
 try:
@@ -27,7 +28,6 @@ except ImportError:
     HAS_REDIS = False
     redis_client = None
 
-from backend.config import settings
 
 logger = get_logger(__name__)
 
@@ -39,14 +39,14 @@ class BacktestRequest(BaseModel):
     strategy_id: str = "SMC_v1"
     symbol: str
     timeframe: str = "M15"
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    start_date: str | None = None
+    end_date: str | None = None
     candle_count: int = 5000
     initial_balance: float = 10000.0
-    risk_config: Dict[str, Any] = {}
-    prop_firm: Dict[str, Any] = {}
+    risk_config: dict[str, Any] = {}
+    prop_firm: dict[str, Any] = {}
     # ── Dynamic Strategy Params ──
-    strategy_params: Dict[str, Any] = {}
+    strategy_params: dict[str, Any] = {}
     # ── Risk Params ──
     risk_per_trade_pct: float = 1.0
     min_rr: float = 3.0
@@ -80,10 +80,10 @@ class BacktestRequest(BaseModel):
     compounding_enabled: bool = False
     # ── Multi-Strategy Filters ──
     session_filter_enabled: bool = True
-    manual_bias_overrides: Dict[str, Any] = {}
+    manual_bias_overrides: dict[str, Any] = {}
 
 class SaveBacktestRequest(BaseModel):
-    backtest_data: Dict[str, Any]
+    backtest_data: dict[str, Any]
     save_mode: str = "FULL"  # "FULL" or "SUMMARY"
 
 
@@ -96,6 +96,7 @@ async def get_backtest_status(current_user: User = Depends(get_current_user)):
     if state is None and HAS_REDIS and redis_client and redis_client.redis:
         try:
             import asyncio
+
             import redis.exceptions
             data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
             if data:
@@ -117,6 +118,7 @@ async def get_backtest_latest_result(current_user: User = Depends(get_current_us
     if state is None and HAS_REDIS and redis_client and redis_client.redis:
         try:
             import asyncio
+
             import redis.exceptions
             data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
             if data:
@@ -151,6 +153,7 @@ async def stop_backtest_endpoint(current_user: User = Depends(get_current_user))
     if state is None and HAS_REDIS and redis_client and redis_client.redis:
         try:
             import asyncio
+
             import redis.exceptions
             data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
             if data:
@@ -164,6 +167,7 @@ async def stop_backtest_endpoint(current_user: User = Depends(get_current_user))
         if HAS_REDIS and redis_client and redis_client.redis:
             try:
                 import asyncio
+
                 import redis.exceptions
                 await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
             except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
@@ -198,6 +202,7 @@ async def run_backtest_endpoint(
             if HAS_REDIS and redis_client and redis_client.redis:
                 try:
                     import asyncio
+
                     import redis.exceptions
                     await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
                 except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
@@ -207,6 +212,7 @@ async def run_backtest_endpoint(
             if HAS_REDIS and redis_client and redis_client.redis:
                 try:
                     import asyncio
+
                     import redis.exceptions
                     data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
                     if data:
@@ -217,11 +223,12 @@ async def run_backtest_endpoint(
 
         await _save_state(initial_state)
         try:
+            import time as _time
+
+            from backend.api.websocket import manager as ws_manager
             from backend.backtester.runner import run_backtest
             from backend.mt5.data_fetcher import DataFetcher, DataFetchError
             from backend.services.bot_service import bot_service
-            from backend.api.websocket import manager as ws_manager
-            import time as _time
 
             bt_start = _time.time()
             logger.info(f"═══ BACKTEST START ═══ {req.symbol} {req.timeframe} | user={current_user.email}")
@@ -258,8 +265,9 @@ async def run_backtest_endpoint(
 
             # Generate signals using the unified SMCEngine
             import pandas as pd
+
+            from backend.core.config_schema import InstrumentSettings, UserConfigV2
             from backend.strategies.registry import get_strategy
-            from backend.core.config_schema import UserConfigV2, InstrumentSettings
             
             config = UserConfigV2()
             
@@ -278,10 +286,26 @@ async def run_backtest_endpoint(
                 for k, v in req.strategy_params.items():
                     if hasattr(config.smc, k):
                         setattr(config.smc, k, v)
-            elif req.strategy_id == "CrashBoom_v1":
+            elif req.strategy_id == "DriftJumpAlpha_v1":
                 for k, v in req.strategy_params.items():
-                    if hasattr(config.crashboom, k):
-                        setattr(config.crashboom, k, v)
+                    if hasattr(config.drift_jump_alpha, k):
+                        setattr(config.drift_jump_alpha, k, v)
+            elif req.strategy_id == "CRT_v1":
+                for k, v in req.strategy_params.items():
+                    if hasattr(config.crt, k):
+                        setattr(config.crt, k, v)
+            elif req.strategy_id == "HTFFVGFlip_v1":
+                for k, v in req.strategy_params.items():
+                    if hasattr(config.htf_fvg_flip, k):
+                        setattr(config.htf_fvg_flip, k, v)
+            elif req.strategy_id == "BiasIFVG_v1":
+                for k, v in req.strategy_params.items():
+                    if hasattr(config.bias_ifvg, k):
+                        setattr(config.bias_ifvg, k, v)
+            elif req.strategy_id == "NYOpenRetest_v1":
+                for k, v in req.strategy_params.items():
+                    if hasattr(config.ny_open_retest, k):
+                        setattr(config.ny_open_retest, k, v)
                         
             config.instrument_settings = [InstrumentSettings(symbol=req.symbol, strategy_id=req.strategy_id)]
             
@@ -307,6 +331,7 @@ async def run_backtest_endpoint(
                 prev_m5_time = None
 
                 import asyncio
+
                 import numpy as np
 
                 candles_h4_sorted = candles_h4_idx.sort_index()
@@ -493,9 +518,7 @@ async def run_backtest_endpoint(
                     return _sanitize(obj.tolist())
                 elif isinstance(obj, (int, float)) and pd.isna(obj):
                     return None
-                elif isinstance(obj, pd.Timestamp):
-                    return obj.isoformat()
-                elif hasattr(obj, 'isoformat'):
+                elif isinstance(obj, pd.Timestamp) or hasattr(obj, 'isoformat'):
                     return obj.isoformat()
                 elif isinstance(obj, (str, type(None))):
                     return obj
@@ -577,13 +600,12 @@ async def run_backtest_endpoint(
             logger.error(f"Backtest error: {e}\n{traceback.format_exc()}")
             from backend.api.websocket import manager as ws_manager
             from backend.services.bot_service import bot_service
-            bot_service.log_system_event(f"Backtest failed: {str(e)}", category="BACKTEST", level="ERROR")
+            bot_service.log_system_event(f"Backtest failed: {e!s}", category="BACKTEST", level="ERROR")
             try:
                 await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
             except: pass
 
-    import asyncio
-    asyncio.create_task(_run_backtest_task())
+    background_tasks.add_task(_run_backtest_task)
     return {"status": "started", "message": "Backtest queued and running in the background."}
 
 @router.get("/backtests")
@@ -771,8 +793,9 @@ async def get_backtest(
     }
 
     try:
-        from backend.analytics.reports import generate_risk_report
         import dataclasses
+
+        from backend.analytics.reports import generate_risk_report
         risk_report = generate_risk_report(grouped_trades_out)
         resp["report"] = dataclasses.asdict(risk_report)
         resp["session_win_rates"] = {
@@ -803,7 +826,6 @@ async def get_saved_trade_chart(
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch massive chart data for a specific trade separately to prevent UI freeze."""
-    from backend.data.models import BacktestTrade
     result = await db.execute(
         select(BacktestTrade)
         .where(BacktestTrade.backtest_id == backtest_id, BacktestTrade.id == group_id)
@@ -877,10 +899,12 @@ async def save_backtest_from_client(
     db: AsyncSession = Depends(get_db),
 ):
     """Save a discarded backtest from the client."""
-    from backend.data.models import BacktestRun, BacktestTrade
-    from sqlalchemy.future import select
-    from datetime import datetime, timezone
     import json
+    from datetime import datetime
+
+    from sqlalchemy.future import select
+
+    from backend.data.models import BacktestRun
     
     raw_data = await request.json()
     data = raw_data.get("backtest_data", raw_data)
@@ -971,7 +995,6 @@ async def save_backtest_from_client(
             logging.error(f"Failed to parse time for trade: {e}")
             entry_time, exit_time = None, None
             
-        import uuid
         bt_trade = BacktestTrade(
             id=uuid.uuid4().int & ((1 << 63) - 1),  # Bypass SQLite BIGINT autoincrement issue & ensure signed 64-bit fit
             backtest_id=backtest_id,

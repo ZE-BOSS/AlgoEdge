@@ -6,10 +6,10 @@ Source: SMC_Strategy-1.md Section 14
 Source: RiskManagement_Spec.md Section 6
 """
 
-from typing import Dict, Any, Optional
+from typing import Any
+
 from backend.core.config_schema import UserConfig
-from backend.strategies.base_strategy import TradeSignal, TradeAction
-from backend.utils.timeutils import is_kill_zone
+from backend.strategies.base_strategy import TradeSignal
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -21,7 +21,7 @@ class TradeGate:
     def __init__(self, config: UserConfig):
         self.config = config
 
-    def validate_all(self, context: Dict[str, Any]) -> tuple[bool, list[str]]:
+    def validate_all(self, context: dict[str, Any]) -> tuple[bool, list[str]]:
         """Run all safety gates. Returns (passed, list_of_rejection_reasons)."""
         direction = context.get("signal_direction", "")
         reasons = []
@@ -106,7 +106,7 @@ class SignalGenerator:
         self.config = config
         self.gate = TradeGate(config)
 
-    def generate(self, context: Dict[str, Any], score: int) -> Optional[TradeSignal]:
+    def generate(self, context: dict[str, Any], score: int) -> TradeSignal | None:
         """Attempt to generate a signal from current context."""
 
         context["confluence_score"] = score

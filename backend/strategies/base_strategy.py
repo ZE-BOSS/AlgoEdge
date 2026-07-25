@@ -5,9 +5,11 @@ Abstract base class for all trading strategies.
 Source: TradingBot_MasterPlan-2.md Section 12 (Extension 5)
 """
 
+from typing import Any
+
 import pandas as pd
-from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
+
 
 class TradeSignal(BaseModel):
     """Standardized output from any strategy."""
@@ -22,16 +24,20 @@ class TradeSignal(BaseModel):
     stop_loss: float
     take_profit: float
     confluence_score: int
-    metadata: Dict[str, Any] = {}
-    chart_data: Optional[List[Dict[str, Any]]] = None
+    metadata: dict[str, Any] = {}
+    chart_data: list[dict[str, Any]] | None = None
 
 class TradeAction(BaseModel):
     """Action to take on an open position."""
     ticket: int
     action: str  # "CLOSE", "MODIFY_SL"
-    new_sl: Optional[float] = None
+    new_sl: float | None = None
     close_pct: float = 1.0
 
+
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class BaseStrategy:
     """Interface that all strategies must implement."""
@@ -41,14 +47,40 @@ class BaseStrategy:
         self.is_backtesting = False
         self.run_logs = []
 
-    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Optional[TradeSignal]:
+    def log_event(self, message: str, level: str = "INFO", category: str = "STRATEGY"):
+        from datetime import datetime, timezone
+        from backend.services.bot_service import bot_service
+        
+        # Terminal logging
+        if level == "DEBUG":
+            logger.debug(f"[{category}] {message}")
+        elif level == "WARN":
+            logger.warning(f"[{category}] {message}")
+        elif level == "ERROR":
+            logger.error(f"[{category}] {message}")
+        else:
+            logger.info(f"[{category}] {message}")
+            
+        if self.is_backtesting:
+            self.run_logs.append({
+                "time": datetime.now(timezone.utc).isoformat(),
+                "level": level,
+                "category": category,
+                "message": message
+            })
+            if level != "DEBUG":
+                bot_service.log_system_event(message, level, f"BT-{category}")
+        else:
+            bot_service.log_system_event(message, level, category)
+
+    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         """Called on every new closed bar."""
         raise NotImplementedError
 
-    async def on_tick(self, symbol: str, tick: Dict[str, Any]) -> Optional[List[TradeAction]]:
+    async def on_tick(self, symbol: str, tick: dict[str, Any]) -> list[TradeAction] | None:
         """Called on every live tick for position management (optional)."""
         return []
 
-    def get_required_timeframes(self) -> List[str]:
+    def get_required_timeframes(self) -> list[str]:
         """Return list of timeframes this strategy needs."""
         raise NotImplementedError

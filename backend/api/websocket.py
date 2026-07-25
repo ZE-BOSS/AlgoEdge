@@ -6,12 +6,12 @@ Supports direct broadcasting (without Redis) for activity logs and backtest prog
 Source: TradingBot_MasterPlan-2.md Section 6
 """
 
-from typing import Dict, List
-from fastapi import WebSocket, WebSocketDisconnect
 import json
 
-from backend.utils.logger import get_logger
+from fastapi import WebSocket, WebSocketDisconnect
+
 from backend.config import settings
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -26,7 +26,7 @@ class ConnectionManager:
     """WebSocket connection pool — one per user."""
 
     def __init__(self):
-        self.active: Dict[str, List[WebSocket]] = {}
+        self.active: dict[str, list[WebSocket]] = {}
 
     async def connect(self, ws: WebSocket, user_id: str):
         await ws.accept()
@@ -74,7 +74,7 @@ class ConnectionManager:
         """Get total number of active WebSocket connections."""
         return sum(len(v) for v in self.active.values())
 
-    def get_connected_users(self) -> List[str]:
+    def get_connected_users(self) -> list[str]:
         """Get list of user IDs with active WebSocket connections."""
         return list(self.active.keys())
 
@@ -93,8 +93,9 @@ async def websocket_handler(websocket: WebSocket, user_id: str, token: str = Non
         await websocket.close(code=1008)
         return
 
-    from jose import jwt, JWTError
-    from backend.api.deps import JWT_SECRET_KEY, JWT_ALGORITHM
+    from jose import JWTError, jwt
+
+    from backend.api.deps import JWT_ALGORITHM, JWT_SECRET_KEY
 
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])

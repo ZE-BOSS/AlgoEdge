@@ -3,10 +3,11 @@ backend/risk/prop_firm_validator.py
 
 Validates trades against strict Prop Firm (BloomFunded) rules without compounding.
 """
-from typing import Dict, Any, Tuple, Optional
-from datetime import datetime, timezone, timedelta
 import json
 import os
+from datetime import datetime, timedelta
+from typing import Any
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -139,7 +140,7 @@ class PropFirmValidator:
                 self.save_state()
                 logger.error(self.pause_reason)
 
-    def validate_trade(self, symbol: str, requested_lots: float) -> Tuple[bool, str, float]:
+    def validate_trade(self, symbol: str, requested_lots: float) -> tuple[bool, str, float]:
         """
         Returns (is_valid, reason, allowed_lots)
         """
@@ -155,7 +156,7 @@ class PropFirmValidator:
             return False, f"Max 5 positions reached for {symbol}", 0.0
         
         if self.open_positions_count >= 13:
-            return False, f"Max 13 total open positions reached", 0.0
+            return False, "Max 13 total open positions reached", 0.0
 
         # Max Lot Size Limit
         max_lot_allowed = self.max_lot_sizes.get(symbol, 999.0)

@@ -13,17 +13,17 @@ Core behavior:
 """
 
 import uuid
-from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
-import pandas as pd
-import numpy as np
+from typing import Any
 
-from backend.risk.engine import RiskEngine
-from backend.risk.multi_tp import MultiTPManager, TPLevel, _is_buy
-from backend.risk.position_sizer import get_pip_size
+import numpy as np
+import pandas as pd
+
+from backend.analytics.reports import generate_risk_report
 from backend.risk.compounding import get_instrument_profile
-from backend.analytics.metrics import compute_portfolio_stats
-from backend.analytics.reports import generate_risk_report, RiskReport
+from backend.risk.engine import RiskEngine
+from backend.risk.multi_tp import TPLevel, _is_buy
+from backend.risk.position_sizer import get_pip_size
 from backend.risk.prop_firm_validator import PropFirmValidator
 from backend.utils.logger import get_logger
 from backend.utils.timeutils import detect_session
@@ -81,17 +81,17 @@ class BacktestEngine:
     What you backtest = what runs live.
     """
 
-    def __init__(self, risk_config: Dict[str, Any]):
+    def __init__(self, risk_config: dict[str, Any]):
         self.risk_engine = RiskEngine(risk_config)
         self.risk_config = risk_config
         prop_firm_config = risk_config.get("prop_firm", {})
         self.prop_firm_validator = PropFirmValidator(prop_firm_config)
         self.risk_engine.prop_firm_validator = self.prop_firm_validator
-        self.trades: List[Dict[str, Any]] = []
-        self.open_positions: List[Dict[str, Any]] = []
-        self.equity_curve: List[float] = []
+        self.trades: list[dict[str, Any]] = []
+        self.open_positions: list[dict[str, Any]] = []
+        self.equity_curve: list[float] = []
         self.invalid_signals: int = 0
-        self.rejection_funnel: Dict[str, Any] = {
+        self.rejection_funnel: dict[str, Any] = {
             "total_evaluated": 0,
             "strategy_rejections": {},
             "risk_rejections": {},
@@ -102,12 +102,12 @@ class BacktestEngine:
     def run(
         self,
         candles: pd.DataFrame,
-        signals: List[Dict[str, Any]],
+        signals: list[dict[str, Any]],
         initial_balance: float = 10000.0,
         candles_m15: pd.DataFrame = None,
         candles_m5: pd.DataFrame = None,
         compounding_enabled: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run a backtest on historical candles with pre-generated signals."""
         balance = initial_balance
         self.trades = []
@@ -122,7 +122,7 @@ class BacktestEngine:
             "approved": 0
         }
 
-        logger.info(f"[ENGINE] ═══ Starting backtest engine ═══")
+        logger.info("[ENGINE] ═══ Starting backtest engine ═══")
         logger.info(f"[ENGINE] Balance: ${initial_balance} | Signals: {len(signals)} | Candles: {len(candles)}")
         logger.info(f"[ENGINE] Risk config: risk_pct={self.risk_config.get('risk_per_trade_pct')}% | min_rr={self.risk_config.get('min_rr')} | tp_count={self.risk_config.get('tp_count')}")
 
@@ -388,13 +388,14 @@ class BacktestEngine:
                     approved, reason, tp_levels = self.risk_engine.evaluate_signal(
                         signal_data=sig,
                         account_balance=balance,
-                        current_time=current_time_dt
+                        current_time=current_time_dt,
+                        initial_balance=initial_balance
                     )
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
                     self.rejection_funnel["errors"] += 1
-                    logger.error(f"[ENGINE] ❌ Error evaluating signal: {str(e)}")
+                    logger.error(f"[ENGINE] ❌ Error evaluating signal: {e!s}")
                     continue
 
                 if approved:
@@ -439,7 +440,7 @@ class BacktestEngine:
             pos["entry_time_iso"] = _epoch_to_iso(pos.get("entry_time"))
             pos["exit_time_iso"] = _epoch_to_iso(last_time)
             pos["exit_confirmations"] = [
-                f"Exit Reason: END_OF_DATA (forced close)",
+                "Exit Reason: END_OF_DATA (forced close)",
                 f"Exit Price: {last_price:.5f}",
                 f"PnL: ${pos.get('pnl', 0):.2f}",
             ]
@@ -459,7 +460,7 @@ class BacktestEngine:
         total_pnl = balance - initial_balance
         wins = sum(1 for t in grouped_trades if t.get("pnl", 0) > 0)
         losses = sum(1 for t in grouped_trades if t.get("pnl", 0) <= 0)
-        logger.info(f"[ENGINE] ═══ Backtest engine complete ═══")
+        logger.info("[ENGINE] ═══ Backtest engine complete ═══")
         logger.info(f"[ENGINE] Trades: {len(grouped_trades)} ({wins}W / {losses}L) | Invalid: {self.invalid_signals}")
         logger.info(f"[ENGINE] P&L: ${total_pnl:.2f} | Final balance: ${balance:.2f}")
         if self.trades:
@@ -484,13 +485,13 @@ class BacktestEngine:
 
     def _create_position(
         self,
-        sig: Dict[str, Any],
+        sig: dict[str, Any],
         tp: TPLevel,
         current_time: Any,
         current_price: float,
         group_id: str,
         balance: float,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a position dict with entry confirmations and group_id."""
         entry_price = sig.get("entry_price", current_price)
 
@@ -510,7 +511,7 @@ class BacktestEngine:
             f"RR Multiplier: 1:{tp.rr_multiplier:.1f}",
             f"Volume: {tp.volume:.2f} lots ({tp.volume_pct * 100:.0f}%)",
             f"Entry Session: {entry_session}",
-            f"Entry Mode: ALL AT ENTRY",
+            "Entry Mode: ALL AT ENTRY",
             f"Pattern: {sig.get('pattern', 'N/A')}",
             f"FVG: {'Yes' if sig.get('has_fvg') else 'No'}",
             f"Liquidity Sweep: {'Yes' if sig.get('has_liquidity_sweep') else 'No'}",
@@ -545,7 +546,7 @@ class BacktestEngine:
             "original_signal": sig,
         }
 
-    def _group_trades(self, trades: List[Dict], candles: Any = None, candles_m15: Any = None, candles_m5: Any = None) -> List[Dict]:
+    def _group_trades(self, trades: list[dict], candles: Any = None, candles_m15: Any = None, candles_m5: Any = None) -> list[dict]:
         """Group trades by group_id for combined P&L display, extracting chart data for frontend."""
         from collections import OrderedDict
         groups = OrderedDict()
@@ -669,7 +670,7 @@ class BacktestEngine:
                     g["smc_data"]["boxes"] = [m for m in markings if m["type"] in ("OB", "FVG")]
                     g["smc_data"]["markers"] = [m for m in markings if m["type"] == "STRUCTURE"]
                     
-                except Exception as e:
+                except Exception:
                     import traceback
                     traceback.print_exc()
 

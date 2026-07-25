@@ -5,14 +5,14 @@ Signal listing and detail endpoints.
 Source: TradingBot_MasterPlan-2.md Section 6 — REST API
 """
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
-from typing import Optional
 
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.api.deps import get_current_user
 from backend.data.database import get_db
 from backend.data.models import Signal, Trade, User
-from backend.api.deps import get_current_user
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -21,9 +21,9 @@ router = APIRouter(prefix="/api", tags=["signals"])
 
 @router.get("/signals")
 async def get_signals(
-    symbol: Optional[str] = None,
-    status: Optional[str] = None,  # "executed", "skipped", or None for all
-    session: Optional[str] = None,
+    symbol: str | None = None,
+    status: str | None = None,  # "executed", "skipped", or None for all
+    session: str | None = None,
     limit: int = Query(50, le=500),
     offset: int = 0,
     current_user: User = Depends(get_current_user),
@@ -147,8 +147,9 @@ async def get_signal_snapshot(
 ):
     """Get signal entry chart snapshot image."""
     import os
-    from fastapi.responses import FileResponse
+
     from fastapi import HTTPException
+    from fastapi.responses import FileResponse
 
     result = await db.execute(
         select(Signal).where(Signal.id == signal_id, Signal.user_id == current_user.id)

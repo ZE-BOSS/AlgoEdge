@@ -4,10 +4,12 @@ backend/backtester/report.py
 Generates summary reports from backtest results.
 """
 
-from typing import Dict, Any
+from typing import Any
+
 from backend.analytics.metrics import compute_portfolio_stats
 
-def generate_backtest_report(backtest_results: Dict[str, Any]) -> Dict[str, Any]:
+
+def generate_backtest_report(backtest_results: dict[str, Any]) -> dict[str, Any]:
     """
     Format backtest results into a standardized report.
     """

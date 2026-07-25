@@ -5,7 +5,6 @@ Position sizing engine: Fixed % and Kelly Criterion.
 Source: RiskManagement_Spec.md Section 5
 """
 
-from typing import Optional
 from backend.utils.logger import get_logger
 
 try:
