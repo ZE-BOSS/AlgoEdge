@@ -341,11 +341,12 @@ class BotService:
                     
                 if getattr(self, "prop_firm_validator", None) and self.prop_firm_validator.enabled:
                     try:
-                        from backend.mt5.bridge import bridge
-                        if bridge.account_info:
+                        from backend.brokers.factory import broker_factory
+                        broker = broker_factory.get_broker()
+                        if broker.account_info:
                             self.prop_firm_validator.update_equity_balance(
-                                equity=bridge.account_info.equity,
-                                balance=bridge.account_info.balance,
+                                equity=broker.account_info.equity,
+                                balance=broker.account_info.balance,
                                 current_time=datetime.now(timezone.utc)
                             )
                     except Exception as e:
@@ -496,11 +497,12 @@ class BotService:
 
                                 # === Execute trade via RiskEngine ===
                                 try:
-                                    from backend.mt5.bridge import bridge
-                                    if not bridge.account_info:
-                                        self._log_event("Trade rejected: MT5 bridge offline or account info unavailable.", "ERROR", "RISK")
+                                    from backend.brokers.factory import broker_factory
+                                    broker = broker_factory.get_broker()
+                                    if not broker.account_info:
+                                        logger.warning("No MT5 account info available for risk sizing")
                                         continue
-                                    account_balance = bridge.account_info.balance
+                                    account_balance = broker.account_info.balance
 
                                     risk_config = {
                                         "risk_per_trade_pct": config.risk.risk_per_trade_pct,

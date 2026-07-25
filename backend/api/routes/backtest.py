@@ -286,6 +286,18 @@ async def run_backtest_endpoint(
                 for k, v in req.strategy_params.items():
                     if hasattr(config.crt, k):
                         setattr(config.crt, k, v)
+            elif req.strategy_id == "HTFFVGFlip_v1":
+                for k, v in req.strategy_params.items():
+                    if hasattr(config.htf_fvg_flip, k):
+                        setattr(config.htf_fvg_flip, k, v)
+            elif req.strategy_id == "BiasIFVG_v1":
+                for k, v in req.strategy_params.items():
+                    if hasattr(config.bias_ifvg, k):
+                        setattr(config.bias_ifvg, k, v)
+            elif req.strategy_id == "NYOpenRetest_v1":
+                for k, v in req.strategy_params.items():
+                    if hasattr(config.ny_open_retest, k):
+                        setattr(config.ny_open_retest, k, v)
                         
             config.instrument_settings = [InstrumentSettings(symbol=req.symbol, strategy_id=req.strategy_id)]
             

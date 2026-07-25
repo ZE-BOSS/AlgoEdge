@@ -90,8 +90,9 @@ async def lifespan(app: FastAPI):
     mt5_ok = False
     if os.name == "nt":
         try:
-            from backend.mt5.bridge import bridge
-            await bridge.connect()
+            from backend.brokers.factory import broker_factory
+            broker = broker_factory.get_broker("MT5")
+            await broker.connect()
             mt5_ok = True
             logger.info("MT5 connected")
         except Exception as e:

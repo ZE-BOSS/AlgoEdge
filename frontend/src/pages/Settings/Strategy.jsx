@@ -192,6 +192,9 @@ export default function StrategySettings() {
                       <option value="SMC_v1">SMC Multi-TF</option>
                       <option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option>
                       <option value="CRT_v1">CRT Strategy</option>
+                      <option value="HTFFVGFlip_v1">HTF FVG Flip</option>
+                      <option value="BiasIFVG_v1">Bias KeyLevel IFVG</option>
+                      <option value="NYOpenRetest_v1">NY Open Break Retest</option>
                     </select>
                   </div>
                   
@@ -278,6 +281,47 @@ export default function StrategySettings() {
               Bypass Session Filter (Synthetics)
             </label>
           </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">HTF FVG Flip Parameters</span></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div><label>HTF Timeframe</label><input type="text" value={config.htf_fvg_flip?.htf_timeframe || 'H1'} onChange={e => updateNested('htf_fvg_flip', 'htf_timeframe', e.target.value)} /></div>
+          <div><label>Entry Confirm TF</label><input type="text" value={config.htf_fvg_flip?.entry_confirmation_tf || 'M1'} onChange={e => updateNested('htf_fvg_flip', 'entry_confirmation_tf', e.target.value)} /></div>
+          <div><label>Target RR</label><input type="number" step="0.1" value={config.htf_fvg_flip?.target_rr || 1.0} onChange={e => updateNested('htf_fvg_flip', 'target_rr', +e.target.value)} /></div>
+          <div><label>Session Start</label><input type="text" value={config.htf_fvg_flip?.session_start || '09:30'} onChange={e => updateNested('htf_fvg_flip', 'session_start', e.target.value)} /></div>
+          <div><label>Session Cutoff</label><input type="text" value={config.htf_fvg_flip?.session_cutoff || '11:00'} onChange={e => updateNested('htf_fvg_flip', 'session_cutoff', e.target.value)} /></div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+              <input type="checkbox" checked={config.htf_fvg_flip?.session_filter_enabled ?? false} onChange={e => updateNested('htf_fvg_flip', 'session_filter_enabled', e.target.checked)} />
+              Enable Session Filter
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Bias KeyLevel IFVG Parameters</span></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div><label>Stop Method</label><input type="text" value={config.bias_ifvg?.stop_method || 'swing_high_low'} onChange={e => updateNested('bias_ifvg', 'stop_method', e.target.value)} /></div>
+          <div><label>Target RR Range Min</label><input type="number" step="0.1" value={config.bias_ifvg?.target_rr_range_min || 1.0} onChange={e => updateNested('bias_ifvg', 'target_rr_range_min', +e.target.value)} /></div>
+          <div><label>Target RR Range Max</label><input type="number" step="0.1" value={config.bias_ifvg?.target_rr_range_max || 3.0} onChange={e => updateNested('bias_ifvg', 'target_rr_range_max', +e.target.value)} /></div>
+          <div><label>Max Trades / Day</label><input type="number" value={config.bias_ifvg?.max_trades_per_day || 2} onChange={e => updateNested('bias_ifvg', 'max_trades_per_day', +e.target.value)} /></div>
+          <div><label>Session Start</label><input type="text" value={config.bias_ifvg?.session_start || '09:30'} onChange={e => updateNested('bias_ifvg', 'session_start', e.target.value)} /></div>
+          <div><label>Session Cutoff</label><input type="text" value={config.bias_ifvg?.session_cutoff || '11:00'} onChange={e => updateNested('bias_ifvg', 'session_cutoff', e.target.value)} /></div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">NY Open Break Retest Parameters</span></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div><label>Range Start</label><input type="text" value={config.ny_open_retest?.range_window_start || '08:00'} onChange={e => updateNested('ny_open_retest', 'range_window_start', e.target.value)} /></div>
+          <div><label>Range End</label><input type="text" value={config.ny_open_retest?.range_window_end || '08:15'} onChange={e => updateNested('ny_open_retest', 'range_window_end', e.target.value)} /></div>
+          <div><label>Earliest Break Time</label><input type="text" value={config.ny_open_retest?.earliest_valid_break_time || '09:30'} onChange={e => updateNested('ny_open_retest', 'earliest_valid_break_time', e.target.value)} /></div>
+          <div><label>Session End</label><input type="text" value={config.ny_open_retest?.session_end || '11:00'} onChange={e => updateNested('ny_open_retest', 'session_end', e.target.value)} /></div>
+          <div><label>Stop Buffer (points)</label><input type="number" step="0.1" value={config.ny_open_retest?.stop_buffer_points || 5.0} onChange={e => updateNested('ny_open_retest', 'stop_buffer_points', +e.target.value)} /></div>
+          <div><label>Fixed Target (points)</label><input type="number" step="0.1" value={config.ny_open_retest?.fixed_target_points || 15.0} onChange={e => updateNested('ny_open_retest', 'fixed_target_points', +e.target.value)} /></div>
         </div>
       </div>
 

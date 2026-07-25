@@ -689,6 +689,9 @@ export default function Backtester() {
       strategy_id: 'SMC_v1',
       drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20, jump_entry_percentile_threshold: 95.0, trade_jumps_enabled: false, control_test_passed: false, aggregate_max_lots_per_symbol: 6.0,
       htf_timeframe: '1H', ltf_timeframe: 'M1', target_r_multiple: 1.5, max_trades_per_session: 1, session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
+      entry_confirmation_tf: 'M1', target_rr: 1.0, require_unfilled_htf_fvg: true,
+      stop_method: 'swing_high_low', target_rr_range_min: 1.0, target_rr_range_max: 3.0, max_trades_per_day: 2,
+      range_window_start: '08:00', range_window_end: '08:15', earliest_valid_break_time: '09:30', session_end: '11:00', stop_buffer_points: 5.0, fixed_target_points: 15.0, dynamic_target_override: true,
     };
   });
 
@@ -854,6 +857,35 @@ export default function Backtester() {
           session_cutoff: form.session_cutoff,
           bypass_session_synthetics: form.bypass_session_synthetics
         };
+      } else if (form.strategy_id === 'HTFFVGFlip_v1') {
+        payload.strategy_params = {
+          htf_timeframe: form.htf_timeframe,
+          entry_confirmation_tf: form.entry_confirmation_tf,
+          target_rr: form.target_rr,
+          require_unfilled_htf_fvg: form.require_unfilled_htf_fvg,
+          session_filter_enabled: form.session_filter_enabled,
+          session_start: form.session_start,
+          session_cutoff: form.session_cutoff
+        };
+      } else if (form.strategy_id === 'BiasIFVG_v1') {
+        payload.strategy_params = {
+          stop_method: form.stop_method,
+          target_rr_range_min: form.target_rr_range_min,
+          target_rr_range_max: form.target_rr_range_max,
+          max_trades_per_day: form.max_trades_per_day,
+          session_start: form.session_start,
+          session_cutoff: form.session_cutoff
+        };
+      } else if (form.strategy_id === 'NYOpenRetest_v1') {
+        payload.strategy_params = {
+          range_window_start: form.range_window_start,
+          range_window_end: form.range_window_end,
+          earliest_valid_break_time: form.earliest_valid_break_time,
+          session_end: form.session_end,
+          stop_buffer_points: form.stop_buffer_points,
+          fixed_target_points: form.fixed_target_points,
+          dynamic_target_override: form.dynamic_target_override
+        };
       }
       
       return runBacktest(payload);
@@ -922,7 +954,7 @@ export default function Backtester() {
         <div className="card-header"><span className="card-title">Configuration</span></div>
         <div style={{ display: 'grid', gap: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div><label>Strategy Engine</label><select value={form.strategy_id} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option></select></div>
+            <div><label>Strategy Engine</label><select value={form.strategy_id} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option></select></div>
             <div>
               <label>Symbol</label>
               <input 
@@ -1028,6 +1060,47 @@ export default function Backtester() {
                     <input type="checkbox" checked={form.bypass_session_synthetics ?? true} onChange={e => u('bypass_session_synthetics', e.target.checked)} />
                     Bypass Session Filter (Synthetics)
                   </label>
+            {form.strategy_id === 'HTFFVGFlip_v1' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><input type="text" value={form.htf_timeframe} onChange={e => u('htf_timeframe', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Entry Confirm TF</label><input type="text" value={form.entry_confirmation_tf} onChange={e => u('entry_confirmation_tf', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={form.target_rr} onChange={e => u('target_rr', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+                    <input type="checkbox" checked={form.require_unfilled_htf_fvg ?? true} onChange={e => u('require_unfilled_htf_fvg', e.target.checked)} />
+                    Require Unfilled HTF FVG
+                  </label>
+                </div>
+              </div>
+            )}
+            {form.strategy_id === 'BiasIFVG_v1' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <div><label style={{ fontSize: '0.7rem' }}>Stop Method</label><input type="text" value={form.stop_method} onChange={e => u('stop_method', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Target RR Range Min</label><input type="number" step="0.1" value={form.target_rr_range_min} onChange={e => u('target_rr_range_min', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Target RR Range Max</label><input type="number" step="0.1" value={form.target_rr_range_max} onChange={e => u('target_rr_range_max', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" value={form.max_trades_per_day} onChange={e => u('max_trades_per_day', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>
+              </div>
+            )}
+            {form.strategy_id === 'NYOpenRetest_v1' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <div><label style={{ fontSize: '0.7rem' }}>Range Start</label><input type="text" value={form.range_window_start} onChange={e => u('range_window_start', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Range End</label><input type="text" value={form.range_window_end} onChange={e => u('range_window_end', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Earliest Break Time</label><input type="text" value={form.earliest_valid_break_time} onChange={e => u('earliest_valid_break_time', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Session End</label><input type="text" value={form.session_end} onChange={e => u('session_end', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Stop Buffer (pts)</label><input type="number" step="0.1" value={form.stop_buffer_points} onChange={e => u('stop_buffer_points', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Fixed Target (pts)</label><input type="number" step="0.1" value={form.fixed_target_points} onChange={e => u('fixed_target_points', +e.target.value)} /></div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+                    <input type="checkbox" checked={form.dynamic_target_override ?? true} onChange={e => u('dynamic_target_override', e.target.checked)} />
+                    Dynamic Target Override
+                  </label>
+                </div>
+              </div>
+            )}
                 </div>
               </div>
             )}

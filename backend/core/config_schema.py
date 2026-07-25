@@ -11,6 +11,9 @@ from dataclasses import dataclass, field
 from typing import List, Literal, Optional, Dict, Any
 
 from backend.strategies.strategy_one.params import SMCParams, RiskParams
+from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
+from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
+from backend.strategies.strategy_six_ny_open_retest.params import NYOpenRetestParams
 from backend.risk.compounding import CompoundingParams
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -142,6 +145,9 @@ class UserConfigV2(UserConfig):
     instrument_settings: List[InstrumentSettings] = None
     drift_jump_alpha: DriftJumpAlphaParams = field(default_factory=DriftJumpAlphaParams)
     crt: CRTParams = field(default_factory=CRTParams)
+    htf_fvg_flip: HTFFVGFlipParams = field(default_factory=HTFFVGFlipParams)
+    bias_ifvg: BiasIFVGParams = field(default_factory=BiasIFVGParams)
+    ny_open_retest: NYOpenRetestParams = field(default_factory=NYOpenRetestParams)
     prop_firm: PropFirmParams = field(default_factory=PropFirmParams)
 
     @classmethod
@@ -152,6 +158,9 @@ class UserConfigV2(UserConfig):
         instrument_data = data.pop("instrument_settings", None)
         drift_jump_alpha_data = data.pop("drift_jump_alpha", {})
         crt_data = data.pop("crt", {})
+        htf_fvg_flip_data = data.pop("htf_fvg_flip", {})
+        bias_ifvg_data = data.pop("bias_ifvg", {})
+        ny_open_retest_data = data.pop("ny_open_retest", {})
         prop_firm_data = data.pop("prop_firm", {})
         import dataclasses
         known_fields = {f.name for f in dataclasses.fields(cls)}
@@ -168,6 +177,9 @@ class UserConfigV2(UserConfig):
         config.risk = RiskParams(**filter_kwargs(RiskParams, risk_data))
         config.drift_jump_alpha = DriftJumpAlphaParams(**filter_kwargs(DriftJumpAlphaParams, drift_jump_alpha_data))
         config.crt = CRTParams(**filter_kwargs(CRTParams, crt_data))
+        config.htf_fvg_flip = HTFFVGFlipParams(**filter_kwargs(HTFFVGFlipParams, htf_fvg_flip_data))
+        config.bias_ifvg = BiasIFVGParams(**filter_kwargs(BiasIFVGParams, bias_ifvg_data))
+        config.ny_open_retest = NYOpenRetestParams(**filter_kwargs(NYOpenRetestParams, ny_open_retest_data))
         config.prop_firm = PropFirmParams(**filter_kwargs(PropFirmParams, prop_firm_data))
         
         if compounding_data:
@@ -191,6 +203,12 @@ class UserConfigV2(UserConfig):
             self.drift_jump_alpha = DriftJumpAlphaParams()
         if self.crt is None:
             self.crt = CRTParams()
+        if self.htf_fvg_flip is None:
+            self.htf_fvg_flip = HTFFVGFlipParams()
+        if self.bias_ifvg is None:
+            self.bias_ifvg = BiasIFVGParams()
+        if self.ny_open_retest is None:
+            self.ny_open_retest = NYOpenRetestParams()
         if self.prop_firm is None:
             self.prop_firm = PropFirmParams()
 

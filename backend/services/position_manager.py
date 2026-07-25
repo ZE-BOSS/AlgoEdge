@@ -470,9 +470,19 @@ class PositionManager:
                             
                             # Ensure BE buffer covers spread + commission to prevent net loss
                             sym_info = mt5.symbol_info(symbol)
-                            if sym_info and sym_info.spread > 0:
-                                min_spread_buffer = (sym_info.spread * sym_info.point) * 2.0
-                                be_buffer = max(be_buffer, min_spread_buffer)
+                            tick = mt5.symbol_info_tick(symbol)
+                            
+                            real_spread = 0.0
+                            if tick and tick.ask > tick.bid:
+                                real_spread = tick.ask - tick.bid
+                            elif sym_info and sym_info.spread > 0:
+                                real_spread = sym_info.spread * sym_info.point
+                            
+                            if real_spread <= 0:
+                                real_spread = 2.0 * pip_size_val # fallback 2 pips
+                                
+                            min_spread_buffer = real_spread * 2.0 # 2x spread for safety against commission/slippage
+                            be_buffer = max(be_buffer, min_spread_buffer)
                                 
                             new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                             
@@ -558,9 +568,19 @@ class PositionManager:
                         
                         # Ensure BE buffer covers spread + commission to prevent net loss
                         sym_info = mt5.symbol_info(symbol)
-                        if sym_info and sym_info.spread > 0:
-                            min_spread_buffer = (sym_info.spread * sym_info.point) * 2.0
-                            be_buffer = max(be_buffer, min_spread_buffer)
+                        tick = mt5.symbol_info_tick(symbol)
+                        
+                        real_spread = 0.0
+                        if tick and tick.ask > tick.bid:
+                            real_spread = tick.ask - tick.bid
+                        elif sym_info and sym_info.spread > 0:
+                            real_spread = sym_info.spread * sym_info.point
+                        
+                        if real_spread <= 0:
+                            real_spread = 2.0 * pip_size_val # fallback 2 pips
+                            
+                        min_spread_buffer = real_spread * 2.0 # 2x spread for safety against commission/slippage
+                        be_buffer = max(be_buffer, min_spread_buffer)
                             
                         new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                         
@@ -723,14 +743,14 @@ class PositionManager:
 
     async def _modify_sl(self, ticket: int, symbol: str, new_sl: float) -> bool:
         from backend.mt5.order_manager import OrderManager
-        loop = asyncio.get_running_loop()
-        success = await loop.run_in_executor(
-            None,
-            lambda: OrderManager.modify_sl(ticket, symbol, new_sl)
-        )
-        if not success:
-            logger.error(f"Failed to modify SL for {ticket} to {new_sl}")
+        try:
+            success = await OrderManager.modify_sl(ticket, new_sl)
+            if not success:
+                logger.error(f"Failed to modify SL for {ticket} to {new_sl}")
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Error modifying SL for {ticket}: {e}")
             return False
-        return True
 
 position_manager = PositionManager()

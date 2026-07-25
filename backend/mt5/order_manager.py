@@ -123,8 +123,10 @@ class OrderManager:
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "position": ticket,
+            "symbol": position[0].symbol,
             "sl": new_sl,
-            "tp": position[0].tp
+            "tp": position[0].tp,
+            "magic": position[0].magic
         }
         
         result = await loop.run_in_executor(
@@ -230,32 +232,3 @@ class OrderManager:
                     "reason": getattr(d, 'reason', -1),
                 })
         return closed_deals
-
-    @staticmethod
-    def modify_sl(ticket: int, symbol: str, new_sl: float) -> bool:
-        """Modifies the Stop Loss of an open position synchronously."""
-        if not mt5:
-            return False
-            
-        position = mt5.positions_get(ticket=ticket)
-        if not position:
-            logger.error(f"Position {ticket} not found for modification")
-            return False
-            
-        position = position[0]
-        
-        request = {
-            "action": mt5.TRADE_ACTION_SLTP,
-            "position": ticket,
-            "symbol": symbol,
-            "sl": new_sl,
-            "tp": position.tp, # Keep existing TP
-            "magic": position.magic
-        }
-        
-        result = mt5.order_send(request)
-        if result is None:
-            logger.error(f"Modify SL for position {ticket} failed: MT5 returned None")
-            return False
-            
-        return result.retcode == mt5.TRADE_RETCODE_DONE
