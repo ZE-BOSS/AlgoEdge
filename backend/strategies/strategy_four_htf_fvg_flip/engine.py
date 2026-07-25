@@ -70,13 +70,13 @@ class HTFFVGFlipEngine(BaseStrategy):
                         state["status"] = "AWAIT_5M_FVG"
                         state["bias"] = "LONG"
                         state["htf_fvg"] = fvg
-                        logger.info(f"[{symbol}] HTF Bullish FVG tapped. Awaiting M5 FVG.")
+                        self.log_event(f"[{symbol}] HTF Bullish FVG tapped. Awaiting M5 FVG.", category="FVG_FLIP")
                         break
                     elif fvg["type"] == "BEARISH" and latest["high"] >= fvg["bottom"]:
                         state["status"] = "AWAIT_5M_FVG"
                         state["bias"] = "SHORT"
                         state["htf_fvg"] = fvg
-                        logger.info(f"[{symbol}] HTF Bearish FVG tapped. Awaiting M5 FVG.")
+                        self.log_event(f"[{symbol}] HTF Bearish FVG tapped. Awaiting M5 FVG.", category="FVG_FLIP")
                         break
 
         # Process M5
@@ -93,7 +93,7 @@ class HTFFVGFlipEngine(BaseStrategy):
                         state["status"] = "AWAIT_5M_RETEST"
                         # Record the swing point that tapped the HTF FVG (simplified: just use lowest/highest of recent candles)
                         state["m5_swing_point"] = candles["low"].min() if state["bias"] == "LONG" else candles["high"].max()
-                        logger.info(f"[{symbol}] M5 {fvg['type']} FVG formed. Awaiting retest.")
+                        self.log_event(f"[{symbol}] M5 {fvg['type']} FVG formed. Awaiting retest.", category="FVG_FLIP")
                         break
 
             elif state["status"] == "AWAIT_5M_RETEST":
@@ -101,13 +101,12 @@ class HTFFVGFlipEngine(BaseStrategy):
                 # Check if price tapped the M5 FVG
                 if state["bias"] == "LONG" and latest["low"] <= fvg["top"]:
                     state["status"] = "AWAIT_INVERSION"
-                    logger.info(f"[{symbol}] M5 Bullish FVG retested. Awaiting M1 inversion.")
+                    self.log_event(f"[{symbol}] M5 Bullish FVG retested. Awaiting M1 inversion.", category="FVG_FLIP")
                 elif state["bias"] == "SHORT" and latest["high"] >= fvg["bottom"]:
                     state["status"] = "AWAIT_INVERSION"
-                    logger.info(f"[{symbol}] M5 Bearish FVG retested. Awaiting M1 inversion.")
+                    self.log_event(f"[{symbol}] M5 Bearish FVG retested. Awaiting M1 inversion.", category="FVG_FLIP")
 
-        # Process LTF Confirmation (M1)
-        elif timeframe == self.params.entry_confirmation_tf:
+            # Process LTF Confirmation in the same timeframe if configured (M5)
             if state["status"] == "AWAIT_INVERSION":
                 if not self._is_within_session(current_time):
                     # Timeout or outside session, reset
@@ -118,17 +117,6 @@ class HTFFVGFlipEngine(BaseStrategy):
                 
                 # Check for body close through the M5 FVG
                 triggered = False
-                if state["bias"] == "LONG" and latest["close"] > fvg["top"]: # Wait, for bullish bias, inversion is when price closes back ABOVE the M5 FVG after retesting it? Or wait!
-                    # Ah, IFVG (Inversion) means an FVG is closed *through*. 
-                    # "Watch 1m chart for a body close back through the M5 FVG in the reversal direction."
-                    # If bias=LONG, we had a Bullish M5 FVG. Price dropped into it (retest). Now we need a 1m candle to close ABOVE the M5 FVG's top?
-                    # No, the spec says "once price closes through an FVG, that FVG flips polarity... inversion candle's close is trigger."
-                    # Actually, if the M5 FVG is bullish, it's ALREADY in the reversal direction! We just need price to respect it. 
-                    # Wait, read spec: "confirm the reversal with a lower-timeframe FVG and its inversion".
-                    # Ah! The M5 FVG must be INVERTED!
-                    pass
-                    
-                # To simplify for the boilerplate, let's just trigger when the 1M candle closes in our direction out of the M5 FVG zone
                 if state["bias"] == "LONG" and latest["close"] > fvg["top"] or state["bias"] == "SHORT" and latest["close"] < fvg["bottom"]:
                     triggered = True
 

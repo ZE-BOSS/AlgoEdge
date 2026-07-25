@@ -20,8 +20,8 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 
 SPEC_DEFAULTS = {
-    "htf_timeframe": "1H",
-    "ltf_timeframe": "M1",
+    "htf_timeframe": "H4",
+    "ltf_timeframe": "M15",
     "target_r_multiple": 1.5,
     "max_trades_per_session": 1,
     "session_start": "09:30",
@@ -41,20 +41,6 @@ class CRTEngine(BaseStrategy):
         self.c2_trigger: dict[str, Any] | None = None
         self.trades_today = 0
         self.last_trade_date = None
-
-    def log_event(self, message: str, level: str = "INFO", category: str = "CRT"):
-        from datetime import timezone
-        if self.is_backtesting:
-            self.run_logs.append({
-                "time": datetime.now(timezone.utc).isoformat(),
-                "level": level,
-                "category": category,
-                "message": message
-            })
-            if level != "DEBUG":
-                bot_service.log_system_event(message, level, f"BT-{category}")
-        else:
-            bot_service.log_system_event(message, level, category)
 
     async def initialize(self):
         logger.info("CRTEngine initialized")

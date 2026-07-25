@@ -56,14 +56,14 @@ class NYOpenRetestEngine(BaseStrategy):
                 state["range_low"] = latest["low"]
                 state["range_mid"] = (latest["high"] + latest["low"]) / 2.0
                 state["status"] = "AWAIT_BREAK"
-                logger.info(f"[{symbol}] NY Open Range marked: {state['range_high']} - {state['range_low']} (Mid: {state['range_mid']})")
+                self.log_event(f"[{symbol}] NY Open Range marked: {state['range_high']} - {state['range_low']} (Mid: {state['range_mid']})", category="NY_OPEN")
 
-        # 2. Break and Retest on M1
-        elif timeframe == "M1":
+        # 2. Break and Retest on M5
+        elif timeframe == "M5":
             # Session expiration check
             if time_str >= self.params.session_end and state["status"] not in ["MARK_RANGE", "DONE"]:
                 state["status"] = "DONE"
-                logger.info(f"[{symbol}] Session ended, stopping for the day.")
+                self.log_event(f"[{symbol}] Session ended, stopping for the day.", category="NY_OPEN")
                 return None
                 
             if state["status"] == "AWAIT_BREAK":
@@ -73,11 +73,11 @@ class NYOpenRetestEngine(BaseStrategy):
                 if latest["close"] > state["range_high"]:
                     state["bias"] = "LONG"
                     state["status"] = "AWAIT_RETEST"
-                    logger.info(f"[{symbol}] NY Open bullish break detected. Awaiting retest to {state['range_mid']}")
+                    self.log_event(f"[{symbol}] NY Open bullish break detected. Awaiting retest to {state['range_mid']}", category="NY_OPEN")
                 elif latest["close"] < state["range_low"]:
                     state["bias"] = "SHORT"
                     state["status"] = "AWAIT_RETEST"
-                    logger.info(f"[{symbol}] NY Open bearish break detected. Awaiting retest to {state['range_mid']}")
+                    self.log_event(f"[{symbol}] NY Open bearish break detected. Awaiting retest to {state['range_mid']}", category="NY_OPEN")
 
             elif state["status"] == "AWAIT_RETEST":
                 triggered = False

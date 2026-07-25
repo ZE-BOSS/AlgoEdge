@@ -35,6 +35,10 @@ class TradeAction(BaseModel):
     close_pct: float = 1.0
 
 
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 class BaseStrategy:
     """Interface that all strategies must implement."""
 
@@ -42,6 +46,32 @@ class BaseStrategy:
         self.config = user_config
         self.is_backtesting = False
         self.run_logs = []
+
+    def log_event(self, message: str, level: str = "INFO", category: str = "STRATEGY"):
+        from datetime import datetime, timezone
+        from backend.services.bot_service import bot_service
+        
+        # Terminal logging
+        if level == "DEBUG":
+            logger.debug(f"[{category}] {message}")
+        elif level == "WARN":
+            logger.warning(f"[{category}] {message}")
+        elif level == "ERROR":
+            logger.error(f"[{category}] {message}")
+        else:
+            logger.info(f"[{category}] {message}")
+            
+        if self.is_backtesting:
+            self.run_logs.append({
+                "time": datetime.now(timezone.utc).isoformat(),
+                "level": level,
+                "category": category,
+                "message": message
+            })
+            if level != "DEBUG":
+                bot_service.log_system_event(message, level, f"BT-{category}")
+        else:
+            bot_service.log_system_event(message, level, category)
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         """Called on every new closed bar."""

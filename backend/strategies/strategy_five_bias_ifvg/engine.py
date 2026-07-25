@@ -75,16 +75,17 @@ class BiasIFVGEngine(BaseStrategy):
                 state["bias"] = new_bias
                 state["key_levels"] = self._detect_key_levels(candles, state["bias"])
                 state["status"] = "AWAIT_KEY_LEVEL"
-                logger.info(f"[{symbol}] Bias updated to {new_bias} based on {timeframe}")
+                self.log_event(f"[{symbol}] Bias updated to {new_bias} based on {timeframe}", category="BIAS_IFVG")
         
         # 2 & 3. Key Level Tap and Confirmation
         elif timeframe == "M5":
             if state["status"] == "AWAIT_KEY_LEVEL":
                 # Simulated key level tap for boilerplate
-                # E.g., if price drops sharply while bias is LONG
-                pass
+                if state["bias"] == "LONG" and latest["close"] < candles.iloc[-2]["low"]:
+                    state["status"] = "AWAIT_IFVG_CLOSE"
+                elif state["bias"] == "SHORT" and latest["close"] > candles.iloc[-2]["high"]:
+                    state["status"] = "AWAIT_IFVG_CLOSE"
                 
-        elif timeframe == "M1":
             if state["status"] == "AWAIT_IFVG_CLOSE":
                 if not self._is_within_session(current_time):
                     state["status"] = "AWAIT_KEY_LEVEL"
@@ -92,6 +93,11 @@ class BiasIFVGEngine(BaseStrategy):
                     
                 # Simulated trigger logic for boilerplate
                 triggered = False
+                if state["bias"] == "LONG" and latest["close"] > candles.iloc[-2]["high"]:
+                    triggered = True
+                elif state["bias"] == "SHORT" and latest["close"] < candles.iloc[-2]["low"]:
+                    triggered = True
+                    
                 if triggered:
                     entry = latest["close"]
                     sl = entry * 0.99 if state["bias"] == "LONG" else entry * 1.01
@@ -110,7 +116,7 @@ class BiasIFVGEngine(BaseStrategy):
                     )
                     
             # Reset daily limits at end of day
-            if current_time.hour == 23 and current_time.minute == 59:
+            if current_time.hour == 23 and current_time.minute >= 50:
                 state["trades_today"] = 0
 
         return None
