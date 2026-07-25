@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Server, Save, Loader2, Check, Wifi, WifiOff, Trash2, Shield, Eye, EyeOff, MessageSquare } from 'lucide-react';
-import { getBrokerStatus, saveBrokerStandard, saveBrokerDeriv, testBrokerConnection, removeBrokerStandard, removeBrokerDeriv, testMt5Entry, testMt5Close, testMt5Breakeven, testMt5Trail, getConfig, updateConfig } from '../../services/api';
+import { getBrokerStatus, saveBrokerStandard, testBrokerConnection, removeBrokerStandard, testMt5Entry, testMt5Close, testMt5Breakeven, testMt5Trail, getConfig, updateConfig } from '../../services/api';
 import { useConnectionStore, useAuthStore } from '../../store';
 
 function BrokerCard({ title, description, type, brokerStatus, onSave, onTest, onRemove }) {
