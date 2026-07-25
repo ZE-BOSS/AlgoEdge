@@ -5,15 +5,17 @@ CRT (Candle Range Theory) Strategy Orchestrator
 Source: CRT_Strategy_Spec.md
 """
 
-from typing import Dict, Any, List, Optional
-import pandas as pd
 from datetime import datetime, time
+from typing import Any
+
+import pandas as pd
 import pytz
-from backend.strategies.base_strategy import BaseStrategy, TradeSignal, TradeAction
+
+from backend.services.bot_service import bot_service
+from backend.strategies.base_strategy import BaseStrategy, TradeSignal
+from backend.strategies.core.market_structure import MarketStructureDetector
 from backend.strategies.registry import register_strategy
 from backend.utils.logger import get_logger
-from backend.strategies.core.market_structure import MarketStructureDetector
-from backend.services.bot_service import bot_service
 
 logger = get_logger(__name__)
 
@@ -31,12 +33,12 @@ class CRTEngine(BaseStrategy):
     def __init__(self, config: Any):
         super().__init__(config)
         self.params = getattr(config, 'crt', None)
-        self.context: Dict[str, Any] = {}
+        self.context: dict[str, Any] = {}
         self.ms_detector = MarketStructureDetector(swing_length=5, min_bos_count=1)
         
         # State tracking
-        self.c1: Optional[Dict[str, float]] = None
-        self.c2_trigger: Optional[Dict[str, Any]] = None
+        self.c1: dict[str, float] | None = None
+        self.c2_trigger: dict[str, Any] | None = None
         self.trades_today = 0
         self.last_trade_date = None
 
@@ -57,7 +59,7 @@ class CRTEngine(BaseStrategy):
     async def initialize(self):
         logger.info("CRTEngine initialized")
 
-    def get_required_timeframes(self) -> List[str]:
+    def get_required_timeframes(self) -> list[str]:
         htf = self.params.htf_timeframe if getattr(self, 'params', None) else SPEC_DEFAULTS['htf_timeframe']
         ltf = self.params.ltf_timeframe if getattr(self, 'params', None) else SPEC_DEFAULTS['ltf_timeframe']
         return [htf, ltf]
@@ -152,7 +154,7 @@ class CRTEngine(BaseStrategy):
                     self.c1 = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
                     return None
 
-                valid_bullish = c2_low < c1_low and (c1_low < c2_close < c1_high)
+                valid_bullish = (c2_low < c1_low < c2_close < c1_high)
                 valid_bearish = c2_high > c1_high and (c1_low < c2_close < c1_high)
 
                 if valid_bullish and bias == "BULLISH":
@@ -182,9 +184,7 @@ class CRTEngine(BaseStrategy):
                 tp = self.c2_trigger["c1_extreme"]
                 
                 triggered = False
-                if direction == "BUY" and current_price > trigger_lvl:
-                    triggered = True
-                elif direction == "SELL" and current_price < trigger_lvl:
+                if direction == "BUY" and current_price > trigger_lvl or direction == "SELL" and current_price < trigger_lvl:
                     triggered = True
                     
                 if triggered:
@@ -213,12 +213,12 @@ class CRTEngine(BaseStrategy):
                         confluence_score=90,
                         timeframe=ltf,
                         metadata={
-                            "reason": f"CRT Setup C1/C2. NY Session.",
+                            "reason": "CRT Setup C1/C2. NY Session.",
                             "htf": htf
                         }
                     )
 
         return None
 
-    async def on_tick(self, symbol: str, tick: Dict[str, Any]) -> None:
+    async def on_tick(self, symbol: str, tick: dict[str, Any]) -> None:
         pass

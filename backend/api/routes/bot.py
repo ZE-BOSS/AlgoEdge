@@ -5,17 +5,17 @@ Bot control endpoints — start, stop, status, activity logs.
 Validates broker connectivity before allowing bot to start.
 """
 
-import json
 import asyncio
-from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel
-from typing import Optional, List
+import json
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.api.deps import get_current_user
 from backend.data.database import get_db
 from backend.data.models import User, UserConfigModel
-from backend.api.deps import get_current_user
 from backend.services.bot_service import bot_service
 from backend.utils.logger import get_logger
 
@@ -44,7 +44,7 @@ def _needs_deriv_broker(symbols: list) -> bool:
 
 
 class StartBotRequest(BaseModel):
-    symbols: Optional[List[str]] = None
+    symbols: list[str] | None = None
     scan_interval: int = 60
 
 

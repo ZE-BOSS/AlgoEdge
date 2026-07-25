@@ -5,13 +5,14 @@ JWT authentication dependencies for FastAPI routes.
 All protected routes use `current_user = Depends(get_current_user)`.
 """
 
+import os
+from datetime import datetime, timezone
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime, timezone
-import os
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.data.database import get_db
 from backend.data.models import User

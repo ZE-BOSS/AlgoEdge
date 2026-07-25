@@ -5,15 +5,15 @@ LLM analysis endpoints.
 Source: TradingBot_MasterPlan-2.md Section 9
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel
-from typing import Optional, List
 
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.api.deps import get_current_user
 from backend.data.database import get_db
 from backend.data.models import LLMAnalysis, Trade, User
-from backend.api.deps import get_current_user
 from backend.services.llm_service import LLMService
 from backend.utils.logger import get_logger
 
@@ -24,12 +24,12 @@ router = APIRouter(prefix="/api", tags=["llm"])
 class AnalyzeTradeRequest(BaseModel):
     trade_id: int
     provider: str = "anthropic"
-    model: Optional[str] = None
+    model: str | None = None
 
 
 class CustomQuestionRequest(BaseModel):
     question: str
-    context_data: Optional[dict] = None
+    context_data: dict | None = None
     provider: str = "anthropic"
 
 

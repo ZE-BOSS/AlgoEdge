@@ -7,14 +7,20 @@ Identical logic used in both live trading and backtesting.
 Source: RiskManagement_Spec.md
 """
 
-from typing import Dict, Any, List, Tuple, Optional
-from datetime import datetime
 import json
-from backend.risk.position_sizer import calculate_lot_size, calculate_lot_from_dollars, get_pip_size, calculate_risk_dollars
-from backend.risk.multi_tp import MultiTPManager, TPLevel
+from datetime import datetime
+from typing import Any
+
 from backend.risk.breakeven_manager import BreakevenManager
-from backend.risk.trailing_manager import TrailingManager
 from backend.risk.circuit_breaker import CircuitBreaker
+from backend.risk.multi_tp import MultiTPManager
+from backend.risk.position_sizer import (
+    calculate_lot_from_dollars,
+    calculate_lot_size,
+    calculate_risk_dollars,
+    get_pip_size,
+)
+from backend.risk.trailing_manager import TrailingManager
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -27,7 +33,7 @@ class RiskEngine:
     Source: RiskManagement_Spec.md Section 7
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
         self.multi_tp = MultiTPManager(config)
         self.breakeven = BreakevenManager(config)
@@ -42,11 +48,11 @@ class RiskEngine:
 
     def evaluate_signal(
         self,
-        signal_data: Dict[str, Any],
+        signal_data: dict[str, Any],
         account_balance: float,
         compounding_risk_dollars: float = 0.0,
-        current_time: Optional[datetime] = None,
-    ) -> Tuple[bool, str, List[Dict[str, Any]]]:
+        current_time: datetime | None = None,
+    ) -> tuple[bool, str, list[dict[str, Any]]]:
         """
         Evaluate if a signal is safe to trade, and if so, calculate sizes and TPs.
         Returns (is_approved, reason, tp_levels).
@@ -202,11 +208,11 @@ class RiskEngine:
 
     def manage_open_position(
         self,
-        position: Dict[str, Any],
+        position: dict[str, Any],
         current_price: float,
         atr_value: float = 0.0,
-        swing_points: Optional[List[Dict[str, Any]]] = None,
-    ) -> List[Dict[str, Any]]:
+        swing_points: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Evaluate BE and trailing stops for an open position.
         Returns list of required actions.
@@ -284,6 +290,6 @@ class RiskEngine:
 
         return actions
 
-    def on_position_closed(self, group_id: str, pnl: float, current_time: Optional[datetime] = None):
+    def on_position_closed(self, group_id: str, pnl: float, current_time: datetime | None = None):
         """Update circuit breaker state after a position closes."""
         self.circuit.position_closed(group_id, pnl, current_time)

@@ -5,8 +5,10 @@ Order Block (OB) identification and mitigation tracking.
 Source: SMC_Strategy.md Section 2
 """
 
+from typing import Any
+
 import pandas as pd
-from typing import List, Dict, Any
+
 
 class OrderBlockDetector:
     """Identifies fresh order blocks and tracks their mitigation status."""
@@ -16,7 +18,7 @@ class OrderBlockDetector:
         self.max_touches = max_touches
         self.active_obs = []
 
-    def update(self, candles: pd.DataFrame) -> List[Dict[str, Any]]:
+    def update(self, candles: pd.DataFrame) -> list[dict[str, Any]]:
         """
         Scan for new OBs and update mitigation status of existing ones.
         """

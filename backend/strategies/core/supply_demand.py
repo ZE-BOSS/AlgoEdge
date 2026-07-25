@@ -5,8 +5,10 @@ Supply and Demand zone detection (RBD, DBR).
 Provides broader context for Order Blocks.
 """
 
+from typing import Any
+
 import pandas as pd
-from typing import List, Dict, Any
+
 
 class SupplyDemandDetector:
     """Detects Drop-Base-Rally and Rally-Base-Drop zones."""
@@ -16,7 +18,7 @@ class SupplyDemandDetector:
         self.demand_zones = []
         self.max_age = max_age
 
-    def update(self, candles: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
+    def update(self, candles: pd.DataFrame) -> dict[str, list[dict[str, Any]]]:
         """Update active supply and demand zones."""
         if len(candles) < 4:
             return {"supply": self.supply_zones, "demand": self.demand_zones}

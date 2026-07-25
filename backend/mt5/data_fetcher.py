@@ -5,15 +5,14 @@ OHLCV Historical and Live Data Fetching.
 Provides explicit error reporting when fetch fails rather than returning silent empty DataFrames.
 """
 
-import pandas as pd
-from typing import Optional
-from datetime import datetime
+import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+
+import pandas as pd
 
 from backend.utils.logger import get_logger
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-import numpy as np
 
 try:
     import MetaTrader5 as mt5
@@ -188,8 +187,7 @@ class DataFetcher:
         # For forex (5 days a week), duration has weekends. So count is actually overestimated.
         # We add 200 bars buffer.
         count += 200
-        if count > 200000:
-            count = 200000
+        count = min(count, 200000)
 
         loop = asyncio.get_running_loop()
         rates = None

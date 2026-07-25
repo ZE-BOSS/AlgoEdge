@@ -6,12 +6,12 @@ Source: CompoundingPlan_Spec.md
 """
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
 
-from backend.data.database import get_db
-from backend.data.models import CompoundingStateModel, CompoundingEvent, User
 from backend.api.deps import get_current_user
+from backend.data.database import get_db
+from backend.data.models import CompoundingEvent, CompoundingStateModel, User
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)

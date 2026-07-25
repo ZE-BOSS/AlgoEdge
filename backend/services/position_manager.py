@@ -8,14 +8,14 @@ Actively manages open MT5 positions. Runs in a frequent loop (e.g. every 3s) to:
 """
 
 import asyncio
+from datetime import datetime
+
 import MetaTrader5 as mt5
-from datetime import datetime, timezone
 from sqlalchemy import select
 
-from backend.utils.logger import get_logger
-from backend.services.telegram import telegram_service
 from backend.api.websocket import manager as ws_manager
 from backend.risk.position_sizer import get_pip_size
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -59,9 +59,9 @@ class PositionManager:
         if not mt5.terminal_info():
             return
 
-        from backend.data.database import async_session
-        from backend.data.models import TradePosition, Trade, UserConfigModel
         from backend.core.config_schema import UserConfigV2
+        from backend.data.database import async_session
+        from backend.data.models import Trade, TradePosition, UserConfigModel
         
         async with async_session() as session:
             # 1. Fetch user config for risk settings
@@ -327,8 +327,8 @@ class PositionManager:
                                     
                                     # Update chart data
                                     try:
+
                                         from backend.mt5.data_fetcher import DataFetcher
-                                        import pandas as pd
                                         candles = await DataFetcher.get_historical_data(trade.symbol, "M5", 100)
                                         if not candles.empty:
                                             cd_df = candles.copy()
@@ -342,15 +342,16 @@ class PositionManager:
                         if pos.mt5_ticket not in self._notified_closes:
                             self._notified_closes.add(pos.mt5_ticket)
                             try:
-                                from backend.services.telegram import telegram_service
                                 import asyncio
+
+                                from backend.services.telegram import telegram_service
                                 emoji = "✅" if net_profit >= 0 else "❌"
                                 reason_str = reason if 'reason' in dir() else "CLOSED"
                                 if reason_str == "SL": reason_str = "Stop Loss Hit"
                                 elif reason_str == "TRAIL": reason_str = "Trailing Stop Hit"
                                 elif reason_str.startswith("TP"): reason_str = "Take Profit Hit"
                                 elif reason_str == "CLIENT": reason_str = "Manual Close"
-                                msg = f"{emoji} *{reason_str}*\nSymbol: {pos.symbol if hasattr(pos, 'symbol') else 'Unknown'}\nTicket: {pos.mt5_ticket}\nExit Price: {exit_deal.price}\nP&L: ${net_profit:.2f}"
+                                msg = f"{emoji} *{reason_str}*\nSymbol: {trade.symbol if trade else 'Unknown'}\nTicket: {pos.mt5_ticket}\nExit Price: {exit_deal.price}\nP&L: ${net_profit:.2f}"
                                 asyncio.create_task(telegram_service.send_message(msg))
                             except Exception as tg_err:
                                 logger.warning(f"Telegram notification failed: {tg_err}")
@@ -487,9 +488,7 @@ class PositionManager:
                             new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                             
                             move_sl = False
-                            if is_buy and new_sl > current_sl:
-                                move_sl = True
-                            elif not is_buy and (current_sl == 0.0 or new_sl < current_sl):
+                            if is_buy and new_sl > current_sl or not is_buy and (current_sl == 0.0 or new_sl < current_sl):
                                 move_sl = True
                                 
                             if move_sl:
@@ -528,9 +527,7 @@ class PositionManager:
                         new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method, tp_level)
                         if new_trail_sl is not None:
                             move_sl = False
-                            if is_buy and new_trail_sl > current_sl:
-                                move_sl = True
-                            elif not is_buy and (current_sl == 0.0 or new_trail_sl < current_sl):
+                            if is_buy and new_trail_sl > current_sl or not is_buy and (current_sl == 0.0 or new_trail_sl < current_sl):
                                 move_sl = True
                                 
                             if move_sl:
@@ -587,9 +584,7 @@ class PositionManager:
                         for alive_pos in alive_positions:
                             current_sl = alive_pos.stop_loss
                             move_sl = False
-                            if is_buy and new_sl > current_sl:
-                                move_sl = True
-                            elif not is_buy and (current_sl == 0.0 or new_sl < current_sl):
+                            if is_buy and new_sl > current_sl or not is_buy and (current_sl == 0.0 or new_sl < current_sl):
                                 move_sl = True
                             
                             if move_sl and not alive_pos.be_applied:
@@ -662,8 +657,9 @@ class PositionManager:
             atr_data = self._cached_atr.get(symbol)
             if not atr_data or (now - atr_data['time']) > 60:
                 try:
-                    from backend.mt5.data_fetcher import DataFetcher
                     import pandas as pd
+
+                    from backend.mt5.data_fetcher import DataFetcher
                     candles = await DataFetcher.get_historical_data(symbol, "M5", 30)
                     if not candles.empty:
                         candles['prev_close'] = candles['close'].shift(1)
@@ -709,7 +705,9 @@ class PositionManager:
             if not struct_data or (now - struct_data['time']) > 300: # 5 min cache
                 try:
                     from backend.mt5.data_fetcher import DataFetcher
-                    from backend.strategies.core.market_structure import MarketStructureDetector
+                    from backend.strategies.core.market_structure import (
+                        MarketStructureDetector,
+                    )
                     candles = await DataFetcher.get_historical_data(symbol, "M15", 100)
                     if not candles.empty:
                         bars = getattr(risk, 'trail_structure_bars', 3)

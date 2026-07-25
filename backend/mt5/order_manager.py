@@ -6,7 +6,8 @@ Order placement, modification, and multi-position management logic.
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, List
+from typing import Any
+
 from backend.utils.logger import get_logger
 
 try:
@@ -31,7 +32,7 @@ class OrderManager:
         tp: float,
         magic: int,
         comment: str = ""
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Place a single market order."""
         logger.info(f"Placing {direction} on {symbol} (vol: {volume})")
         
@@ -86,11 +87,11 @@ class OrderManager:
     async def place_multi_position_order(
         symbol: str,
         direction: str,
-        volumes: List[float],
+        volumes: list[float],
         sl: float,
-        tps: List[float],
+        tps: list[float],
         magic_base: int
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Place multiple sub-positions for TP1, TP2, TP3.
         """
@@ -198,7 +199,7 @@ class OrderManager:
         return result.retcode == mt5.TRADE_RETCODE_DONE
 
     @staticmethod
-    async def get_closed_positions_since(last_check_time: float) -> List[Dict[str, Any]]:
+    async def get_closed_positions_since(last_check_time: float) -> list[dict[str, Any]]:
         """Get positions closed since last_check_time."""
         if not mt5:
             return []

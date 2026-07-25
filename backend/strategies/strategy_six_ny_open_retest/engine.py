@@ -1,12 +1,9 @@
+
 import pandas as pd
-from typing import Optional
-from datetime import datetime
-
-from backend.strategies.base_strategy import BaseStrategy, Signal
 from backend.core.config_schema import UserConfigV2
-from backend.utils.logger import get_logger
-
+from backend.strategies.base_strategy import BaseStrategy, Signal
 from backend.strategies.registry import register_strategy
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -31,7 +28,7 @@ class NYOpenRetestEngine(BaseStrategy):
                 "current_day": None
             }
 
-    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Optional[Signal]:
+    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Signal | None:
         self._init_state(symbol)
         state = self.state[symbol]
         
@@ -83,9 +80,7 @@ class NYOpenRetestEngine(BaseStrategy):
 
             elif state["status"] == "AWAIT_RETEST":
                 triggered = False
-                if state["bias"] == "LONG" and latest["low"] <= state["range_mid"]:
-                    triggered = True
-                elif state["bias"] == "SHORT" and latest["high"] >= state["range_mid"]:
+                if state["bias"] == "LONG" and latest["low"] <= state["range_mid"] or state["bias"] == "SHORT" and latest["high"] >= state["range_mid"]:
                     triggered = True
                     
                 if triggered:

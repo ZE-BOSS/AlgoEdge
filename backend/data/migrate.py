@@ -10,8 +10,10 @@ not missing columns), this script handles ALTER TABLE for production databases.
 
 import asyncio
 import os
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -84,8 +86,6 @@ MIGRATIONS = [
 
 async def run_migrations():
     """Apply all pending migrations."""
-    from backend.config import settings
-    import os
     db_url = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/algoedge")
     engine = create_async_engine(db_url)
 

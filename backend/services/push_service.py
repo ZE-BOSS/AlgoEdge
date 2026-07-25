@@ -6,18 +6,19 @@ Source: Frontend_PWA_LLM_Spec.md — Push Notification System
 """
 
 import json
-from typing import Optional, List, Dict, Any
+from typing import Any
+
+from sqlalchemy import select
 
 from backend.config import settings
 from backend.data.database import get_session
 from backend.data.models import PushSubscription
 from backend.utils.logger import get_logger
-from sqlalchemy import select
 
 logger = get_logger(__name__)
 
 try:
-    from pywebpush import webpush, WebPushException
+    from pywebpush import WebPushException, webpush
     HAS_WEBPUSH = True
 except ImportError:
     HAS_WEBPUSH = False
@@ -51,7 +52,7 @@ async def send_push_notification(
     event_type: str,
     title: str,
     body: str,
-    data: Optional[Dict[str, Any]] = None,
+    data: dict[str, Any] | None = None,
 ):
     """
     Send a push notification to all subscriptions for a user.

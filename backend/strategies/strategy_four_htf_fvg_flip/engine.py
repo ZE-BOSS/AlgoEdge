@@ -1,14 +1,10 @@
-import pandas as pd
-import numpy as np
-from typing import Optional
-from datetime import datetime
 
+import pandas as pd
+from backend.core.config_schema import UserConfigV2
 from backend.strategies.base_strategy import BaseStrategy, Signal
 from backend.strategies.core.fvg import FVGDetector
-from backend.core.config_schema import UserConfigV2
-from backend.utils.logger import get_logger
-
 from backend.strategies.registry import register_strategy
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -54,7 +50,7 @@ class HTFFVGFlipEngine(BaseStrategy):
         else:
             return time_str >= start or time_str <= cutoff
 
-    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Optional[Signal]:
+    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Signal | None:
         self._init_state(symbol)
         state = self.state[symbol]
         
@@ -132,9 +128,7 @@ class HTFFVGFlipEngine(BaseStrategy):
                     pass
                     
                 # To simplify for the boilerplate, let's just trigger when the 1M candle closes in our direction out of the M5 FVG zone
-                if state["bias"] == "LONG" and latest["close"] > fvg["top"]:
-                    triggered = True
-                elif state["bias"] == "SHORT" and latest["close"] < fvg["bottom"]:
+                if state["bias"] == "LONG" and latest["close"] > fvg["top"] or state["bias"] == "SHORT" and latest["close"] < fvg["bottom"]:
                     triggered = True
 
                 if triggered:

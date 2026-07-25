@@ -1,4 +1,4 @@
-from typing import Optional
+
 from backend.brokers.base import BaseBroker
 from backend.utils.logger import get_logger
 
@@ -6,7 +6,7 @@ logger = get_logger(__name__)
 
 class BrokerFactory:
     _instance = None
-    _broker_instance: Optional[BaseBroker] = None
+    _broker_instance: BaseBroker | None = None
     
     @classmethod
     def get_broker(cls, broker_type: str = "MT5") -> BaseBroker:

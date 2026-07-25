@@ -9,14 +9,14 @@ Passwords are encrypted with Fernet (AES-128-CBC + HMAC-SHA256) before storage.
 """
 
 import asyncio
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
 
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.api.deps import get_current_user
 from backend.data.database import get_db
 from backend.data.models import User
-from backend.api.deps import get_current_user
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,14 +29,14 @@ class BrokerConfigRequest(BaseModel):
     account: int
     password: str               # Plaintext over HTTPS — encrypted before DB storage
     server: str
-    path: Optional[str] = ""    # MT5 terminal path (optional)
+    path: str | None = ""    # MT5 terminal path (optional)
 
 
 class TestBrokerRequest(BaseModel):
     account: int
     password: str
     server: str
-    path: Optional[str] = ""
+    path: str | None = ""
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ def _get_encryption():
     except ValueError as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Encryption not configured: {str(e)}. Set ENCRYPTION_KEY in .env"
+            detail=f"Encryption not configured: {e!s}. Set ENCRYPTION_KEY in .env"
         )
 
 

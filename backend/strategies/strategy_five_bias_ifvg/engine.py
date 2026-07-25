@@ -1,14 +1,9 @@
+
 import pandas as pd
-import numpy as np
-from typing import Optional
-from datetime import datetime
-
-from backend.strategies.base_strategy import BaseStrategy, Signal
-from backend.strategies.core.fvg import FVGDetector
 from backend.core.config_schema import UserConfigV2
-from backend.utils.logger import get_logger
-
+from backend.strategies.base_strategy import BaseStrategy, Signal
 from backend.strategies.registry import register_strategy
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -65,7 +60,7 @@ class BiasIFVGEngine(BaseStrategy):
         # In a full implementation, we'd scan multiple timeframes and merge overlaps
         return []
 
-    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Optional[Signal]:
+    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Signal | None:
         self._init_state(symbol)
         state = self.state[symbol]
         

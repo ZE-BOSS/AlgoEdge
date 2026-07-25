@@ -13,9 +13,9 @@ Sources:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Literal, Tuple, Optional, Dict, Any
-from backend.risk.compounding import CompoundingParams
+from typing import Literal
 
+from backend.risk.compounding import CompoundingParams
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RISK MANAGEMENT PARAMETERS
@@ -61,7 +61,7 @@ class RiskParams:
     If tp_count > 2: TP1+TP2 at entry, TP3–5 deferred (conviction-based).
     Range: 1–5."""
 
-    tp_splits: List[float] = field(default_factory=lambda: [40.0, 35.0, 25.0])
+    tp_splits: list[float] = field(default_factory=lambda: [40.0, 35.0, 25.0])
     """
     Percentage of total lot allocated to each TP level.
     Must sum to 100. Length should match tp_count.
@@ -309,7 +309,7 @@ class SMCParams:
     """M15/M5 swing detection lookback."""
 
     # §5.3 fix: moving back into strategy-specific params
-    manual_bias_overrides: Dict[str, str] = field(default_factory=dict)
+    manual_bias_overrides: dict[str, str] = field(default_factory=dict)
     """Manual overrides for HTF Bias. Map of symbol to BULLISH/BEARISH/NONE."""
 
     # ── Order Block Settings ──────────────────────────────────────────
@@ -338,7 +338,7 @@ class SMCParams:
     fvg_entry_level: float = 0.50
     """Where within FVG to enter: 0.5 = 50% (CE level)."""
 
-    manual_bias_overrides: Dict[str, str] = field(default_factory=dict)
+    manual_bias_overrides: dict[str, str] = field(default_factory=dict)
     """Manual overrides for HTF Bias. Map of symbol to BULLISH/BEARISH/NONE."""
 
     fvg_max_age_bars: int = 50
@@ -437,11 +437,11 @@ class SMCParams:
     """Minutes before/after HIGH-impact news to block all entries."""
 
     # ── Symbols & Timeframes ──────────────────────────────────────────
-    watched_symbols: List[str] = field(default_factory=lambda: [
+    watched_symbols: list[str] = field(default_factory=lambda: [
         "EURUSD", "GBPUSD", "XAUUSD", "US30", "BTCUSD",
     ])
 
-    timeframes: List[str] = field(default_factory=lambda: [
+    timeframes: list[str] = field(default_factory=lambda: [
         "M5", "M15", "H4",
     ])
 

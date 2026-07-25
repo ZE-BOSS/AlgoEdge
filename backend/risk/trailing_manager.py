@@ -5,8 +5,8 @@ All 4 trailing stop methods.
 Source: RiskManagement_Spec.md Section 3.3
 """
 
-from typing import Optional, Dict, Any, List
-import pandas as pd
+from typing import Any
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 class TrailingManager:
     """Manages all 4 trailing stop methods with ratchet logic (never moves back)."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
         self.trail_pips = config.get("trail_pips", 15.0)
         self.atr_trail_multiplier = config.get("atr_trail_multiplier", 1.5)
@@ -43,9 +43,9 @@ class TrailingManager:
         highest_price: float = 0.0,
         lowest_price: float = 0.0,
         atr_value: float = 0.0,
-        swing_points: Optional[List[Dict[str, Any]]] = None,
+        swing_points: list[dict[str, Any]] | None = None,
         tp_level: int = 1,
-    ) -> Optional[float]:
+    ) -> float | None:
         """
         Calculate new trailing SL. Returns None if no adjustment needed.
         RATCHET: SL only moves in the profitable direction — never backward.
@@ -107,7 +107,7 @@ class TrailingManager:
         else:
             return lowest + trail_distance
 
-    def _structure_trail(self, direction: str, swing_points: Optional[List[Dict[str, Any]]], atr: float) -> Optional[float]:
+    def _structure_trail(self, direction: str, swing_points: list[dict[str, Any]] | None, atr: float) -> float | None:
         """
         Method 3: Trail to each confirmed swing point (SMC-native).
         SL moves to below confirmed Higher Low (BUY) or above Lower High (SELL) plus an ATR safety buffer.

@@ -8,13 +8,13 @@ Dynamically includes configuration blocks for all registered strategies.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional, Dict, Any
+from typing import Literal
 
-from backend.strategies.strategy_one.params import SMCParams, RiskParams
-from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
-from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
-from backend.strategies.strategy_six_ny_open_retest.params import NYOpenRetestParams
 from backend.risk.compounding import CompoundingParams
+from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
+from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
+from backend.strategies.strategy_one.params import RiskParams, SMCParams
+from backend.strategies.strategy_six_ny_open_retest.params import NYOpenRetestParams
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STRATEGY TWO (CRASHBOOM) PARAMETERS
@@ -61,8 +61,8 @@ class InstrumentSettings:
     symbol:          str
     strategy_id:     str   = "SMC_v1"       # The registry ID of the strategy to run
     enabled:         bool  = True           # Trade this symbol at all
-    max_lot_override: Optional[float] = None # Cap lot size (safety)
-    custom_sl_buffer: Optional[float] = None # Override profile's sl_buffer_pips
+    max_lot_override: float | None = None # Cap lot size (safety)
+    custom_sl_buffer: float | None = None # Override profile's sl_buffer_pips
     compounding_enabled: bool = True        # Allow compounding on this symbol
     notes:           str  = ""              # User label (e.g. "V75 main account")
 
@@ -80,7 +80,7 @@ class PropFirmParams:
     challenge_type: Literal["none", "1-step", "2-step", "flex"] = "none"
     account_size: float = 10000.0
     initial_balance: float = 10000.0
-    max_lot_sizes: Dict[str, float] = field(default_factory=dict)
+    max_lot_sizes: dict[str, float] = field(default_factory=dict)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ class UserConfigV2(UserConfig):
     Extended UserConfig with compounding, instrument settings, and multi-strategy support.
     """
     compounding: CompoundingParams = None
-    instrument_settings: List[InstrumentSettings] = None
+    instrument_settings: list[InstrumentSettings] = None
     drift_jump_alpha: DriftJumpAlphaParams = field(default_factory=DriftJumpAlphaParams)
     crt: CRTParams = field(default_factory=CRTParams)
     htf_fvg_flip: HTFFVGFlipParams = field(default_factory=HTFFVGFlipParams)

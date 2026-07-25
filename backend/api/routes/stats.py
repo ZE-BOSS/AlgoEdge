@@ -6,13 +6,13 @@ Source: TradingBot_MasterPlan-2.md Section 6
 """
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.analytics.metrics import compute_portfolio_stats
+from backend.api.deps import get_current_user
 from backend.data.database import get_db
 from backend.data.models import PerformanceStats, Trade, User
-from backend.api.deps import get_current_user
-from backend.analytics.metrics import compute_portfolio_stats
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)

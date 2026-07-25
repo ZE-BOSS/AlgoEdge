@@ -6,10 +6,9 @@ Broadcasts real-time progress via WebSocket during backtest execution.
 Source: TradingBot_MasterPlan-2.md Section 11
 """
 
-import uuid
 import json
-from typing import Dict, Any, Optional, Callable, List
 from datetime import datetime, timezone
+from typing import Any
 
 import pandas as pd
 
@@ -35,8 +34,9 @@ async def _broadcast_progress(user_id: str, progress: dict):
 async def _broadcast_notification(user_id: str, title: str, message: str, notification_type: str = "info"):
     """Broadcast an explicit frontend/browser notification to a specific user."""
     try:
-        from backend.api.websocket import manager as ws_manager
         from datetime import datetime, timezone
+
+        from backend.api.websocket import manager as ws_manager
         await ws_manager.broadcast_to_user(user_id, {
             "type": "notification",
             "payload": {
@@ -55,14 +55,14 @@ async def run_backtest(
     strategy_id: str,
     symbol: str,
     candles: pd.DataFrame,
-    signals: List[Dict[str, Any]],
-    risk_config: Dict[str, Any],
+    signals: list[dict[str, Any]],
+    risk_config: dict[str, Any],
     initial_balance: float = 10000.0,
     save_mode: str = "FULL",
     candles_m15: pd.DataFrame = None,
     candles_m5: pd.DataFrame = None,
     compounding_enabled: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Execute a backtest and optionally persist results to PostgreSQL.
     save_mode: "FULL", "SUMMARY", "DISCARD"

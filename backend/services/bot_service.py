@@ -7,13 +7,12 @@ Broadcasts all events to the frontend via WebSocket for real-time visibility.
 """
 
 import asyncio
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
 from collections import deque
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
-from backend.utils.logger import get_logger
-from backend.config import settings
 from backend.services.profit_tracker import profit_tracker
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -24,13 +23,13 @@ class BotService:
 
     def __init__(self):
         self.running = False
-        self.symbols: List[str] = []
-        self.last_scan: Optional[str] = None
+        self.symbols: list[str] = []
+        self.last_scan: str | None = None
         self.scan_interval: int = 60  # seconds between scans
-        self._task: Optional[asyncio.Task] = None
-        self._sync_task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
+        self._sync_task: asyncio.Task | None = None
         self._events: deque = deque(maxlen=MAX_LOG_ENTRIES)
-        self.user_id: Optional[str] = None
+        self.user_id: str | None = None
         self.total_signals_today = 0
         self._last_signal_time = {}
         self.engine = None
@@ -124,10 +123,12 @@ class BotService:
 
         # 2. Save to Database
         try:
+            import json
+
+            from sqlalchemy import select
+
             from backend.data.database import async_session
             from backend.data.models import Signal
-            from sqlalchemy import select
-            import json
             
             async with async_session() as session:
                 sig_time = getattr(signal_domain, 'timestamp', None)
@@ -177,8 +178,8 @@ class BotService:
             logger.error(f"Failed to save signal to DB: {e}")
             return None
 
-    async def start(self, user_id: str, symbols: Optional[List[str]] = None,
-                    scan_interval: int = 60) -> Dict[str, Any]:
+    async def start(self, user_id: str, symbols: list[str] | None = None,
+                    scan_interval: int = 60) -> dict[str, Any]:
         """Start the bot scanning loop."""
         if self.running:
             return {"running": True, "message": "Bot is already running"}
@@ -202,10 +203,11 @@ class BotService:
 
         # Server restart recovery: Check DB for OPEN trades and verify with MT5
         try:
+            import MetaTrader5 as mt5
+            from sqlalchemy import select
+
             from backend.data.database import async_session
             from backend.data.models import TradePosition
-            from sqlalchemy import select
-            import MetaTrader5 as mt5
             
             if mt5.terminal_info():
                 async with async_session() as session:
@@ -228,7 +230,9 @@ class BotService:
                             else:
                                 # Not in open positions, not in history. Might be a startup delay.
                                 # Seed ghost grace period so reconciliation handles it gracefully.
-                                from backend.services.position_manager import position_manager
+                                from backend.services.position_manager import (
+                                    position_manager,
+                                )
                                 position_manager._ghost_strike_counts[pos.mt5_ticket] = 1
                                 self._log_event(
                                     f"Position {pos.mt5_ticket} missing from MT5 (no history found yet). "
@@ -240,7 +244,7 @@ class BotService:
 
         return {"running": True, "message": "Bot started successfully", "symbols": self.symbols}
 
-    async def stop(self) -> Dict[str, Any]:
+    async def stop(self) -> dict[str, Any]:
         """Stop the bot scanning loop."""
         if not self.running:
             return {"running": False, "message": "Bot is already stopped"}
@@ -268,7 +272,7 @@ class BotService:
         self._log_event("Bot stopped by user", category="BOT")
         return {"running": False, "message": "Bot stopped"}
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get current bot status."""
         return {
             "running": self.running,
@@ -278,7 +282,7 @@ class BotService:
             "scan_interval": self.scan_interval,
         }
 
-    def get_logs(self, limit: int = 50) -> Dict[str, Any]:
+    def get_logs(self, limit: int = 50) -> dict[str, Any]:
         """Get recent activity log entries."""
         events = list(self._events)[:limit]
         return {"events": events, "total": len(self._events)}
@@ -291,11 +295,13 @@ class BotService:
 
         while self.running:
             try:
+                import json
+
+                from sqlalchemy import select
+
+                from backend.core.config_schema import UserConfig, UserConfigV2
                 from backend.data.database import async_session
                 from backend.data.models import UserConfigModel
-                from sqlalchemy import select
-                from backend.core.config_schema import UserConfigV2, UserConfig
-                import json
                 
                 async with async_session() as session:
                     result = await session.execute(select(UserConfigModel).where(UserConfigModel.user_id == user_id))
@@ -366,9 +372,10 @@ class BotService:
                     self._log_event(f"Scanning {symbol}...", category="SCAN")
 
                     try:
-                        from backend.risk.engine import RiskEngine
-                        from backend.mt5.order_manager import OrderManager
                         import pandas as pd
+
+                        from backend.mt5.order_manager import OrderManager
+                        from backend.risk.engine import RiskEngine
                         
                         def _index_candles(df):
                             if 'time' in df.columns:
@@ -630,8 +637,14 @@ class BotService:
                                             await self._save_signal_state(signal, "EXECUTED")
                                             try:
                                                 import json
-                                                from backend.data.database import async_session
-                                                from backend.data.models import Trade, TradePosition
+
+                                                from backend.data.database import (
+                                                    async_session,
+                                                )
+                                                from backend.data.models import (
+                                                    Trade,
+                                                    TradePosition,
+                                                )
                                                 
                                                 async with async_session() as session:
                                                     trade = Trade(
@@ -667,7 +680,9 @@ class BotService:
                                                     await session.commit()
                                                     
                                                     # Force frontend Journal/Dashboard to refetch
-                                                    from backend.api.websocket import manager as ws_manager
+                                                    from backend.api.websocket import (
+                                                        manager as ws_manager,
+                                                    )
                                                     await ws_manager.broadcast_all({"type": "trade_update"})
                                                     
                                             except Exception as db_err:

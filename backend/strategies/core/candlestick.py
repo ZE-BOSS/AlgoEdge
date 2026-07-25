@@ -11,10 +11,8 @@ Source: SMC_Strategy.md Section 9 — The Candlestick Confirmation Bible
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
-import pandas as pd
-import numpy as np
 
+import pandas as pd
 
 # ── Data Structures ──────────────────────────────────────────────────────────
 
@@ -82,7 +80,7 @@ def detect_bullish_engulfing(
     candles: pd.DataFrame,
     idx: int,
     min_size_ratio: float = 1.0,
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Bullish Engulfing: Large bullish body completely engulfs previous bearish body.
     Must appear at or inside a bullish OB/FVG zone.
@@ -118,7 +116,7 @@ def detect_bearish_engulfing(
     candles: pd.DataFrame,
     idx: int,
     min_size_ratio: float = 1.0,
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Bearish Engulfing: Large bearish body completely engulfs previous bullish body.
     """
@@ -152,7 +150,7 @@ def detect_hammer(
     idx: int,
     min_wick_ratio: float = 2.0,
     max_upper_wick_ratio: float = 0.5,
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Hammer / Bullish Pin Bar:
     - Long lower wick >= 2× body size
@@ -190,7 +188,7 @@ def detect_shooting_star(
     idx: int,
     min_wick_ratio: float = 2.0,
     max_lower_wick_ratio: float = 0.5,
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Shooting Star / Bearish Pin Bar:
     - Long upper wick >= 2× body size
@@ -229,7 +227,7 @@ def detect_dragonfly_doji(
     idx: int,
     max_body_pct: float = 0.10,
     min_lower_wick_pct: float = 0.60,
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Dragonfly Doji (Bullish):
     - Body < 10% of total range
@@ -268,7 +266,7 @@ def detect_gravestone_doji(
     idx: int,
     max_body_pct: float = 0.10,
     min_upper_wick_pct: float = 0.60,
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Gravestone Doji (Bearish):
     - Body < 10% of total range
@@ -307,7 +305,7 @@ def detect_morning_star(
     idx: int,
     min_body_ratio: float = 1.2,
     min_close_pct: float = 0.50,
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Morning Star (3-candle bullish reversal):
     Candle[-2]: Large bearish candle
@@ -351,7 +349,7 @@ def detect_evening_star(
     candles: pd.DataFrame,
     idx: int,
     min_body_ratio: float = 1.2,
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Evening Star (3-candle bearish reversal):
     Candle[-2]: Large bullish
@@ -396,7 +394,7 @@ def detect_inside_bar(
     candles: pd.DataFrame,
     idx: int,
     bias: str,
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Inside Bar: Current candle's high and low are both within the previous candle's range.
     Used as continuation signal when at POI — breakout in bias direction = entry.
@@ -427,7 +425,7 @@ def detect_rejection_wick(
     idx: int,
     bias: str,
     min_wick_ratio: float = 2.0,
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Rejection Wick: Any candle with a significant wick at a key SMC level.
     Bullish: long lower wick at OB/FVG zone
@@ -470,7 +468,7 @@ def detect_displacement(
     idx: int,
     bias: str,
     min_body_ratio: float = 1.5,
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Displacement Candle: Large strong candle (body > 1.5× average) signaling
     the start of ChoCH expansion. This creates an OB/FVG behind it.
@@ -505,7 +503,7 @@ def detect_confirmation_pattern(
     candles: pd.DataFrame,
     bias: str,                  # "BULLISH" or "BEARISH"
     lookback: int = 3,          # how many recent candles to check
-) -> Optional[CandlePattern]:
+) -> CandlePattern | None:
     """
     Master function. Scans the last `lookback` candles for any valid
     SMC confirmation pattern aligned with the given bias.
@@ -584,7 +582,7 @@ CANDLESTICK_SCORES = {
     PatternTier.TIER_3: 5,
 }
 
-def get_candlestick_score(pattern: Optional[CandlePattern]) -> int:
+def get_candlestick_score(pattern: CandlePattern | None) -> int:
     """
     Returns the confluence score points to add for this pattern.
     Used by the confluence scoring system in confluence.py.

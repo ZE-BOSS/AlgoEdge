@@ -4,9 +4,11 @@ backend/strategies/smc/asian_range.py
 Module to detect the Asian Range (Accumulation phase) and check for liquidity sweeps
 during the London open (Manipulation phase).
 """
-import pandas as pd
 from datetime import datetime, timezone
+
+import pandas as pd
 from backend.utils.timeutils import get_local_time
+
 
 class AsianRange:
     def __init__(self, start_hour: int = 18, end_hour: int = 0):
@@ -71,10 +73,8 @@ class AsianRange:
                 in_range = self.start_hour <= hour < self.end_hour
                 
             if in_range:
-                if row["high"] > range_high:
-                    range_high = row["high"]
-                if row["low"] < range_low:
-                    range_low = row["low"]
+                range_high = max(range_high, row["high"])
+                range_low = min(range_low, row["low"])
                 found = True
                 in_current_session = True
                 if current_dt is None:

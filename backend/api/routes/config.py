@@ -6,15 +6,16 @@ Source: TradingBot_MasterPlan-2.md Section 6
 """
 
 import json
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Any
 
-from backend.data.database import get_db
-from backend.data.models import UserConfigModel, User
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from backend.api.deps import get_current_user
+from backend.data.database import get_db
+from backend.data.models import User, UserConfigModel
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,8 +23,8 @@ router = APIRouter(prefix="/api", tags=["config"])
 
 
 class UpdateConfigRequest(BaseModel):
-    config: Dict[str, Any]
-    preset_name: Optional[str] = None
+    config: dict[str, Any]
+    preset_name: str | None = None
 
 
 @router.get("/config")

@@ -7,12 +7,12 @@ Supports both .env-based connection and per-user credential connection.
 """
 
 import asyncio
-from typing import Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from backend.config import settings
-from backend.utils.logger import get_logger
 from backend.data.redis_client import redis_client
+from backend.utils.logger import get_logger
 
 try:
     import MetaTrader5 as mt5
@@ -24,6 +24,7 @@ logger = get_logger(__name__)
 
 from backend.brokers.base import BaseBroker
 
+
 class MT5Broker(BaseBroker):
     """
     Singleton manager for MT5 terminal connection.
@@ -34,7 +35,7 @@ class MT5Broker(BaseBroker):
         self.connected = False
         self._executor = ThreadPoolExecutor(max_workers=4)
         self.account_info = None
-        self._connected_account: Optional[int] = None  # Track which account is connected
+        self._connected_account: int | None = None  # Track which account is connected
         self._intentional_disconnect = False
         self._last_method = None
         self._last_kwargs = {}
@@ -54,6 +55,9 @@ class MT5Broker(BaseBroker):
         if not mt5:
             logger.warning("MetaTrader5 package not found. Running in MOCK mode.")
             self.connected = True
+            from collections import namedtuple
+            AccountInfo = namedtuple("AccountInfo", ["balance", "equity", "margin", "free_margin", "leverage"])
+            self.account_info = AccountInfo(balance=10000.0, equity=10000.0, margin=0.0, free_margin=10000.0, leverage=100)
             return True
 
         cfg = config_override or settings.mt5
@@ -101,6 +105,9 @@ class MT5Broker(BaseBroker):
         if not mt5:
             logger.warning("MetaTrader5 package not found. Running in MOCK mode.")
             self.connected = True
+            from collections import namedtuple
+            AccountInfo = namedtuple("AccountInfo", ["balance", "equity", "margin", "free_margin", "leverage"])
+            self.account_info = AccountInfo(balance=10000.0, equity=10000.0, margin=0.0, free_margin=10000.0, leverage=100)
             return True
 
         # Load user credentials from DB
@@ -308,7 +315,7 @@ class MT5Broker(BaseBroker):
         """Verify MT5 terminal is still responding."""
         return self.connected
 
-    def get_connected_account(self) -> Optional[int]:
+    def get_connected_account(self) -> int | None:
         """Return the currently connected MT5 account number."""
         return self._connected_account
 
@@ -361,6 +368,9 @@ class MT5Broker(BaseBroker):
         if not mt5:
             logger.warning("MetaTrader5 package not found. Running in MOCK mode.")
             self.connected = True
+            from collections import namedtuple
+            AccountInfo = namedtuple("AccountInfo", ["balance", "equity", "margin", "free_margin", "leverage"])
+            self.account_info = AccountInfo(balance=10000.0, equity=10000.0, margin=0.0, free_margin=10000.0, leverage=100)
             return True
 
         try:
@@ -483,7 +493,7 @@ class MT5Broker(BaseBroker):
         """Verify MT5 terminal is still responding."""
         return self.connected
 
-    def get_connected_account(self) -> Optional[int]:
+    def get_connected_account(self) -> int | None:
         """Return the currently connected MT5 account number."""
         return self._connected_account
 
@@ -528,32 +538,32 @@ class MT5Broker(BaseBroker):
         from backend.mt5.data_fetcher import DataFetcher
         return await DataFetcher.get_historical_data(symbol, timeframe, count)
         
-    async def get_symbol_info(self, symbol: str) -> Optional[Dict[str, Any]]:
+    async def get_symbol_info(self, symbol: str) -> dict[str, Any] | None:
         if not mt5: return None
         loop = asyncio.get_running_loop()
         info = await loop.run_in_executor(self._executor, lambda: mt5.symbol_info(symbol))
         return info._asdict() if info else None
         
-    async def get_account_info(self) -> Optional[Dict[str, Any]]:
+    async def get_account_info(self) -> dict[str, Any] | None:
         info = await self.get_live_account_info()
         return info._asdict() if info else None
         
-    async def get_open_positions(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_open_positions(self, symbol: str | None = None) -> list[dict[str, Any]]:
         if not mt5: return []
         loop = asyncio.get_running_loop()
         positions = await loop.run_in_executor(self._executor, lambda: mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get())
         return [p._asdict() for p in positions] if positions else []
 
-    async def execute_market_order(self, symbol: str, direction: str, volume: float, sl: Optional[float] = None, tp: Optional[float] = None, comment: str = "") -> Optional[Dict[str, Any]]:
+    async def execute_market_order(self, symbol: str, direction: str, volume: float, sl: float | None = None, tp: float | None = None, comment: str = "") -> dict[str, Any] | None:
         from backend.mt5.order_manager import OrderManager
         magic = 0 # Default magic
         return await OrderManager.place_market_order(symbol, direction, volume, sl or 0.0, tp or 0.0, magic, comment)
 
-    async def close_position(self, ticket: int, volume: Optional[float] = None) -> bool:
+    async def close_position(self, ticket: int, volume: float | None = None) -> bool:
         from backend.mt5.order_manager import OrderManager
         return await OrderManager.close_position(ticket, volume)
 
-    async def modify_position(self, ticket: int, sl: Optional[float] = None, tp: Optional[float] = None) -> bool:
+    async def modify_position(self, ticket: int, sl: float | None = None, tp: float | None = None) -> bool:
         from backend.mt5.order_manager import OrderManager
         if sl is not None:
             return await OrderManager.modify_sl(ticket, sl)

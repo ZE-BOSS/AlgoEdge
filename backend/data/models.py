@@ -6,14 +6,26 @@ PostgreSQL backend hosted on Railway.
 Source: TradingBot_MasterPlan-2.md Section 5 — Database Schema
 """
 
+import random
+import time
+
 from sqlalchemy import (
-    Column, Integer, BigInteger, Float, Text, String, Boolean, LargeBinary,
-    ForeignKey, Index, UniqueConstraint, DateTime, func, JSON
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
-from datetime import datetime
-import time
-import random
 
 
 class Base(DeclarativeBase):

@@ -7,8 +7,9 @@ Source: TradingBot_MasterPlan-2.md Section 11
 """
 
 import itertools
-from typing import Dict, Any, List
 from copy import deepcopy
+from typing import Any
+
 import pandas as pd
 
 from backend.backtester.engine import BacktestEngine
@@ -20,17 +21,17 @@ logger = get_logger(__name__)
 class ParameterOptimizer:
     """Runs multiple backtests across a grid of parameters."""
 
-    def __init__(self, base_config: Dict[str, Any]):
+    def __init__(self, base_config: dict[str, Any]):
         self.base_config = base_config
 
     def run_grid_search(
         self,
         candles: pd.DataFrame,
-        signals: List[Dict[str, Any]],
-        param_grid: Dict[str, List[Any]],
+        signals: list[dict[str, Any]],
+        param_grid: dict[str, list[Any]],
         initial_balance: float = 10000.0,
         rank_by: str = "sharpe_ratio",
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Execute backtests for every combination in param_grid.
         Returns list of results sorted by the specified metric (descending).

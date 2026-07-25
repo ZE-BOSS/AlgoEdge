@@ -5,7 +5,6 @@ Fibonacci Premium, Discount, and Optimal Trade Entry (OTE) zones.
 Source: SMC_Strategy.md Section 3
 """
 
-from typing import Dict, Any
 
 class PremiumDiscountCalculator:
     """Calculates Fibonacci retracement levels for a given price leg."""
@@ -14,7 +13,7 @@ class PremiumDiscountCalculator:
         self.ote_min = ote_min
         self.ote_max = ote_max
 
-    def calculate(self, swing_high: float, swing_low: float) -> Dict[str, float]:
+    def calculate(self, swing_high: float, swing_low: float) -> dict[str, float]:
         """
         Calculate Premium/Discount zones and OTE levels.
         """

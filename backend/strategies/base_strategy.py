@@ -5,9 +5,11 @@ Abstract base class for all trading strategies.
 Source: TradingBot_MasterPlan-2.md Section 12 (Extension 5)
 """
 
+from typing import Any
+
 import pandas as pd
-from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
+
 
 class TradeSignal(BaseModel):
     """Standardized output from any strategy."""
@@ -22,14 +24,14 @@ class TradeSignal(BaseModel):
     stop_loss: float
     take_profit: float
     confluence_score: int
-    metadata: Dict[str, Any] = {}
-    chart_data: Optional[List[Dict[str, Any]]] = None
+    metadata: dict[str, Any] = {}
+    chart_data: list[dict[str, Any]] | None = None
 
 class TradeAction(BaseModel):
     """Action to take on an open position."""
     ticket: int
     action: str  # "CLOSE", "MODIFY_SL"
-    new_sl: Optional[float] = None
+    new_sl: float | None = None
     close_pct: float = 1.0
 
 
@@ -41,14 +43,14 @@ class BaseStrategy:
         self.is_backtesting = False
         self.run_logs = []
 
-    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Optional[TradeSignal]:
+    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         """Called on every new closed bar."""
         raise NotImplementedError
 
-    async def on_tick(self, symbol: str, tick: Dict[str, Any]) -> Optional[List[TradeAction]]:
+    async def on_tick(self, symbol: str, tick: dict[str, Any]) -> list[TradeAction] | None:
         """Called on every live tick for position management (optional)."""
         return []
 
-    def get_required_timeframes(self) -> List[str]:
+    def get_required_timeframes(self) -> list[str]:
         """Return list of timeframes this strategy needs."""
         raise NotImplementedError

@@ -9,11 +9,12 @@ When TP1 hits, all remaining positions move to break-even.
 User configures tp_count (1-5) and RR per level.
 """
 
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, field
 import math
-from backend.utils.logger import get_logger
+from dataclasses import dataclass
+from typing import Any
+
 from backend.risk.position_sizer import get_symbol_info
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -37,14 +38,14 @@ class TPLevel:
     volume_pct: float   # percentage of total volume (0.0–1.0)
     tp_price: float
     volume: float
-    trail_method: Optional[str]  # None for TP1, ATR_TRAIL for TP2, etc.
+    trail_method: str | None  # None for TP1, ATR_TRAIL for TP2, etc.
     deferred: bool = False       # Always False — all TPs open at entry
 
 
 class MultiTPManager:
     """Calculates TP levels and splits volume across sub-positions."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.tp1_rr = config.get("tp1_rr", 1.0)
         self.tp2_rr = config.get("tp2_rr", 3.0)
         self.tp3_rr = config.get("tp3_rr", 5.0)
@@ -80,8 +81,8 @@ class MultiTPManager:
         direction: str,
         total_volume: float,
         symbol: str,
-        liquidity_target: Optional[float] = None,
-    ) -> List[TPLevel]:
+        liquidity_target: float | None = None,
+    ) -> list[TPLevel]:
         """
         Calculate TP prices and volume splits for up to 5 levels.
         ALL TPs open at entry (deferred=False always).

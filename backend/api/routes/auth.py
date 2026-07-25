@@ -5,23 +5,21 @@ User registration, login, and JWT token management.
 Email + password authentication with bcrypt hashing.
 """
 
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from jose import jwt
 from passlib.context import CryptContext
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.api.deps import JWT_ALGORITHM, JWT_SECRET_KEY, get_current_user
 from backend.data.database import get_db
 from backend.data.models import User
-from backend.api.deps import JWT_SECRET_KEY, JWT_ALGORITHM, get_current_user
 from backend.utils.logger import get_logger
-
-import os
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])

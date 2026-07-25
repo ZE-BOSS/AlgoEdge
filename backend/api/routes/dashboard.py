@@ -2,20 +2,19 @@
 backend/api/routes/dashboard.py
 Consolidated dashboard endpoint.
 """
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-import asyncio
 
-from backend.data.database import get_db
-from backend.data.models import User
 from backend.api.deps import get_current_user
-
-from backend.api.routes.stats import get_user_stats
-from backend.api.routes.config import get_user_config
-from backend.api.routes.trades import get_open_positions
-from backend.api.routes.compounding import get_compounding_state
 from backend.api.routes.bot import get_bot_status
 from backend.api.routes.broker import get_broker_status
+from backend.api.routes.compounding import get_compounding_state
+from backend.api.routes.config import get_user_config
+from backend.api.routes.stats import get_user_stats
+from backend.api.routes.trades import get_open_positions
+from backend.data.database import get_db
+from backend.data.models import User
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
 

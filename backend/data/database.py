@@ -5,13 +5,14 @@ Async PostgreSQL session factory using SQLAlchemy + asyncpg.
 Provides dependency injection for FastAPI routes.
 """
 
-from sqlalchemy.ext.asyncio import (
-    create_async_engine,
-    async_sessionmaker,
-    AsyncSession,
-)
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from backend.config import settings
 from backend.data.models import Base

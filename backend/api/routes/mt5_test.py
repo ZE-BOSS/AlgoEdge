@@ -4,11 +4,11 @@ backend/api/routes/mt5_test.py
 Endpoints for manual MT5 diagnostic testing from the frontend.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 import asyncio
-import os
 import time
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from backend.api.deps import get_current_user
 from backend.data.models import User
@@ -38,10 +38,12 @@ async def test_mt5_entry(req: EntryRequest, current_user: User = Depends(get_cur
             return {"success": False, "error": "MT5 is offline or not connected"}
             
         # Get user config to determine risk
-        from backend.data.database import async_session
-        from sqlalchemy import select
-        from backend.data.models import UserConfigModel
         import json
+
+        from sqlalchemy import select
+
+        from backend.data.database import async_session
+        from backend.data.models import UserConfigModel
         
         async with async_session() as session:
             result = await session.execute(select(UserConfigModel).where(UserConfigModel.user_id == current_user.id))

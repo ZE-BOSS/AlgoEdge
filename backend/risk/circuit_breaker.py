@@ -8,8 +8,9 @@ Refactored: Replaced percentage-based daily/weekly drawdown with trade-count-bas
 consecutive loss limits per user request.
 """
 
-from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timezone
+from typing import Any
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,7 +23,7 @@ class CircuitBreaker:
     Source: RiskManagement_Spec.md Section 6.1–6.5
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         # Trade-count-based limits (replaces percentage-based)
         self.max_daily_consecutive_losses = config.get("max_daily_consecutive_losses", 5)
         self.max_weekly_consecutive_losses = config.get("max_weekly_consecutive_losses", 15)
@@ -40,18 +41,18 @@ class CircuitBreaker:
         self.daily_pnl = 0.0   # Still tracked for reporting, not for gating
         self.weekly_pnl = 0.0  # Still tracked for reporting, not for gating
         self.open_positions = 0
-        self.open_positions_by_symbol: Dict[str, int] = {}  # symbol → count of active groups
+        self.open_positions_by_symbol: dict[str, int] = {}  # symbol → count of active groups
         self.is_paused = False
         self.pause_reason = ""
         self.last_reset_day = datetime.now(timezone.utc).date()
         self.last_reset_week = datetime.now(timezone.utc).isocalendar()[1]
-        self.last_trade_closed_m15_time: Optional[int] = None
+        self.last_trade_closed_m15_time: int | None = None
         
         # Track active grouped trades (signal)
         self.active_groups = {} # group_id -> {"pnl": 0.0, "sub_trades": 0}
 
 
-    def check_all(self, account_balance: float, current_time: Optional[datetime] = None) -> Tuple[bool, str]:
+    def check_all(self, account_balance: float, current_time: datetime | None = None) -> tuple[bool, str]:
         """Run all active circuit breaker checks."""
         self._check_daily_reset(current_time)
         self._check_weekly_reset(current_time)
@@ -64,7 +65,7 @@ class CircuitBreaker:
             current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
             current_m15 = (int(current_epoch) // 900) * 900
             if current_m15 <= self.last_trade_closed_m15_time:
-                return False, f"M15 Cooldown Active: Waiting for current M15 candle to close"
+                return False, "M15 Cooldown Active: Waiting for current M15 candle to close"
 
         # 2. Max daily trades
         if self.max_daily_trades > 0 and self.daily_trades_count >= self.max_daily_trades:
@@ -103,7 +104,7 @@ class CircuitBreaker:
 
         return True, "OK"
 
-    def check_symbol(self, symbol: str) -> Tuple[bool, str]:
+    def check_symbol(self, symbol: str) -> tuple[bool, str]:
         """Check if a new position can be opened on the given symbol.
         Enforces one active signal group per symbol at a time.
         """
@@ -120,7 +121,7 @@ class CircuitBreaker:
         if symbol:
             self.open_positions_by_symbol[symbol] = self.open_positions_by_symbol.get(symbol, 0) + 1
 
-    def position_closed(self, group_id: str, pnl: float, current_time: Optional[datetime] = None):
+    def position_closed(self, group_id: str, pnl: float, current_time: datetime | None = None):
         """Track a position closing."""
         if group_id in self.active_groups:
             self.active_groups[group_id]["pnl"] += pnl
@@ -177,7 +178,7 @@ class CircuitBreaker:
         self.last_trade_closed_m15_time = None
         logger.info("Circuit breaker manually resumed by user")
 
-    def _parse_timestamp_date(self, ts) -> Tuple[datetime.date, int]:
+    def _parse_timestamp_date(self, ts) -> tuple[datetime.date, int]:
         """Safely parse either seconds or milliseconds epoch into date and week."""
         try:
             val = float(ts)
@@ -190,7 +191,7 @@ class CircuitBreaker:
             dt = datetime.now(timezone.utc)
             return dt.date(), dt.isocalendar()[1]
 
-    def _check_daily_reset(self, current_time: Optional[datetime] = None):
+    def _check_daily_reset(self, current_time: datetime | None = None):
         """Reset daily counters at midnight."""
         now = current_time if current_time is not None else datetime.now(timezone.utc)
         if hasattr(now, "date"):
@@ -211,7 +212,7 @@ class CircuitBreaker:
                 self.is_paused = False
                 self.pause_reason = ""
 
-    def _check_weekly_reset(self, current_time: Optional[datetime] = None):
+    def _check_weekly_reset(self, current_time: datetime | None = None):
         """Reset weekly counters on Monday."""
         now = current_time if current_time is not None else datetime.now(timezone.utc)
         if hasattr(now, "isocalendar"):

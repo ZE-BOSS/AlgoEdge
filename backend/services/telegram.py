@@ -5,7 +5,9 @@ Service for sending Telegram notifications asynchronously.
 """
 
 import asyncio
+
 import aiohttp
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)

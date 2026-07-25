@@ -6,6 +6,7 @@ Source: Frontend_PWA_LLM_Spec.md Section 4.6
 """
 
 from cryptography.fernet import Fernet, InvalidToken
+
 from backend.config import settings
 
 

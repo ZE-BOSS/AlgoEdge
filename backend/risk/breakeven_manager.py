@@ -5,7 +5,8 @@ Break-even system with configurable trigger and buffer.
 Source: RiskManagement_Spec.md Section 3.2
 """
 
-from typing import Optional, Dict, Any
+from typing import Any
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -14,7 +15,7 @@ logger = get_logger(__name__)
 class BreakevenManager:
     """Manages break-even SL adjustments for open positions."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.be_trigger_rr = config.get("be_trigger_rr", 1.0)
         # be_buffer_pips is repurposed as atr multiplier for safety buffer (backward compatible)
         self.be_atr_multiplier = config.get("be_buffer_atr_mult", config.get("be_buffer_pips", 0.1))
@@ -32,7 +33,7 @@ class BreakevenManager:
         atr: float,
         be_already_applied: bool = False,
         tp1_hit: bool = False,
-    ) -> Optional[float]:
+    ) -> float | None:
         """
         Returns the new SL price if break-even should be triggered, else None.
         SL only moves in the profitable direction — never backward.

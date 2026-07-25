@@ -6,9 +6,9 @@ Single source of truth for all service connection details.
 """
 
 import os
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Load .env from project root

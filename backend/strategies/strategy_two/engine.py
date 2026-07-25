@@ -8,16 +8,18 @@ Implements Continuous Drift (Setup A) + Discrete Jump (Setup B) logic for Crash 
 Uses simplified empirical gap counting.
 """
 
-from typing import Dict, Any, List, Optional
-import pandas as pd
-import numpy as np
 from datetime import datetime
-from backend.strategies.base_strategy import BaseStrategy, TradeSignal, TradeAction
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from backend.risk.position_sizer import get_pip_size
+from backend.services.bot_service import bot_service
+from backend.strategies.base_strategy import BaseStrategy, TradeSignal
+from backend.strategies.core.market_structure import MarketStructureDetector
 from backend.strategies.registry import register_strategy
 from backend.utils.logger import get_logger
-from backend.risk.position_sizer import get_pip_size
-from backend.strategies.core.market_structure import MarketStructureDetector
-from backend.services.bot_service import bot_service
 
 logger = get_logger(__name__)
 
@@ -74,11 +76,11 @@ class DriftJumpAlphaEngine(BaseStrategy):
     def __init__(self, config: Any):
         super().__init__(config)
         self.params = getattr(config, 'drift_jump_alpha', getattr(config, 'crashboom', None))
-        self.context: Dict[str, Any] = {}
+        self.context: dict[str, Any] = {}
         
         # State tracking
-        self.last_jump_idx: Optional[int] = None
-        self.jump_distances: List[int] = []
+        self.last_jump_idx: int | None = None
+        self.jump_distances: list[int] = []
         self.ms_detector = MarketStructureDetector(swing_length=5, min_bos_count=1)
         self.post_jump_regime_reset = False
 
@@ -100,7 +102,7 @@ class DriftJumpAlphaEngine(BaseStrategy):
     async def initialize(self):
         logger.info("DriftJumpAlphaEngine initialized")
 
-    def get_required_timeframes(self) -> List[str]:
+    def get_required_timeframes(self) -> list[str]:
         return ["M5"]
 
     def detect_jump(self, bar: pd.Series, symbol: str, atr_val: float) -> bool:
@@ -203,7 +205,7 @@ class DriftJumpAlphaEngine(BaseStrategy):
                 self.jump_distances.append(dist)
             self.last_jump_idx = len(df) - 1
             self.post_jump_regime_reset = True
-            self.log_event(f"Jump detected! Resetting regime wait.")
+            self.log_event("Jump detected! Resetting regime wait.")
             return None
             
         bars_since_jump = (len(df) - 1 - self.last_jump_idx) if self.last_jump_idx is not None else 999999
@@ -277,7 +279,7 @@ class DriftJumpAlphaEngine(BaseStrategy):
             
         if not regime_active:
             self.post_jump_regime_reset = False
-            self.log_event(f"Drift Regime UP inactive.")
+            self.log_event("Drift Regime UP inactive.")
             return None
             
         if self.post_jump_regime_reset:
@@ -308,7 +310,7 @@ class DriftJumpAlphaEngine(BaseStrategy):
             self.log_event("No previous swing high breached.")
             return None
 
-        self.log_event(f"Setup A Confirmation passed! Building signal...")
+        self.log_event("Setup A Confirmation passed! Building signal...")
 
         entry_price = float(current_bar['close'])
         
@@ -352,5 +354,5 @@ class DriftJumpAlphaEngine(BaseStrategy):
         
         return sig
 
-    async def on_tick(self, symbol: str, tick: Dict[str, Any]) -> None:
+    async def on_tick(self, symbol: str, tick: dict[str, Any]) -> None:
         pass

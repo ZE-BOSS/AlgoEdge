@@ -5,12 +5,13 @@ Encrypted API key storage using Fernet symmetric encryption.
 Source: TradingBot_MasterPlan-2.md Section 9.1
 """
 
-from typing import Optional
+
+from sqlalchemy import select
+
 from backend.config import settings
 from backend.data.database import get_session
 from backend.data.models import APIKey
 from backend.utils.logger import get_logger
-from sqlalchemy import select
 
 logger = get_logger(__name__)
 
@@ -63,7 +64,7 @@ async def store_api_key(user_id: str, provider: str, api_key: str) -> bool:
     return True
 
 
-async def get_api_key(user_id: str, provider: str) -> Optional[str]:
+async def get_api_key(user_id: str, provider: str) -> str | None:
     """Retrieve and decrypt an API key."""
     cipher = _get_cipher()
     if not cipher:

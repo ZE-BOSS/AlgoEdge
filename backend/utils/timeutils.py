@@ -6,9 +6,7 @@ Source: SMC_Strategy.md Section 12
 """
 
 import os
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Literal
-
+from datetime import datetime, timedelta, timezone
 
 # ── Timezone Configuration ───────────────────────────────────────────────────
 # Default to Nigerian Time (WAT / UTC+1) as requested.
@@ -38,7 +36,7 @@ def get_utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def get_local_time(dt: Optional[datetime] = None) -> datetime:
+def get_local_time(dt: datetime | None = None) -> datetime:
     """Convert a UTC datetime to configured Local Time."""
     if dt is None:
         dt = get_utc_now()
@@ -47,7 +45,7 @@ def get_local_time(dt: Optional[datetime] = None) -> datetime:
     return dt.astimezone(LOCAL_TZ)
 
 
-def get_current_session(dt: Optional[datetime] = None) -> Optional[str]:
+def get_current_session(dt: datetime | None = None) -> str | None:
     """
     Returns the active session name ('LONDON', 'NY', 'LONDON/NY') or None.
     When London and NY overlap, returns 'LONDON/NY'.
@@ -67,7 +65,7 @@ def get_current_session(dt: Optional[datetime] = None) -> Optional[str]:
     return None
 
 
-def is_kill_zone(dt: Optional[datetime] = None) -> bool:
+def is_kill_zone(dt: datetime | None = None) -> bool:
     """Returns True if current time is in a London or NY kill zone."""
     dt = get_local_time(dt)
     hour = dt.hour
@@ -77,7 +75,7 @@ def is_kill_zone(dt: Optional[datetime] = None) -> bool:
     return london_kz or ny_kz
 
 
-def is_session_blocked(dt: Optional[datetime] = None, instrument_type: str = "FOREX") -> tuple[bool, str]:
+def is_session_blocked(dt: datetime | None = None, instrument_type: str = "FOREX") -> tuple[bool, str]:
     """
     Returns (is_blocked, reason) if current time falls in a blocked window.
     Synthetics trade 24/7 and are never blocked.
@@ -117,7 +115,7 @@ def is_news_blocked(
     news_events: list[dict],
     buffer_minutes: int = 30,
     instrument_type: str = "FOREX"
-) -> tuple[bool, Optional[dict]]:
+) -> tuple[bool, dict | None]:
     """
     Returns (is_blocked, event) if within buffer_minutes of a HIGH-impact event.
     Synthetics are immune to news.
@@ -141,8 +139,8 @@ def detect_session(timestamp) -> str:
     Returns 'LONDON', 'NY', 'OVERLAP', 'ASIAN', or '24/7'.
     Used by the backtester for session tagging on trades.
     """
-    import pandas as pd
     import numpy as np
+    import pandas as pd
     
     if isinstance(timestamp, (int, float)):
         try:

@@ -6,9 +6,10 @@ Source: TradingBot_MasterPlan-2.md Section 8 — Trade Metrics Computation
 Source: RiskManagement_Spec.md Section 8
 """
 
+from typing import Any
+
 import numpy as np
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, field
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,7 +24,7 @@ def calculate_pips(symbol: str, price1: float, price2: float) -> float:
     return abs(price1 - price2) / pip_size
 
 
-def compute_trade_metrics(trade: Dict[str, Any]) -> Dict[str, Any]:
+def compute_trade_metrics(trade: dict[str, Any]) -> dict[str, Any]:
     """
     Compute per-trade metrics after a trade closes.
     Source: TradingBot_MasterPlan-2.md — compute_trade_metrics
@@ -59,7 +60,7 @@ def compute_trade_metrics(trade: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def calculate_sharpe(returns: List[float], periods_per_year: float = 252) -> float:
+def calculate_sharpe(returns: list[float], periods_per_year: float = 252) -> float:
     """Annualized Sharpe ratio."""
     if len(returns) < 2:
         return 0.0
@@ -74,7 +75,7 @@ def calculate_sharpe(returns: List[float], periods_per_year: float = 252) -> flo
     return val
 
 
-def calculate_sortino(returns: List[float], periods_per_year: float = 252) -> float:
+def calculate_sortino(returns: list[float], periods_per_year: float = 252) -> float:
     """Annualized Sortino ratio (only downside volatility)."""
     if len(returns) < 2:
         return 0.0
@@ -92,7 +93,7 @@ def calculate_sortino(returns: List[float], periods_per_year: float = 252) -> fl
     return val
 
 
-def calculate_max_drawdown(equity_curve: List[float]) -> tuple[float, float]:
+def calculate_max_drawdown(equity_curve: list[float]) -> tuple[float, float]:
     """
     Calculate max drawdown from equity curve.
     Returns (max_dd_pct, max_dd_abs).
@@ -103,20 +104,17 @@ def calculate_max_drawdown(equity_curve: List[float]) -> tuple[float, float]:
     max_dd_abs = 0.0
     max_dd_pct = 0.0
     for val in equity_curve:
-        if val > peak:
-            peak = val
+        peak = max(peak, val)
         dd_abs = peak - val
         dd_pct = dd_abs / peak if peak > 0 else 0.0
         
-        if dd_abs > max_dd_abs:
-            max_dd_abs = dd_abs
-        if dd_pct > max_dd_pct:
-            max_dd_pct = dd_pct
+        max_dd_abs = max(max_dd_abs, dd_abs)
+        max_dd_pct = max(max_dd_pct, dd_pct)
             
     return max_dd_pct, max_dd_abs
 
 
-def max_consecutive(values: List[bool]) -> int:
+def max_consecutive(values: list[bool]) -> int:
     """Return max consecutive True values."""
     max_count = 0
     current = 0
@@ -129,7 +127,7 @@ def max_consecutive(values: List[bool]) -> int:
     return max_count
 
 
-def compute_portfolio_stats(trades: List[Dict[str, Any]], initial_balance: float = 10000.0) -> Dict[str, Any]:
+def compute_portfolio_stats(trades: list[dict[str, Any]], initial_balance: float = 10000.0) -> dict[str, Any]:
     """
     Compute aggregate portfolio statistics from a list of closed trades.
     Source: RiskManagement_Spec.md Section 8.2

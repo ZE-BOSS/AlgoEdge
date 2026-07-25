@@ -7,6 +7,7 @@ All modules import `logger` from here for consistent formatting.
 
 import sys
 from pathlib import Path
+
 from loguru import logger
 
 # Remove default handler
