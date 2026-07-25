@@ -94,13 +94,13 @@ export default function StrategySettings() {
   const handleSave = () => mutation.mutate(config);
 
   const allSymbols = [
-    'XAUUSD','EURUSD','GBPUSD','USDJPY','US30','NAS100','US100','SPX500','US500','BTCUSD',
-    'Volatility 10 Index','Volatility 25 Index','Volatility 50 Index',
-    'Volatility 75 Index','Volatility 100 Index','Volatility 150 Index','Volatility 250 Index',
-    'Boom 300 Index','Boom 500 Index','Boom 1000 Index',
-    'Crash 300 Index','Crash 500 Index','Crash 1000 Index',
-    'Jump 10 Index','Jump 25 Index','Jump 50 Index','Jump 75 Index','Jump 100 Index',
-    'Step Index','Range Break 100 Index','Range Break 200 Index',
+    'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'US30', 'BTCUSD',
+    'Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index',
+    'Volatility 75 Index', 'Volatility 100 Index', 'Volatility 150 Index', 'Volatility 250 Index',
+    'Boom 300 Index', 'Boom 500 Index', 'Boom 1000 Index',
+    'Crash 300 Index', 'Crash 500 Index', 'Crash 1000 Index',
+    'Jump 10 Index', 'Jump 25 Index', 'Jump 50 Index', 'Jump 75 Index', 'Jump 100 Index',
+    'Step Index', 'Range Break 100 Index', 'Range Break 200 Index',
   ];
 
   const activeSymbols = config.instrument_settings ? config.instrument_settings.filter(i => i.enabled).map(i => i.symbol) : config.symbols;
@@ -108,13 +108,13 @@ export default function StrategySettings() {
   const toggleSymbol = (sym) => {
     let settings = [...(config.instrument_settings || [])];
     const exists = settings.find(i => i.symbol === sym);
-    
+
     if (exists) {
       exists.enabled = !exists.enabled;
     } else {
       settings.push({ symbol: sym, strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false });
     }
-    
+
     const active = settings.filter(i => i.enabled).map(i => i.symbol);
     setConfig({ ...config, instrument_settings: settings, symbols: active });
   };
@@ -152,10 +152,10 @@ export default function StrategySettings() {
               {sym}
             </button>
           ))}
-          <input 
-            type="text" 
-            placeholder="Add custom symbol... (Enter)" 
-            className="input" 
+          <input
+            type="text"
+            placeholder="Add custom symbol... (Enter)"
+            className="input"
             style={{ width: 220, height: 32, fontSize: '0.875rem' }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && e.target.value.trim()) {
@@ -184,8 +184,8 @@ export default function StrategySettings() {
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Strategy Engine</label>
-                    <select 
-                      value={symConfig.strategy_id || 'SMC_v1'} 
+                    <select
+                      value={symConfig.strategy_id || 'SMC_v1'}
                       onChange={e => updateSymbolSetting(sym, 'strategy_id', e.target.value)}
                       style={{ fontSize: '0.8rem', padding: '4px 8px' }}
                     >
@@ -197,11 +197,11 @@ export default function StrategySettings() {
                       <option value="NYOpenRetest_v1">NY Open Break Retest</option>
                     </select>
                   </div>
-                  
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Manual HTF Bias</label>
-                    <select 
-                      value={(config.smc?.manual_bias_overrides || {})[sym] || 'NONE'} 
+                    <select
+                      value={(config.smc?.manual_bias_overrides || {})[sym] || 'NONE'}
                       onChange={e => updateBias(sym, e.target.value)}
                       style={{ fontSize: '0.8rem', padding: '4px 8px' }}
                     >
@@ -212,12 +212,12 @@ export default function StrategySettings() {
                   </div>
 
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.8rem', marginTop: 16 }}>
-                    <input 
-                      type="checkbox" 
-                      checked={symConfig.compounding_enabled || false} 
-                      onChange={e => updateSymbolSetting(sym, 'compounding_enabled', e.target.checked)} 
-                      style={{ width: 14, height: 14 }} 
-                    /> 
+                    <input
+                      type="checkbox"
+                      checked={symConfig.compounding_enabled || false}
+                      onChange={e => updateSymbolSetting(sym, 'compounding_enabled', e.target.checked)}
+                      style={{ width: 14, height: 14 }}
+                    />
                     Compounding
                   </label>
                 </div>
