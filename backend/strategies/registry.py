@@ -40,6 +40,7 @@ def get_strategy(name: str) -> type[BaseStrategy]:
     """Get a strategy class by name."""
     _load_strategies()
     if name not in _STRATEGIES:
+        logger.error(f"Registry dump: {list(_STRATEGIES.keys())}")
         raise ValueError(f"Strategy {name} not found in registry.")
     return _STRATEGIES[name]
 

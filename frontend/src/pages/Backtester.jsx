@@ -816,12 +816,14 @@ export default function Backtester() {
     mutationFn: () => {
       setResult(null);
       setEvents([]);
-      const payload = { ...form, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: { prop_firm: form.prop_firm }, strategy_params: {} };
+      const validStrats = ['SMC_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'];
+      const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'SMC_v1';
+      const payload = { ...form, strategy_id: payload_strategy, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: { prop_firm: form.prop_firm }, strategy_params: {} };
       if (form.manual_bias && form.manual_bias !== 'NONE') {
         payload.manual_bias_overrides = { [form.symbol]: form.manual_bias };
       }
       
-      if (form.strategy_id === 'SMC_v1') {
+      if (payload_strategy === 'SMC_v1') {
         payload.strategy_params = {
           min_signal_score: form.confluence_threshold,
           swing_length_htf: form.swing_length,
@@ -954,7 +956,7 @@ export default function Backtester() {
         <div className="card-header"><span className="card-title">Configuration</span></div>
         <div style={{ display: 'grid', gap: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div><label>Strategy Engine</label><select value={form.strategy_id} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option></select></div>
+            <div><label>Strategy Engine</label><select value={['SMC_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'].includes(form.strategy_id) ? form.strategy_id : 'SMC_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option></select></div>
             <div>
               <label>Symbol</label>
               <input 
