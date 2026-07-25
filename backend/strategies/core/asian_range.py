@@ -7,6 +7,7 @@ during the London open (Manipulation phase).
 from datetime import datetime, timezone
 
 import pandas as pd
+
 from backend.utils.timeutils import get_local_time
 
 

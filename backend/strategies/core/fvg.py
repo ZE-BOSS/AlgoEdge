@@ -8,6 +8,7 @@ Source: SMC_Strategy.md Section 2
 from typing import Any
 
 import pandas as pd
+
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)

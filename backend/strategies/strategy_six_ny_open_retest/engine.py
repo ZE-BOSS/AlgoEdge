@@ -1,7 +1,8 @@
 
 import pandas as pd
+
 from backend.core.config_schema import UserConfigV2
-from backend.strategies.base_strategy import BaseStrategy, Signal
+from backend.strategies.base_strategy import BaseStrategy, TradeSignal
 from backend.strategies.registry import register_strategy
 from backend.utils.logger import get_logger
 
@@ -28,7 +29,7 @@ class NYOpenRetestEngine(BaseStrategy):
                 "current_day": None
             }
 
-    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> Signal | None:
+    async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         self._init_state(symbol)
         state = self.state[symbol]
         
@@ -96,7 +97,7 @@ class NYOpenRetestEngine(BaseStrategy):
                     take_profit = entry + target if state["bias"] == "LONG" else entry - target
                     
                     state["status"] = "DONE"
-                    return Signal(
+                    return TradeSignal(
                         symbol=symbol,
                         direction=state["bias"],
                         entry_price=entry,
