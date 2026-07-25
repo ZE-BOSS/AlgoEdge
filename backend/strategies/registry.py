@@ -22,6 +22,7 @@ def _load_strategies():
     if not _LOADED:
         import backend.strategies.strategy_one.engine
         import backend.strategies.strategy_two.engine
+        import backend.strategies.strategy_six_crt.engine
         _LOADED = True
 
 def register_strategy(name: str):

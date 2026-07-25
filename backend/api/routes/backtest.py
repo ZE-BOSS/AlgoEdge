@@ -278,10 +278,14 @@ async def run_backtest_endpoint(
                 for k, v in req.strategy_params.items():
                     if hasattr(config.smc, k):
                         setattr(config.smc, k, v)
-            elif req.strategy_id == "CrashBoom_v1":
+            elif req.strategy_id == "DriftJumpAlpha_v1":
                 for k, v in req.strategy_params.items():
-                    if hasattr(config.crashboom, k):
-                        setattr(config.crashboom, k, v)
+                    if hasattr(config.drift_jump_alpha, k):
+                        setattr(config.drift_jump_alpha, k, v)
+            elif req.strategy_id == "CRT_v1":
+                for k, v in req.strategy_params.items():
+                    if hasattr(config.crt, k):
+                        setattr(config.crt, k, v)
                         
             config.instrument_settings = [InstrumentSettings(symbol=req.symbol, strategy_id=req.strategy_id)]
             

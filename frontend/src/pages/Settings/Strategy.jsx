@@ -28,12 +28,24 @@ export default function StrategySettings() {
       session_filter_enabled: true,
       news_filter_enabled: true,
     },
-    crashboom: {
+    drift_jump_alpha: {
       spike_lookback_bars: 50,
-      drift_ema_fast: 5,
-      drift_ema_slow: 15,
-      spike_threshold_pips: 20.0,
-      recovery_target_pips: 10.0,
+      drift_ema_fast: 20,
+      drift_ema_slow: 50,
+      min_adx_to_trade: 20,
+      jump_entry_percentile_threshold: 95.0,
+      trade_jumps_enabled: false,
+      control_test_passed: false,
+      aggregate_max_lots_per_symbol: 6.0,
+    },
+    crt: {
+      htf_timeframe: '1H',
+      ltf_timeframe: 'M1',
+      target_r_multiple: 1.5,
+      max_trades_per_session: 1,
+      session_start: '09:30',
+      session_cutoff: '12:00',
+      bypass_session_synthetics: true,
     },
     manual_bias_overrides: {},
   });
@@ -178,7 +190,8 @@ export default function StrategySettings() {
                       style={{ fontSize: '0.8rem', padding: '4px 8px' }}
                     >
                       <option value="SMC_v1">SMC Multi-TF</option>
-                      <option value="CrashBoom_v1">CrashBoom Drift</option>
+                      <option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option>
+                      <option value="CRT_v1">CRT Strategy</option>
                     </select>
                   </div>
                   
@@ -228,13 +241,43 @@ export default function StrategySettings() {
       </div>
 
       <div className="card">
-        <div className="card-header"><span className="card-title">CrashBoom Drift Parameters</span></div>
+        <div className="card-header"><span className="card-title">Drift & Jump Alpha Parameters</span></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Spike Lookback (Bars)</label><input type="number" value={config.crashboom?.spike_lookback_bars || 50} onChange={e => updateNested('crashboom', 'spike_lookback_bars', +e.target.value)} /></div>
-          <div><label>Drift EMA Fast</label><input type="number" value={config.crashboom?.drift_ema_fast || 5} onChange={e => updateNested('crashboom', 'drift_ema_fast', +e.target.value)} /></div>
-          <div><label>Drift EMA Slow</label><input type="number" value={config.crashboom?.drift_ema_slow || 15} onChange={e => updateNested('crashboom', 'drift_ema_slow', +e.target.value)} /></div>
-          <div><label>Spike Threshold (pips)</label><input type="number" value={config.crashboom?.spike_threshold_pips || 20.0} onChange={e => updateNested('crashboom', 'spike_threshold_pips', +e.target.value)} /></div>
-          <div><label>Recovery Target (pips)</label><input type="number" value={config.crashboom?.recovery_target_pips || 10.0} onChange={e => updateNested('crashboom', 'recovery_target_pips', +e.target.value)} /></div>
+          <div><label>Drift EMA Fast</label><input type="number" value={config.drift_jump_alpha?.drift_ema_fast || 20} onChange={e => updateNested('drift_jump_alpha', 'drift_ema_fast', +e.target.value)} /></div>
+          <div><label>Drift EMA Slow</label><input type="number" value={config.drift_jump_alpha?.drift_ema_slow || 50} onChange={e => updateNested('drift_jump_alpha', 'drift_ema_slow', +e.target.value)} /></div>
+          <div><label>Min ADX to Trade</label><input type="number" value={config.drift_jump_alpha?.min_adx_to_trade || 20} onChange={e => updateNested('drift_jump_alpha', 'min_adx_to_trade', +e.target.value)} /></div>
+          <div><label>Jump Entry Threshold (%)</label><input type="number" value={config.drift_jump_alpha?.jump_entry_percentile_threshold || 95.0} onChange={e => updateNested('drift_jump_alpha', 'jump_entry_percentile_threshold', +e.target.value)} /></div>
+          <div><label>Max Lots per Symbol</label><input type="number" step="0.1" value={config.drift_jump_alpha?.aggregate_max_lots_per_symbol || 6.0} onChange={e => updateNested('drift_jump_alpha', 'aggregate_max_lots_per_symbol', +e.target.value)} /></div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+              <input type="checkbox" checked={config.drift_jump_alpha?.trade_jumps_enabled ?? false} onChange={e => updateNested('drift_jump_alpha', 'trade_jumps_enabled', e.target.checked)} />
+              Enable Jump Trades (Setup B)
+            </label>
+          </div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+              <input type="checkbox" checked={config.drift_jump_alpha?.control_test_passed ?? false} onChange={e => updateNested('drift_jump_alpha', 'control_test_passed', e.target.checked)} />
+              Control Test Passed
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">CRT Strategy Parameters</span></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div><label>HTF Timeframe</label><input type="text" value={config.crt?.htf_timeframe || '1H'} onChange={e => updateNested('crt', 'htf_timeframe', e.target.value)} /></div>
+          <div><label>LTF Timeframe</label><input type="text" value={config.crt?.ltf_timeframe || 'M1'} onChange={e => updateNested('crt', 'ltf_timeframe', e.target.value)} /></div>
+          <div><label>Target R-Multiple</label><input type="number" step="0.1" value={config.crt?.target_r_multiple || 1.5} onChange={e => updateNested('crt', 'target_r_multiple', +e.target.value)} /></div>
+          <div><label>Max Trades / Session</label><input type="number" value={config.crt?.max_trades_per_session || 1} onChange={e => updateNested('crt', 'max_trades_per_session', +e.target.value)} /></div>
+          <div><label>Session Start (ET)</label><input type="text" value={config.crt?.session_start || '09:30'} onChange={e => updateNested('crt', 'session_start', e.target.value)} /></div>
+          <div><label>Session Cutoff (ET)</label><input type="text" value={config.crt?.session_cutoff || '12:00'} onChange={e => updateNested('crt', 'session_cutoff', e.target.value)} /></div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+              <input type="checkbox" checked={config.crt?.bypass_session_synthetics ?? true} onChange={e => updateNested('crt', 'bypass_session_synthetics', e.target.checked)} />
+              Bypass Session Filter (Synthetics)
+            </label>
+          </div>
         </div>
       </div>
 
