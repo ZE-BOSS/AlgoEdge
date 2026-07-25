@@ -183,7 +183,8 @@ async def get_broker_status(
             "account_masked": _mask_account(current_user.mt5_account) if current_user.mt5_account else None,
             "server": current_user.mt5_server,
             "path": current_user.mt5_path,
-        },
+        }
+    }
 
 
 @router.post("/test")

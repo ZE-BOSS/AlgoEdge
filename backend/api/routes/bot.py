@@ -23,19 +23,7 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api", tags=["bot"])
 bot_start_lock = asyncio.Lock()
 
-# Deriv / synthetic symbols that require the Deriv broker
-    "Volatility 10 Index", "Volatility 25 Index", "Volatility 50 Index",
-    "Volatility 75 Index", "Volatility 100 Index",
-    "Boom 300 Index", "Boom 500 Index", "Boom 1000 Index",
-    "Crash 300 Index", "Crash 500 Index", "Crash 1000 Index",
-    "Step Index", "Range Break 100 Index", "Range Break 200 Index",
-}
 
-
-    """Check if any symbol requires a standard MT5 broker (forex, metals, indices)."""
-
-
-    """Check if any symbol requires a Deriv broker (synthetics)."""
 
 
 class StartBotRequest(BaseModel):
