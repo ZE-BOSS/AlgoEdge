@@ -746,9 +746,21 @@ class BotService:
         This loop only handles: profit accumulation, activity log, Telegram, circuit breaker.
         """
         from backend.mt5.order_manager import OrderManager
+        import json
+        import os
+        state_file = "backend/data/bot_sync_state.json"
         
         last_check_time = datetime.now(timezone.utc).timestamp() - 86400 * 3
         processed_deal_tickets = set()
+        
+        if os.path.exists(state_file):
+            try:
+                with open(state_file, "r") as f:
+                    data = json.load(f)
+                    last_check_time = data.get("last_check_time", last_check_time)
+                    processed_deal_tickets = set(data.get("processed_deal_tickets", []))
+            except Exception as e:
+                logger.error(f"Failed to load bot sync state: {e}")
         
         while self.running:
             try:
@@ -788,6 +800,16 @@ class BotService:
                                 self.circuit_breaker.position_closed(symbol, net_profit, close_time)
                             if getattr(self, "prop_firm_validator", None):
                                 self.prop_firm_validator.record_trade_closed(deal.get("symbol", "UNKNOWN"), deal.get("volume", 0.0), net_profit)
+                                
+                            try:
+                                os.makedirs(os.path.dirname(state_file), exist_ok=True)
+                                with open(state_file, "w") as f:
+                                    json.dump({
+                                        "last_check_time": last_check_time,
+                                        "processed_deal_tickets": list(processed_deal_tickets)
+                                    }, f)
+                            except Exception as e:
+                                logger.error(f"Failed to save bot sync state: {e}")
                             
             except asyncio.CancelledError:
                 break

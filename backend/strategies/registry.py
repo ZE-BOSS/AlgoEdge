@@ -20,6 +20,12 @@ _LOADED = False
 def _load_strategies():
     global _LOADED
     if not _LOADED:
+        import backend.strategies.strategy_one.engine  # noqa: F401
+        import backend.strategies.strategy_two.engine  # noqa: F401
+        import backend.strategies.strategy_three_crt.engine  # noqa: F401
+        import backend.strategies.strategy_four_htf_fvg_flip.engine  # noqa: F401
+        import backend.strategies.strategy_five_bias_ifvg.engine  # noqa: F401
+        import backend.strategies.strategy_six_ny_open_retest.engine  # noqa: F401
         _LOADED = True
 
 def register_strategy(name: str):
