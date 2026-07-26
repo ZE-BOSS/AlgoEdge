@@ -641,7 +641,10 @@ SYMBOL_ALIASES: dict[str, str] = {
     "Gold": "XAUUSD", "GOLD": "XAUUSD",
     "DJI": "US30", "DOW": "US30",
     "US100": "NAS100", "USTEC": "NAS100", "NDX": "NAS100",
-    "SPX500": "US500", "SPX": "US500",
+    "NDX100": "NAS100", "US Tech100": "NAS100", "US Tech 100": "NAS100",
+    "USTECH": "NAS100", "NQ100": "NAS100", "NQ": "NAS100",
+    "SPX500": "US500", "SPX": "US500", "SP500": "US500", "S&P500": "US500",
+    "S&P 500": "US500", "US 500": "US500", "INX": "US500", "ES": "US500",
     "BTC": "BTCUSD",
 }
 

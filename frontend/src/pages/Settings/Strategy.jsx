@@ -97,7 +97,7 @@ export default function StrategySettings() {
   const handleSave = () => mutation.mutate(config);
 
   const allSymbols = [
-    'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'US30', 'BTCUSD',
+    'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'US30', 'NAS100', 'US100', 'USTEC', 'NDX', 'NDX100', 'US Tech100', 'US Tech 100', 'USTECH', 'NQ100', 'NQ', 'SPX500', 'US500', 'SPX', 'SP500', 'S&P500', 'S&P 500', 'US 500', 'INX', 'ES', 'BTCUSD',
     'Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index',
     'Volatility 75 Index', 'Volatility 100 Index', 'Volatility 150 Index', 'Volatility 250 Index',
     'Boom 300 Index', 'Boom 500 Index', 'Boom 1000 Index',

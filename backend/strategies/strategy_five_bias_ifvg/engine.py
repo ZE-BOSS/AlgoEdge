@@ -94,7 +94,7 @@ class BiasIFVGEngine(BaseStrategy):
                 state["status"] = "AWAIT_KEY_LEVEL"
                 self.log_event(f"[{symbol}] Bias established: {state['bias']}", category="BIAS_IFVG")
         
-          # 3. M1 IFVG Entry Trigger
+          # 3. M5 IFVG Entry Trigger
         elif timeframe == "M5":
             if state["status"] == "AWAIT_KEY_LEVEL":
                 # Simulated key level tap for boilerplate
@@ -125,7 +125,7 @@ class BiasIFVGEngine(BaseStrategy):
                     return TradeSignal(
                         symbol=symbol,
                         direction=state["bias"],
-                        timeframe="M1",
+                        timeframe="M5",
                         entry_price=entry,
                         stop_loss=sl,
                         take_profit=0.0,

@@ -51,12 +51,11 @@ Step 1 bias.
 ## Step 3 — IFVG Confirmation
 - Define the **manipulation leg**: the swing (high→low, or low→high) that
   actually touched the Step 2 key level.
-- Scan timeframes 30s (intermediate/advanced traders only), 1m, 2m, 3m, 4m,
-  5m for FVGs that exist *within* that specific leg (not elsewhere on chart).
+- Scan the 5m timeframe for FVGs that exist *within* that specific leg (not elsewhere on chart).
 - Take the **highest** timeframe FVG found inside the leg — this is the IFVG.
 - Entry trigger = a body close through that FVG, on its native timeframe.
 - Rule of thumb: lower-timeframe-only confirmations (e.g. jumping straight to
-  a 1m signal when a 4m gap exists in the same leg) are a common beginner
+  a lower-timeframe signal when a higher gap exists in the same leg) are a common beginner
   error and reduce win rate, even though they'd give better R:R.
 
 ## Step 4 — Execution & Risk Management
@@ -88,7 +87,7 @@ key_levels = rank_and_trim(key_levels, max_n=3)
 for level in key_levels:
     wait_until(price_touches(level))
     leg = get_manipulation_leg(level)  # swing that touched the level
-    candidate_tfs = [30s, 1m, 2m, 3m, 4m, 5m]
+    candidate_tfs = ['M5']
     ifvg = highest_tf_fvg_within_leg(leg, candidate_tfs)
     if ifvg is None:
         continue
@@ -110,14 +109,14 @@ for level in key_levels:
 |---|---|
 | `bias_timeframes` | Daily, 4H, 1H (+15m check) |
 | `key_level_timeframes` | 3m, 5m, 15m, 30m, 1H, 4H |
-| `confirmation_timeframes` | 30s–5m, take highest present in leg |
+| `confirmation_timeframes` | 5m |
 | `stop_method` | swing_high_low |
 | `target_rr_range` | 1.0–3.0 |
 | `max_trades_per_day` | 2 |
 | `session_start / session_end` | 09:30 / 11:00 ET |
 
 ## Data Requirements
-OHLC candles at 30s, 1m–5m, 15m, 30m, 1H, 4H, and Daily resolution, all
+OHLC candles at 5m, 15m, 30m, 1H, 4H, and Daily resolution, all
 timezone-aligned to US Eastern.
 
 ## Open Questions / Edge Cases for Implementation

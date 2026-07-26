@@ -31,7 +31,7 @@ entering. Works symmetrically long and short.
 2. **AWAIT_5M_FVG** — After the HTF tap, wait for a new FVG to form on the
    5-minute chart in the anticipated reversal direction.
 3. **AWAIT_5M_RETEST** — Wait for price to trade back into that 5-minute FVG.
-4. **AWAIT_INVERSION** — Watch a lower timeframe (commonly 1m or 2m) for a
+4. **AWAIT_INVERSION** — Watch a lower timeframe (commonly 5m) for a
    body close back through the 5-minute FVG in the reversal direction. This is
    the inversion / confirmation signal.
 5. **ENTER** — Enter in the direction of the inversion once the confirming
@@ -69,7 +69,7 @@ on_new_m5_candle(candle):
         if price_enters(m5_fvg):
             state = AWAIT_INVERSION
 
-on_new_low_tf_candle(candle):  # 1m/2m
+on_new_low_tf_candle(candle):  # 5m
     if state == AWAIT_INVERSION:
         if body_closes_through(candle, m5_fvg, direction=bias):
             entry = candle.close
@@ -84,12 +84,12 @@ on_new_low_tf_candle(candle):  # 1m/2m
 | Parameter | Default | Notes |
 |---|---|---|
 | `htf_timeframe` | 1H (alt: 4H) | Key-level timeframe |
-| `entry_confirmation_tf` | 1m | Can widen to 2m if too noisy |
+| `entry_confirmation_tf` | 5m | Can widen if too noisy |
 | `target_rr` | 1.0 | Ratio to next liquidity pool; user-overridable |
 | `require_unfilled_htf_fvg` | true | Only take first tap of a gap |
 
 ## Data Requirements
-1m, 5m, and 1H/4H OHLC candles for the traded instrument, synchronized to the
+5m, 15m, and 1H/4H OHLC candles for the traded instrument, synchronized to the
 same session timezone.
 
 ## Backtest Reference (self-reported, unverified)

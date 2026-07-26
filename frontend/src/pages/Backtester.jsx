@@ -8,7 +8,7 @@ import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
 const SYMBOLS = [
-  'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'US30', 'NAS100', 'US100', 'SPX500', 'US500', 'BTCUSD',
+  'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'US30', 'NAS100', 'US100', 'USTEC', 'NDX', 'NDX100', 'US Tech100', 'US Tech 100', 'USTECH', 'NQ100', 'NQ', 'SPX500', 'US500', 'SPX', 'SP500', 'S&P500', 'S&P 500', 'US 500', 'INX', 'ES', 'BTCUSD',
   'Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index',
   'Volatility 75 Index', 'Volatility 100 Index', 'Volatility 150 Index', 'Volatility 250 Index',
   'Boom 300 Index', 'Boom 500 Index', 'Boom 1000 Index',
@@ -688,8 +688,8 @@ export default function Backtester() {
       manual_bias: 'NONE',
       strategy_id: 'SMC_v1',
       drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20, jump_entry_percentile_threshold: 95.0, trade_jumps_enabled: false, control_test_passed: false, aggregate_max_lots_per_symbol: 6.0,
-      htf_timeframe: 'H1', ltf_timeframe: 'M1', target_r_multiple: 1.5, max_trades_per_session: 1, session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
-      entry_confirmation_tf: 'M1', target_rr: 1.0, require_unfilled_htf_fvg: true,
+      htf_timeframe: 'H1', ltf_timeframe: 'M5', target_r_multiple: 1.5, max_trades_per_session: 1, session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
+      entry_confirmation_tf: 'M5', target_rr: 1.0, require_unfilled_htf_fvg: true,
       stop_method: 'swing_high_low', target_rr_range_min: 1.0, target_rr_range_max: 3.0, max_trades_per_day: 2,
       range_window_start: '08:00', range_window_end: '08:15', earliest_valid_break_time: '09:30', session_end: '11:00', stop_buffer_points: 5.0, fixed_target_points: 15.0, dynamic_target_override: true,
     };

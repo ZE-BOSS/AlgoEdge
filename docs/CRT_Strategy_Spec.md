@@ -18,7 +18,7 @@ Source: a discretionary NY-session CRT scalp strategy (demonstrated on MNQ futur
 | Term | Meaning |
 |---|---|
 | HTF | Higher timeframe used to identify the pattern — 1H, 30M, or 15M (configurable) |
-| LTF | Lower timeframe used only for entry timing — 1M or 2M (configurable) |
+| LTF | Lower timeframe used only for entry timing — 5M (configurable) |
 | Candle 1 (C1) / Range Candle | Defines the range; use wick high/low, never the candle body |
 | Candle 2 (C2) / Sweep Candle | The next HTF candle; must wick beyond one side of C1 and close back inside it |
 | Trigger Level | C2's high (bullish setups) or low (bearish setups) — the LTF break that fires entry |
@@ -27,7 +27,7 @@ Source: a discretionary NY-session CRT scalp strategy (demonstrated on MNQ futur
 
 ```
 htf_timeframe: enum[1H, 30M, 15M]      # default 1H — highest-quality per source; 15M = more frequent
-ltf_timeframe: enum[1M, 2M]            # default 1M
+ltf_timeframe: enum[1M, 5M, 15M]            # default 5M
 session_start / session_cutoff: time   # instrument-local — see Section 8
 target_r_multiple: float               # default 1.5, valid range 1.5-2.0
 max_trades_per_session: int = 1

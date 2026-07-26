@@ -52,7 +52,7 @@ on_new_m15_candle(candle):
         range_mid = (range_high + range_low) / 2
         state = AWAIT_BREAK
 
-on_new_m1_candle(candle):
+on_new_m5_candle(candle):
     if state == AWAIT_BREAK:
         if candle.time < "09:30 ET":
             return  # ignore pre-open breaks
@@ -84,7 +84,7 @@ on_new_m1_candle(candle):
 | Parameter | Default | Notes |
 |---|---|---|
 | `range_window` | 08:00–08:15 ET | One 15m candle |
-| `break_confirmation_tf` | 1m | Close-based, not wick-based |
+| `break_confirmation_tf` | 5m | Close-based, not wick-based |
 | `earliest_valid_break_time` | 09:30 ET | Breaks before this are ignored |
 | `stop_buffer_points` | 5 (instrument-specific) | Calibrate per market |
 | `fixed_target_points` | 15 (instrument-specific) | Calibrate per market |
@@ -93,7 +93,7 @@ on_new_m1_candle(candle):
 | `news_filter` | optional | Source recommends de-risking around scheduled news, not necessarily skipping the trade entirely |
 
 ## Data Requirements
-1-minute and 15-minute OHLC candles, timezone-aligned to US Eastern, plus a
+5-minute and 15-minute OHLC candles, timezone-aligned to US Eastern, plus a
 way to identify recent higher-timeframe swing highs/lows for the dynamic
 target override.
 
