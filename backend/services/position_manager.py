@@ -467,9 +467,10 @@ class PositionManager:
                     if risk_pips > 0:
                         current_rr = pips_in_profit / risk_pips
                         if current_rr >= risk.be_trigger_rr:
-                            be_atr_mult = getattr(risk, 'be_buffer_atr_mult', getattr(risk, 'be_buffer_pips', 0.1))
+                            be_atr_mult = getattr(risk, 'be_buffer_atr_mult', 0.0)
+                            be_pips = getattr(risk, 'be_buffer_pips', 2.0)
                             atr_val = await self._get_or_fetch_atr(symbol, pip_size_val)
-                            be_buffer = be_atr_mult * atr_val
+                            be_buffer = max(be_atr_mult * atr_val, be_pips * pip_size_val)
                             
                             # Ensure BE buffer covers spread + commission to prevent net loss
                             sym_info = mt5.symbol_info(symbol)
@@ -560,11 +561,12 @@ class PositionManager:
                         entry_price = alive_positions[0].entry_price
                         symbol = mt5_tickets[alive_positions[0].mt5_ticket].symbol
                         pip_size_val = get_pip_size(symbol)
-                        # Use ATR-relative buffer via be_buffer_atr_mult (§1.4 fix)
-                        be_atr_mult = getattr(risk, 'be_buffer_atr_mult', getattr(risk, 'be_buffer_pips', 0.1))
+                        # Use both ATR and Pip relative buffers, taking the max
+                        be_atr_mult = getattr(risk, 'be_buffer_atr_mult', 0.0)
+                        be_pips = getattr(risk, 'be_buffer_pips', 2.0)
                         # Fetch real ATR
                         atr_val = await self._get_or_fetch_atr(symbol, pip_size_val)
-                        be_buffer = be_atr_mult * atr_val
+                        be_buffer = max(be_atr_mult * atr_val, be_pips * pip_size_val)
                         
                         # Ensure BE buffer covers spread + commission to prevent net loss
                         sym_info = mt5.symbol_info(symbol)

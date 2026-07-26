@@ -189,6 +189,18 @@ class DataFetcher:
 
         
         if rates is None or len(rates) == 0:
+            # Fallback: copy_rates_range often fails with (-2, Invalid params) if start_ts is too old.
+            # Attempt to fetch using copy_rates_from which is more resilient to history bounds.
+            tf_minutes = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
+            minutes = tf_minutes.get(timeframe, 5)
+            estimated_bars = min(int((end_ts - start_ts) / (minutes * 60)), 200000) # Cap at 200k bars
+            logger.info(f"copy_rates_range failed for {timeframe}. Falling back to copy_rates_from with count={estimated_bars}")
+            rates = await loop.run_in_executor(
+                _executor, 
+                lambda: mt5.copy_rates_from(symbol, tf_code, end_ts, estimated_bars)
+            )
+
+        if rates is None or len(rates) == 0:
             mt5_error = mt5.last_error()
             error_msg = (
                 f"MT5 returned no data for {symbol} {timeframe} "

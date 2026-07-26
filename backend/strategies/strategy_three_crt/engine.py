@@ -183,21 +183,22 @@ class CRTEngine(BaseStrategy):
                     else:
                         sl = current_price + sl_dist
                         
-                    return TradeSignal(
-                        strategy_id="CRT_v1",
-                        symbol=symbol,
-                        direction=direction,
-                        signal_type="BREAKOUT_ENTRY",
-                        entry_price=current_price,
-                        stop_loss=sl,
-                        take_profit=tp,
-                        confluence_score=90,
-                        timeframe=ltf,
-                        metadata={
-                            "reason": "CRT Setup C1/C2. NY Session.",
-                            "htf": htf
-                        }
-                    )
+                        return TradeSignal(
+                            strategy_id="CRT_v1",
+                            symbol=symbol,
+                            direction=direction,
+                            signal_type="BREAKOUT_ENTRY",
+                            entry_price=current_price,
+                            stop_loss=sl,
+                            take_profit=tp,
+                            confluence_score=90,
+                            timeframe=ltf,
+                            timestamp=candles.index[-1].timestamp(),
+                            metadata={
+                                "reason": "CRT Setup C1/C2. NY Session.",
+                                "htf": htf
+                            }
+                        )
 
         return None
 

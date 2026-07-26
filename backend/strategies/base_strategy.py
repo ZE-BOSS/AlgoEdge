@@ -24,6 +24,7 @@ class TradeSignal(BaseModel):
     stop_loss: float
     take_profit: float
     confluence_score: int
+    timestamp: float | None = None
     metadata: dict[str, Any] = {}
     chart_data: list[dict[str, Any]] | None = None
 

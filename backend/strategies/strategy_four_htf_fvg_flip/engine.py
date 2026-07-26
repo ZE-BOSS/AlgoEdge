@@ -142,10 +142,12 @@ class HTFFVGFlipEngine(BaseStrategy):
                     return TradeSignal(
                         symbol=symbol,
                         direction=state["bias"],
+                        timeframe=timeframe,
                         entry_price=entry,
                         stop_loss=sl,
                         take_profit=0.0, # Managed dynamically by PositionManager
-                        confluence_score=100.0,
+                        confluence_score=88,
+                        timestamp=float(latest["time"]) if "time" in latest else current_time.timestamp(),
                         metadata={"setup": "HTF_FVG_FLIP"}
                     )
 

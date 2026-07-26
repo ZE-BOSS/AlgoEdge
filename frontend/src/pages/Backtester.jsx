@@ -688,7 +688,7 @@ export default function Backtester() {
       manual_bias: 'NONE',
       strategy_id: 'SMC_v1',
       drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20, jump_entry_percentile_threshold: 95.0, trade_jumps_enabled: false, control_test_passed: false, aggregate_max_lots_per_symbol: 6.0,
-      htf_timeframe: '1H', ltf_timeframe: 'M1', target_r_multiple: 1.5, max_trades_per_session: 1, session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
+      htf_timeframe: 'H1', ltf_timeframe: 'M1', target_r_multiple: 1.5, max_trades_per_session: 1, session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
       entry_confirmation_tf: 'M1', target_rr: 1.0, require_unfilled_htf_fvg: true,
       stop_method: 'swing_high_low', target_rr_range_min: 1.0, target_rr_range_max: 3.0, max_trades_per_day: 2,
       range_window_start: '08:00', range_window_end: '08:15', earliest_valid_break_time: '09:30', session_end: '11:00', stop_buffer_points: 5.0, fixed_target_points: 15.0, dynamic_target_override: true,
@@ -1051,8 +1051,8 @@ export default function Backtester() {
             )}
             {form.strategy_id === 'CRT_v1' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><input type="text" value={form.htf_timeframe} onChange={e => u('htf_timeframe', e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>LTF Timeframe</label><input type="text" value={form.ltf_timeframe} onChange={e => u('ltf_timeframe', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><select value={form.htf_timeframe} onChange={e => u('htf_timeframe', e.target.value)}>{['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+                <div><label style={{ fontSize: '0.7rem' }}>LTF Timeframe</label><select value={form.ltf_timeframe} onChange={e => u('ltf_timeframe', e.target.value)}>{['M1', 'M5', 'M15'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                 <div><label style={{ fontSize: '0.7rem' }}>Target R-Multiple</label><input type="number" step="0.1" value={form.target_r_multiple} onChange={e => u('target_r_multiple', +e.target.value)} /></div>
                 <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Session</label><input type="number" value={form.max_trades_per_session} onChange={e => u('max_trades_per_session', +e.target.value)} /></div>
                 <div><label style={{ fontSize: '0.7rem' }}>Session Start (ET)</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
@@ -1064,8 +1064,8 @@ export default function Backtester() {
                   </label>
             {form.strategy_id === 'HTFFVGFlip_v1' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><input type="text" value={form.htf_timeframe} onChange={e => u('htf_timeframe', e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Entry Confirm TF</label><input type="text" value={form.entry_confirmation_tf} onChange={e => u('entry_confirmation_tf', e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><select value={form.htf_timeframe} onChange={e => u('htf_timeframe', e.target.value)}>{['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Entry Confirm TF</label><select value={form.entry_confirmation_tf} onChange={e => u('entry_confirmation_tf', e.target.value)}>{['M1', 'M5', 'M15'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
                 <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={form.target_rr} onChange={e => u('target_rr', +e.target.value)} /></div>
                 <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
                 <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>

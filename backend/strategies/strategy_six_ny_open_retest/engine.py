@@ -106,10 +106,12 @@ class NYOpenRetestEngine(BaseStrategy):
                     return TradeSignal(
                         symbol=symbol,
                         direction=state["bias"],
+                        timeframe=timeframe,
                         entry_price=entry,
                         stop_loss=stop_loss,
                         take_profit=take_profit,
-                        confluence_score=100.0,
+                        confluence_score=92,
+                        timestamp=float(latest["time"]) if "time" in latest else candles.index[-1].timestamp(),
                         metadata={"setup": "NY_OPEN_RETEST"}
                     )
 

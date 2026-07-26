@@ -134,6 +134,7 @@ class SignalGenerator:
             timeframe=context.get("entry_timeframe", "M5"),
             confluence_score=score,
             signal_type=context.get("signal_type", "OB_ENTRY"),
+            timestamp=context.get("timestamp"),
             metadata={
                 "htf_bias": context.get("htf_bias"),
                 "ob": context.get("fresh_ob"),

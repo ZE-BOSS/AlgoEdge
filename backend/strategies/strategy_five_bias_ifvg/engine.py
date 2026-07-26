@@ -32,6 +32,8 @@ class BiasIFVGEngine(BaseStrategy):
                 "trades_today": 0,
                 "last_trade_won": False
             }
+        if not hasattr(self, 'last_trade_date'):
+            self.last_trade_date = None
 
     def _is_within_session(self, current_time: pd.Timestamp) -> bool:
         if current_time.tz is not None:
@@ -70,6 +72,10 @@ class BiasIFVGEngine(BaseStrategy):
         
         current_time = candles.index[-1]
         latest = candles.iloc[-1]
+        
+        if self.last_trade_date != current_time.date():
+            state["trades_today"] = 0
+            self.last_trade_date = current_time.date()
         
         # 1. Determine Bias
         if timeframe in ["H1", "H4", "D1"]:
@@ -119,15 +125,15 @@ class BiasIFVGEngine(BaseStrategy):
                     return TradeSignal(
                         symbol=symbol,
                         direction=state["bias"],
+                        timeframe="M1",
                         entry_price=entry,
                         stop_loss=sl,
                         take_profit=0.0,
-                        confluence_score=100.0,
+                        confluence_score=85,
+                        timestamp=float(latest["time"]) if "time" in latest else current_time.timestamp(),
                         metadata={"setup": "BIAS_IFVG"}
                     )
                     
-            # Reset daily limits at end of day
-            if current_time.hour == 23 and current_time.minute >= 50:
-                state["trades_today"] = 0
+            # Daily reset handled at the start of on_bar
 
         return None

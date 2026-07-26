@@ -472,4 +472,8 @@ class SMCEngine(BaseStrategy):
             "candle_tier": candle_tier,
             "in_kill_zone": in_kill_zone,
             "is_backtesting": self.is_backtesting,
+            "timestamp": _bar_ts,
+            "current_spread_pips": self.context.get("current_spread_pips", 1.0),
+            "active_fvgs": fvgs,
+            "asian_range_swept": False,
         }

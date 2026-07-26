@@ -187,17 +187,19 @@ class DriftJumpAlphaEngine(BaseStrategy):
         # Update Market Structure
         ms_state = self.ms_detector.update(candles)
 
-        # Detect historical jumps
-        self.jump_distances = []
-        last_j_idx = None
-        for i in range(1, len(df)-1):
-            b = df.iloc[i]
-            if self.detect_jump(b, symbol, b['atr']):
-                if last_j_idx is not None:
-                    self.jump_distances.append(i - last_j_idx)
-                last_j_idx = i
-                
-        self.last_jump_idx = last_j_idx
+        # Detect historical jumps only once
+        if not getattr(self, 'history_scanned', False):
+            self.jump_distances = []
+            last_j_idx = None
+            for i in range(1, len(df)-1):
+                b = df.iloc[i]
+                if self.detect_jump(b, symbol, b['atr']):
+                    if last_j_idx is not None:
+                        self.jump_distances.append(i - last_j_idx)
+                    last_j_idx = i
+                    
+            self.last_jump_idx = last_j_idx
+            self.history_scanned = True
             
         if self.detect_jump(current_bar, symbol, atr_val):
             if self.last_jump_idx is not None:
@@ -251,13 +253,15 @@ class DriftJumpAlphaEngine(BaseStrategy):
                         take_profit=tp,
                         confluence_score=95,
                         timeframe=timeframe,
+                        timestamp=candles.index[-1].timestamp(),
                         metadata={
                             "size_modifier": 1.0, # Sizing rules or ceilings applied at order execution layer
                             "gap_pct": gap_pct,
-                            "trail_method": "ATR_TRAIL",
+                            "trail_method": "NONE",
                             "atr_val": float(atr_val),
                             "setup": "setup_b_jump",
-                            "reason": f"Jump Entry Predicted. Gap Pct: {gap_pct:.1f}%"
+                            "reason": f"Jump SELL. Gap: {gap_pct:.1f}%",
+                            "aggregate_max_lots_per_symbol": getattr(self.params, 'aggregate_max_lots_per_symbol', 0.0)
                         }
                     )
             
@@ -342,13 +346,15 @@ class DriftJumpAlphaEngine(BaseStrategy):
             take_profit=tp,
             confluence_score=80,
             timeframe=timeframe,
+            timestamp=candles.index[-1].timestamp(),
             metadata={
                 "size_modifier": size_modifier,
                 "gap_pct": gap_pct,
                 "trail_method": "ATR_TRAIL",
                 "atr_val": float(atr_val),
                 "setup": "setup_a_drift",
-                "reason": f"Drift Continuation UP. Gap Pct: {gap_pct:.1f}%"
+                "reason": f"Drift Continuation UP. Gap Pct: {gap_pct:.1f}%",
+                "aggregate_max_lots_per_symbol": getattr(self.params, 'aggregate_max_lots_per_symbol', 0.0)
             }
         )
         
