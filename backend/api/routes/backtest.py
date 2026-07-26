@@ -238,32 +238,11 @@ async def run_backtest_endpoint(
                 current_state = await _get_state()
                 current_state["progress"] = {"stage": "Fetching historical data...", "pct": 5}
                 await _save_state(current_state)
-                if req.start_date and req.end_date:
-                    start = datetime.fromisoformat(req.start_date)
-                    end = datetime.fromisoformat(req.end_date)
-                    import pandas as pd
-                    # Fetch historical context so indicators can warm up immediately on start_date
-                    h4_start = start - pd.Timedelta(days=150)
-                    m15_start = start - pd.Timedelta(days=10)
-                    m5_start = start - pd.Timedelta(days=5)
-                    candles_h4 = await DataFetcher.get_data_range(req.symbol, "H4", h4_start, end)
-                    candles_m15 = await DataFetcher.get_data_range(req.symbol, "M15", m15_start, end)
-                    candles_m5 = await DataFetcher.get_data_range(req.symbol, "M5", m5_start, end)
-                else:
-                    candles_h4 = await DataFetcher.get_historical_data(req.symbol, "H4", count=req.candle_count)
-                    candles_m15 = await DataFetcher.get_historical_data(req.symbol, "M15", count=req.candle_count)
-                    candles_m5 = await DataFetcher.get_historical_data(req.symbol, "M5", count=req.candle_count)
-            except DataFetchError as e:
-                bot_service.log_system_event(f"Backtest data fetch failed: {e.reason}", category="BACKTEST", level="ERROR")
-                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
-                return
+            except Exception as _e:
+                logger.warning(f"[BACKTEST] Could not update progress state: {_e}")
 
-            if any(c is None or c.empty for c in [candles_h4, candles_m15, candles_m5]):
-                bot_service.log_system_event("Incomplete MTF data available for backtest", category="BACKTEST", level="ERROR")
-                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": "Incomplete MTF data"})
-                return
-
-            # Generate signals using the unified SMCEngine
+            # NOTE: Engine is built first so we can call get_required_timeframes()
+            # before deciding which data to fetch. Data fetch happens below.
             import pandas as pd
 
             from backend.core.config_schema import InstrumentSettings, UserConfigV2
@@ -313,112 +292,133 @@ async def run_backtest_endpoint(
             engine = engine_class(config)
             engine.is_backtesting = True
 
+            # ── Dynamic timeframe dispatch ───────────────────────────────────────
+            # Ask the engine which timeframes it actually needs instead of always
+            # fetching H4 / M15 / M5. This ensures M5-only strategies (DriftJumpAlpha)
+            # don't receive empty HTF slices that could trip minimum-bar guards.
+            required_tfs = engine.get_required_timeframes()  # e.g. ["M5"] or ["H4","M15","M5"]
+            logger.info(f"[BACKTEST] Strategy {req.strategy_id} requires timeframes: {required_tfs}")
+
+            # ── Timeframe metadata used for data-fetch warmup & slice windows ──
+            TF_META = {
+                "M1":  {"np_td": (1,  'm'), "warmup_days": 1,   "window": 500},
+                "M5":  {"np_td": (5,  'm'), "warmup_days": 5,   "window": 500},
+                "M15": {"np_td": (15, 'm'), "warmup_days": 10,  "window": 300},
+                "M30": {"np_td": (30, 'm'), "warmup_days": 15,  "window": 200},
+                "H1":  {"np_td": (1,  'h'), "warmup_days": 30,  "window": 200},
+                "H4":  {"np_td": (4,  'h'), "warmup_days": 150, "window": 200},
+                "D1":  {"np_td": (1,  'D'), "warmup_days": 365, "window": 100},
+            }
+
+            # The fastest (primary clock) timeframe drives the simulation loop.
+            # Sort TFs by their minute-equivalent so we pick the smallest.
+            TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
+            sorted_tfs = sorted(required_tfs, key=lambda t: TF_MINUTES.get(t, 999))
+            primary_tf = sorted_tfs[0]  # fastest TF = clock driver
+
+            # ── Fetch data for all required timeframes ───────────────────────────
+            try:
+                candles_by_tf: dict = {}
+                if req.start_date and req.end_date:
+                    start_dt = datetime.fromisoformat(req.start_date)
+                    end_dt = datetime.fromisoformat(req.end_date)
+                    for tf in required_tfs:
+                        meta = TF_META.get(tf, TF_META["M5"])
+                        tf_start = start_dt - pd.Timedelta(days=meta["warmup_days"])
+                        candles_by_tf[tf] = await DataFetcher.get_data_range(req.symbol, tf, tf_start, end_dt)
+                else:
+                    for tf in required_tfs:
+                        candles_by_tf[tf] = await DataFetcher.get_historical_data(req.symbol, tf, count=req.candle_count)
+            except DataFetchError as e:
+                bot_service.log_system_event(f"Backtest data fetch failed: {e.reason}", category="BACKTEST", level="ERROR")
+                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
+                return
+
+            missing = [tf for tf, df in candles_by_tf.items() if df is None or df.empty]
+            if missing:
+                bot_service.log_system_event(f"Incomplete MTF data for backtest ({missing})", category="BACKTEST", level="ERROR")
+                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": f"No data for {missing}"})
+                return
+
             def _index_candles(df):
                 if 'time' in df.columns:
                     return df.set_index(pd.to_datetime(df['time'], unit='s'))
                 return df
-                
-            candles_h4_idx = _index_candles(candles_h4)
-            candles_m15_idx = _index_candles(candles_m15)
-            candles_m5_idx = _index_candles(candles_m5)
-            
+
+            indexed_by_tf = {tf: _index_candles(df).sort_index() for tf, df in candles_by_tf.items()}
+
+            # Convenience aliases for code below that still needs them (run_backtest call)
+            candles_m15_idx = indexed_by_tf.get("M15", indexed_by_tf.get(primary_tf))
+            candles_m5_idx  = indexed_by_tf.get("M5",  indexed_by_tf.get(primary_tf))
+
             signals = []
-            
+
             async def generate_signals_simulated():
-                sigs = []
-                prev_h4_time = None
-                prev_m15_time = None
-                prev_m5_time = None
-
                 import asyncio
-
                 import numpy as np
-
-                candles_h4_sorted = candles_h4_idx.sort_index()
-                candles_m5_sorted = candles_m5_idx.sort_index()
-                candles_m15_sorted = candles_m15_idx.sort_index()
-
-                # Pre-compute index arrays for fast binary search
-                h4_times = candles_h4_sorted.index.values
-                m15_times = candles_m15_sorted.index.values
-                m5_times = candles_m5_sorted.index.values
-
-                # Max lookback windows (bars)
-                H4_WINDOW = 200
-                M15_WINDOW = 300
-                M5_WINDOW = 500
-
                 import time
+
+                sigs = []
+                primary_sorted = indexed_by_tf[primary_tf]
+                primary_times = primary_sorted.index.values
+
+                # Prev-time trackers per TF to avoid calling on_bar for the same candle twice
+                prev_time_by_tf: dict = {tf: None for tf in required_tfs}
+
                 last_yield_time = time.monotonic()
-                
-                for i in range(300, len(m5_times)):
-                    # Yield event loop only every 50ms to keep WebSocket/Redis responsive without slowing down backtest
+
+                for i in range(300, len(primary_times)):
                     if time.monotonic() - last_yield_time > 0.05:
                         await asyncio.sleep(0)
                         last_yield_time = time.monotonic()
 
                     if i % 600 == 0:
-                        pct = int((i / len(m5_times)) * 80) + 10
-                        progress_obj = {"stage": "Running simulation...", "pct": pct}
-
+                        pct = int((i / len(primary_times)) * 80) + 10
                         current_state = await _get_state()
                         if current_state.get("status") == "cancelled":
-                            bot_service.log_system_event("Backtest simulation cancelled by user", category="BACKTEST")
+                            bot_service.log_system_event("Backtest cancelled by user", category="BACKTEST")
                             raise Exception("Backtest Cancelled")
-
-                        current_state["progress"] = progress_obj
+                        current_state["progress"] = {"stage": "Running simulation...", "pct": pct}
                         await _save_state(current_state)
                         try:
                             asyncio.create_task(ws_manager.broadcast_to_user(current_user.id, {
-                                "type": "backtest_progress",
-                                "stage": "Running simulation...",
-                                "pct": pct
+                                "type": "backtest_progress", "stage": "Running simulation...", "pct": pct
                             }))
                         except: pass
 
-                    current_time = m5_times[i]
+                    current_time = primary_times[i]
                     is_warmup = req.start_date and current_time < np.datetime64(datetime.fromisoformat(req.start_date))
 
-                    # Calculate cutoffs to ensure we only include fully closed candles.
-                    # A candle is only closed when its open_time + duration <= current_time.
-                    # Since we use side='right', open_time <= current_time - duration will be included.
-                    h4_cutoff = current_time - np.timedelta64(4, 'h')
-                    h4_end = int(np.searchsorted(h4_times, h4_cutoff, side='right'))
-                    h4_start = max(0, h4_end - H4_WINDOW)
-                    slice_h4 = candles_h4_sorted.iloc[h4_start:h4_end]
-
-                    m15_cutoff = current_time - np.timedelta64(15, 'm')
-                    m15_end = int(np.searchsorted(m15_times, m15_cutoff, side='right'))
-                    m15_start = max(0, m15_end - M15_WINDOW)
-                    slice_m15 = candles_m15_sorted.iloc[m15_start:m15_end]
-
-                    # m5_times[i] is current_time. We want up to i-1 to ensure it's closed.
-                    m5_end = i
-                    m5_start = max(0, m5_end - M5_WINDOW)
-                    slice_m5 = candles_m5_sorted.iloc[m5_start:m5_end]
-
-                    if len(slice_h4) < 20 or len(slice_m15) < 20 or len(slice_m5) < 20:
-                        continue
-
                     sig = None
-                    
-                    last_h4_time = slice_h4.index[-1]
-                    if last_h4_time != prev_h4_time:
-                        s = await engine.on_bar(req.symbol, "H4", slice_h4)
-                        if s: sig = s
-                        prev_h4_time = last_h4_time
 
-                    last_m15_time = slice_m15.index[-1]
-                    if last_m15_time != prev_m15_time:
-                        s = await engine.on_bar(req.symbol, "M15", slice_m15)
-                        if s: sig = s
-                        prev_m15_time = last_m15_time
+                    for tf in required_tfs:
+                        meta = TF_META.get(tf, TF_META["M5"])
+                        sorted_tf = indexed_by_tf[tf]
+                        tf_times = sorted_tf.index.values
 
-                    last_m5_time = m5_times[i]
-                    if last_m5_time != prev_m5_time:
-                        s = await engine.on_bar(req.symbol, "M5", slice_m5)
-                        if s: sig = s
-                        prev_m5_time = last_m5_time
+                        if tf == primary_tf:
+                            # Primary TF: use current bar index minus 1 (closed candle)
+                            tf_end = i
+                            tf_start_idx = max(0, tf_end - meta["window"])
+                            slice_tf = sorted_tf.iloc[tf_start_idx:tf_end]
+                            last_tf_time = primary_times[i]
+                        else:
+                            # HTF: find fully closed candle before current_time
+                            np_td, np_unit = meta["np_td"]
+                            cutoff = current_time - np.timedelta64(np_td, np_unit)
+                            tf_end = int(np.searchsorted(tf_times, cutoff, side='right'))
+                            tf_start_idx = max(0, tf_end - meta["window"])
+                            slice_tf = sorted_tf.iloc[tf_start_idx:tf_end]
+                            last_tf_time = tf_times[tf_end - 1] if tf_end > 0 else None
+
+                        if len(slice_tf) < 20:
+                            continue
+
+                        if last_tf_time != prev_time_by_tf[tf]:
+                            s = await engine.on_bar(req.symbol, tf, slice_tf)
+                            if s:
+                                sig = s
+                            prev_time_by_tf[tf] = last_tf_time
 
                     if sig and not is_warmup:
                         sig_dict = {
@@ -436,7 +436,7 @@ async def run_backtest_endpoint(
                 return sigs
 
             signals = await generate_signals_simulated()
-            candles = candles_m5_idx
+            candles = indexed_by_tf.get("M5", indexed_by_tf[primary_tf])
 
             merged_risk_config = {
                 "risk_per_trade_pct": req.risk_per_trade_pct,
@@ -450,6 +450,7 @@ async def run_backtest_endpoint(
                 "tp_splits": req.tp_splits,
                 "be_trigger_rr": req.be_trigger_rr,
                 "be_buffer_pips": req.be_buffer_pips,
+                "be_buffer_atr_mult": getattr(req, "be_buffer_atr_mult", 0.0) if hasattr(req, "be_buffer_atr_mult") else req.risk_config.get("be_buffer_atr_mult", 0.0),
                 "trail_method_tp2": req.trail_method_tp2,
                 "trail_method_tp3": req.trail_method_tp3,
                 "trail_method_tp4": req.trail_method_tp4,

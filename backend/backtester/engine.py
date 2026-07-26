@@ -146,7 +146,7 @@ class BacktestEngine:
             atr_array[i] = np.mean(tr_all[i - atr_period:i])
 
         # ── Pre-compute swing point cache ──
-        sw_len = self.risk_config.get("swing_length", 5)
+        sw_len = self.risk_config.get("trail_structure_bars", self.risk_config.get("swing_length", 5))
         swing_lookback = 20
         swing_cache = {}
         for i in range(swing_lookback, len(candles)):
@@ -210,9 +210,6 @@ class BacktestEngine:
                 limit_hit = False
                 if is_crashboom and pos["bars_held"] >= 400:
                     limit_hit = True
-                elif not is_crashboom and isinstance(c_ts, (int, float)) and isinstance(e_ts, (int, float)):
-                    if c_ts > 1e8 and e_ts > 1e8 and (c_ts - e_ts >= 48 * 3600):
-                        limit_hit = True
                         
                 if limit_hit:
                     pos["exit_price"] = current_price

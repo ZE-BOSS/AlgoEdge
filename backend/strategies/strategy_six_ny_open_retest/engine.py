@@ -29,6 +29,9 @@ class NYOpenRetestEngine(BaseStrategy):
                 "current_day": None
             }
 
+    def get_required_timeframes(self) -> list[str]:
+        return ["H4", "M15", "M5"]
+
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         self._init_state(symbol)
         state = self.state[symbol]
@@ -50,13 +53,16 @@ class NYOpenRetestEngine(BaseStrategy):
 
         # 1. Mark the Range on M15
         if timeframe == "M15":
-            if state["status"] == "MARK_RANGE" and time_str == self.params.range_window_end:
-                # Assuming the M15 candle closing at 08:15 covers the 08:00-08:15 period
-                state["range_high"] = latest["high"]
-                state["range_low"] = latest["low"]
-                state["range_mid"] = (latest["high"] + latest["low"]) / 2.0
-                state["status"] = "AWAIT_BREAK"
-                self.log_event(f"[{symbol}] NY Open Range marked: {state['range_high']} - {state['range_low']} (Mid: {state['range_mid']})", category="NY_OPEN")
+            if state["status"] == "MARK_RANGE":
+                # Only accumulate candles that fall inside [range_window_start, range_window_end]
+                if self.params.range_window_start <= time_str <= self.params.range_window_end:
+                    state["range_high"] = max(state["range_high"], latest["high"]) if state["range_high"] else latest["high"]
+                    state["range_low"] = min(state["range_low"], latest["low"]) if state["range_low"] else latest["low"]
+                elif time_str > self.params.range_window_end and state["range_high"] is not None:
+                    state["range_mid"] = (state["range_high"] + state["range_low"]) / 2.0
+                    state["status"] = "AWAIT_BREAK"
+                    self.log_event(f"[{symbol}] NY Open Range marked: {state['range_high']} - {state['range_low']} (Mid: {state['range_mid']})", category="NY_OPEN")
+
 
         # 2. Break and Retest on M5
         elif timeframe == "M5":
@@ -71,17 +77,17 @@ class NYOpenRetestEngine(BaseStrategy):
                     return None
                     
                 if latest["close"] > state["range_high"]:
-                    state["bias"] = "LONG"
+                    state["bias"] = "BUY"
                     state["status"] = "AWAIT_RETEST"
                     self.log_event(f"[{symbol}] NY Open bullish break detected. Awaiting retest to {state['range_mid']}", category="NY_OPEN")
                 elif latest["close"] < state["range_low"]:
-                    state["bias"] = "SHORT"
+                    state["bias"] = "SELL"
                     state["status"] = "AWAIT_RETEST"
                     self.log_event(f"[{symbol}] NY Open bearish break detected. Awaiting retest to {state['range_mid']}", category="NY_OPEN")
 
             elif state["status"] == "AWAIT_RETEST":
                 triggered = False
-                if state["bias"] == "LONG" and latest["low"] <= state["range_mid"] or state["bias"] == "SHORT" and latest["high"] >= state["range_mid"]:
+                if state["bias"] == "BUY" and latest["low"] <= state["range_mid"] or state["bias"] == "SELL" and latest["high"] >= state["range_mid"]:
                     triggered = True
                     
                 if triggered:
@@ -93,8 +99,8 @@ class NYOpenRetestEngine(BaseStrategy):
                     buffer = self.params.stop_buffer_points
                     target = self.params.fixed_target_points
                     
-                    stop_loss = state["range_low"] - buffer if state["bias"] == "LONG" else state["range_high"] + buffer
-                    take_profit = entry + target if state["bias"] == "LONG" else entry - target
+                    stop_loss = state["range_low"] - buffer if state["bias"] == "BUY" else state["range_high"] + buffer
+                    take_profit = entry + target if state["bias"] == "BUY" else entry - target
                     
                     state["status"] = "DONE"
                     return TradeSignal(

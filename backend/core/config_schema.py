@@ -39,7 +39,7 @@ class CRTParams:
     """
     Tunable parameters for the Candle Range Theory engine.
     """
-    htf_timeframe: str = "1H"
+    htf_timeframe: str = "H1"
     ltf_timeframe: str = "M1"
     target_r_multiple: float = 1.5
     max_trades_per_session: int = 1

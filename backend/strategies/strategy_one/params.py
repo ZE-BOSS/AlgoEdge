@@ -371,10 +371,10 @@ class SMCParams:
     enforce_htf_pd: bool = True
     """Hard reject Buy signals in Premium, Sell signals in Discount."""
 
-    enforce_fvg_displacement: bool = True
+    enforce_fvg_displacement: bool = False
     """Hard reject ChoCH signals that do not leave behind an FVG."""
 
-    enforce_asian_range_sweep: bool = True
+    enforce_asian_range_sweep: bool = False
     """Hard reject signals if Asian Range (Accumulation) has not been swept."""
 
     asian_range_start_hour: int = 18

@@ -20,7 +20,7 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 
 SPEC_DEFAULTS = {
-    "htf_timeframe": "H4",
+    "htf_timeframe": "H1",
     "ltf_timeframe": "M15",
     "target_r_multiple": 1.5,
     "max_trades_per_session": 1,
@@ -75,12 +75,7 @@ class CRTEngine(BaseStrategy):
 
     def _get_htf_bias(self) -> str:
         """Use MS detector to get bias on HTF."""
-        last_choch = self.ms_detector.state.get("last_choch")
-        if last_choch == "BULLISH":
-            return "BULLISH"
-        elif last_choch == "BEARISH":
-            return "BEARISH"
-        return "FLAT"
+        return self.ms_detector.get_bias()
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         if not self.is_backtesting:

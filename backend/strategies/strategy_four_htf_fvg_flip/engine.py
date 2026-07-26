@@ -51,6 +51,9 @@ class HTFFVGFlipEngine(BaseStrategy):
         else:
             return time_str >= start or time_str <= cutoff
 
+    def get_required_timeframes(self) -> list[str]:
+        return ["H4", "M15", "M5"]
+
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         self._init_state(symbol)
         state = self.state[symbol]
@@ -62,21 +65,18 @@ class HTFFVGFlipEngine(BaseStrategy):
         if timeframe == self.params.htf_timeframe:
             htf_fvgs = self.htf_detectors[symbol].update(candles)
             if state["status"] == "AWAIT_HTF_TAP":
-                # Check if current price tapped any active HTF FVG
                 for fvg in htf_fvgs:
-                    # In a real implementation, we check if price is counter-trend
-                    # For now, we assume any tap sets the bias.
-                    if fvg["type"] == "BULLISH" and latest["low"] <= fvg["top"]:
+                    # Bullish FVG tap -> expect bounce up (BUY bias)
+                    if fvg["type"] == "BULLISH" and fvg["bottom"] <= latest["low"] <= fvg["top"]:
                         state["status"] = "AWAIT_5M_FVG"
-                        state["bias"] = "LONG"
-                        state["htf_fvg"] = fvg
-                        self.log_event(f"[{symbol}] HTF Bullish FVG tapped. Awaiting M5 FVG.", category="FVG_FLIP")
+                        state["bias"] = "BUY"
+                        self.log_event(f"[{symbol}] HTF Bullish FVG tapped. Bias: BUY", category="FVG_FLIP")
                         break
-                    elif fvg["type"] == "BEARISH" and latest["high"] >= fvg["bottom"]:
+                    # Bearish FVG tap -> expect bounce down (SELL bias)
+                    elif fvg["type"] == "BEARISH" and fvg["bottom"] <= latest["high"] <= fvg["top"]:
                         state["status"] = "AWAIT_5M_FVG"
-                        state["bias"] = "SHORT"
-                        state["htf_fvg"] = fvg
-                        self.log_event(f"[{symbol}] HTF Bearish FVG tapped. Awaiting M5 FVG.", category="FVG_FLIP")
+                        state["bias"] = "SELL"
+                        self.log_event(f"[{symbol}] HTF Bearish FVG tapped. Bias: SELL", category="FVG_FLIP")
                         break
 
         # Process M5
@@ -87,24 +87,36 @@ class HTFFVGFlipEngine(BaseStrategy):
             if state["status"] == "AWAIT_5M_FVG":
                 # Look for a new M5 FVG in direction of bias
                 for fvg in m5_fvgs:
-                    if (state["bias"] == "LONG" and fvg["type"] == "BULLISH") or \
-                       (state["bias"] == "SHORT" and fvg["type"] == "BEARISH"):
+                    if (state["bias"] == "BUY" and fvg["type"] == "BULLISH") or \
+                       (state["bias"] == "SELL" and fvg["type"] == "BEARISH"):
                         state["m5_fvg"] = fvg
                         state["status"] = "AWAIT_5M_RETEST"
-                        # Record the swing point that tapped the HTF FVG (simplified: just use lowest/highest of recent candles)
-                        state["m5_swing_point"] = candles["low"].min() if state["bias"] == "LONG" else candles["high"].max()
+                        # Use last 20 candles for swing point detection
+                        lookback = candles.iloc[-20:]
+                        state["m5_swing_point"] = lookback["low"].min() if state["bias"] == "BUY" else lookback["high"].max()
                         self.log_event(f"[{symbol}] M5 {fvg['type']} FVG formed. Awaiting retest.", category="FVG_FLIP")
                         break
 
             elif state["status"] == "AWAIT_5M_RETEST":
                 fvg = state["m5_fvg"]
-                # Check if price tapped the M5 FVG
-                if state["bias"] == "LONG" and latest["low"] <= fvg["top"]:
+                
+                # Check if FVG invalidated (closed beyond)
+                if state["bias"] == "BUY" and latest["close"] < fvg["bottom"]:
+                    state["status"] = "AWAIT_HTF_TAP"
+                    self.log_event(f"[{symbol}] M5 Bullish FVG invalidated.", category="FVG_FLIP")
+                    return None
+                elif state["bias"] == "SELL" and latest["close"] > fvg["top"]:
+                    state["status"] = "AWAIT_HTF_TAP"
+                    self.log_event(f"[{symbol}] M5 Bearish FVG invalidated.", category="FVG_FLIP")
+                    return None
+                    
+                # Retest logic
+                if state["bias"] == "BUY" and fvg["bottom"] <= latest["low"] <= fvg["top"]:
                     state["status"] = "AWAIT_INVERSION"
-                    self.log_event(f"[{symbol}] M5 Bullish FVG retested. Awaiting M1 inversion.", category="FVG_FLIP")
-                elif state["bias"] == "SHORT" and latest["high"] >= fvg["bottom"]:
+                    self.log_event(f"[{symbol}] M5 Bullish FVG retested. Awaiting M5 inversion.", category="FVG_FLIP")
+                elif state["bias"] == "SELL" and fvg["bottom"] <= latest["high"] <= fvg["top"]:
                     state["status"] = "AWAIT_INVERSION"
-                    self.log_event(f"[{symbol}] M5 Bearish FVG retested. Awaiting M1 inversion.", category="FVG_FLIP")
+                    self.log_event(f"[{symbol}] M5 Bearish FVG retested. Awaiting M5 inversion.", category="FVG_FLIP")
 
             # Process LTF Confirmation in the same timeframe if configured (M5)
             if state["status"] == "AWAIT_INVERSION":
@@ -117,12 +129,12 @@ class HTFFVGFlipEngine(BaseStrategy):
                 
                 # Check for body close through the M5 FVG
                 triggered = False
-                if state["bias"] == "LONG" and latest["close"] > fvg["top"] or state["bias"] == "SHORT" and latest["close"] < fvg["bottom"]:
+                if state["bias"] == "BUY" and latest["close"] > fvg["top"] or state["bias"] == "SELL" and latest["close"] < fvg["bottom"]:
                     triggered = True
 
                 if triggered:
                     entry = latest["close"]
-                    sl = state.get("m5_swing_point", entry * 0.99 if state["bias"]=="LONG" else entry * 1.01)
+                    sl = state.get("m5_swing_point", entry * 0.99 if state["bias"]=="BUY" else entry * 1.01)
                     
                     # Reset state
                     state["status"] = "AWAIT_HTF_TAP"

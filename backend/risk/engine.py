@@ -63,7 +63,16 @@ class RiskEngine:
         entry = signal_data.get("entry_price", 0.0)
         sl = signal_data.get("stop_loss", 0.0)
 
-        # 1. Circuit Breaker Check
+        # 1. Circuit Breaker: symbol-level check (blocks if position already open on symbol)
+        cb_ok, cb_reason = self.circuit.check_symbol(symbol)
+        if not cb_ok:
+            logger.warning(json.dumps({
+                "event": "risk_rejected",
+                "reason": "circuit_breaker_symbol",
+                "details": cb_reason
+            }))
+            return False, cb_reason, []
+            
         can_trade, reason = self.circuit.check_all(account_balance, current_time)
         if not can_trade:
             logger.warning(json.dumps({

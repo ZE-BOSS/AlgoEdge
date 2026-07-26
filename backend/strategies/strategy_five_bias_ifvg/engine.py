@@ -61,6 +61,9 @@ class BiasIFVGEngine(BaseStrategy):
         # In a full implementation, we'd scan multiple timeframes and merge overlaps
         return []
 
+    def get_required_timeframes(self) -> list[str]:
+        return ["H4", "M15", "M5"]
+
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         self._init_state(symbol)
         state = self.state[symbol]
@@ -68,22 +71,30 @@ class BiasIFVGEngine(BaseStrategy):
         current_time = candles.index[-1]
         latest = candles.iloc[-1]
         
-        # 1. Higher-Timeframe Bias Generation
+        # 1. Determine Bias
         if timeframe in ["H1", "H4", "D1"]:
-            new_bias = self._compute_bias(candles)
-            if new_bias != state["bias"]:
-                state["bias"] = new_bias
-                state["key_levels"] = self._detect_key_levels(candles, state["bias"])
+            # Dummy SMA-based bias for the boilerplate
+            close_prices = candles["close"]
+            sma20 = close_prices.rolling(20).mean().iloc[-1]
+            if pd.isna(sma20):
+                return None
+                
+            if candles.iloc[-1]["close"] > sma20:
+                state["bias"] = "BUY"
+            else:
+                state["bias"] = "SELL"
+                
+            if state["status"] == "AWAIT_BIAS" and state["bias"] != "NEUTRAL":
                 state["status"] = "AWAIT_KEY_LEVEL"
-                self.log_event(f"[{symbol}] Bias updated to {new_bias} based on {timeframe}", category="BIAS_IFVG")
+                self.log_event(f"[{symbol}] Bias established: {state['bias']}", category="BIAS_IFVG")
         
-        # 2 & 3. Key Level Tap and Confirmation
+          # 3. M1 IFVG Entry Trigger
         elif timeframe == "M5":
             if state["status"] == "AWAIT_KEY_LEVEL":
                 # Simulated key level tap for boilerplate
-                if state["bias"] == "LONG" and latest["close"] < candles.iloc[-2]["low"]:
+                if state["bias"] == "BUY" and latest["close"] < candles.iloc[-2]["low"]:
                     state["status"] = "AWAIT_IFVG_CLOSE"
-                elif state["bias"] == "SHORT" and latest["close"] > candles.iloc[-2]["high"]:
+                elif state["bias"] == "SELL" and latest["close"] > candles.iloc[-2]["high"]:
                     state["status"] = "AWAIT_IFVG_CLOSE"
                 
             if state["status"] == "AWAIT_IFVG_CLOSE":
@@ -93,14 +104,14 @@ class BiasIFVGEngine(BaseStrategy):
                     
                 # Simulated trigger logic for boilerplate
                 triggered = False
-                if state["bias"] == "LONG" and latest["close"] > candles.iloc[-2]["high"]:
+                if state["bias"] == "BUY" and latest["close"] > candles.iloc[-2]["high"]:
                     triggered = True
-                elif state["bias"] == "SHORT" and latest["close"] < candles.iloc[-2]["low"]:
+                elif state["bias"] == "SELL" and latest["close"] < candles.iloc[-2]["low"]:
                     triggered = True
                     
                 if triggered:
                     entry = latest["close"]
-                    sl = entry * 0.99 if state["bias"] == "LONG" else entry * 1.01
+                    sl = entry * 0.99 if state["bias"] == "BUY" else entry * 1.01
                     
                     state["status"] = "AWAIT_KEY_LEVEL"
                     state["trades_today"] += 1

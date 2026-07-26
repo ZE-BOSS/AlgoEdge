@@ -468,6 +468,7 @@ class SMCEngine(BaseStrategy):
             "fvg_inside_ob": fvg_inside_ob,
             "in_ote_zone": self.context.get("in_ote_zone", False),
             "in_sd_zone": self.context.get("in_sd_zone", False),
+            "ipdm_phase": self.context.get("ipdm", {}).get("phase", "UNKNOWN"),
             "candle_tier": candle_tier,
             "in_kill_zone": in_kill_zone,
             "is_backtesting": self.is_backtesting,

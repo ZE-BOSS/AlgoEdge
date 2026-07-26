@@ -444,7 +444,7 @@ class BotService:
                             
                             if signal:
                                 # Cooldown check
-                                sig_time = getattr(signal, 'timestamp', None)
+                                sig_time = signal.metadata.get('timestamp') if isinstance(getattr(signal, 'metadata', None), dict) else getattr(signal, 'timestamp', None)
                                 if not sig_time and hasattr(signal, 'chart_data') and signal.chart_data:
                                     sig_time = signal.chart_data[-1].get('time')
                                 if sig_time and sig_time == self._last_signal_time.get(symbol):
@@ -502,6 +502,14 @@ class BotService:
                                 except Exception as e:
                                     logger.error(f"Error checking open positions: {e}")
 
+                                # === Check Circuit Breaker ===
+                                if self.circuit_breaker:
+                                    cb_ok, cb_reason = self.circuit_breaker.check_symbol(signal.symbol)
+                                    if not cb_ok:
+                                        self._log_event(f"[REJECTED] Circuit breaker blocked {signal.symbol}: {cb_reason}", "SIGNAL", "RISK")
+                                        await self._save_signal_state(signal, "SKIPPED", cb_reason)
+                                        continue
+
                                 # === Execute trade via RiskEngine ===
                                 try:
                                     from backend.brokers.factory import broker_factory
@@ -535,9 +543,10 @@ class BotService:
                                         "target_profit_enabled": config.risk.target_profit_enabled if hasattr(config.risk, 'target_profit_enabled') else False,
                                         "max_daily_profit": config.risk.max_daily_profit if hasattr(config.risk, 'max_daily_profit') else 500.0,
                                         "max_weekly_profit": config.risk.max_weekly_profit if hasattr(config.risk, 'max_weekly_profit') else 2000.0,
-                                        "compounding_enabled": config.risk.compounding_enabled if hasattr(config.risk, 'compounding_enabled') else False,
+                                        "compounding_enabled": config.compounding.enabled if hasattr(config, 'compounding') else False,
                                         "be_trigger_rr": config.risk.be_trigger_rr,
                                         "be_buffer_pips": config.risk.be_buffer_pips,
+                                        "be_buffer_atr_mult": getattr(config.risk, "be_buffer_atr_mult", 0.0),
                                         "trail_method_tp2": config.risk.trail_method_tp2 if hasattr(config.risk, 'trail_method_tp2') else "ATR_TRAIL",
                                         "trail_method_tp3": config.risk.trail_method_tp3 if hasattr(config.risk, 'trail_method_tp3') else "STRUCTURE_TRAIL",
                                         "trail_method_tp4": config.risk.trail_method_tp4 if hasattr(config.risk, 'trail_method_tp4') else "ATR_TRAIL",
@@ -563,7 +572,8 @@ class BotService:
                                     compounding_risk = config.get_risk_amount(account_balance) if hasattr(config, 'get_risk_amount') else account_balance * (config.risk.risk_per_trade_pct / 100)
 
                                     approved, reason, tp_levels = risk_engine.evaluate_signal(
-                                        signal_data, account_balance, compounding_risk_dollars=compounding_risk
+                                        signal_data, account_balance, compounding_risk_dollars=compounding_risk,
+                                        initial_balance=getattr(config.prop_firm, "initial_balance", 10000.0) if hasattr(config, "prop_firm") else getattr(config.compounding, "starting_balance", 10000.0) if hasattr(config, "compounding") else 10000.0
                                     )
 
                                     if approved:

@@ -68,9 +68,9 @@ class TradeGate:
         if getattr(self.config.smc, "enforce_htf_pd", False):
             # Enforce buying in Discount, selling in Premium
             ipdm_phase = context.get("ipdm_phase", "")
-            if direction == "BUY" and "PREMIUM" in ipdm_phase:
+            if direction == "BULLISH" and "PREMIUM" in ipdm_phase:
                 reasons.append("Gate 6: Hard Filter — Buy signal in Premium zone rejected")
-            elif direction == "SELL" and "DISCOUNT" in ipdm_phase:
+            elif direction == "BEARISH" and "DISCOUNT" in ipdm_phase:
                 reasons.append("Gate 6: Hard Filter — Sell signal in Discount zone rejected")
                 
         if getattr(self.config.smc, "enforce_fvg_displacement", False):
@@ -84,7 +84,7 @@ class TradeGate:
         # Gate 7: Must be in active session (if session filter enabled)
         if getattr(self.config.smc, "session_filter_enabled", False):
             if not context.get("in_kill_zone", False):
-                reasons.append("Gate 6: Outside active kill zone session")
+                reasons.append("Gate 7: Outside active kill zone session")
 
         # Gate 8: Must not be blocked by high-impact news
         if getattr(self.config.smc, "news_filter_enabled", False):

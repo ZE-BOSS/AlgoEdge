@@ -467,7 +467,9 @@ class PositionManager:
                     if risk_pips > 0:
                         current_rr = pips_in_profit / risk_pips
                         if current_rr >= risk.be_trigger_rr:
-                            be_buffer = risk.be_buffer_pips * pip_size_val
+                            be_atr_mult = getattr(risk, 'be_buffer_atr_mult', getattr(risk, 'be_buffer_pips', 0.1))
+                            atr_val = await self._get_or_fetch_atr(symbol, pip_size_val)
+                            be_buffer = be_atr_mult * atr_val
                             
                             # Ensure BE buffer covers spread + commission to prevent net loss
                             sym_info = mt5.symbol_info(symbol)
@@ -560,8 +562,9 @@ class PositionManager:
                         pip_size_val = get_pip_size(symbol)
                         # Use ATR-relative buffer via be_buffer_atr_mult (§1.4 fix)
                         be_atr_mult = getattr(risk, 'be_buffer_atr_mult', getattr(risk, 'be_buffer_pips', 0.1))
-                        # Estimate ATR from recent candle range as proxy when not available
-                        be_buffer = be_atr_mult * pip_size_val * 10  # conservative fallback
+                        # Fetch real ATR
+                        atr_val = await self._get_or_fetch_atr(symbol, pip_size_val)
+                        be_buffer = be_atr_mult * atr_val
                         
                         # Ensure BE buffer covers spread + commission to prevent net loss
                         sym_info = mt5.symbol_info(symbol)
@@ -652,30 +655,9 @@ class PositionManager:
             return None
 
         elif trail_method == "ATR_TRAIL":
-            now = datetime.utcnow().timestamp()
-            
-            atr_data = self._cached_atr.get(symbol)
-            if not atr_data or (now - atr_data['time']) > 60:
-                try:
-                    import pandas as pd
-
-                    from backend.mt5.data_fetcher import DataFetcher
-                    candles = await DataFetcher.get_historical_data(symbol, "M5", 30)
-                    if not candles.empty:
-                        candles['prev_close'] = candles['close'].shift(1)
-                        candles['tr1'] = candles['high'] - candles['low']
-                        candles['tr2'] = abs(candles['high'] - candles['prev_close'])
-                        candles['tr3'] = abs(candles['low'] - candles['prev_close'])
-                        candles['tr'] = candles[['tr1', 'tr2', 'tr3']].max(axis=1)
-                        atr_val = candles['tr'].rolling(window=14).mean().iloc[-1]
-                        if not pd.isna(atr_val):
-                            self._cached_atr[symbol] = {'atr': atr_val, 'time': now}
-                            atr_data = self._cached_atr[symbol]
-                except Exception as e:
-                    logger.warning(f"Failed to fetch ATR for trailing SL on {symbol}: {e}")
-            
-            if not atr_data: return None
-            atr = atr_data['atr']
+            atr_val = await self._get_or_fetch_atr(symbol, pip_size_val)
+            if not atr_val: return None
+            atr = atr_val
             
             multiplier = 0.5 if tp_level == "aggressive" else getattr(risk, f'atr_trail_multiplier_tp{tp_level}', getattr(risk, 'atr_trail_multiplier', 1.5))
             trail_distance = atr * multiplier
@@ -750,5 +732,31 @@ class PositionManager:
         except Exception as e:
             logger.error(f"Error modifying SL for {ticket}: {e}")
             return False
+
+    async def _get_or_fetch_atr(self, symbol: str, pip_size_val: float) -> float:
+        now = datetime.utcnow().timestamp()
+        atr_data = self._cached_atr.get(symbol)
+        
+        if not atr_data or (now - atr_data['time']) > 60:
+            try:
+                import pandas as pd
+                from backend.mt5.data_fetcher import DataFetcher
+                candles = await DataFetcher.get_historical_data(symbol, "M5", 30)
+                if not candles.empty:
+                    candles['prev_close'] = candles['close'].shift(1)
+                    candles['tr1'] = candles['high'] - candles['low']
+                    candles['tr2'] = abs(candles['high'] - candles['prev_close'])
+                    candles['tr3'] = abs(candles['low'] - candles['prev_close'])
+                    candles['tr'] = candles[['tr1', 'tr2', 'tr3']].max(axis=1)
+                    atr_val = candles['tr'].rolling(window=14).mean().iloc[-1]
+                    if not pd.isna(atr_val):
+                        self._cached_atr[symbol] = {'atr': atr_val, 'time': now}
+                        return atr_val
+            except Exception as e:
+                logger.warning(f"Failed to fetch ATR for {symbol}: {e}")
+        elif atr_data:
+            return atr_data['atr']
+            
+        return 10.0 * pip_size_val
 
 position_manager = PositionManager()
