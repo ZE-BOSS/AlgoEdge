@@ -12,5 +12,5 @@ class NYOpenRetestParams:
     session_end: str = "11:00"
     
     stop_buffer_points: float = 5.0
-    fixed_target_points: float = 15.0
+    fixed_target_points: float = 50.0
     dynamic_target_override: bool = True

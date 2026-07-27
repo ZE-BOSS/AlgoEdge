@@ -1,8 +1,9 @@
-
 import pandas as pd
+import pytz
 
 from backend.core.config_schema import UserConfigV2
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
+from backend.strategies.core.fvg import FVGDetector
 from backend.strategies.registry import register_strategy
 from backend.utils.logger import get_logger
 
@@ -17,29 +18,33 @@ class BiasIFVGEngine(BaseStrategy):
         super().__init__(config)
         self.params = config.bias_ifvg
         
-        # State tracking per symbol
         self.state = {}
+        self.htf_detectors = {}
+        self.m15_detectors = {}
+        self.m5_detectors = {}
         
     def _init_state(self, symbol: str):
         if symbol not in self.state:
             self.state[symbol] = {
                 "bias": None,
-                "key_levels": [],
-                "active_level": None,
-                "manipulation_leg": None,
-                "ifvg_detected": False,
-                "status": "AWAIT_KEY_LEVEL",
+                "key_level": None,
+                "status": "AWAIT_BIAS",
+                "m5_fvg_to_invert": None,
                 "trades_today": 0,
-                "last_trade_won": False
             }
+            self.htf_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
+            self.m15_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
+            self.m5_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.05)
         if not hasattr(self, 'last_trade_date'):
             self.last_trade_date = None
 
     def _is_within_session(self, current_time: pd.Timestamp) -> bool:
-        if current_time.tz is not None:
-            current_time = current_time.tz_localize(None)
-            
-        time_str = current_time.strftime("%H:%M")
+        if current_time.tzinfo is None:
+            current_time = current_time.tz_localize('UTC')
+        ny_tz = pytz.timezone('America/New_York')
+        ny_time = current_time.astimezone(ny_tz)
+        time_str = ny_time.strftime("%H:%M")
+        
         start = self.params.session_start
         cutoff = self.params.session_cutoff
         
@@ -47,21 +52,6 @@ class BiasIFVGEngine(BaseStrategy):
             return start <= time_str <= cutoff
         else:
             return time_str >= start or time_str <= cutoff
-
-    def _compute_bias(self, candles: pd.DataFrame) -> str:
-        # Placeholder for complex HTF bias computation (FVG respect/disrespect)
-        # Using a simple moving average proxy for the boilerplate
-        if len(candles) < 20:
-            return "UNKNOWN"
-        sma20 = candles["close"].rolling(20).mean().iloc[-1]
-        if candles.iloc[-1]["close"] > sma20:
-            return "LONG"
-        return "SHORT"
-        
-    def _detect_key_levels(self, candles: pd.DataFrame, bias: str):
-        # Placeholder for FVG, CISD, and Rejection Block detectors
-        # In a full implementation, we'd scan multiple timeframes and merge overlaps
-        return []
 
     def get_required_timeframes(self) -> list[str]:
         return ["H4", "M15", "M5"]
@@ -76,49 +66,83 @@ class BiasIFVGEngine(BaseStrategy):
         if self.last_trade_date != current_time.date():
             state["trades_today"] = 0
             self.last_trade_date = current_time.date()
+            state["status"] = "AWAIT_BIAS"
         
-        # 1. Determine Bias
-        if timeframe in ["H1", "H4", "D1"]:
-            # Dummy SMA-based bias for the boilerplate
-            close_prices = candles["close"]
-            sma20 = close_prices.rolling(20).mean().iloc[-1]
-            if pd.isna(sma20):
+        # 1. Determine Bias (HTF: H4)
+        if timeframe == "H4":
+            htf_fvgs = self.htf_detectors[symbol].update(candles)
+            if not htf_fvgs:
                 return None
-                
-            if candles.iloc[-1]["close"] > sma20:
+            
+            # Simple bias: if the most recent FVG is bullish, bias is BUY, else SELL
+            last_fvg = htf_fvgs[-1]
+            if last_fvg["type"] == "BULLISH":
                 state["bias"] = "BUY"
             else:
                 state["bias"] = "SELL"
                 
-            if state["status"] == "AWAIT_BIAS" and state["bias"] != "NEUTRAL":
+            if state["status"] == "AWAIT_BIAS":
                 state["status"] = "AWAIT_KEY_LEVEL"
-                self.log_event(f"[{symbol}] Bias established: {state['bias']}", category="BIAS_IFVG")
+                self.log_event(f"[{symbol}] Bias established: {state['bias']} based on HTF FVG", category="BIAS_IFVG")
         
-          # 3. M5 IFVG Entry Trigger
+        # 2. Key Levels (M15)
+        elif timeframe == "M15":
+            m15_fvgs = self.m15_detectors[symbol].update(candles)
+            if state["status"] in ["AWAIT_KEY_LEVEL", "AWAIT_IFVG_SETUP"]:
+                # Wait for price to tap an M15 FVG in the direction of bias
+                for fvg in reversed(m15_fvgs):
+                    if state["bias"] == "BUY" and fvg["type"] == "BULLISH" and fvg["bottom"] <= latest["low"] <= fvg["top"]:
+                        state["key_level"] = fvg
+                        state["status"] = "AWAIT_IFVG_SETUP"
+                        self.log_event(f"[{symbol}] M15 Bullish FVG tapped. Awaiting M5 IFVG.", category="BIAS_IFVG")
+                        break
+                    elif state["bias"] == "SELL" and fvg["type"] == "BEARISH" and fvg["bottom"] <= latest["high"] <= fvg["top"]:
+                        state["key_level"] = fvg
+                        state["status"] = "AWAIT_IFVG_SETUP"
+                        self.log_event(f"[{symbol}] M15 Bearish FVG tapped. Awaiting M5 IFVG.", category="BIAS_IFVG")
+                        break
+
+        # 3. IFVG Confirmation and Entry (M5)
         elif timeframe == "M5":
-            if state["status"] == "AWAIT_KEY_LEVEL":
-                # Simulated key level tap for boilerplate
-                if state["bias"] == "BUY" and latest["close"] < candles.iloc[-2]["low"]:
-                    state["status"] = "AWAIT_IFVG_CLOSE"
-                elif state["bias"] == "SELL" and latest["close"] > candles.iloc[-2]["high"]:
-                    state["status"] = "AWAIT_IFVG_CLOSE"
-                
-            if state["status"] == "AWAIT_IFVG_CLOSE":
+            m5_fvgs = self.m5_detectors[symbol].update(candles)
+            
+            if state["status"] == "AWAIT_IFVG_SETUP":
+                # Look for an opposing M5 FVG that forms during the reaction
+                for fvg in reversed(m5_fvgs):
+                    if state["bias"] == "BUY" and fvg["type"] == "BEARISH":
+                        state["m5_fvg_to_invert"] = fvg
+                        state["status"] = "AWAIT_IFVG_CLOSE"
+                        break
+                    elif state["bias"] == "SELL" and fvg["type"] == "BULLISH":
+                        state["m5_fvg_to_invert"] = fvg
+                        state["status"] = "AWAIT_IFVG_CLOSE"
+                        break
+
+            elif state["status"] == "AWAIT_IFVG_CLOSE":
                 if not self._is_within_session(current_time):
                     state["status"] = "AWAIT_KEY_LEVEL"
                     return None
                     
-                # Simulated trigger logic for boilerplate
+                fvg = state["m5_fvg_to_invert"]
                 triggered = False
-                if state["bias"] == "BUY" and latest["close"] > candles.iloc[-2]["high"]:
+                
+                # Check for body close through the opposing FVG
+                if state["bias"] == "BUY" and latest["close"] > fvg["top"]:
                     triggered = True
-                elif state["bias"] == "SELL" and latest["close"] < candles.iloc[-2]["low"]:
+                elif state["bias"] == "SELL" and latest["close"] < fvg["bottom"]:
                     triggered = True
                     
                 if triggered:
                     entry = latest["close"]
-                    sl = entry * 0.99 if state["bias"] == "BUY" else entry * 1.01
-                    
+                    # SL is the recent swing extreme
+                    recent_candles = candles.iloc[-20:]
+                    if state["bias"] == "BUY":
+                        sl = recent_candles["low"].min()
+                        tp = entry + (entry - sl) * 2.0  # 1:2 RR
+                    else:
+                        sl = recent_candles["high"].max()
+                        tp = entry - (sl - entry) * 2.0
+                        
                     state["status"] = "AWAIT_KEY_LEVEL"
                     state["trades_today"] += 1
                     
@@ -128,12 +152,10 @@ class BiasIFVGEngine(BaseStrategy):
                         timeframe="M5",
                         entry_price=entry,
                         stop_loss=sl,
-                        take_profit=0.0,
+                        take_profit=tp,
                         confluence_score=85,
                         timestamp=float(latest["time"]) if "time" in latest else current_time.timestamp(),
                         metadata={"setup": "BIAS_IFVG"}
                     )
-                    
-            # Daily reset handled at the start of on_bar
 
         return None

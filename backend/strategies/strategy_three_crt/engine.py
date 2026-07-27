@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 
 SPEC_DEFAULTS = {
     "htf_timeframe": "H1",
-    "ltf_timeframe": "M15",
+    "ltf_timeframe": "M5",
     "target_r_multiple": 1.5,
     "max_trades_per_session": 1,
     "session_start": "09:30",
@@ -93,6 +93,7 @@ class CRTEngine(BaseStrategy):
         if self.last_trade_date != dt.date():
             self.trades_today = 0
             self.last_trade_date = dt.date()
+            self.ms_detector = MarketStructureDetector(swing_length=5, min_bos_count=1)
             
         max_trades = self.params.max_trades_per_session if getattr(self, 'params', None) else SPEC_DEFAULTS['max_trades_per_session']
         if self.trades_today >= max_trades:
@@ -165,7 +166,7 @@ class CRTEngine(BaseStrategy):
                 tp = self.c2_trigger["c1_extreme"]
                 
                 triggered = False
-                if direction == "BUY" and current_price > trigger_lvl or direction == "SELL" and current_price < trigger_lvl:
+                if (direction == "BUY" and current_price > trigger_lvl) or (direction == "SELL" and current_price < trigger_lvl):
                     triggered = True
                     
                 if triggered:
@@ -183,22 +184,22 @@ class CRTEngine(BaseStrategy):
                     else:
                         sl = current_price + sl_dist
                         
-                        return TradeSignal(
-                            strategy_id="CRT_v1",
-                            symbol=symbol,
-                            direction=direction,
-                            signal_type="BREAKOUT_ENTRY",
-                            entry_price=current_price,
-                            stop_loss=sl,
-                            take_profit=tp,
-                            confluence_score=90,
-                            timeframe=ltf,
-                            timestamp=candles.index[-1].timestamp(),
-                            metadata={
-                                "reason": "CRT Setup C1/C2. NY Session.",
-                                "htf": htf
-                            }
-                        )
+                    return TradeSignal(
+                        strategy_id="CRT_v1",
+                        symbol=symbol,
+                        direction=direction,
+                        signal_type="BREAKOUT_ENTRY",
+                        entry_price=current_price,
+                        stop_loss=sl,
+                        take_profit=tp,
+                        confluence_score=90,
+                        timeframe=ltf,
+                        timestamp=candles.index[-1].timestamp(),
+                        metadata={
+                            "reason": "CRT Setup C1/C2. NY Session.",
+                            "htf": htf
+                        }
+                    )
 
         return None
 

@@ -1,5 +1,5 @@
-
 import pandas as pd
+import pytz
 
 from backend.core.config_schema import UserConfigV2
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
@@ -39,10 +39,11 @@ class HTFFVGFlipEngine(BaseStrategy):
         if not self.params.session_filter_enabled:
             return True
         
-        if current_time.tz is not None:
-            current_time = current_time.tz_localize(None)
-            
-        time_str = current_time.strftime("%H:%M")
+        ny_tz = pytz.timezone('America/New_York')
+        if current_time.tzinfo is None:
+            current_time = current_time.tz_localize('UTC')
+        ny_time = current_time.astimezone(ny_tz)
+        time_str = ny_time.strftime("%H:%M")
         start = self.params.session_start
         cutoff = self.params.session_cutoff
         
@@ -81,6 +82,7 @@ class HTFFVGFlipEngine(BaseStrategy):
 
         # Process M5
         elif timeframe == "M5":
+            m5_fvgs = []
             if state["status"] in ["AWAIT_5M_FVG", "AWAIT_5M_RETEST", "AWAIT_INVERSION"]:
                 m5_fvgs = self.m5_detectors[symbol].update(candles)
                 
@@ -102,11 +104,11 @@ class HTFFVGFlipEngine(BaseStrategy):
                 
                 # Check if FVG invalidated (closed beyond)
                 if state["bias"] == "BUY" and latest["close"] < fvg["bottom"]:
-                    state["status"] = "AWAIT_HTF_TAP"
+                    state["status"] = "AWAIT_5M_FVG"
                     self.log_event(f"[{symbol}] M5 Bullish FVG invalidated.", category="FVG_FLIP")
                     return None
                 elif state["bias"] == "SELL" and latest["close"] > fvg["top"]:
-                    state["status"] = "AWAIT_HTF_TAP"
+                    state["status"] = "AWAIT_5M_FVG"
                     self.log_event(f"[{symbol}] M5 Bearish FVG invalidated.", category="FVG_FLIP")
                     return None
                     
@@ -136,6 +138,13 @@ class HTFFVGFlipEngine(BaseStrategy):
                     entry = latest["close"]
                     sl = state.get("m5_swing_point", entry * 0.99 if state["bias"]=="BUY" else entry * 1.01)
                     
+                    # Calculate TP (next liquidity pool)
+                    recent_candles = candles.iloc[-50:]
+                    if state["bias"] == "BUY":
+                        tp = recent_candles["high"].max()
+                    else:
+                        tp = recent_candles["low"].min()
+                    
                     # Reset state
                     state["status"] = "AWAIT_HTF_TAP"
                     
@@ -145,7 +154,7 @@ class HTFFVGFlipEngine(BaseStrategy):
                         timeframe=timeframe,
                         entry_price=entry,
                         stop_loss=sl,
-                        take_profit=0.0, # Managed dynamically by PositionManager
+                        take_profit=tp,
                         confluence_score=88,
                         timestamp=float(latest["time"]) if "time" in latest else current_time.timestamp(),
                         metadata={"setup": "HTF_FVG_FLIP"}

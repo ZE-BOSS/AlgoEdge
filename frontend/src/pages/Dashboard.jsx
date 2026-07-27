@@ -424,6 +424,7 @@ export default function Dashboard() {
   const positionsData = dashboardData?.positions;
   const compoundingData = dashboardData?.compounding;
   const propFirmStatus = dashboardData?.prop_firm_status;
+  const mt5Sync = dashboardData?.mt5_sync;
 
   const configSymbols = userConfig?.config?.watched_symbols || userConfig?.config?.symbols || ['XAUUSD', 'EURUSD', 'GBPUSD'];
 
@@ -451,9 +452,16 @@ export default function Dashboard() {
 
   return (
     <>
-      <div className="page-header">
-        <h2>Dashboard</h2>
-        <p>Live trading overview and performance metrics</p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2>Dashboard</h2>
+          <p>Live trading overview and performance metrics</p>
+        </div>
+        {mt5Sync && (
+          <div className={`badge ${mt5Sync.status === 'error' ? 'badge-red' : 'badge-green'}`} title={mt5Sync.reason || `Synced ${mt5Sync.synced_positions} positions`}>
+            {mt5Sync.status === 'ok' ? '✓ MT5 Synced' : '! MT5 Sync Error'}
+          </div>
+        )}
       </div>
 
       {status === 'OFFLINE' && (

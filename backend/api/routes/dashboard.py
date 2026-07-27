@@ -15,6 +15,10 @@ from backend.api.routes.stats import get_user_stats
 from backend.api.routes.trades import get_open_positions
 from backend.data.database import get_db
 from backend.data.models import User
+from backend.services.sync_service import sync_mt5_history
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
@@ -24,6 +28,13 @@ async def get_dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     """Return consolidated data for the dashboard."""
+    # 1. First sync with MT5 to ensure DB is 100% accurate
+    try:
+        mt5_sync_result = await sync_mt5_history(current_user, db, hours_back=72)
+    except Exception as e:
+        logger.error(f"MT5 sync failed in dashboard: {e}")
+        mt5_sync_result = {"status": "error", "reason": str(e)}
+
     # Execute sequentially to avoid shared session issues
     try:
         stats_data = await get_user_stats(current_user, db)
@@ -79,5 +90,6 @@ async def get_dashboard(
         "compounding": compounding_data,
         "broker": broker_data,
         "bot": bot_result,
-        "prop_firm_status": pf_state
+        "prop_firm_status": pf_state,
+        "mt5_sync": mt5_sync_result
     }

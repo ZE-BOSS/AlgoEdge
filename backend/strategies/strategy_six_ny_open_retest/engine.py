@@ -1,5 +1,5 @@
-
 import pandas as pd
+import pytz
 
 from backend.core.config_schema import UserConfigV2
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
@@ -49,7 +49,11 @@ class NYOpenRetestEngine(BaseStrategy):
             state["range_mid"] = None
             state["bias"] = None
 
-        time_str = current_time.strftime("%H:%M")
+        ny_tz = pytz.timezone('America/New_York')
+        if current_time.tzinfo is None:
+            current_time = current_time.tz_localize('UTC')
+        ny_time = current_time.astimezone(ny_tz)
+        time_str = ny_time.strftime("%H:%M")
 
         # 1. Mark the Range on M15
         if timeframe == "M15":
@@ -87,7 +91,7 @@ class NYOpenRetestEngine(BaseStrategy):
 
             elif state["status"] == "AWAIT_RETEST":
                 triggered = False
-                if state["bias"] == "BUY" and latest["low"] <= state["range_mid"] or state["bias"] == "SELL" and latest["high"] >= state["range_mid"]:
+                if (state["bias"] == "BUY" and latest["low"] <= state["range_mid"]) or (state["bias"] == "SELL" and latest["high"] >= state["range_mid"]):
                     triggered = True
                     
                 if triggered:
@@ -101,6 +105,17 @@ class NYOpenRetestEngine(BaseStrategy):
                     
                     stop_loss = state["range_low"] - buffer if state["bias"] == "BUY" else state["range_high"] + buffer
                     take_profit = entry + target if state["bias"] == "BUY" else entry - target
+                    
+                    if getattr(self.params, 'dynamic_target_override', True):
+                        recent_candles = candles.iloc[-50:]
+                        if state["bias"] == "BUY":
+                            recent_high = recent_candles["high"].max()
+                            if recent_high - entry > target:
+                                take_profit = recent_high
+                        else:
+                            recent_low = recent_candles["low"].min()
+                            if entry - recent_low > target:
+                                take_profit = recent_low
                     
                     state["status"] = "DONE"
                     return TradeSignal(

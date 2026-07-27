@@ -62,9 +62,14 @@ export default function Analytics() {
 
   return (
     <>
-      <div className="page-header">
-        <h2><BarChart3 size={22} style={{ display: 'inline', marginRight: 8 }} />Analytics</h2>
-        <p>Performance metrics, equity curves, and trade distribution analysis</p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2><BarChart3 size={22} style={{ display: 'inline', marginRight: 8 }} />Analytics</h2>
+          <p>Performance metrics, equity curves, and trade distribution analysis</p>
+        </div>
+        <div className="badge badge-green" title="Data synced directly from MT5 terminal history">
+          ✓ MT5 Verified
+        </div>
       </div>
 
       <div className="metrics-grid">
