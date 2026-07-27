@@ -6,7 +6,7 @@ Ensures PnL, swap, commission, exit times and exact prices are 100% accurate.
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,7 +63,7 @@ async def sync_mt5_history(user: User, db: AsyncSession, hours_back: int = 72) -
         await loop.run_in_executor(None, mt5.shutdown)
         return {"status": "error", "reason": f"MT5 Login failed: {mt5.last_error()}"}
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     from_date = now - timedelta(hours=hours_back)
     
     # Fetch historical deals
@@ -107,14 +107,15 @@ async def sync_mt5_history(user: User, db: AsyncSession, hours_back: int = 72) -
         if deal.entry == 1 or deal.entry == 2:  # OUT or INOUT
             position_pnl[pos_id]["is_closed"] = True
             position_pnl[pos_id]["exit_price"] = deal.price
-            position_pnl[pos_id]["exit_time"] = datetime.fromtimestamp(deal.time)
+            # Convert MT5 deal time to naive UTC datetime for Postgres
+            position_pnl[pos_id]["exit_time"] = datetime.fromtimestamp(deal.time, timezone.utc).replace(tzinfo=None)
             
     # Now query the local DB for recent trades to sync
     query = (
         select(Trade)
         .options(selectinload(Trade.positions))
         .where(Trade.user_id == user.id)
-        .where(Trade.created_at >= from_date - timedelta(days=5)) # Look back a bit further for entries
+        .where(Trade.created_at >= from_date.replace(tzinfo=None) - timedelta(days=5)) # Look back a bit further for entries
     )
     
     result = await db.execute(query)
@@ -124,10 +125,9 @@ async def sync_mt5_history(user: User, db: AsyncSession, hours_back: int = 72) -
     updated = False
     
     for trade in trades:
-        # A Trade in the DB might correspond to one MT5 ticket, or multiple if sub-positions were used.
-        # Check sub-positions first
         trade_updated = False
         
+        # Check sub-positions first
         for pos in trade.positions:
             if not pos.mt5_ticket:
                 continue
@@ -148,36 +148,44 @@ async def sync_mt5_history(user: User, db: AsyncSession, hours_back: int = 72) -
                     
                 trade_updated = True
                 
-        # Also check parent trade ticket
-        if trade.mt5_ticket:
-            ticket = str(trade.mt5_ticket)
-            if ticket in position_pnl:
-                mt5_data = position_pnl[ticket]
-                
-                if mt5_data["is_closed"] and trade.status == "OPEN":
-                    trade.status = "CLOSED"
-                    trade.exit_price = mt5_data["exit_price"]
-                    trade.exit_time = mt5_data["exit_time"]
-                    if trade.exit_reason is None:
-                        trade.exit_reason = "MT5_SYNC_CLOSED"
-                
-                # Aggregate total PnL
-                if not trade.positions:
-                    new_pnl = mt5_data["profit"] + mt5_data["swap"] + mt5_data["commission"]
-                    if trade.pnl != new_pnl:
-                        trade.pnl = new_pnl
-                
-                # Dynamic attribute (we don't persist it unless we add it to the model)
-                trade._mt5_verified = True
-                trade_updated = True
-                
-        if trade_updated:
-            # Re-calculate parent trade aggregate PnL if sub-positions exist
-            if trade.positions:
+        # Handle parent trade logic
+        if trade.positions:
+            if trade_updated:
+                # Re-calculate parent trade aggregate PnL
                 closed_pnl = sum(p.pnl for p in trade.positions if p.pnl is not None)
                 if trade.pnl != closed_pnl:
                     trade.pnl = closed_pnl
+                
+                # Derive parent status from sub-positions
+                all_closed = all(p.status == "CLOSED" for p in trade.positions)
+                if all_closed and trade.status == "OPEN":
+                    trade.status = "CLOSED"
+                    trade.exit_reason = "MT5_SYNC_CLOSED"
+                    last_exit = max((p.exit_time for p in trade.positions if p.exit_time), default=None)
+                    if last_exit:
+                        trade.exit_time = last_exit
+        else:
+            # Single-position trade (no sub-positions)
+            if trade.mt5_ticket:
+                ticket = str(trade.mt5_ticket)
+                if ticket in position_pnl:
+                    mt5_data = position_pnl[ticket]
                     
+                    if mt5_data["is_closed"] and trade.status == "OPEN":
+                        trade.status = "CLOSED"
+                        trade.exit_price = mt5_data["exit_price"]
+                        trade.exit_time = mt5_data["exit_time"]
+                        if trade.exit_reason is None:
+                            trade.exit_reason = "MT5_SYNC_CLOSED"
+                    
+                    new_pnl = mt5_data["profit"] + mt5_data["swap"] + mt5_data["commission"]
+                    if trade.pnl != new_pnl:
+                        trade.pnl = new_pnl
+                    
+                    trade_updated = True
+                
+        if trade_updated:
+            trade._mt5_verified = True
             synced_count += 1
             updated = True
             
