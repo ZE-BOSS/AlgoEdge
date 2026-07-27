@@ -15,7 +15,7 @@ const SYMBOLS = [
   'NAS100', 'US100', 'USTEC', 'NDX', 'NQ',
   'SPX500', 'US500', 'SPX', 'SP500', 'S&P500', 'ES',
   'GER40', 'DAX', 'DE40', 'GER30', 'HK50', 'Hang Seng', 'HSI',
-  'USOIL', 'WTI', 'Crude Oil', 'OIL', 'XTIUSD',
+  'USOIL', 'WTI', 'Crude Oil', 'OIL', 'XTIUSD', 'US Oil',
   'NG', 'XNGUSD', 'Natural Gas',
   'BTCUSD', 'Bitcoin', 'BTC', 'ETHUSD', 'ETH', 'Ethereum',
   'Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index',

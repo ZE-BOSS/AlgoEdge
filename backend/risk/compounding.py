@@ -715,7 +715,7 @@ SYMBOL_ALIASES: dict[str, str] = {
     "DSI900DN": "DEX 900DN", "DSI900UP": "DEX 900UP",
     # Commodities / Forex / Crypto
     "Gold": "XAUUSD", "GOLD": "XAUUSD", "XAU": "XAUUSD",
-    "WTI": "USOIL", "OIL": "USOIL", "Crude": "USOIL", "Crude Oil": "USOIL", "XTIUSD": "USOIL", "WTICrude": "USOIL",
+    "WTI": "USOIL", "OIL": "USOIL", "Crude": "USOIL", "Crude Oil": "USOIL", "XTIUSD": "USOIL", "WTICrude": "USOIL", "US Oil": "USOIL",
     "NG": "NG", "XNGUSD": "NG", "Natural Gas": "NG",
     "ETH": "ETHUSD", "Ethereum": "ETHUSD",
     "DJI": "US30", "DOW": "US30", "Wall Street 30": "US30", "WS30": "US30", "YM": "US30",
