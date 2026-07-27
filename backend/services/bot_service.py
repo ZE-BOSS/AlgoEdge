@@ -184,7 +184,7 @@ class BotService:
         if self.running:
             return {"running": True, "message": "Bot is already running"}
 
-        self.symbols = symbols or ["XAUUSD", "EURUSD", "GBPUSD"]
+        self.symbols = symbols or ["XAUUSD", "EURUSD", "GBPUSD", "USOIL", "ETHUSD", "GBPJPY"]
         self.scan_interval = scan_interval
         self.running = True
         self.total_signals_today = 0

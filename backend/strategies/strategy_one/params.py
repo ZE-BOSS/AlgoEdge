@@ -438,7 +438,7 @@ class SMCParams:
 
     # ── Symbols & Timeframes ──────────────────────────────────────────
     watched_symbols: list[str] = field(default_factory=lambda: [
-        "EURUSD", "GBPUSD", "XAUUSD", "US30", "BTCUSD",
+        "EURUSD", "GBPUSD", "XAUUSD", "USOIL", "ETHUSD", "GBPJPY", "US30", "BTCUSD",
     ])
 
     timeframes: list[str] = field(default_factory=lambda: [
@@ -580,7 +580,7 @@ GOLD_SMC_PARAMS = SMCParams(
     equal_highs_tolerance_pips=20.0,
     session_filter_enabled=True,
     news_filter_enabled=True,
-    watched_symbols=["XAUUSD"],
+    watched_symbols=["XAUUSD", "USOIL", "ETHUSD", "GBPJPY"],
     timeframes=["M5", "M15", "H4"],
     min_signal_score=70,       # Higher threshold for gold volatility
 )

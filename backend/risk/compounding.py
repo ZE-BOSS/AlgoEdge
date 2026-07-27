@@ -475,6 +475,82 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         atr_trail_multiplier_override=2.0,  # Wider trail for gold
         max_spread_atr_mult_override=0.5,
     ),
+    "USOIL": InstrumentProfile(
+        symbol="USOIL",
+        instrument_type="COMMODITY",
+        point_size=0.01,
+        point_value_per_lot=1.0,
+        lot_min=0.01,
+        lot_max=50.0,
+        lot_step=0.01,
+        contract_size=1000,
+        session_filter=True,
+        news_filter=True,
+        trades_24_7=False,
+    ),
+    "ETHUSD": InstrumentProfile(
+        symbol="ETHUSD",
+        instrument_type="CRYPTO",
+        point_size=0.01,
+        point_value_per_lot=0.01,
+        lot_min=0.01,
+        lot_max=100.0,
+        lot_step=0.01,
+        contract_size=1,
+        session_filter=False,
+        news_filter=False,
+        trades_24_7=True,
+    ),
+    "GBPJPY": InstrumentProfile(
+        symbol="GBPJPY",
+        instrument_type="FOREX",
+        point_size=0.01,
+        point_value_per_lot=0.067, # Approx based on USDJPY
+        lot_min=0.01,
+        lot_max=100.0,
+        lot_step=0.01,
+        contract_size=100000,
+        session_filter=True,
+        news_filter=True,
+        trades_24_7=False,
+    ),
+    "AUDUSD": InstrumentProfile(
+        symbol="AUDUSD",
+        instrument_type="FOREX",
+        point_size=0.00001,
+        point_value_per_lot=1.0,
+        lot_min=0.01,
+        lot_max=100.0,
+        lot_step=0.01,
+        contract_size=100000,
+        session_filter=True,
+        news_filter=True,
+        trades_24_7=False,
+    ),
+    "GBPNZD": InstrumentProfile(
+        symbol="GBPNZD", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=0.6, lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "GBPAUD": InstrumentProfile(
+        symbol="GBPAUD", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=0.65, lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "GBPCHF": InstrumentProfile(
+        symbol="GBPCHF", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=1.15, lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "EURJPY": InstrumentProfile(
+        symbol="EURJPY", instrument_type="FOREX", point_size=0.01, point_value_per_lot=0.067, lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "EURAUD": InstrumentProfile(
+        symbol="EURAUD", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=0.65, lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "GER40": InstrumentProfile(
+        symbol="GER40", instrument_type="INDEX", point_size=0.1, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "HK50": InstrumentProfile(
+        symbol="HK50", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "NG": InstrumentProfile(
+        symbol="NG", instrument_type="COMMODITY", point_size=0.001, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
 
     # ── Forex Majors ──────────────────────────────────────────────────────────
 
@@ -638,21 +714,41 @@ SYMBOL_ALIASES: dict[str, str] = {
     "DSI600DN": "DEX 600DN", "DSI600UP": "DEX 600UP",
     "DSI900DN": "DEX 900DN", "DSI900UP": "DEX 900UP",
     # Commodities / Forex / Crypto
-    "Gold": "XAUUSD", "GOLD": "XAUUSD",
-    "DJI": "US30", "DOW": "US30",
+    "Gold": "XAUUSD", "GOLD": "XAUUSD", "XAU": "XAUUSD",
+    "WTI": "USOIL", "OIL": "USOIL", "Crude": "USOIL", "Crude Oil": "USOIL", "XTIUSD": "USOIL", "WTICrude": "USOIL",
+    "NG": "NG", "XNGUSD": "NG", "Natural Gas": "NG",
+    "ETH": "ETHUSD", "Ethereum": "ETHUSD",
+    "DJI": "US30", "DOW": "US30", "Wall Street 30": "US30", "WS30": "US30", "YM": "US30",
     "US100": "NAS100", "USTEC": "NAS100", "NDX": "NAS100",
     "NDX100": "NAS100", "US Tech100": "NAS100", "US Tech 100": "NAS100",
     "USTECH": "NAS100", "NQ100": "NAS100", "NQ": "NAS100",
     "SPX500": "US500", "SPX": "US500", "SP500": "US500", "S&P500": "US500",
     "S&P 500": "US500", "US 500": "US500", "INX": "US500", "ES": "US500",
-    "BTC": "BTCUSD",
+    "GER40": "GER40", "DAX": "GER40", "DE40": "GER40", "DAX40": "GER40", "GER30": "GER40",
+    "HK50": "HK50", "Hang Seng": "HK50", "HSI": "HK50",
+    "BTC": "BTCUSD", "Bitcoin": "BTCUSD",
+    "Aussie": "AUDUSD", "Geppy": "GBPJPY", "GJ": "GBPJPY",
+    "GBPNZD": "GBPNZD", "GBPAUD": "GBPAUD", "GBPCHF": "GBPCHF",
+    "EURJPY": "EURJPY", "EURAUD": "EURAUD",
 }
 
+import re
 
 def get_instrument_profile(symbol: str) -> InstrumentProfile | None:
-    """Look up instrument profile with alias resolution."""
-    resolved = SYMBOL_ALIASES.get(symbol, symbol)
-    return INSTRUMENT_PROFILES.get(resolved)
+    """Look up instrument profile with alias resolution and suffix stripping."""
+    # Common suffixes added by brokers (.m, c, _i, #, .a)
+    clean_symbol = re.sub(r'(\.m|c|_i|#|\.a|x)$', '', symbol, flags=re.IGNORECASE)
+    clean_symbol = clean_symbol.replace('/', '')
+    
+    # Try the cleaned symbol first
+    resolved = SYMBOL_ALIASES.get(clean_symbol, clean_symbol)
+    profile = INSTRUMENT_PROFILES.get(resolved)
+    if profile:
+        return profile
+        
+    # Fallback to the exact raw symbol
+    resolved_exact = SYMBOL_ALIASES.get(symbol, symbol)
+    return INSTRUMENT_PROFILES.get(resolved_exact)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
