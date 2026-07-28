@@ -182,6 +182,7 @@ export const getSavedTradeChart = (backtestId, groupId) => api.get(`/backtests/$
 export const stopBacktest = () => api.post('/stop');
 export const saveBacktest = (id, data) => api.post(`/backtests/${id}/save`, data);
 export const getBacktests = () => api.get('/backtests');
+export const getBulkBacktests = (ids) => api.post('/backtests/bulk', { ids });
 export const getBacktest = (id) => api.get(`/backtests/${id}`);
 export const deleteBacktest = (id) => api.delete(`/backtests/${id}`);
 

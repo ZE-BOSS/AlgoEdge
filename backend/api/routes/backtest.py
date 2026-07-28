@@ -35,6 +35,9 @@ USER_BACKTEST_STATE = {}  # Fallback in-memory persistence: user_id -> state
 router = APIRouter(prefix="/api", tags=["backtest"])
 
 
+class BulkBacktestRequest(BaseModel):
+    ids: list[str]
+
 class BacktestRequest(BaseModel):
     strategy_id: str = "SMC_v1"
     symbol: str
@@ -1038,3 +1041,59 @@ async def save_backtest_from_client(
         
     await db.commit()
     return {"status": "ok", "message": "Backtest saved successfully"}
+
+
+@router.post("/backtests/bulk")
+async def get_bulk_backtests(
+    req: BulkBacktestRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return lightweight trade data for multiple backtests at once."""
+    result = await db.execute(
+        select(BacktestRun)
+        .options(selectinload(BacktestRun.trades))
+        .where(BacktestRun.id.in_(req.ids), BacktestRun.user_id == current_user.id)
+    )
+    runs = result.scalars().all()
+    
+    response = []
+    for run in runs:
+        params = safe_json_loads(run.params_snapshot, {})
+        initial_balance = params.get("initial_balance", 10000.0)
+        
+        trades_out = []
+        for t in run.trades:
+            sub_trades = safe_json_loads(t.sub_trades, [])
+            trades_out.append({
+                "symbol": t.symbol,
+                "direction": t.direction,
+                "entry_price": t.entry_price,
+                "exit_price": t.exit_price,
+                "stop_loss": t.stop_loss,
+                "pnl": t.pnl,
+                "balance_before": t.balance_before,
+                "balance_after": t.balance_after,
+                "exit_reason": t.exit_reason,
+                "tp_level_hit": t.tp_level_hit,
+                "entry_time": t.entry_time.isoformat() if t.entry_time else None,
+                "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+                "session": getattr(t, "session", None) or "UNKNOWN",
+                "confluence_score": t.confluence_score,
+                "be_applied": t.be_applied,
+                "pnl_r": t.pnl_r,
+                "realized_rr": t.realized_rr,
+                "mae_pips": t.mae_pips,
+                "mfe_pips": t.mfe_pips,
+                "sub_trades": sub_trades,
+            })
+            
+        response.append({
+            "id": run.id,
+            "symbol": run.symbol,
+            "strategy_id": run.strategy_id,
+            "initial_balance": initial_balance,
+            "trades": trades_out
+        })
+        
+    return {"data": response}

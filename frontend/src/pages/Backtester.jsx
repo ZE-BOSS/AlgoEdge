@@ -2,10 +2,12 @@ import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap } from 'lucide-react';
-import { runBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart } from '../services/api';
+import { runBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getBulkBacktests } from '../services/api';
 import TradeChart from '../components/TradeChart';
 import { useConnectionStore, useAuthStore } from '../store';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
+import * as summaryEngine from '../utils/summaryEngine';
+import CumulativeSummary from '../components/CumulativeSummary';
 
 const SYMBOLS = [
   'XAUUSD', 'Gold', 'XAU', 'XPTUSD', 'Platinum', 'XPT',
@@ -651,6 +653,8 @@ export default function Backtester() {
   const queryClient = useQueryClient();
   const { status } = useConnectionStore();
   const isAuth = useAuthStore(s => s.isAuthenticated);
+  const [selectedBacktests, setSelectedBacktests] = useState(new Set());
+  const [showSummary, setShowSummary] = useState(false);
   const STORAGE_KEY = 'algoedge_bt_config';
 
   const { data: remoteConfig } = useQuery({
@@ -1233,11 +1237,19 @@ export default function Backtester() {
             <option value="PNL">Sort by P&L</option>
             <option value="WinRate">Sort by Win Rate</option>
           </select>
+          {selectedBacktests.size > 0 && (
+            <button className="btn btn-primary btn-sm" onClick={() => setShowSummary(true)}>
+              Open Summary ({selectedBacktests.size})
+            </button>
+          )}
         </div>
       </div>
       <div className="table-wrapper">
         <table>
-          <thead><tr><th>Date</th><th>Symbol</th><th>Trades</th><th>Win Rate</th><th>P&L</th><th>Notes</th><th></th></tr></thead>
+          <thead><tr>
+            <th style={{ width: 40 }}></th>
+            <th>Date</th><th>Symbol</th><th>Trades</th><th>Win Rate</th><th>P&L</th><th>Notes</th><th></th>
+          </tr></thead>
           <tbody>
             {(() => {
               if (!backtests?.length) return <tr><td colSpan="7" style={{ textAlign: 'center', padding: 20 }}>No saved backtests</td></tr>;
@@ -1253,27 +1265,59 @@ export default function Backtester() {
                 return 0;
               });
 
-              return filtered.map(bt => (
-                <tr key={bt.id}>
-                  <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{bt.created_at ? new Date(bt.created_at).toLocaleString() : 'N/A'}</td>
-                  <td><strong>{bt.symbol}</strong></td>
-                  <td>{bt.total_trades}</td>
-                  <td className={bt.win_rate >= 0.5 ? 'green' : 'yellow'}>{((bt.win_rate || 0) * 100).toFixed(0)}%</td>
-                  <td style={{ color: bt.total_pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>${(bt.total_pnl || 0).toFixed(2)}</td>
-                  <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bt.notes_preview || ''}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => handleView(bt.id)}><Eye size={12} /></button>
-                      <button className="btn btn-danger btn-sm" onClick={() => handleDelete(bt.id)}><Trash2 size={12} /></button>
-                    </div>
-                  </td>
-                </tr>
-              ));
+              return filtered.map(bt => {
+                const isSelected = selectedBacktests.has(bt.id);
+                // Uniqueness constraint check (symbol + strategy_id)
+                const uniqueKey = `${bt.symbol}_${bt.strategy_id}`;
+                const isConflict = !isSelected && Array.from(selectedBacktests).some(id => {
+                  const selBt = backtests.find(b => b.id === id);
+                  return selBt && `${selBt.symbol}_${selBt.strategy_id}` === uniqueKey;
+                });
+
+                return (
+                  <tr key={bt.id} style={{ background: isSelected ? 'rgba(88, 166, 255, 0.1)' : 'transparent' }}>
+                    <td>
+                      <input 
+                        type="checkbox" 
+                        checked={isSelected}
+                        disabled={isConflict}
+                        title={isConflict ? "Another backtest with the same symbol and strategy is already selected" : ""}
+                        onChange={() => {
+                          const next = new Set(selectedBacktests);
+                          if (isSelected) next.delete(bt.id);
+                          else next.add(bt.id);
+                          setSelectedBacktests(next);
+                        }}
+                        style={{ cursor: isConflict ? 'not-allowed' : 'pointer', width: 14, height: 14 }}
+                      />
+                    </td>
+                    <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{bt.created_at ? new Date(bt.created_at).toLocaleString() : 'N/A'}</td>
+                    <td><strong>{bt.symbol}</strong></td>
+                    <td>{bt.total_trades}</td>
+                    <td className={bt.win_rate >= 0.5 ? 'green' : 'yellow'}>{((bt.win_rate || 0) * 100).toFixed(0)}%</td>
+                    <td style={{ color: bt.total_pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>${(bt.total_pnl || 0).toFixed(2)}</td>
+                    <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bt.notes_preview || ''}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => handleView(bt.id)}><Eye size={12} /></button>
+                        <button className="btn btn-danger btn-sm" onClick={() => handleDelete(bt.id)}><Trash2 size={12} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              });
             })()}
           </tbody>
         </table>
       </div>
     </div>
+    
+    {showSummary && selectedBacktests.size > 0 && (
+      <CumulativeSummary 
+        selectedIds={selectedBacktests} 
+        onClose={() => setShowSummary(false)} 
+      />
+    )}
     
     {showSaveModal && (
       <SaveModal
