@@ -270,38 +270,38 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
 
     # ── Volatility 1s Variants ───────────────────────────────────────────────
 
-    "Volatility 10 Index (1s)": InstrumentProfile(
-        symbol="Volatility 10 Index (1s)", instrument_type="SYNTHETIC",
+    "Volatility 10 (1s) Index": InstrumentProfile(
+        symbol="Volatility 10 (1s) Index", instrument_type="SYNTHETIC",
         point_size=0.001, point_value_per_lot=0.25, lot_min=0.5, lot_max=100.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
-    "Volatility 25 Index (1s)": InstrumentProfile(
-        symbol="Volatility 25 Index (1s)", instrument_type="SYNTHETIC",
+    "Volatility 25 (1s) Index": InstrumentProfile(
+        symbol="Volatility 25 (1s) Index", instrument_type="SYNTHETIC",
         point_size=0.01, point_value_per_lot=0.5, lot_min=0.005, lot_max=50.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
-    "Volatility 50 Index (1s)": InstrumentProfile(
-        symbol="Volatility 50 Index (1s)", instrument_type="SYNTHETIC",
+    "Volatility 50 (1s) Index": InstrumentProfile(
+        symbol="Volatility 50 (1s) Index", instrument_type="SYNTHETIC",
         point_size=0.01, point_value_per_lot=0.75, lot_min=0.005, lot_max=20.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
-    "Volatility 75 Index (1s)": InstrumentProfile(
-        symbol="Volatility 75 Index (1s)", instrument_type="SYNTHETIC",
+    "Volatility 75 (1s) Index": InstrumentProfile(
+        symbol="Volatility 75 (1s) Index", instrument_type="SYNTHETIC",
         point_size=0.01, point_value_per_lot=1.0, lot_min=0.05, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
-    "Volatility 100 Index (1s)": InstrumentProfile(
-        symbol="Volatility 100 Index (1s)", instrument_type="SYNTHETIC",
+    "Volatility 100 (1s) Index": InstrumentProfile(
+        symbol="Volatility 100 (1s) Index", instrument_type="SYNTHETIC",
         point_size=0.01, point_value_per_lot=1.5, lot_min=0.1, lot_max=5.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
-    "Volatility 150 Index (1s)": InstrumentProfile(
-        symbol="Volatility 150 Index (1s)", instrument_type="SYNTHETIC",
+    "Volatility 150 (1s) Index": InstrumentProfile(
+        symbol="Volatility 150 (1s) Index", instrument_type="SYNTHETIC",
         point_size=0.01, point_value_per_lot=2.0, lot_min=0.001, lot_max=3.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
-    "Volatility 250 Index (1s)": InstrumentProfile(
-        symbol="Volatility 250 Index (1s)", instrument_type="SYNTHETIC",
+    "Volatility 250 (1s) Index": InstrumentProfile(
+        symbol="Volatility 250 (1s) Index", instrument_type="SYNTHETIC",
         point_size=0.01, point_value_per_lot=3.0, lot_min=0.001, lot_max=2.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
@@ -689,11 +689,11 @@ SYMBOL_ALIASES: dict[str, str] = {
     "V100": "Volatility 100 Index", "V150": "Volatility 150 Index",
     "V250": "Volatility 250 Index",
     # Volatility 1s
-    "V10(1s)":  "Volatility 10 Index (1s)",  "V25(1s)":  "Volatility 25 Index (1s)",
-    "V50(1s)":  "Volatility 50 Index (1s)",  "V75(1s)":  "Volatility 75 Index (1s)",
-    "V100(1s)": "Volatility 100 Index (1s)", "V150(1s)": "Volatility 150 Index (1s)",
-    "V250(1s)": "Volatility 250 Index (1s)",
-    "Volatility 75 Index (1s)": "Volatility 75 Index (1s)",
+    "V10(1s)":  "Volatility 10 (1s) Index",  "V25(1s)":  "Volatility 25 (1s) Index",
+    "V50(1s)":  "Volatility 50 (1s) Index",  "V75(1s)":  "Volatility 75 (1s) Index",
+    "V100(1s)": "Volatility 100 (1s) Index", "V150(1s)": "Volatility 150 (1s) Index",
+    "V250(1s)": "Volatility 250 (1s) Index",
+    "Volatility 75 (1s) Index": "Volatility 75 (1s) Index",
     # Boom
     "BOOM300": "Boom 300 Index", "BOOM500": "Boom 500 Index",
     "BOOM600": "Boom 600 Index", "BOOM900": "Boom 900 Index",
