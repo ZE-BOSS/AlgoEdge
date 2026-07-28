@@ -109,6 +109,8 @@ export default function StrategySettings() {
     'BTCUSD', 'Bitcoin', 'BTC', 'ETHUSD', 'ETH', 'Ethereum',
     'Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index',
     'Volatility 75 Index', 'Volatility 100 Index', 'Volatility 150 Index', 'Volatility 250 Index',
+    'Volatility 10 Index (1s)', 'Volatility 25 Index (1s)', 'Volatility 50 Index (1s)',
+    'Volatility 75 Index (1s)', 'Volatility 100 Index (1s)', 'Volatility 150 Index (1s)', 'Volatility 250 Index (1s)',
     'Boom 300 Index', 'Boom 500 Index', 'Boom 1000 Index',
     'Crash 300 Index', 'Crash 500 Index', 'Crash 1000 Index',
     'Jump 10 Index', 'Jump 25 Index', 'Jump 50 Index', 'Jump 75 Index', 'Jump 100 Index',

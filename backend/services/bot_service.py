@@ -488,16 +488,29 @@ class BotService:
                                     # Each group of TP positions counts as 1 trade
                                     if mt5_positions:
                                         seen_groups = set()
+                                        symbol_groups = set()
                                         for p in mt5_positions:
                                             group_key = (p.symbol, round(p.time / 5) * 5)
                                             seen_groups.add(group_key)
+                                            if p.symbol == signal.symbol:
+                                                symbol_groups.add(group_key)
                                         live_trade_count = len(seen_groups)
+                                        symbol_trade_count = len(symbol_groups)
                                     else:
                                         live_trade_count = 0
-                                    max_concurrent = getattr(config.risk, 'max_concurrent_positions', 1)
+                                        symbol_trade_count = 0
+                                        
+                                    max_concurrent = getattr(config.risk, 'max_concurrent_positions', 3)
+                                    max_per_symbol = getattr(config.risk, 'max_positions_per_symbol', 1)
+                                    
                                     if live_trade_count >= max_concurrent:
-                                        self._log_event(f"[REJECTED] Max open positions reached ({live_trade_count}/{max_concurrent})", "SIGNAL", "RISK")
-                                        await self._save_signal_state(signal, "SKIPPED", f"Max open positions reached ({live_trade_count}/{max_concurrent})")
+                                        self._log_event(f"[REJECTED] Max open positions reached globally ({live_trade_count}/{max_concurrent})", "SIGNAL", "RISK")
+                                        await self._save_signal_state(signal, "SKIPPED", f"Max open positions reached globally ({live_trade_count}/{max_concurrent})")
+                                        continue
+                                        
+                                    if symbol_trade_count >= max_per_symbol:
+                                        self._log_event(f"[REJECTED] Max positions reached for {signal.symbol} ({symbol_trade_count}/{max_per_symbol})", "SIGNAL", "RISK")
+                                        await self._save_signal_state(signal, "SKIPPED", f"Max positions reached for {signal.symbol} ({symbol_trade_count}/{max_per_symbol})")
                                         continue
                                 except Exception as e:
                                     logger.error(f"Error checking open positions: {e}")

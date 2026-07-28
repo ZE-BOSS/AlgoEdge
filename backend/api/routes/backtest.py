@@ -54,6 +54,7 @@ class BacktestRequest(BaseModel):
     max_weekly_consecutive_losses: int = 5
     max_consecutive_losses: int = 5
     max_concurrent_positions: int = 3
+    max_positions_per_symbol: int = 1
     max_daily_trades: int = 5
     target_profit_enabled: bool = False
     max_daily_profit: float = 500.0
@@ -257,6 +258,7 @@ async def run_backtest_endpoint(
             config.risk.max_weekly_consecutive_losses = req.max_weekly_consecutive_losses
             config.risk.max_consecutive_losses = req.max_consecutive_losses
             config.risk.max_concurrent_positions = req.max_concurrent_positions
+            config.risk.max_positions_per_symbol = req.max_positions_per_symbol
             config.risk.max_daily_trades = req.max_daily_trades
             config.smc.manual_bias_overrides = req.manual_bias_overrides
             
@@ -463,6 +465,7 @@ async def run_backtest_endpoint(
                 "max_weekly_consecutive_losses": req.max_weekly_consecutive_losses,
                 "max_consecutive_losses": req.max_consecutive_losses,
                 "max_concurrent_positions": req.max_concurrent_positions,
+                "max_positions_per_symbol": req.max_positions_per_symbol,
                 "max_daily_trades": req.max_daily_trades,
                 "target_profit_enabled": req.target_profit_enabled,
                 "max_daily_profit": req.max_daily_profit,

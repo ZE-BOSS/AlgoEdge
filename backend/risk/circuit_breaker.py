@@ -28,6 +28,7 @@ class CircuitBreaker:
         self.max_daily_consecutive_losses = config.get("max_daily_consecutive_losses", 5)
         self.max_weekly_consecutive_losses = config.get("max_weekly_consecutive_losses", 15)
         self.max_concurrent_positions = config.get("max_concurrent_positions", 3)
+        self.max_positions_per_symbol = config.get("max_positions_per_symbol", 1)
         self.max_correlated_risk_pct = config.get("max_correlated_risk_pct", 4.0)
         self.max_daily_trades = config.get("max_daily_trades", 5)
         self.target_profit_enabled = config.get("target_profit_enabled", False)
@@ -109,8 +110,8 @@ class CircuitBreaker:
         Enforces one active signal group per symbol at a time.
         """
         sym_open = self.open_positions_by_symbol.get(symbol, 0)
-        if sym_open >= 1:
-            return False, f"Already have an open position on {symbol} — waiting for it to close"
+        if sym_open >= self.max_positions_per_symbol:
+            return False, f"Max positions reached for {symbol} ({sym_open}/{self.max_positions_per_symbol})"
         return True, "OK"
 
     def position_opened(self, group_id: str, sub_trade_count: int, symbol: str = ""):

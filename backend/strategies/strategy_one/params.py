@@ -243,7 +243,10 @@ class RiskParams:
     """
 
     max_concurrent_positions: int = 3
-    """Maximum simultaneously open positions per user. Range: 1–10."""
+    """Maximum simultaneously open positions globally across all pairs. Range: 1–10."""
+
+    max_positions_per_symbol: int = 1
+    """Maximum simultaneously open positions per individual symbol. Range: 1–10."""
 
     target_profit_enabled: bool = False
     """Enable circuit breaker based on daily/weekly profit."""

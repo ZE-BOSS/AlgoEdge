@@ -17,6 +17,7 @@ export default function RiskSettings() {
     max_consecutive_losses: 5,
     max_daily_trades: 5,
     max_concurrent_positions: 3,
+    max_positions_per_symbol: 1,
     target_profit_enabled: false,
     max_daily_profit: 500.0,
     max_weekly_profit: 2000.0,
@@ -119,7 +120,8 @@ export default function RiskSettings() {
           <div><label>Max Weekly Consec. Losses</label><input type="number" step="1" min="1" value={config.max_weekly_consecutive_losses} onChange={e => update('max_weekly_consecutive_losses', +e.target.value)} /></div>
           <div><label>Max Consec. Losses</label><input type="number" value={config.max_consecutive_losses} onChange={e => update('max_consecutive_losses', +e.target.value)} /></div>
           <div><label>Max Daily Trades</label><input type="number" step="1" min="1" value={config.max_daily_trades} onChange={e => update('max_daily_trades', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Prevents overtrading in chop</div></div>
-          <div><label>Max Open Positions</label><input type="number" value={config.max_concurrent_positions} onChange={e => update('max_concurrent_positions', +e.target.value)} /></div>
+          <div><label>Max Open Positions</label><input type="number" value={config.max_concurrent_positions} onChange={e => update('max_concurrent_positions', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Global across all symbols</div></div>
+          <div><label>Max Positions / Symbol</label><input type="number" value={config.max_positions_per_symbol} onChange={e => update('max_positions_per_symbol', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Limit trades per symbol</div></div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, marginBottom: 12 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
