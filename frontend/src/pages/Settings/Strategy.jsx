@@ -97,7 +97,7 @@ export default function StrategySettings() {
   const handleSave = () => mutation.mutate(config);
 
   const allSymbols = [
-    'XAUUSD', 'Gold', 'XAU',
+    'XAUUSD', 'Gold', 'XAU', 'XPTUSD', 'Platinum', 'XPT',
     'EURUSD', 'GBPUSD', 'AUDUSD', 'Aussie', 'GBPJPY', 'Geppy', 'GJ',
     'GBPNZD', 'GBPAUD', 'GBPCHF', 'EURJPY', 'EURAUD', 'USDJPY',
     'US30', 'Wall Street 30', 'WS30', 'DJI', 'DOW', 'YM',

@@ -551,6 +551,9 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     "NG": InstrumentProfile(
         symbol="NG", instrument_type="COMMODITY", point_size=0.001, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1000, session_filter=True, news_filter=True, trades_24_7=False,
     ),
+    "XPTUSD": InstrumentProfile(
+        symbol="XPTUSD", instrument_type="COMMODITY", point_size=0.01, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=100, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
 
     # ── Forex Majors ──────────────────────────────────────────────────────────
 
@@ -715,6 +718,7 @@ SYMBOL_ALIASES: dict[str, str] = {
     "DSI900DN": "DEX 900DN", "DSI900UP": "DEX 900UP",
     # Commodities / Forex / Crypto
     "Gold": "XAUUSD", "GOLD": "XAUUSD", "XAU": "XAUUSD",
+    "Platinum": "XPTUSD", "XPT": "XPTUSD",
     "WTI": "USOIL", "OIL": "USOIL", "Crude": "USOIL", "Crude Oil": "USOIL", "XTIUSD": "USOIL", "WTICrude": "USOIL", "US Oil": "USOIL",
     "NG": "NG", "XNGUSD": "NG", "Natural Gas": "NG",
     "ETH": "ETHUSD", "Ethereum": "ETHUSD",

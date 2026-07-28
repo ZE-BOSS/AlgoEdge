@@ -21,8 +21,8 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-# Executor for blocking MT5 calls
-_executor = ThreadPoolExecutor(max_workers=4)
+# Executor for blocking MT5 calls — single worker to serialize MT5 access
+_executor = ThreadPoolExecutor(max_workers=1)
 
 def _get_timeframe_code(tf_str: str):
     if not mt5:
@@ -76,7 +76,7 @@ class DataFetcher:
 
     _cache = {}
     _cache_time = {}
-    CACHE_DURATION = 10  # seconds
+    CACHE_DURATION = 30  # seconds — prevents hammering MT5 with repeated calls
 
     @classmethod
     async def get_historical_data(

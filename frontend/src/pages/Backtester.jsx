@@ -8,7 +8,7 @@ import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
 const SYMBOLS = [
-  'XAUUSD', 'Gold', 'XAU',
+  'XAUUSD', 'Gold', 'XAU', 'XPTUSD', 'Platinum', 'XPT',
   'EURUSD', 'GBPUSD', 'AUDUSD', 'Aussie', 'GBPJPY', 'Geppy', 'GJ',
   'GBPNZD', 'GBPAUD', 'GBPCHF', 'EURJPY', 'EURAUD', 'USDJPY',
   'US30', 'Wall Street 30', 'WS30', 'DJI', 'DOW', 'YM',

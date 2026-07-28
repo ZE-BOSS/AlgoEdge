@@ -366,8 +366,8 @@ class BotService:
                     if not self.running:
                         break
 
-                    # Yield control to event loop to allow WebSocket pings and API requests
-                    await asyncio.sleep(0.1)
+                    # Throttle between symbols to avoid overwhelming MT5
+                    await asyncio.sleep(0.5)
 
                     self._log_event(f"Scanning {symbol}...", category="SCAN")
 
@@ -410,7 +410,7 @@ class BotService:
                         has_missing_data = False
                         for tf in req_tfs:
                             tf_data = await DataFetcher.get_historical_data(symbol, tf, count=5000)
-                            await asyncio.sleep(0.05)
+                            await asyncio.sleep(0.2)  # Throttle between timeframe fetches
                             if tf_data is None or tf_data.empty:
                                 has_missing_data = True
                                 break
