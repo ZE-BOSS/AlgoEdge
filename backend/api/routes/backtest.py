@@ -41,7 +41,6 @@ class BulkBacktestRequest(BaseModel):
 class BacktestRequest(BaseModel):
     strategy_id: str = "SMC_v1"
     symbol: str
-    timeframe: str = "M15"
     start_date: str | None = None
     end_date: str | None = None
     candle_count: int = 5000
@@ -190,8 +189,7 @@ async def run_backtest_endpoint(
     Run a backtest in the background to prevent frontend timeouts.
     """
     from backend.services.bot_service import bot_service
-
-    bot_service.log_system_event(f"Backtest queued: {req.symbol} {req.timeframe}", category="BACKTEST")
+    bot_service.log_system_event(f"Backtest queued: {req.symbol}", category="BACKTEST")
 
     async def _run_backtest_task():
         global USER_BACKTEST_STATE
@@ -235,8 +233,8 @@ async def run_backtest_endpoint(
             from backend.services.bot_service import bot_service
 
             bt_start = _time.time()
-            logger.info(f"═══ BACKTEST START ═══ {req.symbol} {req.timeframe} | user={current_user.email}")
-            bot_service.log_system_event(f"Backtest started: {req.symbol} {req.timeframe}", category="BACKTEST")
+            logger.info(f"═══ BACKTEST START ═══ {req.symbol} | user={current_user.email}")
+            bot_service.log_system_event(f"Backtest started: {req.symbol}", category="BACKTEST")
 
             try:
                 current_state = await _get_state()

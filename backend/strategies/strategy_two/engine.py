@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 # Spec default values for DriftJumpAlpha v2
 SPEC_DEFAULTS = {
     "min_ema_separation_atr_multiple": 0.2,
-    "pullback_max_distance_atr_multiple": 1.0,
+    "pullback_max_distance_atr_multiple": 3.0,
     "confirmation_candles_required": 1,
     "atr_period": 14,
     "trailing_atr_multiple_low_vol": 1.5,
@@ -83,6 +83,7 @@ class DriftJumpAlphaEngine(BaseStrategy):
         self.jump_distances: list[int] = []
         self.ms_detector = MarketStructureDetector(swing_length=5, min_bos_count=1)
         self.post_jump_regime_reset = False
+        self.history_scanned = False
 
     def log_event(self, message: str, level: str = "INFO", category: str = "DJA"):
         """Intercept logs and send to bot_service."""
@@ -188,35 +189,38 @@ class DriftJumpAlphaEngine(BaseStrategy):
         ms_state = self.ms_detector.update(candles)
 
         # Detect historical jumps only once
-        if not getattr(self, 'history_scanned', False):
+        if not self.history_scanned:
             self.jump_distances = []
-            last_j_idx = None
+            bars_since = 999999
             for i in range(1, len(df)-1):
                 b = df.iloc[i]
                 if self.detect_jump(b, symbol, b['atr']):
-                    if last_j_idx is not None:
-                        self.jump_distances.append(i - last_j_idx)
-                    last_j_idx = i
+                    if bars_since != 999999:
+                        self.jump_distances.append(bars_since)
+                    bars_since = 0
+                else:
+                    if bars_since != 999999:
+                        bars_since += 1
                     
-            self.last_jump_idx = last_j_idx
+            self.bars_since_jump = bars_since
             self.history_scanned = True
             
         if self.detect_jump(current_bar, symbol, atr_val):
-            if self.last_jump_idx is not None:
-                dist = (len(df) - 1) - self.last_jump_idx
-                self.jump_distances.append(dist)
-            self.last_jump_idx = len(df) - 1
+            if getattr(self, 'bars_since_jump', 999999) != 999999:
+                self.jump_distances.append(self.bars_since_jump)
+            self.bars_since_jump = 0
             self.post_jump_regime_reset = True
             self.log_event("Jump detected! Resetting regime wait.")
             return None
+        else:
+            if getattr(self, 'bars_since_jump', 999999) != 999999:
+                self.bars_since_jump += 1
             
-        bars_since_jump = (len(df) - 1 - self.last_jump_idx) if self.last_jump_idx is not None else 999999
-        
-        if bars_since_jump < 5:
-            self.log_event(f"In 5-bar jump cooldown ({bars_since_jump} bars).")
+        if getattr(self, 'bars_since_jump', 999999) < 5:
+            self.log_event(f"In 5-bar jump cooldown ({self.bars_since_jump} bars).")
             return None
             
-        gap_pct = self.compute_gap_percentile(bars_since_jump)
+        gap_pct = self.compute_gap_percentile(self.bars_since_jump)
         self.log_event(f"Gap percentile computed: {gap_pct:.1f}%")
         
         if gap_pct >= SPEC_DEFAULTS['flatten_all_at_percentile']:
@@ -287,8 +291,8 @@ class DriftJumpAlphaEngine(BaseStrategy):
             return None
             
         if self.post_jump_regime_reset:
-            if ms_state.get("trend") != "BULLISH":
-                self.log_event("Waiting for BULLISH trend to reset regime after jump.")
+            if current_bar['close'] < current_bar['ema_fast']:
+                self.log_event("Waiting for price to cross above Fast EMA to reset regime after jump.")
                 return None
             self.post_jump_regime_reset = False
             self.log_event("Post-jump regime reset complete.")

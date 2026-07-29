@@ -677,7 +677,7 @@ export default function Backtester() {
       if (saved) return JSON.parse(saved);
     } catch { }
     return {
-      symbol: 'XAUUSD', timeframe: 'M15', initial_balance: 10000,
+      symbol: 'XAUUSD', initial_balance: 10000,
       start_date: '', end_date: '', candle_count: 5000,
       confluence_threshold: 55, swing_length: 5, ob_impulse_ratio: 1.5,
       fvg_min_gap_pips: 3.0, liq_sweep_min_pips: 2.0, max_spread_pips: 3.0,
@@ -986,7 +986,6 @@ export default function Backtester() {
               </datalist>
             </div>
           </div>
-          <div><label>Timeframe</label><select value={form.timeframe} onChange={e => setForm({ ...form, timeframe: e.target.value })}>{['M5', 'M15', 'H4', 'D1'].map(tf => <option key={tf} value={tf}>{tf}</option>)}</select></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div><label>Start Date</label><input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} /></div>
             <div><label>End Date</label><input type="date" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} /></div>
