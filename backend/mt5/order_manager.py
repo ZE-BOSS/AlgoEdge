@@ -39,6 +39,12 @@ class OrderManager:
         if not mt5:
             logger.info("MOCK MODE: Order placed successfully.")
             return {"success": True, "ticket": 12345}
+
+        # ── IPC Auto-Recovery ──
+        terminal_info = mt5.terminal_info()
+        if terminal_info is None or not terminal_info.connected:
+            logger.warning("MT5 connection lost in OrderManager. Attempting to re-initialize IPC...")
+            mt5.initialize()
             
         action = mt5.ORDER_TYPE_BUY if direction.upper() in ("BUY", "BULLISH") else mt5.ORDER_TYPE_SELL
         

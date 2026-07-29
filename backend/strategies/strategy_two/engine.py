@@ -287,8 +287,8 @@ class DriftJumpAlphaEngine(BaseStrategy):
             return None
             
         if self.post_jump_regime_reset:
-            if ms_state.get("last_choch") != "BULLISH":
-                self.log_event("Waiting for BULLISH ChoCH to reset regime after jump.")
+            if ms_state.get("trend") != "BULLISH":
+                self.log_event("Waiting for BULLISH trend to reset regime after jump.")
                 return None
             self.post_jump_regime_reset = False
             self.log_event("Post-jump regime reset complete.")

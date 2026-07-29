@@ -101,6 +101,12 @@ class DataFetcher:
             error_msg = "MT5 terminal is not available on this system. Cannot fetch live/historical data."
             logger.error(error_msg)
             raise DataFetchError(symbol, timeframe, error_msg)
+
+        # ── IPC Auto-Recovery ──
+        terminal_info = mt5.terminal_info()
+        if terminal_info is None or not terminal_info.connected:
+            logger.warning("MT5 connection lost in DataFetcher. Attempting to re-initialize IPC...")
+            mt5.initialize()
             
         tf_code = _get_timeframe_code(timeframe)
         
@@ -173,6 +179,12 @@ class DataFetcher:
             error_msg = "MT5 terminal is not available on this system. Cannot fetch live/historical data."
             logger.error(error_msg)
             raise DataFetchError(symbol, timeframe, error_msg)
+
+        # ── IPC Auto-Recovery ──
+        terminal_info = mt5.terminal_info()
+        if terminal_info is None or not terminal_info.connected:
+            logger.warning("MT5 connection lost in DataFetcher. Attempting to re-initialize IPC...")
+            mt5.initialize()
             
         tf_code = _get_timeframe_code(timeframe)
         
