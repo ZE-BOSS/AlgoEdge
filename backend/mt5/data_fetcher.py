@@ -110,9 +110,19 @@ class DataFetcher:
             _executor, lambda: mt5.symbol_info(symbol)
         )
         if symbol_info is None:
-            error_msg = f"Symbol '{symbol}' not found in MT5. Check broker symbol list."
-            logger.error(error_msg)
-            raise DataFetchError(symbol, timeframe, error_msg)
+            # The symbol might just not be in Market Watch yet, try selecting it
+            selected = await loop.run_in_executor(
+                _executor, lambda: mt5.symbol_select(symbol, True)
+            )
+            if selected:
+                symbol_info = await loop.run_in_executor(
+                    _executor, lambda: mt5.symbol_info(symbol)
+                )
+
+            if symbol_info is None:
+                error_msg = f"Symbol '{symbol}' not found in MT5. Check broker symbol list."
+                logger.error(error_msg)
+                raise DataFetchError(symbol, timeframe, error_msg)
         
         # Ensure symbol is selected in Market Watch
         if not symbol_info.visible:

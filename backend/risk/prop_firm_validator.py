@@ -87,6 +87,17 @@ class PropFirmValidator:
             self.high_water_mark = equity
             changed = True
 
+        # Sync total_profit and daily_profit strictly from balance
+        true_total = balance - self.initial_balance
+        if abs(self.total_profit - true_total) > 0.01:
+            self.total_profit = true_total
+            changed = True
+            
+        true_daily = balance - self.eod_baseline
+        if abs(self.daily_profit - true_daily) > 0.01:
+            self.daily_profit = true_daily
+            changed = True
+
         # 2. Check 22:00 UTC (17:00 EST) for EOD Snapshot
         # A trading day goes from 22:00 UTC to 21:59:59 UTC the next day.
         # Shift time by +2 hours so that midnight aligns exactly with 22:00 UTC.
@@ -187,6 +198,5 @@ class PropFirmValidator:
         if symbol in self.open_lots_by_symbol:
             self.open_lots_by_symbol[symbol] = max(0.0, self.open_lots_by_symbol[symbol] - lots)
             
-        self.daily_profit += pnl
-        self.total_profit += pnl
+        # We no longer increment profit manually here; it is strictly computed from balance in update_equity_balance
         self.save_state()
