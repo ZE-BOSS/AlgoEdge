@@ -139,18 +139,20 @@ class RiskEngine:
         # Calculate actual dollar risk taken (after any Smart Clamping in the position sizer)
         actual_risk_dollars = calculate_risk_dollars(total_lots, entry, sl, symbol)
         
-        # Strict Risk Enforcement
-        # If the minimum broker lot size forces us to risk more than what was requested, REJECT outright.
-        # Adding a tiny 1% leniency buffer to account for MT5 precision floating point rounding.
+        # Soft Risk Handling for Broker Minimum Lot Constraint
+        # When the minimum broker lot forces more risk than requested, we log a warning
+        # but DO NOT reject. The minimum lot trade proceeds — the user accepts this slight
+        # overshoot rather than missing the trade entirely.
         if actual_risk_dollars > (requested_risk_dollars * 1.01):
             logger.warning(json.dumps({
-                "event": "risk_rejected",
+                "event": "risk_warning_broker_minimum",
                 "reason": "broker_minimum_lot_exceeds_risk",
                 "requested_risk_dollars": requested_risk_dollars,
                 "actual_risk_dollars": actual_risk_dollars,
-                "balance": account_balance
+                "balance": account_balance,
+                "note": "Proceeding at minimum lot size — risk overshoot accepted"
             }))
-            return False, f"Proposed risk (${requested_risk_dollars:.2f}) does not meet the broker minimum requirement (${actual_risk_dollars:.2f}).", []
+            # Continue — do not reject. The trade will be placed at minimum lot.
 
         if total_lots == 0.0:
             logger.warning(json.dumps({

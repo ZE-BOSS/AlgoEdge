@@ -11,7 +11,7 @@ export default function StrategySettings() {
   const [saved, setSaved] = useState(false);
 
   const [config, setConfig] = useState({
-    symbols: ['XAUUSD', 'EURUSD', 'GBPUSD'], // legacy support
+    symbols: ['XAUUSD', 'XAGUSD', 'XPTUSD', 'EURUSD', 'GBPUSD'], // legacy support
     instrument_settings: [
       { symbol: 'XAUUSD', strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false },
       { symbol: 'EURUSD', strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false },
@@ -97,7 +97,7 @@ export default function StrategySettings() {
   const handleSave = () => mutation.mutate(config);
 
   const allSymbols = [
-    'XAUUSD', 'Gold', 'XAU', 'XPTUSD', 'Platinum', 'XPT',
+    'XAUUSD', 'Gold', 'XAU', 'XAGUSD', 'Silver', 'XAG', 'XPTUSD', 'Platinum', 'XPT',
     'EURUSD', 'GBPUSD', 'AUDUSD', 'Aussie', 'GBPJPY', 'Geppy', 'GJ',
     'GBPNZD', 'GBPAUD', 'GBPCHF', 'EURJPY', 'EURAUD', 'USDJPY',
     'US30', 'Wall Street 30', 'WS30', 'DJI', 'DOW', 'YM',

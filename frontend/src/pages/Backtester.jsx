@@ -10,7 +10,7 @@ import * as summaryEngine from '../utils/summaryEngine';
 import CumulativeSummary from '../components/CumulativeSummary';
 
 const SYMBOLS = [
-  'XAUUSD', 'Gold', 'XAU', 'XPTUSD', 'Platinum', 'XPT',
+  'XAUUSD', 'Gold', 'XAU', 'XAGUSD', 'Silver', 'XAG', 'XPTUSD', 'Platinum', 'XPT',
   'EURUSD', 'GBPUSD', 'AUDUSD', 'Aussie', 'GBPJPY', 'Geppy', 'GJ',
   'GBPNZD', 'GBPAUD', 'GBPCHF', 'EURJPY', 'EURAUD', 'USDJPY',
   'US30', 'Wall Street 30', 'WS30', 'DJI', 'DOW', 'YM',

@@ -206,7 +206,7 @@ class BotService:
         if self.running:
             return {"running": True, "message": "Bot is already running"}
 
-        self.symbols = symbols or ["XAUUSD", "EURUSD", "GBPUSD", "USOIL", "ETHUSD", "GBPJPY"]
+        self.symbols = symbols or ["XAUUSD", "XAGUSD", "XPTUSD", "EURUSD", "GBPUSD", "USOIL", "ETHUSD", "GBPJPY"]
         self.scan_interval = scan_interval
         self.running = True
         self.total_signals_today = 0
@@ -390,6 +390,8 @@ class BotService:
                 # Maintain a dictionary of engines per symbol
                 if not hasattr(self, 'engines'):
                     self.engines = {}
+                
+                had_execution_failure = False
 
                 for symbol in self.symbols:
                     if not self.running:
@@ -472,14 +474,17 @@ class BotService:
                             await asyncio.sleep(0.01)
                             
                             if signal:
+                                # We have a signal. Inject strategy ID.
+                                signal.strategy_id = strategy_id
+
                                 # Cooldown check
                                 sig_time = signal.metadata.get('timestamp') if isinstance(getattr(signal, 'metadata', None), dict) else getattr(signal, 'timestamp', None)
                                 if not sig_time and hasattr(signal, 'chart_data') and signal.chart_data:
                                     sig_time = signal.chart_data[-1].get('time')
                                 if sig_time and sig_time == self._last_signal_time.get(symbol):
                                     continue
-                                if sig_time:
-                                    self._last_signal_time[symbol] = sig_time
+                                
+                                # Do NOT update self._last_signal_time here. Wait until we know if it was EXECUTED or REJECTED.
                                     
                                 try:
                                     last_tf = req_tfs[-1]
@@ -698,12 +703,15 @@ class BotService:
                                         if not db_positions:
                                             self.circuit_breaker.rollback_position(group_id)
                                             self._log_event(f"All orders failed. Rolled back risk state for {group_id}.", "WARN", "RISK")
-                                            await self._save_signal_state(signal, "FAILED", "MT5 execution failed", tp_levels=tp_levels)
+                                            await self._save_signal_state(signal, "FAILED", "MT5 execution failed for all TP levels", tp_levels=tp_levels)
+                                            had_execution_failure = True
                                         elif len(db_positions) < len(tp_levels):
                                             self.circuit_breaker.active_groups[group_id]["sub_trades"] = len(db_positions)
                                     
                                         if db_positions and self.user_id:
                                             sig_id = await self._save_signal_state(signal, "EXECUTED", tp_levels=db_positions)
+                                            if sig_time:
+                                                self._last_signal_time[symbol] = sig_time
                                             try:
                                                 import json
 
@@ -771,6 +779,8 @@ class BotService:
                                             "WARN", "RISK"
                                         )
                                         await self._save_signal_state(signal, "REJECTED", reason, tp_levels=tp_levels)
+                                        if sig_time:
+                                            self._last_signal_time[symbol] = sig_time
                                         # Only trigger explicit popup for risk-based rejections, not basic RR rejections to avoid spam
                                         if "Broker minimum lot forces risk" in reason or "Proposed risk" in reason:
                                             asyncio.ensure_future(self._broadcast_notification(
@@ -794,14 +804,21 @@ class BotService:
                         self._log_event(f"Data fetch error for {symbol}: {str(e)[:150]}", "ERROR", "DATA")
 
                 self.last_scan = datetime.now(timezone.utc).isoformat()
-                self._log_event(
-                    f"Scan cycle complete — {len(self.symbols)} symbols checked — "
-                    f"next scan in {self.scan_interval}s",
-                    category="BOT"
-                )
-
-                # Wait for next cycle
-                await asyncio.sleep(self.scan_interval)
+                
+                if had_execution_failure:
+                    self._log_event(
+                        f"Execution failed this cycle. Fast-tracking next scan to retry in 5s.",
+                        category="BOT"
+                    )
+                    await asyncio.sleep(5)
+                else:
+                    self._log_event(
+                        f"Scan cycle complete — {len(self.symbols)} symbols checked — "
+                        f"next scan in {self.scan_interval}s",
+                        category="BOT"
+                    )
+                    # Wait for next cycle
+                    await asyncio.sleep(self.scan_interval)
 
             except asyncio.CancelledError:
                 self._log_event("Scan loop cancelled", category="BOT")

@@ -180,8 +180,28 @@ class PropFirmValidator:
         self.check_drawdown_breaches(equity)
 
     def check_drawdown_breaches(self, equity: float):
-        if not self.enabled or self.is_paused:
+        if not self.enabled:
             return
+
+        # A. Auto-recovery: if is_paused (from a previous breach), check if equity recovered
+        if self.is_paused:
+            daily_dd_allowance = self.initial_balance * 0.04
+            daily_floor = self.eod_baseline - daily_dd_allowance
+            max_dd_allowance = self.initial_balance * 0.08 if self.challenge_type in ["1-step", "flex"] else self.initial_balance * 0.06
+            max_dd_floor = (self.high_water_mark - max_dd_allowance) if self.challenge_type in ["1-step", "flex"] else (self.initial_balance - max_dd_allowance)
+            # Only auto-recover if equity is above both floors
+            if equity >= daily_floor and equity >= max_dd_floor:
+                logger.info(f"[PropFirm] Equity recovered to {equity:.2f}. Clearing pause state.")
+                self.is_paused = False
+                self.pause_reason = ""
+                self.save_state()
+                self._telegram_alert(
+                    f"✅ *Prop Firm — Drawdown Recovered*\n"
+                    f"Equity: ${equity:.2f} has recovered above all drawdown floors.\n"
+                    f"Monitoring resumed.",
+                    alert_key=f"recovery_{self.last_eod_date}"
+                )
+            return  # Either still paused or just recovered — no need to re-check breach below
 
         # A. Daily Drawdown Check
         daily_dd_allowance = self.initial_balance * 0.04

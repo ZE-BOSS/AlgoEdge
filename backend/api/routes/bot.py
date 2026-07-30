@@ -56,7 +56,7 @@ async def start_bot(
 
     # Fall back to defaults if still empty
     if not symbols:
-        symbols = ["XAUUSD", "EURUSD", "GBPUSD", "USOIL", "ETHUSD", "GBPJPY"]
+        symbols = ["XAUUSD", "XAGUSD", "XPTUSD", "EURUSD", "GBPUSD", "USOIL", "ETHUSD", "GBPJPY"]
 
     # 2. Validate broker connectivity for selected symbols
     missing_brokers = []

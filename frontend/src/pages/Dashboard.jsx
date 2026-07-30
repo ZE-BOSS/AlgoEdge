@@ -151,7 +151,7 @@ function BotControl() {
   const brokerStatus = dashboardData?.broker;
 
   // Get symbols from config, or defaults
-  const configSymbols = userConfig?.config?.watched_symbols || userConfig?.config?.symbols || ['XAUUSD', 'EURUSD', 'GBPUSD', 'USOIL', 'ETHUSD', 'GBPJPY'];
+  const configSymbols = userConfig?.config?.watched_symbols || userConfig?.config?.symbols || ['XAUUSD', 'XAGUSD', 'XPTUSD', 'EURUSD', 'GBPUSD', 'USOIL', 'ETHUSD', 'GBPJPY'];
 
   const startMutation = useMutation({
     mutationFn: () => startBot({ symbols: configSymbols, scan_interval: 60 }),
@@ -426,7 +426,7 @@ export default function Dashboard() {
   const propFirmStatus = dashboardData?.prop_firm_status;
   const mt5Sync = dashboardData?.mt5_sync;
 
-  const configSymbols = userConfig?.config?.watched_symbols || userConfig?.config?.symbols || ['XAUUSD', 'EURUSD', 'GBPUSD', 'USOIL', 'ETHUSD', 'GBPJPY'];
+  const configSymbols = userConfig?.config?.watched_symbols || userConfig?.config?.symbols || ['XAUUSD', 'XAGUSD', 'XPTUSD', 'EURUSD', 'GBPUSD', 'USOIL', 'ETHUSD', 'GBPJPY'];
 
   useEffect(() => {
     if (statsData) setStats(statsData);
