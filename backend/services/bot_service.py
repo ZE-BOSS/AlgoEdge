@@ -182,7 +182,7 @@ class BotService:
                         entry_price=signal_domain.entry_price,
                         stop_loss=signal_domain.stop_loss,
                         tp1_price=getattr(signal_domain, 'take_profit', None), # fallback
-                        confluence_score=getattr(signal_domain, 'score', 0.0),
+                        confluence_score=getattr(signal_domain, 'confluence_score', getattr(signal_domain, 'score', 0.0)),
                         acted_on=(status == "EXECUTED"),
                         skip_reason=reject_reason if status != "EXECUTED" else None,
                         signal_time=dt_time,
@@ -352,6 +352,13 @@ class BotService:
                     self.circuit_breaker = CircuitBreaker(config.risk.to_dict() if hasattr(config.risk, 'to_dict') else config.risk.__dict__)
                 if not getattr(self, "prop_firm_validator", None):
                     self.prop_firm_validator = PropFirmValidator(getattr(config, "prop_firm", None) or config)
+                else:
+                    pf_config = getattr(config, "prop_firm", None) or config
+                    self.prop_firm_validator.enabled = getattr(pf_config, "account_mode", "personal") == "prop_firm"
+                    self.prop_firm_validator.challenge_type = getattr(pf_config, "challenge_type", "none")
+                    self.prop_firm_validator.account_size = getattr(pf_config, "account_size", 10000.0)
+                    self.prop_firm_validator.initial_balance = getattr(pf_config, "initial_balance", 10000.0)
+                    self.prop_firm_validator.max_lot_sizes = getattr(pf_config, "max_lot_sizes", {})
 
                 # Initialize and refresh news filter if enabled
                 if not hasattr(self, 'news_filter'):

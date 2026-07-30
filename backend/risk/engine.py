@@ -160,19 +160,9 @@ class RiskEngine:
             }))
             return False, "Lot size calculation returned 0", []
 
-        # 3.5 Prop Firm Check
-        if hasattr(self, "prop_firm_validator") and self.prop_firm_validator:
-            is_valid, reason, allowed_lots = self.prop_firm_validator.validate_trade(symbol, total_lots)
-            if not is_valid:
-                logger.warning(json.dumps({
-                    "event": "risk_rejected",
-                    "reason": "prop_firm_blocked",
-                    "details": reason
-                }))
-                return False, reason, []
-            if allowed_lots < total_lots:
-                logger.info(f"Prop Firm downsized lot from {total_lots} to {allowed_lots}")
-                total_lots = allowed_lots
+        # 3.5 Prop Firm Monitor (informational only — never blocks or modifies trades)
+        if hasattr(self, "prop_firm_validator") and self.prop_firm_validator and self.prop_firm_validator.enabled:
+            self.prop_firm_validator.validate_trade(symbol, total_lots)  # logs warnings only
 
         # 4. Multi-Position Splits (TP1/TP2/TP3)
         liquidity_target = signal_data.get("liquidity_target")

@@ -239,3 +239,36 @@ class OrderManager:
                     "reason": getattr(d, 'reason', -1),
                 })
         return closed_deals
+
+    @staticmethod
+    async def get_balance_operations_since(last_check_time: float) -> list[dict[str, Any]]:
+        """Get deposits, withdrawals, and other balance operations."""
+        if not mt5:
+            return []
+            
+        from datetime import datetime
+        
+        loop = asyncio.get_running_loop()
+        now = datetime.now()
+        start_dt = datetime.fromtimestamp(last_check_time)
+        
+        deals = await loop.run_in_executor(
+            _executor,
+            lambda: mt5.history_deals_get(start_dt, now)
+        )
+        
+        if not deals:
+            return []
+            
+        operations = []
+        for d in deals:
+            # 2=BALANCE, 3=CREDIT, 4=CHARGE, 5=CORRECTION, 6=BONUS, 7=COMMISSION
+            if getattr(d, 'type', 0) >= 2:
+                operations.append({
+                    "ticket": getattr(d, 'ticket', 0),
+                    "type": getattr(d, 'type', 2),
+                    "profit": getattr(d, 'profit', 0.0), # For deposits this is positive, withdrawals negative
+                    "comment": getattr(d, 'comment', ''),
+                    "time": getattr(d, 'time', 0)
+                })
+        return operations

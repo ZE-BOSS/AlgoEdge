@@ -34,6 +34,10 @@ async def get_user_stats(
         deals = await OrderManager.get_closed_positions_since(0)
         
         if deals:
+            # Fetch balance operations to calculate net deposits
+            balance_ops = await OrderManager.get_balance_operations_since(0)
+            net_deposits = sum(op.get("profit", 0.0) for op in balance_ops)
+            
             # We got MT5 data! Sort chronologically
             deals.sort(key=lambda x: x["time"])
             
@@ -43,15 +47,29 @@ async def get_user_stats(
             live_balance = account_info.balance if account_info else 10000.0
             
             total_mt5_pnl = sum((d["profit"] + d["commission"] + d["swap"]) for d in deals)
-            initial_balance = live_balance - total_mt5_pnl
+            # Initial Balance = Current Balance - Net Deposits - PnL
+            initial_balance = live_balance - net_deposits - total_mt5_pnl
             if initial_balance <= 0:
                 initial_balance = 10000.0
                 
-            trade_dicts = [{
-                "pnl": d["profit"] + d["commission"] + d["swap"],
-                "exit_reason": "TP" if (d["profit"] > 0) else "SL",
-                "be_applied": False,
-            } for d in deals]
+            # Fetch local DB trades to get the accurate exit_reason (e.g., TP1, TP2) instead of just "TP"
+            db_trades_result = await db.execute(
+                select(Trade).where(Trade.user_id == current_user.id, Trade.status == "CLOSED")
+            )
+            db_trades = {str(t.position_id): t.exit_reason for t in db_trades_result.scalars().all() if t.position_id}
+                
+            trade_dicts = []
+            for d in deals:
+                p_id = str(d.get("position_id", ""))
+                mapped_reason = db_trades.get(p_id)
+                if not mapped_reason:
+                    mapped_reason = "TP" if (d["profit"] > 0) else "SL"
+                    
+                trade_dicts.append({
+                    "pnl": d["profit"] + d["commission"] + d["swap"],
+                    "exit_reason": mapped_reason,
+                    "be_applied": False,
+                })
             
             return compute_portfolio_stats(trade_dicts, initial_balance=initial_balance)
     except Exception as e:

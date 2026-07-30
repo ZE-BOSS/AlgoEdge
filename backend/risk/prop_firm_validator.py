@@ -2,7 +2,10 @@
 backend/risk/prop_firm_validator.py
 
 Validates trades against strict Prop Firm (BloomFunded) rules without compounding.
+Prop Firm is a SOFT MONITOR only — it never blocks or modifies trades.
+It logs warnings and sends Telegram alerts for informational awareness only.
 """
+import asyncio
 import json
 import os
 from datetime import datetime, timedelta
@@ -24,7 +27,7 @@ class PropFirmValidator:
         self.account_size = getattr(config, "account_size", 10000.0)
         self.initial_balance = getattr(config, "initial_balance", 10000.0)
         self.max_lot_sizes = getattr(config, "max_lot_sizes", {})
-        
+
         # State
         self.high_water_mark = self.initial_balance
         self.eod_baseline = self.initial_balance
@@ -34,14 +37,42 @@ class PropFirmValidator:
         self.active_trading_days = 0
         self.is_paused = False
         self.pause_reason = ""
-        
+        self.net_deposits = 0.0
+
         # Positions state
         self.open_positions_count = 0
         self.open_positions_by_symbol = {}
         self.open_lots_by_symbol = {}
-        
+
+        # Alert dedup: track which alerts were already sent this session
+        self._alerts_sent: set = set()
+
         if self.enabled:
             self.load_state()
+
+    # ── Telegram alerting ─────────────────────────────────────────────────────
+
+    def _telegram_alert(self, message: str, alert_key: str = None):
+        """
+        Fire-and-forget Telegram alert. alert_key deduplicates repeated alerts
+        within the same session so the same breach does not spam every tick.
+        """
+        if alert_key:
+            if alert_key in self._alerts_sent:
+                return
+            self._alerts_sent.add(alert_key)
+
+        try:
+            from backend.services.telegram import telegram_service
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(telegram_service.send_message(message))
+            else:
+                asyncio.run(telegram_service.send_message(message))
+        except Exception as e:
+            logger.error(f"[PropFirm] Failed to send Telegram alert: {e}")
+
+    # ── Persistence ───────────────────────────────────────────────────────────
 
     def save_state(self):
         os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
@@ -55,7 +86,9 @@ class PropFirmValidator:
                     "total_profit": self.total_profit,
                     "active_trading_days": self.active_trading_days,
                     "is_paused": self.is_paused,
-                    "pause_reason": self.pause_reason
+                    "pause_reason": self.pause_reason,
+                    "net_deposits": self.net_deposits,
+                    "initial_balance": self.initial_balance
                 }, f)
         except Exception as e:
             logger.error(f"Failed to save prop firm state: {e}")
@@ -73,14 +106,39 @@ class PropFirmValidator:
                     self.active_trading_days = data.get("active_trading_days", 0)
                     self.is_paused = data.get("is_paused", False)
                     self.pause_reason = data.get("pause_reason", "")
+                    self.net_deposits = data.get("net_deposits", 0.0)
+                    self.initial_balance = data.get("initial_balance", getattr(config, "initial_balance", 10000.0) if hasattr(self, 'config') else 10000.0)
             except Exception as e:
                 logger.error(f"Failed to load prop firm state: {e}")
 
-    def update_equity_balance(self, equity: float, balance: float, current_time: datetime):
+    # ── Equity / EOD updates ──────────────────────────────────────────────────
+
+    def update_equity_balance(self, equity: float, balance: float, current_time: datetime, net_deposits: float = None):
         if not self.enabled:
             return
 
         changed = False
+
+        if net_deposits is not None:
+            if self.net_deposits == 0.0:
+                self.net_deposits = net_deposits
+                changed = True
+            elif net_deposits < self.net_deposits:
+                withdrawal_amount = self.net_deposits - net_deposits
+                logger.info(f"[PropFirm] Withdrawal detected: {withdrawal_amount}. Adjusting baselines.")
+                self.eod_baseline = max(0.0, self.eod_baseline - withdrawal_amount)
+                self.high_water_mark = max(0.0, self.high_water_mark - withdrawal_amount)
+                self.initial_balance = max(0.0, self.initial_balance - withdrawal_amount)
+                self.net_deposits = net_deposits
+                changed = True
+            elif net_deposits > self.net_deposits:
+                deposit_amount = net_deposits - self.net_deposits
+                logger.info(f"[PropFirm] Deposit detected: {deposit_amount}. Adjusting baselines.")
+                self.initial_balance += deposit_amount
+                self.eod_baseline += deposit_amount
+                self.high_water_mark += deposit_amount
+                self.net_deposits = net_deposits
+                changed = True
 
         # 1. Trailing High-Water Mark (for 1-Step Flex)
         if equity > self.high_water_mark:
@@ -92,7 +150,7 @@ class PropFirmValidator:
         if abs(self.total_profit - true_total) > 0.01:
             self.total_profit = true_total
             changed = True
-            
+
         true_daily = balance - self.eod_baseline
         if abs(self.daily_profit - true_daily) > 0.01:
             self.daily_profit = true_daily
@@ -103,12 +161,12 @@ class PropFirmValidator:
         # Shift time by +2 hours so that midnight aligns exactly with 22:00 UTC.
         shifted_time = current_time + timedelta(hours=2)
         current_trading_date = shifted_time.date().isoformat()
-        
+
         if self.last_eod_date != current_trading_date:
-            # We crossed into a new trading day! Snapshot the higher of Balance or Equity
+            # We crossed into a new trading day — snapshot the higher of Balance or Equity
             self.eod_baseline = max(balance, equity)
             self.last_eod_date = current_trading_date
-            
+
             # Check minimum trading day requirement
             if self.daily_profit >= (self.initial_balance * 0.005):
                 self.active_trading_days += 1
@@ -125,78 +183,137 @@ class PropFirmValidator:
         if not self.enabled or self.is_paused:
             return
 
-        # A. Daily Drawdown Check (4% of initial balance below EOD baseline)
+        # A. Daily Drawdown Check
         daily_dd_allowance = self.initial_balance * 0.04
-        if equity < (self.eod_baseline - daily_dd_allowance):
+        daily_floor = self.eod_baseline - daily_dd_allowance
+        if equity < daily_floor:
             self.is_paused = True
-            self.pause_reason = f"Daily Drawdown Breach! Equity {equity} fell below baseline {self.eod_baseline} - {daily_dd_allowance}"
+            self.pause_reason = (
+                f"Daily Drawdown Breach! Equity {equity:.2f} fell below daily floor "
+                f"{daily_floor:.2f} (baseline {self.eod_baseline:.2f} - {daily_dd_allowance:.2f})"
+            )
             self.save_state()
-            logger.error(self.pause_reason)
+            logger.error(f"[PROP FIRM] {self.pause_reason}")
+            self._telegram_alert(
+                f"\U0001f534 *Prop Firm Alert \u2014 Daily Drawdown Breached*\n"
+                f"Equity: ${equity:.2f}\n"
+                f"Daily Floor: ${daily_floor:.2f}\n"
+                f"EOD Baseline: ${self.eod_baseline:.2f}\n"
+                f"Allowance: ${daily_dd_allowance:.2f}\n"
+                f"\u26a0\ufe0f Trading continues (monitor only \u2014 no signals blocked)",
+                alert_key=f"daily_dd_{self.last_eod_date}"
+            )
+            return
 
         # B. Max Drawdown Check
         if self.challenge_type in ["1-step", "flex"]:
-            # 8% Trailing based on initial balance
             max_dd_allowance = self.initial_balance * 0.08
-            if equity < (self.high_water_mark - max_dd_allowance):
+            max_dd_floor = self.high_water_mark - max_dd_allowance
+            if equity < max_dd_floor:
                 self.is_paused = True
-                self.pause_reason = f"Max Trailing Drawdown Breach! Equity {equity} fell below HWM {self.high_water_mark} - {max_dd_allowance}"
+                self.pause_reason = (
+                    f"Max Trailing Drawdown Breach! Equity {equity:.2f} fell below "
+                    f"HWM {self.high_water_mark:.2f} - {max_dd_allowance:.2f}"
+                )
                 self.save_state()
-                logger.error(self.pause_reason)
-        elif self.challenge_type == "2-step":
-            # 6% Static based on initial balance
-            max_dd_allowance = self.initial_balance * 0.06
-            if equity < (self.initial_balance - max_dd_allowance):
-                self.is_paused = True
-                self.pause_reason = f"Max Static Drawdown Breach! Equity {equity} fell below {self.initial_balance} - {max_dd_allowance}"
-                self.save_state()
-                logger.error(self.pause_reason)
+                logger.error(f"[PROP FIRM] {self.pause_reason}")
+                self._telegram_alert(
+                    f"\U0001f534 *Prop Firm Alert \u2014 Max Trailing Drawdown Breached*\n"
+                    f"Equity: ${equity:.2f}\n"
+                    f"HWM: ${self.high_water_mark:.2f}\n"
+                    f"Max DD Allowance: ${max_dd_allowance:.2f}\n"
+                    f"Floor: ${max_dd_floor:.2f}\n"
+                    f"\u26a0\ufe0f Trading continues (monitor only \u2014 no signals blocked)",
+                    alert_key="max_trailing_dd"
+                )
+                return
 
-    def validate_trade(self, symbol: str, requested_lots: float) -> tuple[bool, str, float]:
+        elif self.challenge_type == "2-step":
+            max_dd_allowance = self.initial_balance * 0.06
+            max_dd_floor = self.initial_balance - max_dd_allowance
+            if equity < max_dd_floor:
+                self.is_paused = True
+                self.pause_reason = (
+                    f"Max Static Drawdown Breach! Equity {equity:.2f} fell below "
+                    f"{self.initial_balance:.2f} - {max_dd_allowance:.2f}"
+                )
+                self.save_state()
+                logger.error(f"[PROP FIRM] {self.pause_reason}")
+                self._telegram_alert(
+                    f"\U0001f534 *Prop Firm Alert \u2014 Max Static Drawdown Breached*\n"
+                    f"Equity: ${equity:.2f}\n"
+                    f"Initial Balance: ${self.initial_balance:.2f}\n"
+                    f"Max DD Allowance: ${max_dd_allowance:.2f}\n"
+                    f"Floor: ${max_dd_floor:.2f}\n"
+                    f"\u26a0\ufe0f Trading continues (monitor only \u2014 no signals blocked)",
+                    alert_key="max_static_dd"
+                )
+                return
+
+        # C. Yellow Warning — 50% of daily DD used
+        daily_used = self.eod_baseline - equity
+        if daily_used > 0 and daily_used >= (daily_dd_allowance * 0.5):
+            pct_used = (daily_used / daily_dd_allowance) * 100
+            self._telegram_alert(
+                f"\U0001f7e1 *Prop Firm Warning \u2014 Daily Drawdown at {pct_used:.1f}%*\n"
+                f"Equity: ${equity:.2f}\n"
+                f"Daily Loss So Far: ${daily_used:.2f} of ${daily_dd_allowance:.2f} allowed\n"
+                f"Remaining Buffer: ${daily_dd_allowance - daily_used:.2f}",
+                alert_key=f"daily_dd_warn_{self.last_eod_date}"
+            )
+
+    # ── Trade validation (SOFT MONITOR \u2014 never blocks) ────────────────────────
+
+    def validate_trade(self, symbol: str, requested_lots: float) -> tuple:
         """
-        Returns (is_valid, reason, allowed_lots)
+        Always approves the trade. Logs and alerts on limit breaches (informational only).
         """
         if not self.enabled:
             return True, "OK", requested_lots
 
         if self.is_paused:
-            return False, f"Prop Firm rules breached: {self.pause_reason}", 0.0
+            msg = (
+                f"\u26a0\ufe0f *Prop Firm Monitor \u2014 Drawdown breach active, trade proceeding*\n"
+                f"Symbol: {symbol}\n"
+                f"Reason: {self.pause_reason}"
+            )
+            logger.warning(f"Prop Firm rules breached: {self.pause_reason} (Trade allowed per user request)")
+            self._telegram_alert(msg, alert_key=f"trade_breach_{symbol}_{self.pause_reason[:30]}")
 
-        # Position Limits
         sym_open = self.open_positions_by_symbol.get(symbol, 0)
         if sym_open >= 5:
-            return False, f"Max 5 positions reached for {symbol}", 0.0
-        
-        if self.open_positions_count >= 13:
-            return False, "Max 13 total open positions reached", 0.0
+            logger.warning(f"Max 5 positions reached for {symbol} (Trade allowed per user request)")
 
-        # Max Lot Size Limit
+        if self.open_positions_count >= 13:
+            logger.warning("Max 13 total open positions reached (Trade allowed per user request)")
+
         max_lot_allowed = self.max_lot_sizes.get(symbol, 999.0)
         current_lots = self.open_lots_by_symbol.get(symbol, 0.0)
-        
         if (current_lots + requested_lots) > max_lot_allowed:
-            allowed = max_lot_allowed - current_lots
-            if allowed <= 0.001:
-                return False, f"Max lot size limit reached for {symbol}. Allowed: {max_lot_allowed}, Current: {current_lots}", 0.0
-            else:
-                return True, f"Downsized to fit max lot limit for {symbol}", allowed
+            logger.warning(
+                f"Max lot size limit reached for {symbol}. "
+                f"Limit: {max_lot_allowed}, Current: {current_lots} (Trade allowed per user request)"
+            )
 
         return True, "OK", requested_lots
 
-
+    # ── Position tracking ─────────────────────────────────────────────────────
 
     def record_trade_opened(self, symbol: str, lots: float):
-        if not self.enabled: return
+        if not self.enabled:
+            return
         self.open_positions_count += 1
         self.open_positions_by_symbol[symbol] = self.open_positions_by_symbol.get(symbol, 0) + 1
         self.open_lots_by_symbol[symbol] = self.open_lots_by_symbol.get(symbol, 0.0) + lots
 
     def record_trade_closed(self, symbol: str, lots: float, pnl: float):
-        if not self.enabled: return
+        if not self.enabled:
+            return
         self.open_positions_count = max(0, self.open_positions_count - 1)
         if symbol in self.open_positions_by_symbol:
             self.open_positions_by_symbol[symbol] = max(0, self.open_positions_by_symbol[symbol] - 1)
         if symbol in self.open_lots_by_symbol:
             self.open_lots_by_symbol[symbol] = max(0.0, self.open_lots_by_symbol[symbol] - lots)
-            
-        # We no longer increment profit manually here; it is strictly computed from balance in update_equity_balance
+
+        # Profit is computed strictly from balance in update_equity_balance
         self.save_state()

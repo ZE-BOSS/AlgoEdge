@@ -33,13 +33,17 @@ export default function Analytics() {
 
   const s = stats || {};
 
-  // Build equity curve from trades
-  const equityCurve = [];
-  let balance = (trades && trades.length > 0) ? (trades[0].balance_before || 10000) : 10000;
-  (trades || []).forEach((t, i) => {
-    balance += (t.pnl || 0);
-    equityCurve.push({ trade: i + 1, balance: +balance.toFixed(2) });
-  });
+  // Build equity curve from stats if available (MT5 verified), else fallback to DB trades
+  let equityCurve = [];
+  if (s.equity_curve && s.equity_curve.length > 0) {
+    equityCurve = s.equity_curve.map((balance, i) => ({ trade: i, balance: +balance.toFixed(2) }));
+  } else {
+    let balance = (trades && trades.length > 0) ? (trades[0].balance_before || 10000) : 10000;
+    (trades || []).forEach((t, i) => {
+      balance += (t.pnl || 0);
+      equityCurve.push({ trade: i + 1, balance: +balance.toFixed(2) });
+    });
+  }
 
   // TP distribution (TP1-TP5)
   const tpDist = [

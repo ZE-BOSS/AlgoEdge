@@ -126,6 +126,13 @@ class BacktestEngine:
         logger.info(f"[ENGINE] Balance: ${initial_balance} | Signals: {len(signals)} | Candles: {len(candles)}")
         logger.info(f"[ENGINE] Risk config: risk_pct={self.risk_config.get('risk_per_trade_pct')}% | min_rr={self.risk_config.get('min_rr')} | tp_count={self.risk_config.get('tp_count')}")
 
+        # Reset prop firm state for a fresh backtest run
+        self.prop_firm_validator.is_paused = False
+        self.prop_firm_validator.pause_reason = ""
+        self.prop_firm_validator._breach_logged = False
+        self.prop_firm_validator._alerts_sent = set()
+
+
         signal_idx = 0
 
         # ── Pre-compute ATR array (vectorized, O(n)) ──
@@ -184,9 +191,9 @@ class BacktestEngine:
             open_pnl = sum(self._calc_pnl(p["direction"], p["entry_price"], current_price, p["volume"], p.get("symbol", "")) for p in self.open_positions)
             current_time_dt = datetime.fromtimestamp(float(current_time), timezone.utc) if isinstance(current_time, (int, float)) else pd.to_datetime(current_time).to_pydatetime()
             self.prop_firm_validator.update_equity_balance(balance + open_pnl, balance, current_time_dt)
-            if self.prop_firm_validator.is_paused:
-                logger.warning(f"[ENGINE] Prop Firm account paused due to: {self.prop_firm_validator.pause_reason}")
-                break
+            if self.prop_firm_validator.is_paused and not getattr(self.prop_firm_validator, '_breach_logged', False):
+                logger.warning(f"[PROP FIRM MONITOR] Drawdown breach detected: {self.prop_firm_validator.pause_reason} — continuing backtest (informational only)")
+                self.prop_firm_validator._breach_logged = True  # log once, don't spam
 
             # 1. Manage existing open positions
             closed_this_bar = []

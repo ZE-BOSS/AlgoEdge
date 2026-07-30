@@ -197,4 +197,5 @@ def compute_portfolio_stats(trades: list[dict[str, Any]], initial_balance: float
         "sl_hit_rate": exit_reasons.count("SL") / total if total > 0 else 0,
         "trail_hit_rate": exit_reasons.count("TRAIL") / total if total > 0 else 0,
         "be_hit_rate": sum(1 for t in trades if t.get("be_applied")) / total if total > 0 else 0,
+        "equity_curve": equity,
     }

@@ -74,11 +74,29 @@ async def get_dashboard(
             # Use live MT5 account info for accuracy
             try:
                 import MetaTrader5 as mt5
+                from datetime import datetime
                 acc = mt5.account_info()
                 if acc:
-                    pv.update_equity_balance(acc.equity, acc.balance)
-            except Exception:
-                pass
+                    # Accurately calculate active trading days and net deposits directly from MT5 history
+                    deals = mt5.history_deals_get(datetime(2020, 1, 1), datetime.utcnow())
+                    net_deposits = 0.0
+                    if deals:
+                        active_days = set()
+                        for d in deals:
+                            # Balance operations (2=BALANCE, 3=CREDIT, etc)
+                            if getattr(d, 'type', 0) >= 2:
+                                net_deposits += getattr(d, 'profit', 0.0)
+                            
+                            # Only count executed trades (volume > 0 and has a symbol) for active days
+                            if getattr(d, 'symbol', '') != '' and getattr(d, 'volume', 0.0) > 0:
+                                trade_date = datetime.fromtimestamp(d.time).date()
+                                active_days.add(trade_date)
+                        pv.active_trading_days = len(active_days)
+                        
+                    pv.update_equity_balance(acc.equity, acc.balance, datetime.utcnow(), net_deposits=net_deposits)
+                    pv.save_state()
+            except Exception as e:
+                logger.error(f"Failed to sync MT5 Prop Firm state: {e}")
 
             pf_state = {
                 "high_water_mark": pv.high_water_mark,
