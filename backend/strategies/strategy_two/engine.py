@@ -203,6 +203,7 @@ class DriftJumpAlphaEngine(BaseStrategy):
                         bars_since += 1
                     
             self.bars_since_jump = bars_since
+            self.post_jump_regime_reset = False
             self.history_scanned = True
             
         if self.detect_jump(current_bar, symbol, atr_val):

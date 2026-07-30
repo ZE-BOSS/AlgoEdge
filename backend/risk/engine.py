@@ -176,8 +176,9 @@ class RiskEngine:
 
         # 4. Multi-Position Splits (TP1/TP2/TP3)
         liquidity_target = signal_data.get("liquidity_target")
+        strategy_id = signal_data.get("metadata", {}).get("strategy_id", "UNKNOWN")
         tp_levels = self.multi_tp.calculate_tp_levels(
-            entry, sl, direction, total_lots, symbol, liquidity_target
+            entry, sl, direction, total_lots, symbol, liquidity_target, strategy_id
         )
 
         if not tp_levels:

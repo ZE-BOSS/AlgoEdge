@@ -82,11 +82,10 @@ class MultiTPManager:
         total_volume: float,
         symbol: str,
         liquidity_target: float | None = None,
+        strategy_id: str = "UNKNOWN",
     ) -> list[TPLevel]:
         """
-        Calculate TP prices and volume splits for up to 5 levels.
-        ALL TPs open at entry (deferred=False always).
-
+        Calculates prices and volumes for up to 5 TP levels.
         Direction accepts both conventions: "BUY"/"SELL" or "BULLISH"/"BEARISH".
         """
         risk = abs(entry - sl)
@@ -103,7 +102,11 @@ class MultiTPManager:
             logger.error(f"Unknown direction '{direction}' — cannot calculate TPs")
             return []
 
-        rr_multipliers = [self.tp1_rr, self.tp2_rr, self.tp3_rr, self.tp4_rr, self.tp5_rr]
+        # Override TP1 RR for DriftJumpAlpha to be much tighter (0.5R) because crash spikes
+        # happen fast and reverse quickly.
+        tp1_rr_used = 0.5 if strategy_id == "DriftJumpAlpha" else self.tp1_rr
+
+        rr_multipliers = [tp1_rr_used, self.tp2_rr, self.tp3_rr, self.tp4_rr, self.tp5_rr]
         tp_prices = [entry + (risk * rr * sign) for rr in rr_multipliers]
 
         # TP5 can optionally anchor to next liquidity pool
@@ -117,7 +120,7 @@ class MultiTPManager:
             # Single position mode — use only TP1
             tp = TPLevel(
                 level=1,
-                rr_multiplier=self.tp1_rr,
+                rr_multiplier=tp1_rr_used,
                 volume_pct=1.0,
                 tp_price=tp_prices[0],
                 volume=total_volume,
@@ -143,40 +146,24 @@ class MultiTPManager:
         lot_step = info.get("volume_step", 0.01)
         lot_min = info.get("volume_min", 0.01)
 
-        # ── Dynamic TP Collapse ──
-        # If any sub-trade volume is < lot_min, drop the lowest priority TP and recalculate
-        volumes = []
-        while active_count > 0:
-            splits = self.tp_splits[:active_count]
+        # ── Dynamic TP Sizing with Minimum Lot Enforcement ──
+        # Ensure every requested sub-position has at least lot_min.
+        # This overrides volume collapse, potentially slightly increasing risk for very small accounts
+        # but guarantees the requested number of TP levels are entered.
+        splits = self.tp_splits[:active_count]
+        total_split = sum(splits)
+        if total_split == 0:
+            splits = [100 // active_count] * active_count
             total_split = sum(splits)
-            if total_split == 0:
-                splits = [100 // active_count] * active_count
-                total_split = sum(splits)
-            
-            valid = True
-            volumes = []
-            for i in range(active_count):
-                split_pct = splits[i] / total_split
-                raw_vol = total_volume * split_pct
-                vol = math.floor(raw_vol / lot_step) * lot_step
-                vol = round(vol, 4)
-                volumes.append(vol)
-                if vol < lot_min:
-                    valid = False
-                    break
-            
-            if valid:
-                break
-            
-            active_count -= 1
-
-        # If all collapsed (total_volume was too small to split, or even for TP1), enforce Smart Clamping
-        if active_count == 0:
-            active_count = 1
-            splits = [100]
-            total_split = 100
-            clamped_vol = max(lot_min, math.floor(total_volume / lot_step) * lot_step)
-            volumes = [round(clamped_vol, 4)]
+        
+        volumes = []
+        for i in range(active_count):
+            split_pct = splits[i] / total_split
+            raw_vol = total_volume * split_pct
+            vol = math.floor(raw_vol / lot_step) * lot_step
+            # Clamp to minimum lot to prevent collapse
+            vol = max(lot_min, round(vol, 4))
+            volumes.append(vol)
 
         # ── Remainder Sweep ──
         # Any volume lost to rounding is swept into TP1 (if it fits the lot_step)

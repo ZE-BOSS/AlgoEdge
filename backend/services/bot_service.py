@@ -94,7 +94,7 @@ class BotService:
         """Public method for other modules to log events visible on the frontend."""
         self._log_event(message, level, category)
 
-    async def _save_signal_state(self, signal_domain, status: str, reject_reason: str = ""):
+    async def _save_signal_state(self, signal_domain, status: str, reject_reason: str = "", tp_levels: list = None):
         """Saves or updates a signal in the database and dispatches Telegram alert instantly."""
         # 1. Dispatch Telegram Alert Immediately (Decoupled from DB success)
         try:
@@ -106,14 +106,36 @@ class BotService:
             price = telegram_service.escape_markdown(str(getattr(signal_domain, 'entry_price', '')))
             reason = telegram_service.escape_markdown(reject_reason) if reject_reason else ""
             stat = telegram_service.escape_markdown(status)
-            tp = telegram_service.escape_markdown(str(getattr(signal_domain, 'take_profit', 'N/A')))
-            sl = telegram_service.escape_markdown(str(getattr(signal_domain, 'stop_loss', 'N/A')))
+            
+            # Extract additional details if available
+            strategy_id = telegram_service.escape_markdown(str(getattr(signal_domain, 'strategy_id', 'UNKNOWN')))
+            timeframe = telegram_service.escape_markdown(str(getattr(signal_domain, 'timeframe', 'UNKNOWN')))
+            signal_type = telegram_service.escape_markdown(str(getattr(signal_domain, 'signal_type', 'UNKNOWN')))
+            score = telegram_service.escape_markdown(str(getattr(signal_domain, 'score', getattr(signal_domain, 'confluence_score', 0))))
             
             msg = f"🟢 *Signal {stat}*\n" if status == "EXECUTED" else f"⚪ *Signal {stat}*\n"
-            msg += f"Symbol: {sym}\nDirection: {direction}\n"
-            msg += f"Price: {price}\n"
-            if status == "EXECUTED":
-                msg += f"SL: {sl}\nTP: {tp}\n"
+            msg += f"Symbol: {sym}\n"
+            msg += f"Strategy: {strategy_id} ({timeframe})\n"
+            msg += f"Type: {signal_type}\n"
+            msg += f"Direction: {direction}\n"
+            msg += f"Entry: {price}\n"
+            
+            sl = str(getattr(signal_domain, 'stop_loss', 'N/A'))
+            msg += f"SL: {telegram_service.escape_markdown(sl)}\n"
+            
+            if tp_levels:
+                msg += f"Positions: {len(tp_levels)}\n"
+                for i, tp in enumerate(tp_levels):
+                    tp_price = getattr(tp, 'tp_price', tp.get('tp_price') if isinstance(tp, dict) else 'N/A')
+                    vol = getattr(tp, 'volume', tp.get('volume') if isinstance(tp, dict) else 'N/A')
+                    if tp_price != 'N/A':
+                        tp_price = f"{float(tp_price):.5f}"
+                    msg += f"  - TP{i+1}: {telegram_service.escape_markdown(tp_price)} (Vol: {telegram_service.escape_markdown(str(vol))})\n"
+            else:
+                tp_fallback = str(getattr(signal_domain, 'take_profit', 'N/A'))
+                msg += f"TP: {telegram_service.escape_markdown(tp_fallback)}\n"
+
+            msg += f"Score: {score}/100\n"
             if reason:
                 msg += f"Reason: {reason}\n"
                 
@@ -596,68 +618,85 @@ class BotService:
                                             "INFO", "TRADE"
                                         )
 
-                                        # Place orders via OrderManager
+                                        # Place orders via OrderManager with Retry Logic
                                         db_positions = []
+                                        import MetaTrader5 as mt5
+                                        
                                         for tp in tp_levels:
-                                            try:
-                                                result = await OrderManager.place_market_order(
-                                                    symbol=signal.symbol,
-                                                    direction=signal.direction,
-                                                    volume=tp.volume,
-                                                    sl=signal.stop_loss,
-                                                    tp=tp.tp_price,
-                                                    magic=1001 + (tp.level * 10),
-                                                    comment=f"AE_TP{tp.level}",
-                                                )
-                                                if result.get("success"):
-                                                    ticket = result.get("ticket")
-                                                    db_positions.append({
-                                                        "tp_level": tp.level,
-                                                        "volume": tp.volume,
-                                                        "tp_price": tp.tp_price,
-                                                        "ticket": ticket
-                                                    })
-                                                    self._log_event(
-                                                        f"Order placed: TP{tp.level} | "
-                                                        f"{tp.volume} lots @ {signal.entry_price} "
-                                                        f"→ TP: {tp.tp_price:.5f}",
-                                                        "INFO", "TRADE"
+                                            max_retries = 5
+                                            for attempt in range(max_retries):
+                                                try:
+                                                    result = await OrderManager.place_market_order(
+                                                        symbol=signal.symbol,
+                                                        direction=signal.direction,
+                                                        volume=tp.volume,
+                                                        sl=signal.stop_loss,
+                                                        tp=tp.tp_price,
+                                                        magic=1001 + (tp.level * 10),
+                                                        comment=f"AE_TP{tp.level}",
                                                     )
-                                                    asyncio.ensure_future(self._broadcast_notification(
-                                                        "Trade Entered",
-                                                        f"{signal.direction} {signal.symbol} @ {signal.entry_price}",
-                                                        "success"
-                                                    ))
-                                                else:
+                                                    
+                                                    if result.get("success"):
+                                                        ticket = result.get("ticket")
+                                                        db_positions.append({
+                                                            "tp_level": tp.level,
+                                                            "volume": tp.volume,
+                                                            "tp_price": tp.tp_price,
+                                                            "ticket": ticket
+                                                        })
+                                                        self._log_event(
+                                                            f"Order placed: TP{tp.level} | "
+                                                            f"{tp.volume} lots @ {signal.entry_price} "
+                                                            f"→ TP: {tp.tp_price:.5f}",
+                                                            "INFO", "TRADE"
+                                                        )
+                                                        asyncio.ensure_future(self._broadcast_notification(
+                                                            "Trade Entered",
+                                                            f"{signal.direction} {signal.symbol} @ {signal.entry_price}",
+                                                            "success"
+                                                        ))
+                                                        break  # Success! Break the retry loop for this TP
+                                                    else:
+                                                        err_msg = result.get('error', 'unknown')
+                                                        self._log_event(
+                                                            f"Order failed (Attempt {attempt+1}/{max_retries}): TP{tp.level} — {err_msg}",
+                                                            "WARN", "TRADE"
+                                                        )
+                                                        if attempt < max_retries - 1:
+                                                            mt5.initialize() # Try re-init MT5
+                                                            await asyncio.sleep(0.5)
+                                                        else:
+                                                            self._log_event(f"Order failed permanently after {max_retries} attempts: TP{tp.level}", "ERROR", "TRADE")
+                                                            asyncio.ensure_future(self._broadcast_notification(
+                                                                "MT5 Execution Failed",
+                                                                f"Order failed for {signal.symbol}: {err_msg}",
+                                                                "error"
+                                                            ))
+                                                except Exception as order_err:
                                                     self._log_event(
-                                                        f"Order failed: TP{tp.level} — {result.get('error', 'unknown')}",
-                                                        "ERROR", "TRADE"
+                                                        f"Order placement error (Attempt {attempt+1}): {str(order_err)[:100]}",
+                                                        "WARN", "TRADE"
                                                     )
-                                                    asyncio.ensure_future(self._broadcast_notification(
-                                                        "MT5 Execution Failed",
-                                                        f"Order failed for {signal.symbol}: {result.get('error', 'unknown')}",
-                                                        "error"
-                                                    ))
-                                            except Exception as order_err:
-                                                self._log_event(
-                                                    f"Order placement error: {str(order_err)[:100]}",
-                                                    "ERROR", "TRADE"
-                                                )
-                                                asyncio.ensure_future(self._broadcast_notification(
-                                                        "MT5 Execution Failed",
-                                                        f"Order placement error for {signal.symbol}: {str(order_err)[:100]}",
-                                                        "error"
-                                                ))
+                                                    if attempt < max_retries - 1:
+                                                        mt5.initialize()
+                                                        await asyncio.sleep(0.5)
+                                                    else:
+                                                        self._log_event(f"Permanent placement error: {str(order_err)[:100]}", "ERROR", "TRADE")
+                                                        asyncio.ensure_future(self._broadcast_notification(
+                                                                "MT5 Execution Failed",
+                                                                f"Order placement error for {signal.symbol}: {str(order_err)[:100]}",
+                                                                "error"
+                                                        ))
                                     
                                         if not db_positions:
                                             self.circuit_breaker.rollback_position(group_id)
                                             self._log_event(f"All orders failed. Rolled back risk state for {group_id}.", "WARN", "RISK")
-                                            await self._save_signal_state(signal, "FAILED", "MT5 execution failed")
+                                            await self._save_signal_state(signal, "FAILED", "MT5 execution failed", tp_levels=tp_levels)
                                         elif len(db_positions) < len(tp_levels):
                                             self.circuit_breaker.active_groups[group_id]["sub_trades"] = len(db_positions)
                                     
                                         if db_positions and self.user_id:
-                                            await self._save_signal_state(signal, "EXECUTED")
+                                            sig_id = await self._save_signal_state(signal, "EXECUTED", tp_levels=db_positions)
                                             try:
                                                 import json
 
@@ -667,6 +706,7 @@ class BotService:
                                                 from backend.data.models import (
                                                     Trade,
                                                     TradePosition,
+                                                    Signal,
                                                 )
                                                 
                                                 async with async_session() as session:
@@ -700,6 +740,13 @@ class BotService:
                                                             status="OPEN"
                                                         )
                                                         session.add(pos)
+                                                        
+                                                    # Link the signal to this trade
+                                                    if sig_id:
+                                                        sig_db = await session.get(Signal, sig_id)
+                                                        if sig_db:
+                                                            sig_db.trade_id = trade.id
+                                                            
                                                     await session.commit()
                                                     
                                                     # Force frontend Journal/Dashboard to refetch
@@ -716,7 +763,7 @@ class BotService:
                                             f"Trade rejected by risk engine: {reason}",
                                             "WARN", "RISK"
                                         )
-                                        await self._save_signal_state(signal, "REJECTED", reason)
+                                        await self._save_signal_state(signal, "REJECTED", reason, tp_levels=tp_levels)
                                         # Only trigger explicit popup for risk-based rejections, not basic RR rejections to avoid spam
                                         if "Broker minimum lot forces risk" in reason or "Proposed risk" in reason:
                                             asyncio.ensure_future(self._broadcast_notification(

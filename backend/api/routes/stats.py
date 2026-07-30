@@ -26,35 +26,38 @@ async def get_user_stats(
 ):
     """Get aggregate performance stats for the authenticated user."""
     logger.info(f"Computing stats for {current_user.email}")
-    # Try cached stats first
-    result = await db.execute(
-        select(PerformanceStats)
-        .where(PerformanceStats.user_id == current_user.id)
-        .order_by(PerformanceStats.updated_at.desc())
-        .limit(1)
-    )
-    cached = result.scalar_one_or_none()
+    # DB Cache check removed: Always compute live from MT5 for accuracy.
 
-    if cached:
-        logger.info(f"Returning cached stats for {current_user.email}: {cached.total_trades} trades, WR={cached.win_rate}")
-        return {
-            "total_trades": cached.total_trades,
-            "win_rate": cached.win_rate,
-            "total_pnl": cached.total_pnl,
-            "max_drawdown": cached.max_drawdown,
-            "sharpe_ratio": cached.sharpe_ratio,
-            "profit_factor": cached.profit_factor,
-            "avg_rr": cached.avg_rr,
-            "tp1_hit_rate": cached.tp1_hit_rate,
-            "tp2_hit_rate": cached.tp2_hit_rate,
-            "tp3_hit_rate": cached.tp3_hit_rate,
-            "tp4_hit_rate": cached.tp4_hit_rate,
-            "tp5_hit_rate": cached.tp5_hit_rate,
-            "max_consec_wins": cached.max_consec_wins,
-            "max_consec_losses": cached.max_consec_losses,
-        }
+    # 1. Try to get deals from MT5 history first
+    try:
+        from backend.mt5.order_manager import OrderManager
+        deals = await OrderManager.get_closed_positions_since(0)
+        
+        if deals:
+            # We got MT5 data! Sort chronologically
+            deals.sort(key=lambda x: x["time"])
+            
+            # Fetch MT5 live balance
+            import MetaTrader5 as mt5
+            account_info = mt5.account_info()
+            live_balance = account_info.balance if account_info else 10000.0
+            
+            total_mt5_pnl = sum((d["profit"] + d["commission"] + d["swap"]) for d in deals)
+            initial_balance = live_balance - total_mt5_pnl
+            if initial_balance <= 0:
+                initial_balance = 10000.0
+                
+            trade_dicts = [{
+                "pnl": d["profit"] + d["commission"] + d["swap"],
+                "exit_reason": "TP" if (d["profit"] > 0) else "SL",
+                "be_applied": False,
+            } for d in deals]
+            
+            return compute_portfolio_stats(trade_dicts, initial_balance=initial_balance)
+    except Exception as e:
+        logger.warning(f"Could not compute stats from MT5: {e}. Falling back to DB.")
 
-    # Compute live from trades
+    # 2. Compute live from DB trades (Fallback)
     trades_result = await db.execute(
         select(Trade).where(Trade.user_id == current_user.id, Trade.status == "CLOSED").order_by(Trade.entry_time.asc())
     )

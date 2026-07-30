@@ -69,14 +69,25 @@ async def get_dashboard(
     try:
         from backend.services.bot_service import bot_service
         if getattr(bot_service, "prop_firm_validator", None):
+            pv = bot_service.prop_firm_validator
+            
+            # Use live MT5 account info for accuracy
+            try:
+                import MetaTrader5 as mt5
+                acc = mt5.account_info()
+                if acc:
+                    pv.update_equity_balance(acc.equity, acc.balance)
+            except Exception:
+                pass
+
             pf_state = {
-                "high_water_mark": bot_service.prop_firm_validator.high_water_mark,
-                "eod_baseline": bot_service.prop_firm_validator.eod_baseline,
-                "daily_profit": bot_service.prop_firm_validator.daily_profit,
-                "total_profit": bot_service.prop_firm_validator.total_profit,
-                "active_trading_days": bot_service.prop_firm_validator.active_trading_days,
-                "is_paused": bot_service.prop_firm_validator.is_paused,
-                "pause_reason": bot_service.prop_firm_validator.pause_reason,
+                "high_water_mark": pv.high_water_mark,
+                "eod_baseline": pv.eod_baseline,
+                "daily_profit": pv.daily_profit,
+                "total_profit": pv.total_profit,
+                "active_trading_days": pv.active_trading_days,
+                "is_paused": pv.is_paused,
+                "pause_reason": pv.pause_reason,
             }
         else:
             pf_state = None
