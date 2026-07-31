@@ -843,6 +843,17 @@ async def run_portfolio_backtest_endpoint(
                         cur_state = await _get_state()
                         if cur_state.get("status") == "cancelled":
                             raise Exception("Portfolio Backtest Cancelled")
+                        
+                        # Add progress update here for portfolio backtest
+                        pct_within = i / len(primary_times)
+                        pct = int(((sym_idx + pct_within) / total_symbols) * 80)
+                        cur_state["progress"] = {"stage": f"Simulating {sym} ({sym_idx + 1}/{total_symbols})...", "pct": pct}
+                        await _save_state(cur_state)
+                        try:
+                            asyncio.create_task(ws_manager.broadcast_to_user(current_user.id, {
+                                "type": "backtest_progress", **cur_state["progress"]
+                            }))
+                        except: pass
 
                     current_time = primary_times[i]
                     is_warmup = req.start_date and current_time < np.datetime64(datetime.fromisoformat(req.start_date))
@@ -898,8 +909,20 @@ async def run_portfolio_backtest_endpoint(
                 portfolio_signals[sym] = sym_signals
 
                 logger.info(f"[PORTFOLIO_BT] {sym}: {len(sym_signals)} signals from {len(primary_df)} bars")
+                
+                try:
+                    asyncio.create_task(ws_manager.broadcast_to_user(current_user.id, {
+                        "type": "activity_log",
+                        "event": {
+                            "time": datetime.now(timezone.utc).isoformat(),
+                            "level": "INFO",
+                            "category": "BACKTEST_LOG",
+                            "message": f"Generated {len(sym_signals)} signals for {sym}"
+                        }
+                    }))
+                except: pass
 
-            # ── Run the global portfolio engine ──
+            # ── 3. Run Global Simulation ──
             current_state = await _get_state()
             current_state["progress"] = {"stage": "Running global portfolio simulation...", "pct": 85}
             await _save_state(current_state)

@@ -57,7 +57,7 @@ function LiveLogPanel({ events, setEvents }) {
   const { data: logs } = useQuery({ queryKey: ['btLogs'], queryFn: () => getBotLogs(50).then(r => r.data), refetchInterval: 2000, enabled: status === 'ONLINE' && isAuth });
 
   useEffect(() => {
-    const h = e => { try { const m = e.detail; if (m.type === 'activity_log' && m.event) setEvents(p => [m.event, ...p].slice(0, 200)); } catch { } };
+    const h = e => { try { const m = e.detail; if (m.type === 'activity_log' && m.event) setEvents(p => [m.event, ...p].slice(0, 2000)); } catch { } };
     window.addEventListener('ws-message', h);
     return () => window.removeEventListener('ws-message', h);
   }, []);
