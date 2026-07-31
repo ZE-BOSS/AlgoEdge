@@ -305,6 +305,14 @@ export default function RiskSettings() {
               <label>Initial Balance (DD Baseline)</label>
               <input type="number" step="1000" value={config.prop_firm.initial_balance} onChange={e => update('prop_firm', { ...config.prop_firm, initial_balance: +e.target.value })} />
             </div>
+            <div>
+              <label>Max Daily Loss (%)</label>
+              <input type="number" step="0.1" value={config.prop_firm.max_daily_loss_pct || (config.prop_firm.challenge_type === '1-step' ? 4.0 : 5.0)} onChange={e => update('prop_firm', { ...config.prop_firm, max_daily_loss_pct: +e.target.value })} />
+            </div>
+            <div>
+              <label>Max Overall DD (%)</label>
+              <input type="number" step="0.1" value={config.prop_firm.max_total_drawdown_pct || (config.prop_firm.challenge_type === '1-step' ? 6.0 : 10.0)} onChange={e => update('prop_firm', { ...config.prop_firm, max_total_drawdown_pct: +e.target.value })} />
+            </div>
             <div style={{ gridColumn: '1 / -1', marginTop: '4px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <label style={{ margin: 0 }}>Max Lot Sizes per Asset</label>

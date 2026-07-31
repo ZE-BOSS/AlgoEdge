@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap } from 'lucide-react';
-import { runBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getBulkBacktests } from '../services/api';
+import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap, LayoutDashboard, PlusCircle, MinusCircle } from 'lucide-react';
+import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getBulkBacktests } from '../services/api';
 import TradeChart from '../components/TradeChart';
 import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
@@ -313,10 +313,24 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
   const [groupBy, setGroupBy] = useState('Month'); // Default to month
   const [viewMode, setViewMode] = useState('TRADES'); // 'TRADES' or 'SUMMARY'
   const [activeFilter, setActiveFilter] = useState('All');
+  const [symbolFilter, setSymbolFilter] = useState('All');
+  const [strategyFilter, setStrategyFilter] = useState('All');
+
+  const uniqueSymbols = useMemo(() => {
+    const s = new Set(grouped.map(g => g.symbol).filter(Boolean));
+    return Array.from(s).sort();
+  }, [grouped]);
+  
+  const uniqueStrategies = useMemo(() => {
+    const s = new Set(grouped.map(g => g.strategy_id).filter(Boolean));
+    return Array.from(s).sort();
+  }, [grouped]);
   
   let filteredGrouped = grouped;
-  if (activeFilter === 'Wins') filteredGrouped = grouped.filter(g => (g.combined_pnl || g.pnl) > 0);
-  if (activeFilter === 'Losses') filteredGrouped = grouped.filter(g => (g.combined_pnl || g.pnl) <= 0);
+  if (activeFilter === 'Wins') filteredGrouped = filteredGrouped.filter(g => (g.combined_pnl || g.pnl) > 0);
+  if (activeFilter === 'Losses') filteredGrouped = filteredGrouped.filter(g => (g.combined_pnl || g.pnl) <= 0);
+  if (symbolFilter !== 'All') filteredGrouped = filteredGrouped.filter(g => g.symbol === symbolFilter);
+  if (strategyFilter !== 'All') filteredGrouped = filteredGrouped.filter(g => g.strategy_id === strategyFilter);
 
   let displayGroups = [];
   const displayGrouped = filteredGrouped; // Virtualized list handles large datasets efficiently
@@ -522,7 +536,19 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     {grouped.length > 0 && (<>
       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <span className="card-title">Trade Groups ({filteredGrouped.length})</span>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {result.portfolio && uniqueSymbols.length > 0 && (
+            <select value={symbolFilter} onChange={e => setSymbolFilter(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
+              <option value="All">All Symbols</option>
+              {uniqueSymbols.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
+          {result.portfolio && uniqueStrategies.length > 0 && (
+            <select value={strategyFilter} onChange={e => setStrategyFilter(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
+              <option value="All">All Strategies</option>
+              {uniqueStrategies.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
           <div style={{ display: 'flex', gap: 4 }}>
             <button className={`btn btn-sm ${activeFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveFilter('All')}>All</button>
             <button className={`btn btn-sm ${activeFilter === 'Wins' ? 'btn-green' : 'btn-secondary'}`} onClick={() => setActiveFilter('Wins')}>Wins</button>
@@ -655,7 +681,68 @@ export default function Backtester() {
   const isAuth = useAuthStore(s => s.isAuthenticated);
   const [selectedBacktests, setSelectedBacktests] = useState(new Set());
   const [showSummary, setShowSummary] = useState(false);
+  const [activeTab, setActiveTab] = useState('single'); // 'single' | 'portfolio'
   const STORAGE_KEY = 'algoedge_bt_config';
+  const PORTFOLIO_KEY = 'algoedge_portfolio_config';
+
+  // ── Portfolio state ──
+  const [portfolioSymbols, setPortfolioSymbols] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PORTFOLIO_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [{ symbol: 'XAUUSD', strategy_id: 'SMC_v1' }];
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(portfolioSymbols)); } catch {}
+  }, [portfolioSymbols]);
+
+  const addPortfolioSymbol = () => setPortfolioSymbols(p => [...p, { symbol: 'EURUSD', strategy_id: 'SMC_v1' }]);
+  const removePortfolioSymbol = (i) => setPortfolioSymbols(p => p.filter((_, idx) => idx !== i));
+  const updatePortfolioSymbol = (i, field, val) => setPortfolioSymbols(p => p.map((s, idx) => idx === i ? { ...s, [field]: val } : s));
+
+  const portfolioMutation = useMutation({
+    mutationFn: () => {
+      setResult(null);
+      setEvents([]);
+      return runPortfolioBacktest({
+        symbols: portfolioSymbols.map(s => ({ symbol: s.symbol, strategy_id: s.strategy_id, strategy_params: {} })),
+        start_date: form.start_date || undefined,
+        end_date: form.end_date || undefined,
+        candle_count: form.candle_count,
+        initial_balance: form.initial_balance,
+        risk_per_trade_pct: form.risk_per_trade_pct,
+        min_rr: form.min_rr,
+        tp_count: form.tp_count,
+        tp1_rr: form.tp1_rr, tp2_rr: form.tp2_rr, tp3_rr: form.tp3_rr,
+        tp4_rr: form.tp4_rr, tp5_rr: form.tp5_rr,
+        tp_splits: form.tp_splits,
+        be_trigger_rr: form.be_trigger_rr,
+        be_buffer_pips: form.be_buffer_pips,
+        trail_method_tp2: form.trail_method_tp2,
+        trail_method_tp3: form.trail_method_tp3,
+        trail_method_tp4: form.trail_method_tp4,
+        trail_method_tp5: form.trail_method_tp5,
+        atr_trail_multiplier: form.atr_trail_multiplier,
+        trail_pips: form.trail_pips,
+        compounding_enabled: form.compounding_enabled,
+        session_filter_enabled: form.session_filter_enabled,
+        prop_firm: form.prop_firm,
+        max_concurrent_positions: form.max_concurrent_positions * portfolioSymbols.length,
+        max_daily_consecutive_losses: form.max_daily_consecutive_losses,
+        max_weekly_consecutive_losses: form.max_weekly_consecutive_losses,
+        max_consecutive_losses: form.max_consecutive_losses,
+        max_positions_per_symbol: form.max_positions_per_symbol || 1,
+        max_daily_trades: (form.max_daily_trades || 5) * portfolioSymbols.length,
+        target_profit_enabled: form.target_profit_enabled,
+        max_daily_profit: form.max_daily_profit,
+        max_weekly_profit: form.max_weekly_profit,
+      });
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['backtests'] }),
+  });
+
 
   const { data: remoteConfig } = useQuery({
     queryKey: ['config'],
@@ -961,31 +1048,59 @@ export default function Backtester() {
     }
   };
 
-  const isRunning = mutation.isPending || (progress !== null && progress.stage !== 'complete');
+  const isRunning = mutation.isPending || portfolioMutation.isPending || (progress !== null && progress.stage !== 'complete');
   const u = (k, v) => setForm({ ...form, [k]: v });
 
   return (<>
     <div className="page-header"><h2><FlaskConical size={22} style={{ display: 'inline', marginRight: 8 }} />Backtester</h2><p>Test strategies with independent risk parameters</p></div>
     <div className="grid-2">
       <div className="card">
-        <div className="card-header"><span className="card-title">Configuration</span></div>
-        <div style={{ display: 'grid', gap: 14 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div><label>Strategy Engine</label><select value={['SMC_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'].includes(form.strategy_id) ? form.strategy_id : 'SMC_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option></select></div>
-            <div>
-              <label>Symbol</label>
-              <input 
-                type="text" 
-                list="symbols-list" 
-                value={form.symbol} 
-                onChange={e => setForm({ ...form, symbol: e.target.value })} 
-                placeholder="Type to find symbol" 
-              />
-              <datalist id="symbols-list">
-                {backtestSymbols.map(s => <option key={s} value={s} />)}
-              </datalist>
-            </div>
+        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="card-title">Configuration</span>
+          <div style={{ display: 'flex', gap: 4, background: 'var(--bg-tertiary)', padding: 4, borderRadius: 'var(--radius-sm)' }}>
+            <button className={`btn btn-sm ${activeTab === 'single' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('single')}>Single</button>
+            <button className={`btn btn-sm ${activeTab === 'portfolio' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('portfolio')}><LayoutDashboard size={14} style={{ marginRight: 4 }}/> Portfolio</button>
           </div>
+        </div>
+        <div style={{ display: 'grid', gap: 14 }}>
+          {activeTab === 'single' ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label>Strategy Engine</label><select value={['SMC_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'].includes(form.strategy_id) ? form.strategy_id : 'SMC_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option></select></div>
+              <div>
+                <label>Symbol</label>
+                <input type="text" list="symbols-list" value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value })} placeholder="Type to find symbol" />
+                <datalist id="symbols-list">
+                  {backtestSymbols.map(s => <option key={s} value={s} />)}
+                </datalist>
+              </div>
+            </div>
+          ) : (
+            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 12, background: 'var(--bg-secondary)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Portfolio Symbols ({portfolioSymbols.length})</span>
+                <button className="btn btn-sm btn-ghost" onClick={addPortfolioSymbol}><PlusCircle size={14} style={{ marginRight: 4 }}/> Add</button>
+              </div>
+              <div style={{ display: 'grid', gap: 8, maxHeight: 200, overflowY: 'auto', paddingRight: 4 }}>
+                {portfolioSymbols.map((item, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: '0.7rem' }}>Symbol</label>
+                      <input type="text" list="symbols-list" value={item.symbol} onChange={e => updatePortfolioSymbol(idx, 'symbol', e.target.value)} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: '0.7rem' }}>Strategy</label>
+                      <select value={item.strategy_id} onChange={e => updatePortfolioSymbol(idx, 'strategy_id', e.target.value)}>
+                        <option value="SMC_v1">SMC Multi-TF</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option>
+                      </select>
+                    </div>
+                    <button className="btn btn-icon btn-ghost" style={{ color: 'var(--red)', marginBottom: 2 }} onClick={() => removePortfolioSymbol(idx)} disabled={portfolioSymbols.length <= 1}><MinusCircle size={16} /></button>
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 12 }}>Advanced parameters below will apply globally across the portfolio.</p>
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div><label>Start Date</label><input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} /></div>
             <div><label>End Date</label><input type="date" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} /></div>
@@ -1173,8 +1288,8 @@ export default function Backtester() {
 
           <div style={{ display: 'flex', gap: 8 }}>
             {!isRunning ? (
-              <button className="btn btn-primary" onClick={() => mutation.mutate()} disabled={status !== 'ONLINE'} style={{ flex: 1 }}>
-                <Play size={16} /> Run Backtest
+              <button className="btn btn-primary" onClick={() => activeTab === 'single' ? mutation.mutate() : portfolioMutation.mutate()} disabled={status !== 'ONLINE'} style={{ flex: 1 }}>
+                <Play size={16} /> Run {activeTab === 'single' ? 'Backtest' : 'Portfolio Backtest'}
               </button>
             ) : (
               <button className="btn btn-danger" onClick={handleStop} style={{ flex: 1 }}>

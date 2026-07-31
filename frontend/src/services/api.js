@@ -175,6 +175,7 @@ export const getSignalDetail = (id) => api.get(`/signals/${id}`);
 // ── Backtest ────────────────────────────────────────────────────────────────
 
 export const runBacktest = (data) => api.post('/backtest', data, { timeout: 300000 });
+export const runPortfolioBacktest = (data) => api.post('/portfolio_backtest', data, { timeout: 300000 });
 export const getBacktestStatus = () => api.get('/backtest_status');
 export const getLatestBacktestResult = () => api.get('/latest_result');
 export const getUnsavedTradeChart = (groupId) => api.get(`/backtest_result/trade/${groupId}/chart`);

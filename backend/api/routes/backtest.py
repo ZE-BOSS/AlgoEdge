@@ -90,6 +90,55 @@ class SaveBacktestRequest(BaseModel):
     save_mode: str = "FULL"  # "FULL" or "SUMMARY"
 
 
+class PortfolioSymbolConfig(BaseModel):
+    """Config for a single symbol/strategy pair in a portfolio backtest."""
+    symbol: str
+    strategy_id: str = "SMC_v1"
+    strategy_params: dict[str, Any] = {}
+
+
+class PortfolioBacktestRequest(BaseModel):
+    """Request model for a portfolio (multi-symbol) backtest."""
+    symbols: list[PortfolioSymbolConfig]
+    start_date: str | None = None
+    end_date: str | None = None
+    candle_count: int = 5000
+    initial_balance: float = 10000.0
+    prop_firm: dict[str, Any] = {}
+    # ── Risk Params (shared across portfolio) ──
+    risk_per_trade_pct: float = 1.0
+    min_rr: float = 3.0
+    max_daily_consecutive_losses: int = 3
+    max_weekly_consecutive_losses: int = 5
+    max_consecutive_losses: int = 5
+    max_concurrent_positions: int = 5
+    max_positions_per_symbol: int = 1
+    max_daily_trades: int = 10
+    target_profit_enabled: bool = False
+    max_daily_profit: float = 500.0
+    max_weekly_profit: float = 2000.0
+    # ── TP Config ──
+    tp_count: int = 3
+    tp1_rr: float = 1.0
+    tp2_rr: float = 3.0
+    tp3_rr: float = 5.0
+    tp4_rr: float = 10.0
+    tp5_rr: float = 15.0
+    tp_splits: str = "30,25,20,15,10"
+    # ── Break-Even ──
+    be_trigger_rr: float = 1.0
+    be_buffer_pips: float = 2.0
+    # ── Trailing Stops ──
+    trail_method_tp2: str = "ATR_TRAIL"
+    trail_method_tp3: str = "STRUCTURE_TRAIL"
+    trail_method_tp4: str = "ATR_TRAIL"
+    trail_method_tp5: str = "STRUCTURE_TRAIL"
+    atr_trail_multiplier: float = 1.5
+    trail_pips: float = 15.0
+    compounding_enabled: bool = False
+    session_filter_enabled: bool = True
+
+
 @router.get("/backtest_status")
 async def get_backtest_status(current_user: User = Depends(get_current_user)):
     # 1. Try local memory first (instant)
@@ -612,6 +661,353 @@ async def run_backtest_endpoint(
 
     background_tasks.add_task(_run_backtest_task)
     return {"status": "started", "message": "Backtest queued and running in the background."}
+
+
+@router.post("/portfolio_backtest")
+async def run_portfolio_backtest_endpoint(
+    req: PortfolioBacktestRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Run a portfolio (multi-symbol, multi-strategy) backtest in the background.
+    All symbols share the same global risk parameters, tracked on a single timeline.
+    """
+    from backend.services.bot_service import bot_service
+    sym_list = [s.symbol for s in req.symbols]
+    bot_service.log_system_event(f"Portfolio backtest queued: {', '.join(sym_list)}", category="BACKTEST")
+
+    async def _run_portfolio_task():
+        global USER_BACKTEST_STATE
+        initial_state = {"status": "running", "progress": {"stage": "Fetching data...", "pct": 0}, "result": None}
+
+        async def _save_state(state):
+            USER_BACKTEST_STATE[current_user.id] = state
+            if HAS_REDIS and redis_client and redis_client.redis:
+                try:
+                    import redis.exceptions
+                    await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
+                except Exception as e:
+                    logger.warning(f"[PORTFOLIO_BT] Redis save failed: {e}")
+
+        async def _get_state():
+            if HAS_REDIS and redis_client and redis_client.redis:
+                try:
+                    import redis.exceptions
+                    data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
+                    if data:
+                        return json.loads(data)
+                except Exception:
+                    pass
+            return USER_BACKTEST_STATE.get(current_user.id, initial_state.copy())
+
+        await _save_state(initial_state)
+        try:
+            import asyncio
+            import time as _time
+            import pandas as pd
+
+            from backend.api.websocket import manager as ws_manager
+            from backend.backtester.portfolio_engine import PortfolioBacktestEngine
+            from backend.core.config_schema import InstrumentSettings, UserConfigV2
+            from backend.mt5.data_fetcher import DataFetcher, DataFetchError
+            from backend.strategies.registry import get_strategy
+            from backend.services.bot_service import bot_service
+
+            bt_start = _time.time()
+            logger.info(f"═══ PORTFOLIO BACKTEST START ═══ {sym_list} | user={current_user.email}")
+
+            TF_META = {
+                "M1":  {"np_td": (1,  'm'), "warmup_days": 1,   "window": 500},
+                "M5":  {"np_td": (5,  'm'), "warmup_days": 5,   "window": 500},
+                "M15": {"np_td": (15, 'm'), "warmup_days": 10,  "window": 300},
+                "M30": {"np_td": (30, 'm'), "warmup_days": 15,  "window": 200},
+                "H1":  {"np_td": (1,  'h'), "warmup_days": 30,  "window": 200},
+                "H4":  {"np_td": (4,  'h'), "warmup_days": 150, "window": 200},
+                "D1":  {"np_td": (1,  'D'), "warmup_days": 365, "window": 100},
+            }
+            TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
+
+            # Build shared risk config
+            merged_risk_config = {
+                "risk_per_trade_pct": req.risk_per_trade_pct,
+                "min_rr": req.min_rr,
+                "tp_count": req.tp_count,
+                "tp1_rr": req.tp1_rr, "tp2_rr": req.tp2_rr, "tp3_rr": req.tp3_rr,
+                "tp4_rr": req.tp4_rr, "tp5_rr": req.tp5_rr,
+                "tp_splits": req.tp_splits,
+                "be_trigger_rr": req.be_trigger_rr,
+                "be_buffer_pips": req.be_buffer_pips,
+                "trail_method_tp2": req.trail_method_tp2, "trail_method_tp3": req.trail_method_tp3,
+                "trail_method_tp4": req.trail_method_tp4, "trail_method_tp5": req.trail_method_tp5,
+                "atr_trail_multiplier": req.atr_trail_multiplier,
+                "trail_pips": req.trail_pips,
+                "session_filter_enabled": req.session_filter_enabled,
+                "multi_position_mode": req.tp_count > 1,
+                "max_daily_consecutive_losses": req.max_daily_consecutive_losses,
+                "max_weekly_consecutive_losses": req.max_weekly_consecutive_losses,
+                "max_consecutive_losses": req.max_consecutive_losses,
+                "max_concurrent_positions": req.max_concurrent_positions,
+                "max_positions_per_symbol": req.max_positions_per_symbol,
+                "max_daily_trades": req.max_daily_trades,
+                "target_profit_enabled": req.target_profit_enabled,
+                "max_daily_profit": req.max_daily_profit,
+                "max_weekly_profit": req.max_weekly_profit,
+                "compounding_enabled": req.compounding_enabled,
+                "prop_firm": req.prop_firm,
+            }
+
+            # ── Fetch data & generate signals per symbol ──
+            portfolio_data = {}
+            portfolio_signals = {}
+            total_symbols = len(req.symbols)
+
+            for sym_idx, sym_cfg in enumerate(req.symbols):
+                sym = sym_cfg.symbol
+                strat_id = sym_cfg.strategy_id
+
+                pct_base = int((sym_idx / total_symbols) * 80)
+                current_state = await _get_state()
+                current_state["progress"] = {"stage": f"Fetching {sym} ({sym_idx + 1}/{total_symbols})...", "pct": pct_base}
+                await _save_state(current_state)
+                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", **current_state["progress"]})
+
+                # Check for cancellation
+                if current_state.get("status") == "cancelled":
+                    raise Exception("Portfolio Backtest Cancelled")
+
+                # Build strategy config for this symbol
+                config = UserConfigV2()
+                config.risk.min_rr = req.min_rr
+                config.risk.risk_per_trade_pct = req.risk_per_trade_pct
+                for k, v in sym_cfg.strategy_params.items():
+                    if strat_id == "SMC_v1" and hasattr(config.smc, k):
+                        setattr(config.smc, k, v)
+                    elif strat_id == "DriftJumpAlpha_v1" and hasattr(config.drift_jump_alpha, k):
+                        setattr(config.drift_jump_alpha, k, v)
+                    elif strat_id == "CRT_v1" and hasattr(config.crt, k):
+                        setattr(config.crt, k, v)
+                    elif strat_id == "HTFFVGFlip_v1" and hasattr(config.htf_fvg_flip, k):
+                        setattr(config.htf_fvg_flip, k, v)
+                    elif strat_id == "BiasIFVG_v1" and hasattr(config.bias_ifvg, k):
+                        setattr(config.bias_ifvg, k, v)
+                    elif strat_id == "NYOpenRetest_v1" and hasattr(config.ny_open_retest, k):
+                        setattr(config.ny_open_retest, k, v)
+
+                config.instrument_settings = [InstrumentSettings(symbol=sym, strategy_id=strat_id)]
+                engine_class = get_strategy(strat_id)
+                strategy_engine = engine_class(config)
+                strategy_engine.is_backtesting = True
+
+                required_tfs = strategy_engine.get_required_timeframes()
+                sorted_tfs = sorted(required_tfs, key=lambda t: TF_MINUTES.get(t, 999))
+                primary_tf = sorted_tfs[0]
+
+                # Fetch data
+                candles_by_tf = {}
+                try:
+                    if req.start_date and req.end_date:
+                        start_dt = datetime.fromisoformat(req.start_date)
+                        end_dt = datetime.fromisoformat(req.end_date)
+                        for tf in required_tfs:
+                            meta = TF_META.get(tf, TF_META["M5"])
+                            tf_start = start_dt - pd.Timedelta(days=meta["warmup_days"])
+                            candles_by_tf[tf] = await DataFetcher.get_data_range(sym, tf, tf_start, end_dt)
+                    else:
+                        for tf in required_tfs:
+                            candles_by_tf[tf] = await DataFetcher.get_historical_data(sym, tf, count=req.candle_count)
+                except DataFetchError as e:
+                    logger.error(f"[PORTFOLIO_BT] Data fetch failed for {sym}: {e}")
+                    await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": f"Data failed for {sym}: {e}"})
+                    return
+
+                def _index_candles(df):
+                    if 'time' in df.columns:
+                        return df.set_index(pd.to_datetime(df['time'], unit='s'))
+                    return df
+
+                indexed_by_tf = {tf: _index_candles(df).sort_index() for tf, df in candles_by_tf.items()}
+                primary_sorted = indexed_by_tf[primary_tf]
+                primary_times = primary_sorted.index.values
+                prev_time_by_tf = {tf: None for tf in required_tfs}
+
+                # Generate signals for this symbol
+                sym_signals = []
+                import numpy as np
+
+                for i in range(300, len(primary_times)):
+                    if i % 600 == 0:
+                        await asyncio.sleep(0)
+                        cur_state = await _get_state()
+                        if cur_state.get("status") == "cancelled":
+                            raise Exception("Portfolio Backtest Cancelled")
+
+                    current_time = primary_times[i]
+                    is_warmup = req.start_date and current_time < np.datetime64(datetime.fromisoformat(req.start_date))
+                    sig = None
+
+                    for tf in required_tfs:
+                        meta = TF_META.get(tf, TF_META["M5"])
+                        sorted_tf = indexed_by_tf[tf]
+                        tf_times = sorted_tf.index.values
+
+                        if tf == primary_tf:
+                            tf_end = i
+                            tf_start_idx = max(0, tf_end - meta["window"])
+                            slice_tf = sorted_tf.iloc[tf_start_idx:tf_end]
+                            last_tf_time = primary_times[i]
+                        else:
+                            np_td, np_unit = meta["np_td"]
+                            cutoff = current_time - np.timedelta64(np_td, np_unit)
+                            tf_end = int(np.searchsorted(tf_times, cutoff, side='right'))
+                            tf_start_idx = max(0, tf_end - meta["window"])
+                            slice_tf = sorted_tf.iloc[tf_start_idx:tf_end]
+                            last_tf_time = tf_times[tf_end - 1] if tf_end > 0 else None
+
+                        if len(slice_tf) < 20:
+                            continue
+
+                        if last_tf_time != prev_time_by_tf[tf]:
+                            s = await strategy_engine.on_bar(sym, tf, slice_tf)
+                            if s:
+                                sig = s
+                            prev_time_by_tf[tf] = last_tf_time
+
+                    if sig and not is_warmup:
+                        sig_time = int(current_time.astype('datetime64[s]').astype(int)) if hasattr(current_time, 'astype') else int(current_time)
+                        sym_signals.append({
+                            "symbol": sig.symbol,
+                            "strategy_name": strat_id,
+                            "direction": sig.direction,
+                            "time": sig_time,
+                            "entry_price": sig.entry_price,
+                            "stop_loss": sig.stop_loss,
+                            "take_profit": sig.take_profit,
+                            "confluence_score": sig.confluence_score,
+                            "metadata": sig.metadata,
+                        })
+
+                # Use the primary timeframe candles as the simulation dataframe for this symbol
+                primary_df = primary_sorted.copy()
+                if 'time' not in primary_df.columns:
+                    primary_df['time'] = primary_df.index.astype('int64') // 10**9
+
+                portfolio_data[sym] = primary_df
+                portfolio_signals[sym] = sym_signals
+
+                logger.info(f"[PORTFOLIO_BT] {sym}: {len(sym_signals)} signals from {len(primary_df)} bars")
+
+            # ── Run the global portfolio engine ──
+            current_state = await _get_state()
+            current_state["progress"] = {"stage": "Running global portfolio simulation...", "pct": 85}
+            await _save_state(current_state)
+            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", **current_state["progress"]})
+
+            portfolio_engine = PortfolioBacktestEngine(merged_risk_config)
+
+            results = await asyncio.to_thread(
+                portfolio_engine.run,
+                portfolio_data,
+                portfolio_signals,
+                req.initial_balance,
+                req.compounding_enabled,
+            )
+
+            # ── Sanitize and broadcast results ──
+            import numpy as _np
+            import math
+
+            def _sanitize(obj):
+                if isinstance(obj, dict):
+                    return {k: _sanitize(v) for k, v in obj.items()}
+                elif isinstance(obj, (list, tuple)):
+                    return [_sanitize(v) for v in obj]
+                elif isinstance(obj, (_np.bool_, bool)):
+                    return bool(obj)
+                elif isinstance(obj, (_np.integer, int)):
+                    return int(obj)
+                elif isinstance(obj, (_np.floating, float)):
+                    if math.isnan(obj) or math.isinf(obj):
+                        return None
+                    return float(obj)
+                elif isinstance(obj, _np.ndarray):
+                    return _sanitize(obj.tolist())
+                elif isinstance(obj, pd.Timestamp) or hasattr(obj, 'isoformat'):
+                    return obj.isoformat()
+                elif isinstance(obj, (str, type(None))):
+                    return obj
+                return str(obj)
+
+            report = results.get("report")
+            elapsed = (_time.time() - bt_start)
+            total_trades = results.get("total_trades", 0)
+            final_balance = results.get("final_balance", req.initial_balance)
+            total_pnl = final_balance - req.initial_balance
+
+            logger.info(f"[PORTFOLIO_BT] Complete in {elapsed:.1f}s — {total_trades} trades | PnL=${total_pnl:.2f}")
+            bot_service.log_system_event(
+                f"Portfolio backtest complete: {len(req.symbols)} symbols | {total_trades} trades | PnL=${total_pnl:.2f}",
+                category="BACKTEST"
+            )
+
+            response = {
+                "backtest_id": results.get("backtest_id", str(uuid.uuid4())),
+                "portfolio": True,
+                "symbols": sym_list,
+                "initial_balance": req.initial_balance,
+                "final_balance": final_balance,
+                "total_trades": total_trades,
+                "total_signals": results.get("total_signals", 0),
+                "invalid_signals": results.get("invalid_signals", 0),
+                "equity_curve": results.get("equity_curve", []),
+                "trades": results.get("trades", []),
+                "grouped_trades": results.get("grouped_trades", []),
+                "rejection_funnel": results.get("rejection_funnel", {}),
+                "report": {
+                    "win_rate": getattr(report, 'win_rate', 0) if report else results.get("win_rate", 0),
+                    "profit_factor": getattr(report, 'profit_factor', 0) if report else results.get("profit_factor", 0),
+                    "sharpe_ratio": getattr(report, 'sharpe_ratio', 0) if report else results.get("sharpe_ratio", 0),
+                    "sortino_ratio": getattr(report, 'sortino_ratio', 0) if report else results.get("sortino_ratio", 0),
+                    "max_drawdown_pct": getattr(report, 'max_drawdown_pct', 0) if report else results.get("max_drawdown_pct", 0),
+                    "total_pnl": total_pnl,
+                    "expectancy_r": getattr(report, 'expectancy_r', 0) if report else results.get("expectancy_r", 0),
+                    "tp1_hit_rate": getattr(report, 'tp1_hit_rate', 0) if report else 0,
+                    "tp2_hit_rate": getattr(report, 'tp2_hit_rate', 0) if report else 0,
+                    "tp3_hit_rate": getattr(report, 'tp3_hit_rate', 0) if report else 0,
+                    "sl_hit_rate": getattr(report, 'sl_hit_rate', 0) if report else 0,
+                    "be_hit_rate": getattr(report, 'be_hit_rate', 0) if report else 0,
+                    "trail_hit_rate": getattr(report, 'trail_hit_rate', 0) if report else 0,
+                    "max_consecutive_wins": getattr(report, 'max_consecutive_wins', 0) if report else 0,
+                    "max_consecutive_losses": getattr(report, 'max_consecutive_losses', 0) if report else 0,
+                },
+            }
+
+            sanitized = _sanitize(response)
+            current_state = await _get_state()
+            current_state["status"] = "complete"
+            current_state["progress"] = {"stage": "complete", "pct": 100}
+            current_state["result"] = sanitized
+
+            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": sanitized})
+            await _save_state(current_state)
+
+        except Exception as e:
+            import traceback
+            logger.error(f"[PORTFOLIO_BT] Error: {e}\n{traceback.format_exc()}")
+            current_state = await _get_state()
+            current_state["status"] = "error"
+            current_state["progress"] = {"stage": "error", "message": str(e), "pct": 0}
+            current_state["result"] = None
+            try:
+                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
+            except Exception:
+                pass
+            await _save_state(current_state)
+            from backend.services.bot_service import bot_service
+            bot_service.log_system_event(f"Portfolio backtest failed: {e!s}", category="BACKTEST", level="ERROR")
+
+    background_tasks.add_task(_run_portfolio_task)
+    return {"status": "started", "message": f"Portfolio backtest queued for {len(req.symbols)} symbol(s)."}
 
 @router.get("/backtests")
 async def list_backtests(

@@ -123,7 +123,8 @@ def calculate_lot_size(
     if tick_size == 0 or tick_value == 0 or sl_distance == 0:
         return 0.0
 
-    # The USD value of a 1.0 price move per 1 standard lot
+    # MT5 tick_value is the profit in account currency for 1 tick move of 1 standard lot
+    # Therefore, 1 unit of price move (e.g. 1.0) is worth tick_value / tick_size dollars.
     value_per_unit_move = tick_value / tick_size
     raw_lot = risk_amount / (sl_distance * value_per_unit_move)
 

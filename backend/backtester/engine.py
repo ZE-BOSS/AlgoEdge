@@ -127,8 +127,8 @@ class BacktestEngine:
         logger.info(f"[ENGINE] Risk config: risk_pct={self.risk_config.get('risk_per_trade_pct')}% | min_rr={self.risk_config.get('min_rr')} | tp_count={self.risk_config.get('tp_count')}")
 
         # Reset prop firm state for a fresh backtest run
-        self.prop_firm_validator.is_paused = False
-        self.prop_firm_validator.pause_reason = ""
+        self.prop_firm_validator.is_breached = False
+        self.prop_firm_validator.breach_reason = ""
         self.prop_firm_validator._breach_logged = False
         self.prop_firm_validator._alerts_sent = set()
 
@@ -191,8 +191,8 @@ class BacktestEngine:
             open_pnl = sum(self._calc_pnl(p["direction"], p["entry_price"], current_price, p["volume"], p.get("symbol", "")) for p in self.open_positions)
             current_time_dt = datetime.fromtimestamp(float(current_time), timezone.utc) if isinstance(current_time, (int, float)) else pd.to_datetime(current_time).to_pydatetime()
             self.prop_firm_validator.update_equity_balance(balance + open_pnl, balance, current_time_dt)
-            if self.prop_firm_validator.is_paused and not getattr(self.prop_firm_validator, '_breach_logged', False):
-                logger.warning(f"[PROP FIRM MONITOR] Drawdown breach detected: {self.prop_firm_validator.pause_reason} — continuing backtest (informational only)")
+            if self.prop_firm_validator.is_breached and not getattr(self.prop_firm_validator, '_breach_logged', False):
+                logger.warning(f"[PROP FIRM MONITOR] Drawdown breach detected: {self.prop_firm_validator.breach_reason} — continuing backtest (informational only)")
                 self.prop_firm_validator._breach_logged = True  # log once, don't spam
 
             # 1. Manage existing open positions
@@ -692,12 +692,22 @@ class BacktestEngine:
             points = price_diff / profile.point_size if profile.point_size else 0
             raw_pnl = points * profile.point_value_per_lot * volume
         else:
-            # Fallback for unknown symbols: assume standard forex
-            pip_size = get_pip_size(symbol)
+            # Fallback for unknown symbols: dynamically fetch from MT5 if available
             price_diff = exit_price - entry
-            pips = price_diff / pip_size if pip_size else 0
-            # Standard forex: 1 pip = $10 per standard lot
-            raw_pnl = pips * 10.0 * volume
-            logger.warning(f"No InstrumentProfile for '{symbol}', using forex fallback")
+            tick_value = 1.0
+            tick_size = 0.00001
+            try:
+                import MetaTrader5 as mt5
+                if mt5 and mt5.terminal_info() and mt5.terminal_info().connected:
+                    info = mt5.symbol_info(symbol)
+                    if info:
+                        tick_value = info.trade_tick_value or 1.0
+                        tick_size = info.trade_tick_size or 0.00001
+            except Exception:
+                pass
+            
+            value_per_unit_move = tick_value / tick_size
+            raw_pnl = price_diff * value_per_unit_move * volume
+            logger.warning(f"No InstrumentProfile for '{symbol}', using MT5 dynamic fallback (value_per_unit_move={value_per_unit_move})")
 
         return raw_pnl if direction == "BUY" else -raw_pnl

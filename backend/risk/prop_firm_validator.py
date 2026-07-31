@@ -27,6 +27,12 @@ class PropFirmValidator:
         self.account_size = getattr(config, "account_size", 10000.0)
         self.initial_balance = getattr(config, "initial_balance", 10000.0)
         self.max_lot_sizes = getattr(config, "max_lot_sizes", {})
+        
+        # Drawdown limits (customizable, fallback to defaults)
+        default_daily = 4.0 if self.challenge_type in ["1-step", "flex"] else 5.0
+        default_max = 8.0 if self.challenge_type in ["1-step", "flex"] else 10.0
+        self.max_daily_loss_pct = getattr(config, "max_daily_loss_pct", default_daily)
+        self.max_total_drawdown_pct = getattr(config, "max_total_drawdown_pct", default_max)
 
         # State
         self.high_water_mark = self.initial_balance
@@ -35,8 +41,8 @@ class PropFirmValidator:
         self.daily_profit = 0.0
         self.total_profit = 0.0
         self.active_trading_days = 0
-        self.is_paused = False
-        self.pause_reason = ""
+        self.is_breached = False
+        self.breach_reason = ""
         self.net_deposits = 0.0
 
         # Positions state
@@ -85,8 +91,8 @@ class PropFirmValidator:
                     "daily_profit": self.daily_profit,
                     "total_profit": self.total_profit,
                     "active_trading_days": self.active_trading_days,
-                    "is_paused": self.is_paused,
-                    "pause_reason": self.pause_reason,
+                    "is_breached": self.is_breached,
+                    "breach_reason": self.breach_reason,
                     "net_deposits": self.net_deposits,
                     "initial_balance": self.initial_balance
                 }, f)
@@ -104,8 +110,8 @@ class PropFirmValidator:
                     self.daily_profit = data.get("daily_profit", 0.0)
                     self.total_profit = data.get("total_profit", 0.0)
                     self.active_trading_days = data.get("active_trading_days", 0)
-                    self.is_paused = data.get("is_paused", False)
-                    self.pause_reason = data.get("pause_reason", "")
+                    self.is_breached = data.get("is_breached", False)
+                    self.breach_reason = data.get("breach_reason", "")
                     self.net_deposits = data.get("net_deposits", 0.0)
                     self.initial_balance = data.get("initial_balance", getattr(config, "initial_balance", 10000.0) if hasattr(self, 'config') else 10000.0)
             except Exception as e:
@@ -183,17 +189,17 @@ class PropFirmValidator:
         if not self.enabled:
             return
 
-        # A. Auto-recovery: if is_paused (from a previous breach), check if equity recovered
-        if self.is_paused:
-            daily_dd_allowance = self.initial_balance * 0.04
+        # A. Auto-recovery: if is_breached (from a previous breach), check if equity recovered
+        if self.is_breached:
+            daily_dd_allowance = self.initial_balance * (self.max_daily_loss_pct / 100.0)
             daily_floor = self.eod_baseline - daily_dd_allowance
-            max_dd_allowance = self.initial_balance * 0.08 if self.challenge_type in ["1-step", "flex"] else self.initial_balance * 0.06
+            max_dd_allowance = self.initial_balance * (self.max_total_drawdown_pct / 100.0)
             max_dd_floor = (self.high_water_mark - max_dd_allowance) if self.challenge_type in ["1-step", "flex"] else (self.initial_balance - max_dd_allowance)
             # Only auto-recover if equity is above both floors
             if equity >= daily_floor and equity >= max_dd_floor:
-                logger.info(f"[PropFirm] Equity recovered to {equity:.2f}. Clearing pause state.")
-                self.is_paused = False
-                self.pause_reason = ""
+                logger.info(f"[PropFirm] Equity recovered to {equity:.2f}. Clearing breach state.")
+                self.is_breached = False
+                self.breach_reason = ""
                 self.save_state()
                 self._telegram_alert(
                     f"✅ *Prop Firm — Drawdown Recovered*\n"
@@ -204,16 +210,16 @@ class PropFirmValidator:
             return  # Either still paused or just recovered — no need to re-check breach below
 
         # A. Daily Drawdown Check
-        daily_dd_allowance = self.initial_balance * 0.04
+        daily_dd_allowance = self.initial_balance * (self.max_daily_loss_pct / 100.0)
         daily_floor = self.eod_baseline - daily_dd_allowance
         if equity < daily_floor:
-            self.is_paused = True
-            self.pause_reason = (
+            self.is_breached = True
+            self.breach_reason = (
                 f"Daily Drawdown Breach! Equity {equity:.2f} fell below daily floor "
                 f"{daily_floor:.2f} (baseline {self.eod_baseline:.2f} - {daily_dd_allowance:.2f})"
             )
             self.save_state()
-            logger.error(f"[PROP FIRM] {self.pause_reason}")
+            logger.error(f"[PROP FIRM] {self.breach_reason}")
             self._telegram_alert(
                 f"\U0001f534 *Prop Firm Alert \u2014 Daily Drawdown Breached*\n"
                 f"Equity: ${equity:.2f}\n"
@@ -227,16 +233,16 @@ class PropFirmValidator:
 
         # B. Max Drawdown Check
         if self.challenge_type in ["1-step", "flex"]:
-            max_dd_allowance = self.initial_balance * 0.08
+            max_dd_allowance = self.initial_balance * (self.max_total_drawdown_pct / 100.0)
             max_dd_floor = self.high_water_mark - max_dd_allowance
             if equity < max_dd_floor:
-                self.is_paused = True
-                self.pause_reason = (
+                self.is_breached = True
+                self.breach_reason = (
                     f"Max Trailing Drawdown Breach! Equity {equity:.2f} fell below "
                     f"HWM {self.high_water_mark:.2f} - {max_dd_allowance:.2f}"
                 )
                 self.save_state()
-                logger.error(f"[PROP FIRM] {self.pause_reason}")
+                logger.error(f"[PROP FIRM] {self.breach_reason}")
                 self._telegram_alert(
                     f"\U0001f534 *Prop Firm Alert \u2014 Max Trailing Drawdown Breached*\n"
                     f"Equity: ${equity:.2f}\n"
@@ -249,16 +255,16 @@ class PropFirmValidator:
                 return
 
         elif self.challenge_type == "2-step":
-            max_dd_allowance = self.initial_balance * 0.06
+            max_dd_allowance = self.initial_balance * (self.max_total_drawdown_pct / 100.0)
             max_dd_floor = self.initial_balance - max_dd_allowance
             if equity < max_dd_floor:
-                self.is_paused = True
-                self.pause_reason = (
+                self.is_breached = True
+                self.breach_reason = (
                     f"Max Static Drawdown Breach! Equity {equity:.2f} fell below "
                     f"{self.initial_balance:.2f} - {max_dd_allowance:.2f}"
                 )
                 self.save_state()
-                logger.error(f"[PROP FIRM] {self.pause_reason}")
+                logger.error(f"[PROP FIRM] {self.breach_reason}")
                 self._telegram_alert(
                     f"\U0001f534 *Prop Firm Alert \u2014 Max Static Drawdown Breached*\n"
                     f"Equity: ${equity:.2f}\n"
@@ -291,14 +297,14 @@ class PropFirmValidator:
         if not self.enabled:
             return True, "OK", requested_lots
 
-        if self.is_paused:
+        if self.is_breached:
             msg = (
                 f"\u26a0\ufe0f *Prop Firm Monitor \u2014 Drawdown breach active, trade proceeding*\n"
                 f"Symbol: {symbol}\n"
-                f"Reason: {self.pause_reason}"
+                f"Reason: {self.breach_reason}"
             )
-            logger.warning(f"Prop Firm rules breached: {self.pause_reason} (Trade allowed per user request)")
-            self._telegram_alert(msg, alert_key=f"trade_breach_{symbol}_{self.pause_reason[:30]}")
+            logger.warning(f"Prop Firm rules breached: {self.breach_reason} (Trade allowed per user request)")
+            self._telegram_alert(msg, alert_key=f"trade_breach_{symbol}_{self.breach_reason[:30]}")
 
         sym_open = self.open_positions_by_symbol.get(symbol, 0)
         if sym_open >= 5:
