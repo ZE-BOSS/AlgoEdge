@@ -634,18 +634,6 @@ class PositionManager:
         step = getattr(risk, 'trail_step_pips', 5.0) * pip_size_val
         if step <= 0: step = pip_size_val
 
-        # --- Prop Firm Aggressive Trailing Hook ---
-        from backend.services.bot_service import bot_service
-        validator = getattr(bot_service, "prop_firm_validator", None)
-        if validator and validator.enabled:
-            # If in profit, check consistency limits
-            is_in_profit = (current_price > entry_price) if is_buy else (current_price < entry_price)
-            if is_in_profit:
-                needs_trail, _ = validator.check_consistency(0.0)
-                if needs_trail:
-                    trail_method = "ATR_TRAIL"
-                    tp_level = "aggressive"
-
         if trail_method == "FIXED_PIPS":
             trail_distance = getattr(risk, 'trail_pips', 15.0) * pip_size_val
             new_sl = current_price - trail_distance if is_buy else current_price + trail_distance
