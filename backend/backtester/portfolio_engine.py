@@ -18,6 +18,7 @@ from backend.risk.multi_tp import TPLevel, _is_buy
 from backend.risk.position_sizer import get_pip_size
 from backend.risk.prop_firm_validator import PropFirmValidator
 from backend.utils.logger import get_logger
+from backend.utils.trade_grouper import group_trades
 from backend.utils.timeutils import detect_session
 from backend.backtester.engine import _epoch_to_iso, _calc_duration_minutes, _validate_position
 from backend.risk.compounding import get_instrument_profile
@@ -437,8 +438,12 @@ class PortfolioBacktestEngine:
         # Generate metrics
         from backend.analytics.reports import generate_risk_report
         import uuid as _uuid
-        # generate_risk_report takes only a trades list; it infers initial_balance from trades[0]
-        report = generate_risk_report(self.trades)
+        
+        # Group trades using the shared utility
+        grouped_trades = group_trades(self.trades)
+        
+        # generate_risk_report takes the grouped trades list; it infers initial_balance from trades[0]
+        report = generate_risk_report(grouped_trades)
         # Attach rejection funnel directly to the RiskReport object (same pattern as engine.py)
         report.rejection_funnel = self.rejection_funnel
 
@@ -452,7 +457,7 @@ class PortfolioBacktestEngine:
             "total_trades": len(self.trades),
             "invalid_signals": self.invalid_signals,
             "trades": self.trades,
-            "grouped_trades": self.trades,  # portfolio trades are already flat
+            "grouped_trades": grouped_trades,
             "equity_curve": self.equity_curve,
             "report": report,
             "rejection_funnel": self.rejection_funnel,

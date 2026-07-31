@@ -38,6 +38,15 @@ function fmt(v) {
 }
 function fmtDur(m) { if (!m || m <= 0) return '—'; if (m < 60) return `${m.toFixed(0)}m`; if (m < 1440) return `${(m / 60).toFixed(1)}h`; return `${(m / 1440).toFixed(1)}d`; }
 
+function MetricCard({ title, value, color }) {
+  return (
+    <div style={{ padding: '12px 16px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', fontWeight: 600 }}>{title}</div>
+      <div style={{ fontSize: '1.2rem', fontWeight: 700, color: color || 'var(--text-primary)' }}>{value}</div>
+    </div>
+  );
+}
+
 function ProgressBar({ progress }) {
   if (!progress || progress.pct === undefined) return null;
   return (<div style={{ marginTop: 12 }}>
@@ -327,8 +336,8 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
   }, [grouped]);
   
   let filteredGrouped = grouped;
-  if (activeFilter === 'Wins') filteredGrouped = filteredGrouped.filter(g => (g.combined_pnl || g.pnl) > 0);
-  if (activeFilter === 'Losses') filteredGrouped = filteredGrouped.filter(g => (g.combined_pnl || g.pnl) <= 0);
+  if (activeFilter === 'Wins') filteredGrouped = filteredGrouped.filter(g => (g.net_pnl ?? g.combined_pnl ?? g.pnl) > 0);
+  if (activeFilter === 'Losses') filteredGrouped = filteredGrouped.filter(g => (g.net_pnl ?? g.combined_pnl ?? g.pnl) <= 0);
   if (symbolFilter !== 'All') filteredGrouped = filteredGrouped.filter(g => g.symbol === symbolFilter);
   if (strategyFilter !== 'All') filteredGrouped = filteredGrouped.filter(g => g.strategy_id === strategyFilter);
 
@@ -465,15 +474,15 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       </div>
     )}
 
-    <div className="metrics-grid" style={{ marginBottom: 16 }}>
-      <div className="metric-card"><div className="metric-label">Final Balance</div><div className={`metric-value ${result.final_balance >= result.initial_balance ? 'green' : 'red'}`}>${result.final_balance?.toFixed(2)}</div></div>
-      <div className="metric-card"><div className="metric-label">Net P&L</div><div className={`metric-value ${(result.final_balance - result.initial_balance) >= 0 ? 'green' : 'red'}`}>${(result.final_balance - result.initial_balance).toFixed(2)}</div></div>
-      <div className="metric-card"><div className="metric-label">Win Rate</div><div className={`metric-value ${report.win_rate >= 0.55 ? 'green' : 'yellow'}`}>{((report.win_rate || 0) * 100).toFixed(1)}%</div></div>
-      <div className="metric-card"><div className="metric-label">Profit Factor</div><div className="metric-value green">{(report.profit_factor || 0).toFixed(2)}</div></div>
-      <div className="metric-card"><div className="metric-label">Sharpe</div><div className="metric-value blue">{(report.sharpe_ratio || 0).toFixed(2)}</div></div>
-      <div className="metric-card"><div className="metric-label">Max DD</div><div className="metric-value red">{((report.max_drawdown_pct || 0) * 100).toFixed(1)}%</div></div>
-      <div className="metric-card"><div className="metric-label">Expectancy (R)</div><div className="metric-value blue">{(report.expectancy_r || 0).toFixed(2)}</div></div>
-      <div className="metric-card"><div className="metric-label">Sortino</div><div className="metric-value blue">{(report.sortino_ratio || 0).toFixed(2)}</div></div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginBottom: 16 }}>
+      <MetricCard title="Final Balance" value={`$${(result.final_balance || 0).toFixed(2)}`} color={result.final_balance >= result.initial_balance ? 'var(--green)' : 'var(--red)'} />
+      <MetricCard title="Net P&L" value={`$${((result.final_balance || 0) - (result.initial_balance || 0)).toFixed(2)}`} color={(result.final_balance - result.initial_balance) >= 0 ? 'var(--green)' : 'var(--red)'} />
+      <MetricCard title="Win Rate" value={`${((report.win_rate || 0) * 100).toFixed(1)}%`} color={report.win_rate >= 0.5 ? 'var(--green)' : 'var(--red)'} />
+      <MetricCard title="Profit Factor" value={(report.profit_factor || 0).toFixed(2)} />
+      <MetricCard title="Sharpe" value={(report.sharpe_ratio || 0).toFixed(2)} />
+      <MetricCard title="Max DD" value={`${((report.max_drawdown_pct || 0) * 100).toFixed(1)}%`} color="var(--red)" />
+      <MetricCard title="Expectancy (R)" value={(report.expectancy_r || 0).toFixed(2)} />
+      <MetricCard title="Sortino" value={(report.sortino_ratio || 0).toFixed(2)} />
     </div>
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
       {[1, 2, 3, 4, 5].map(n => { const rate = report[`tp${n}_hit_rate`]; return rate != null && rate > 0 ? <div key={n} className="badge badge-green" style={{ padding: '4px 10px', fontSize: '0.75rem' }}>TP{n}: {(rate * 100).toFixed(0)}%</div> : null; })}
