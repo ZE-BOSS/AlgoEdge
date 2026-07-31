@@ -43,6 +43,7 @@ class PortfolioBacktestEngine:
             "errors": 0,
             "approved": 0
         }
+        self.run_logs = []
 
     def _calc_pnl(self, direction: str, entry: float, exit_price: float, volume: float, symbol: str) -> float:
         profile = get_instrument_profile(symbol)
@@ -305,6 +306,13 @@ class PortfolioBacktestEngine:
                 self.trades.append(pos)
                 positions_to_remove.append(pos)
                 
+                self.run_logs.append({
+                    "time": _epoch_to_iso(current_time),
+                    "level": "INFO",
+                    "category": "BACKTEST_LOG",
+                    "message": f"Closed {pos['direction']} {sym} {pos.get('exit_reason')} | PnL: ${pos.get('pnl', 0):.2f}"
+                })
+                
             for p in positions_to_remove:
                 if p in self.open_positions:
                     self.open_positions.remove(p)
@@ -362,7 +370,7 @@ class PortfolioBacktestEngine:
                     continue
 
                 is_valid, val_reason = _validate_position(
-                    sig["direction"], sig["entry_price"], sig["stop_loss"], tp_levels[-1]["price"]
+                    sig["direction"], sig["entry_price"], sig["stop_loss"], tp_levels[-1].tp_price
                 )
                 if not is_valid:
                     self.invalid_signals += 1
@@ -370,6 +378,12 @@ class PortfolioBacktestEngine:
                     continue
 
                 self.rejection_funnel["approved"] += 1
+                self.run_logs.append({
+                    "time": _epoch_to_iso(sig_time),
+                    "level": "INFO",
+                    "category": "BACKTEST_LOG",
+                    "message": f"Opened {sig['direction']} {symbol} @ {sig['entry_price']:.5f} | {len(tp_levels)} TPs"
+                })
 
                 for lvl in tp_levels:
                     new_pos = {
@@ -382,9 +396,9 @@ class PortfolioBacktestEngine:
                         "entry_time_iso": _epoch_to_iso(sig_time),
                         "entry_price": sig["entry_price"],
                         "stop_loss": sig["stop_loss"],
-                        "take_profit": lvl["price"],
-                        "volume": lvl["lots"],
-                        "tp_level": lvl["level"],
+                        "take_profit": lvl.tp_price,
+                        "volume": lvl.volume,
+                        "tp_level": lvl.level,
                         "be_applied": False,
                         "trail_applied": False,
                         "trail_method": self.risk_config.get("trailing_method", "NONE"),
@@ -427,6 +441,7 @@ class PortfolioBacktestEngine:
         results["rejection_funnel"] = self.rejection_funnel
         results["invalid_signals"] = self.invalid_signals
         results["final_balance"] = balance
+        results["run_logs"] = self.run_logs
 
         logger.info(f"[PORTFOLIO] ═══ Global backtest complete ═══")
         logger.info(f"[PORTFOLIO] Final Balance: ${balance:.2f} | Trades: {len(self.trades)}")

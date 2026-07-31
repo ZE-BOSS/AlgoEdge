@@ -64,6 +64,7 @@ class MultiTPManager:
         self.tp_count = config.get("tp_count", 3)  # User-configurable: how many TPs (1–5)
         self.min_rr = config.get("min_rr", 3.0)
         self.multi_position_mode = config.get("multi_position_mode", True)
+        self.prop_firm_config = config.get("prop_firm", {})
 
         # Trail methods per TP level (all configurable)
         self.trail_methods = [
@@ -156,6 +157,7 @@ class MultiTPManager:
             splits = [100 // active_count] * active_count
             total_split = sum(splits)
         
+        max_lot_allowed = self.prop_firm_config.get("max_lot_sizes", {}).get(symbol, float('inf'))
         volumes = []
         for i in range(active_count):
             split_pct = splits[i] / total_split
@@ -163,15 +165,18 @@ class MultiTPManager:
             vol = math.floor(raw_vol / lot_step) * lot_step
             # Clamp to minimum lot to prevent collapse
             vol = max(lot_min, round(vol, 4))
+            # Clamp to max lot size per position
+            vol = min(vol, max_lot_allowed)
             volumes.append(vol)
 
         # ── Remainder Sweep ──
-        # Any volume lost to rounding is swept into TP1 (if it fits the lot_step)
+        # Any volume lost to rounding is swept into TP1 (if it fits the lot_step and max lot size)
         allocated_vol = round(sum(volumes), 4)
         remainder = round(total_volume - allocated_vol, 4)
         if remainder >= lot_step:
             sweep_amount = math.floor(remainder / lot_step) * lot_step
-            volumes[0] = round(volumes[0] + sweep_amount, 4)
+            new_tp1_vol = round(volumes[0] + sweep_amount, 4)
+            volumes[0] = min(new_tp1_vol, max_lot_allowed)
 
         levels = []
         for i in range(active_count):

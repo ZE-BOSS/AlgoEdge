@@ -420,10 +420,10 @@ async def run_backtest_endpoint(
                 last_yield_time = time.monotonic()
 
                 for i in range(300, len(primary_times)):
-                    if time.monotonic() - last_yield_time > 0.05:
-                        await asyncio.sleep(0)
+                    if i % 50 == 0:
+                        await asyncio.sleep(0.001)
                         last_yield_time = time.monotonic()
-
+                    
                     if i % 600 == 0:
                         pct = int((i / len(primary_times)) * 80) + 10
                         current_state = await _get_state()
@@ -632,7 +632,7 @@ async def run_backtest_endpoint(
                     t.pop("chart_data_h1", None)
                     t.pop("chart_data_m15", None)
             
-            # Broadcast IMMEDIATELY so the frontend gets the data even if Redis is slow/failing
+            # Send the run logs immediately as part of the WS payload
             await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
             
             # Now save to state (which writes to Redis and might block)
@@ -836,8 +836,10 @@ async def run_portfolio_backtest_endpoint(
                 import numpy as np
 
                 for i in range(300, len(primary_times)):
+                    if i % 50 == 0:
+                        await asyncio.sleep(0.001)
+                    
                     if i % 600 == 0:
-                        await asyncio.sleep(0)
                         cur_state = await _get_state()
                         if cur_state.get("status") == "cancelled":
                             raise Exception("Portfolio Backtest Cancelled")

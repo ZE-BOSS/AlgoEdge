@@ -98,6 +98,7 @@ class BacktestEngine:
             "errors": 0,
             "approved": 0
         }
+        self.run_logs = []
 
     def run(
         self,
@@ -337,6 +338,13 @@ class BacktestEngine:
                 self.risk_engine.on_position_closed(pos.get("group_id", "unknown"), pos.get("pnl", 0), current_time)
                 self.trades.append(pos)
                 positions_to_remove.append(pos)
+
+                self.run_logs.append({
+                    "time": _epoch_to_iso(current_time),
+                    "level": "INFO",
+                    "category": "BACKTEST_LOG",
+                    "message": f"Closed {pos['direction']} {pos.get('symbol')} {pos.get('exit_reason')} | PnL: ${pos.get('pnl', 0):.2f}"
+                })
             # FIX 2: Bulk removal after the loop — avoids O(n) list.remove per closed position
             for p in positions_to_remove:
                 if p in self.open_positions:
@@ -426,6 +434,13 @@ class BacktestEngine:
                         position = self._create_position(sig, tp, current_time, bar_open_price, group_id, balance)
                         self.open_positions.append(position)
                         logger.debug(f"[ENGINE]   Position opened: TP{tp.level} @ {bar_open_price:.5f} (bar open) | vol={tp.volume:.4f}")
+                        
+                    self.run_logs.append({
+                        "time": _epoch_to_iso(current_time),
+                        "level": "INFO",
+                        "category": "BACKTEST_LOG",
+                        "message": f"Opened {sig.get('direction')} {sig.get('symbol', 'UNKNOWN')} @ {bar_open_price:.5f} | {len(tp_levels)} TPs"
+                    })
                 else:
                     self.rejection_funnel["risk_rejections"][reason] = self.rejection_funnel["risk_rejections"].get(reason, 0) + 1
                     logger.trace(f"[ENGINE] ❌ Signal REJECTED (Risk): {reason}")
@@ -485,6 +500,7 @@ class BacktestEngine:
             "equity_curve": self.equity_curve,
             "report": report,
             "rejection_funnel": self.rejection_funnel,
+            "run_logs": self.run_logs,
         }
 
     def _create_position(
