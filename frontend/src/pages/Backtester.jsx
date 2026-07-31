@@ -1139,6 +1139,22 @@ export default function Backtester() {
               </div>
               <div><label style={{ fontSize: '0.7rem' }}>Account Size</label><input type="number" step="1000" value={form.prop_firm.account_size} onChange={e => u('prop_firm', { ...form.prop_firm, account_size: +e.target.value })} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Initial Balance</label><input type="number" step="1000" value={form.prop_firm.initial_balance} onChange={e => u('prop_firm', { ...form.prop_firm, initial_balance: +e.target.value })} /></div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ fontSize: '0.7rem' }}>Max Lot Sizes per Symbol (JSON)</label>
+                <input
+                  type="text"
+                  placeholder='{"Volatility 75 Index": 10, "Volatility 25 (1s) Index": 0.5}'
+                  value={typeof form.prop_firm.max_lot_sizes === 'object' ? JSON.stringify(form.prop_firm.max_lot_sizes) : (form.prop_firm.max_lot_sizes || '{}')}
+                  onChange={e => {
+                    try {
+                      const parsed = JSON.parse(e.target.value || '{}');
+                      u('prop_firm', { ...form.prop_firm, max_lot_sizes: parsed });
+                    } catch { /* allow partial typing — don't update until valid JSON */ }
+                  }}
+                  style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.72rem' }}
+                />
+                <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 2 }}>JSON map of symbol name → max lots. Leave as {'{}'} for no cap.</div>
+              </div>
             </div>
           )}
 

@@ -436,12 +436,28 @@ class PortfolioBacktestEngine:
 
         # Generate metrics
         from backend.analytics.reports import generate_risk_report
-        results = generate_risk_report(self.trades, initial_balance, self.risk_config)
+        import uuid as _uuid
+        # generate_risk_report takes only a trades list; it infers initial_balance from trades[0]
+        report = generate_risk_report(self.trades)
+        # Attach rejection funnel directly to the RiskReport object (same pattern as engine.py)
+        report.rejection_funnel = self.rejection_funnel
 
-        results["rejection_funnel"] = self.rejection_funnel
-        results["invalid_signals"] = self.invalid_signals
-        results["final_balance"] = balance
-        results["run_logs"] = self.run_logs
+        total_pnl = balance - initial_balance
+
+        results = {
+            "backtest_id": str(_uuid.uuid4()),
+            "initial_balance": initial_balance,
+            "final_balance": balance,
+            "total_pnl": total_pnl,
+            "total_trades": len(self.trades),
+            "invalid_signals": self.invalid_signals,
+            "trades": self.trades,
+            "grouped_trades": self.trades,  # portfolio trades are already flat
+            "equity_curve": self.equity_curve,
+            "report": report,
+            "rejection_funnel": self.rejection_funnel,
+            "run_logs": self.run_logs,
+        }
 
         logger.info(f"[PORTFOLIO] ═══ Global backtest complete ═══")
         logger.info(f"[PORTFOLIO] Final Balance: ${balance:.2f} | Trades: {len(self.trades)}")

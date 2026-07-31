@@ -68,7 +68,7 @@ async def get_dashboard(
         
     try:
         from backend.services.bot_service import bot_service
-        if getattr(bot_service, "prop_firm_validator", None):
+        if getattr(bot_service, "prop_firm_validator", None) and getattr(bot_service.prop_firm_validator, "enabled", False):
             pv = bot_service.prop_firm_validator
             
             # Use live MT5 account info for accuracy
@@ -104,8 +104,8 @@ async def get_dashboard(
                 "daily_profit": pv.daily_profit,
                 "total_profit": pv.total_profit,
                 "active_trading_days": pv.active_trading_days,
-                "is_paused": pv.is_paused,
-                "pause_reason": pv.pause_reason,
+                "is_paused": pv.is_breached,
+                "pause_reason": pv.breach_reason,
             }
         else:
             pf_state = None
