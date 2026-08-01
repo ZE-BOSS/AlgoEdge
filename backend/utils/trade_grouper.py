@@ -138,7 +138,7 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
             g["duration_minutes"] = _calc_duration_minutes(g["entry_time"], max(exit_times))
         # Detect exit session
         try:
-            g["exit_session"] = detect_session(g.get("exit_time", 0))
+            g["exit_session"] = detect_session(_to_epoch_seconds(g.get("exit_time", 0)) or 0)
         except Exception:
             g["exit_session"] = "UNKNOWN"
 

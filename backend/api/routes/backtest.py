@@ -1021,11 +1021,21 @@ async def run_portfolio_backtest_endpoint(
                     "tp1_hit_rate": getattr(report, 'tp1_hit_rate', 0) if report else 0,
                     "tp2_hit_rate": getattr(report, 'tp2_hit_rate', 0) if report else 0,
                     "tp3_hit_rate": getattr(report, 'tp3_hit_rate', 0) if report else 0,
+                    "tp4_hit_rate": getattr(report, 'tp4_hit_rate', 0) if report else 0,
+                    "tp5_hit_rate": getattr(report, 'tp5_hit_rate', 0) if report else 0,
                     "sl_hit_rate": getattr(report, 'sl_hit_rate', 0) if report else 0,
                     "be_hit_rate": getattr(report, 'be_hit_rate', 0) if report else 0,
                     "trail_hit_rate": getattr(report, 'trail_hit_rate', 0) if report else 0,
                     "max_consecutive_wins": getattr(report, 'max_consecutive_wins', 0) if report else 0,
                     "max_consecutive_losses": getattr(report, 'max_consecutive_losses', 0) if report else 0,
+                    # FIX: these two were missing entirely from the portfolio response.
+                    # The frontend only renders the Win Rate by Score/Confirmation/Bias
+                    # panels when `report.confluence_stats || report.bias_stats` is
+                    # truthy — with the keys absent, that check was always false for
+                    # every portfolio backtest (multi-symbol runs), regardless of
+                    # whether the underlying trades had confluence/bias data.
+                    "bias_stats": getattr(report, 'bias_stats', {}) if report else {},
+                    "confluence_stats": getattr(report, 'confluence_stats', {}) if report else {},
                 },
             }
 
@@ -1267,8 +1277,8 @@ async def get_backtest(
             "created_at": run.created_at,
             "notes": run.notes,
             "params_snapshot": params,
-            "bias_stats": params.get("bias_stats"),
-            "confluence_stats": params.get("confluence_stats"),
+            "bias_stats": run.bias_stats or {},
+            "confluence_stats": run.confluence_stats or {},
         },
         "grouped_trades": grouped_trades_out,
         "equity_curve": equity_curve,
@@ -1291,9 +1301,15 @@ async def get_backtest(
             "UNKNOWN": risk_report.other_win_rate
         }
         
-        # Inject saved fields that cannot be easily regenerated from just grouped_trades
-        resp["report"]["bias_stats"] = params.get("bias_stats", {})
-        resp["report"]["confluence_stats"] = params.get("confluence_stats", {})
+        # Prefer the persisted values (computed once, right after the backtest
+        # ran, while original_signal/metadata were still in memory) over
+        # recomputing from grouped_trades_out here — that data has already
+        # been stripped for storage (see runner.py's _slim_sub_trades), so a
+        # from-scratch recompute can only ever produce a degenerate
+        # by_confirmation breakdown. Fall back to the fresh recompute only
+        # for backtests saved before these columns existed.
+        resp["report"]["bias_stats"] = run.bias_stats or risk_report.bias_stats
+        resp["report"]["confluence_stats"] = run.confluence_stats or risk_report.confluence_stats
         resp["report"]["sortino_ratio"] = run.sortino_ratio or risk_report.sortino_ratio
         resp["report"]["expectancy_r"] = run.expectancy_r or risk_report.expectancy_r
     except Exception as e:

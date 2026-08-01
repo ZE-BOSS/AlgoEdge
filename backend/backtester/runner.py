@@ -210,6 +210,8 @@ async def run_backtest(
         sl_hit_rate=report.sl_hit_rate,
         trail_hit_rate=report.trail_hit_rate,
         rejection_funnel=report.rejection_funnel,
+        bias_stats=report.bias_stats,
+        confluence_stats=report.confluence_stats,
         run_logs=json.dumps(results.get("run_logs", []), default=_json_default),
     )
 

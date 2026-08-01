@@ -271,6 +271,22 @@ class BacktestEngine:
                     else:
                         sl_hit = False
 
+                # Update MAE/MFE using this bar's high/low BEFORE the exit checks below,
+                # so the excursion on the closing bar itself is captured — previously
+                # this ran after the sl_hit/tp_hit `continue`s, so any trade that hit
+                # its SL/TP on the same bar it was evaluated (i.e. most quick trades)
+                # closed with mae_pips/mfe_pips frozen at their 0.0 initial value.
+                if pos["direction"] == "BUY":
+                    adverse = pos["entry_price"] - low
+                    favorable = high - pos["entry_price"]
+                else:
+                    adverse = high - pos["entry_price"]
+                    favorable = pos["entry_price"] - low
+
+                pip_size = get_pip_size(pos.get("symbol", ""))
+                pos["mae_pips"] = max(pos.get("mae_pips", 0), adverse / pip_size if pip_size else 0)
+                pos["mfe_pips"] = max(pos.get("mfe_pips", 0), favorable / pip_size if pip_size else 0)
+
                 if sl_hit:
                     pos["exit_price"] = pos["stop_loss"]
                     pos["exit_reason"] = "BE_SL" if pos.get("be_applied") else "SL"
@@ -285,18 +301,6 @@ class BacktestEngine:
                     if pos.get("tp_level") == 1:
                         tp1_hit_groups.add(pos.get("group_id"))
                     continue
-
-                # Update MAE/MFE
-                if pos["direction"] == "BUY":
-                    adverse = pos["entry_price"] - low
-                    favorable = high - pos["entry_price"]
-                else:
-                    adverse = high - pos["entry_price"]
-                    favorable = pos["entry_price"] - low
-
-                pip_size = get_pip_size(pos.get("symbol", ""))
-                pos["mae_pips"] = max(pos.get("mae_pips", 0), adverse / pip_size if pip_size else 0)
-                pos["mfe_pips"] = max(pos.get("mfe_pips", 0), favorable / pip_size if pip_size else 0)
 
                 # Run BE/trailing checks via RiskEngine — WITH ATR + swing data
                 actions = self.risk_engine.manage_open_position(
@@ -336,7 +340,13 @@ class BacktestEngine:
             for pos in closed_this_bar:
                 pos["exit_time"] = current_time
                 try:
-                    pos["session"] = detect_session(current_time)
+                    # current_time may be a numpy.int64/float64 (e.g. when it
+                    # comes from bar['time']). numpy.int64 is NOT an instance
+                    # of Python's int, so detect_session()'s isinstance checks
+                    # silently fall through to "UNKNOWN" for it — even though
+                    # no exception is raised. Normalize to a plain Python
+                    # float first, same as sig_time already is at entry time.
+                    pos["session"] = detect_session(_to_epoch_seconds(current_time))
                 except Exception:
                     pos["session"] = "UNKNOWN"
 
@@ -543,7 +553,7 @@ class BacktestEngine:
 
         # Detect entry session
         try:
-            entry_session = detect_session(current_time)
+            entry_session = detect_session(_to_epoch_seconds(current_time))
         except Exception:
             entry_session = "UNKNOWN"
 

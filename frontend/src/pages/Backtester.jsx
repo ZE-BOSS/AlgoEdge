@@ -1,13 +1,12 @@
-import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap, LayoutDashboard, PlusCircle, MinusCircle } from 'lucide-react';
-import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getBulkBacktests } from '../services/api';
+import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart } from '../services/api';
 import TradeChart from '../components/TradeChart';
 import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
 import * as summaryEngine from '../utils/summaryEngine';
-import CumulativeSummary from '../components/CumulativeSummary';
 
 const SYMBOLS = [
   'XAUUSD', 'Gold', 'XAU', 'XAGUSD', 'Silver', 'XAG', 'XPTUSD', 'Platinum', 'XPT',
@@ -312,14 +311,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
   const report = result.report || {};
   const grouped = result.grouped_trades || [];
   const eqData = (result.equity_curve || []).map((v, i) => ({ bar: i, equity: v }));
-  const sessionRates = result.session_win_rates || {};
-  const sessionData = [
-    { session: 'London', rate: ((report.london_win_rate ?? sessionRates.LONDON) || 0) * 100 },
-    { session: 'NY', rate: ((report.ny_win_rate ?? sessionRates.NY) || 0) * 100 },
-    { session: 'London/NY', rate: ((report.overlap_win_rate ?? sessionRates.OVERLAP) || 0) * 100 },
-    { session: 'Asian', rate: ((report.asian_win_rate ?? sessionRates.ASIAN) || 0) * 100 },
-    { session: 'Other', rate: ((report.other_win_rate ?? sessionRates.UNKNOWN) || 0) * 100 }
-  ];
+  const initialBalance = result.initial_balance || 10000;
 
   const [groupBy, setGroupBy] = useState('Month'); // Default to month
   const [viewMode, setViewMode] = useState('TRADES'); // 'TRADES' or 'SUMMARY'
@@ -342,6 +334,44 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
   if (activeFilter === 'Losses') filteredGrouped = filteredGrouped.filter(g => (g.net_pnl ?? g.combined_pnl ?? g.pnl) <= 0);
   if (symbolFilter !== 'All') filteredGrouped = filteredGrouped.filter(g => g.symbol === symbolFilter);
   if (strategyFilter !== 'All') filteredGrouped = filteredGrouped.filter(g => g.strategy_id === strategyFilter);
+
+  // Normalize grouped trades into the shape summaryEngine's math expects,
+  // sorted chronologically (its stats functions assume this). Re-derived
+  // whenever the symbol/strategy/result filter changes, so switching the
+  // Symbol dropdown updates every metric below — not just the trade list —
+  // to reflect only that symbol/strategy's own trades.
+  const filteredNormalized = useMemo(() => {
+    return [...filteredGrouped]
+      .map(g => ({
+        pnl: g.net_pnl ?? g.combined_pnl ?? g.pnl ?? 0,
+        entry_time: g.entry_time_iso || g.entry_time,
+        exit_time: g.exit_time_iso || g.exit_time,
+        balance_before: g.balance_before,
+        direction: g.direction,
+        entry_price: g.entry_price,
+        stop_loss: g.stop_loss,
+        exit_price: g.exit_price,
+        session: g.entry_session,
+        symbol: g.symbol,
+      }))
+      .sort((a, b) => new Date(a.entry_time || 0) - new Date(b.entry_time || 0));
+  }, [filteredGrouped]);
+
+  const filteredStats = useMemo(
+    () => summaryEngine.computePeriodStats(filteredNormalized, initialBalance),
+    [filteredNormalized, initialBalance]
+  );
+
+  const filteredSessionData = useMemo(() => {
+    const rates = summaryEngine.computeSessionStats(filteredNormalized);
+    return [
+      { session: 'London', rate: (rates.LONDON?.winRate || 0) * 100 },
+      { session: 'NY', rate: (rates.NY?.winRate || 0) * 100 },
+      { session: 'London/NY', rate: (rates.OVERLAP?.winRate || 0) * 100 },
+      { session: 'Asian', rate: (rates.ASIAN?.winRate || 0) * 100 },
+      { session: 'Other', rate: (rates.UNKNOWN?.winRate || 0) * 100 },
+    ];
+  }, [filteredNormalized]);
 
   let displayGroups = [];
   const displayGrouped = filteredGrouped; // Virtualized list handles large datasets efficiently
@@ -376,26 +406,83 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     return displayGroups.map(group => {
       let startBal = null;
       let endBal = null;
-      let pnl = 0;
-      let wins = 0;
-      let losses = 0;
 
       const sorted = [...group.trades].sort((a, b) => new Date(a.entry_time_iso || 0) - new Date(b.entry_time_iso || 0));
       sorted.forEach(t => {
         if (startBal === null) startBal = t.balance_before;
         endBal = t.balance_after;
-        const tpnl = t.combined_pnl || t.pnl || 0;
-        pnl += tpnl;
-        if (tpnl > 0) wins++; else losses++;
       });
+
+      // Reuse the exact same stats math as the top-level cards (and as
+      // CumulativeSummary) so a period row's Max DD / Sharpe / Sortino /
+      // Expectancy are computed consistently, not with a second formula.
+      const normalized = sorted.map(t => ({
+        pnl: t.net_pnl ?? t.combined_pnl ?? t.pnl ?? 0,
+        entry_time: t.entry_time_iso || t.entry_time,
+        exit_time: t.exit_time_iso || t.exit_time,
+        balance_before: t.balance_before,
+        direction: t.direction,
+        entry_price: t.entry_price,
+        stop_loss: t.stop_loss,
+        exit_price: t.exit_price,
+      }));
+      const stats = summaryEngine.computePeriodStats(normalized, startBal ?? initialBalance);
+
+      // TP-level / exit-reason breakdown across every leg in this period —
+      // this is what the row's expand panel drills into.
+      const tpBreakdown = {};
+      sorted.forEach(g => {
+        (g.sub_trades || []).forEach(st => {
+          const reason = st.exit_reason || 'UNKNOWN';
+          if (!tpBreakdown[reason]) tpBreakdown[reason] = { count: 0, wins: 0, pnl: 0 };
+          tpBreakdown[reason].count++;
+          tpBreakdown[reason].pnl += st.pnl || 0;
+          if ((st.pnl || 0) > 0) tpBreakdown[reason].wins++;
+        });
+      });
+
+      // Per-symbol breakdown within this period — only meaningful when
+      // viewing multiple symbols at once (the Symbol filter is 'All').
+      let symbolBreakdown = null;
+      if (symbolFilter === 'All') {
+        const bySymbol = {};
+        sorted.forEach(t => {
+          const sym = t.symbol || 'UNKNOWN';
+          if (!bySymbol[sym]) bySymbol[sym] = [];
+          bySymbol[sym].push(t);
+        });
+        symbolBreakdown = Object.entries(bySymbol).map(([sym, trades]) => {
+          const symPnl = trades.reduce((a, t) => a + (t.net_pnl ?? t.combined_pnl ?? t.pnl ?? 0), 0);
+          const symWins = trades.filter(t => (t.net_pnl ?? t.combined_pnl ?? t.pnl ?? 0) > 0).length;
+          return { symbol: sym, trades: trades.length, wins: symWins, losses: trades.length - symWins, pnl: symPnl };
+        }).sort((a, b) => b.trades - a.trades);
+      }
+
       return {
         period: group.label,
         tradeCount: group.trades.length,
-        startBal, endBal, pnl,
-        winRate: wins / (wins + losses) || 0
+        startBal, endBal,
+        pnl: stats.pnl,
+        winRate: stats.winRate,
+        maxDdPct: stats.maxDdPct,
+        sharpe: stats.sharpe,
+        sortino: stats.sortino,
+        expectancyR: stats.expectancyR,
+        avgDurationMin: stats.avgDurationMin,
+        tpBreakdown,
+        symbolBreakdown,
       };
     });
-  }, [displayGroups, groupBy]);
+  }, [displayGroups, groupBy, symbolFilter, initialBalance]);
+
+  const [expandedPeriods, setExpandedPeriods] = useState(new Set());
+  const togglePeriod = (period) => {
+    setExpandedPeriods(prev => {
+      const next = new Set(prev);
+      if (next.has(period)) next.delete(period); else next.add(period);
+      return next;
+    });
+  };
 
   // Downsample equity curve to prevent Recharts from freezing the browser
   let chartEqData = eqData;
@@ -477,14 +564,14 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     )}
 
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginBottom: 16 }}>
-      <MetricCard title="Final Balance" value={`$${(result.final_balance || 0).toFixed(2)}`} color={result.final_balance >= result.initial_balance ? 'var(--green)' : 'var(--red)'} />
-      <MetricCard title="Net P&L" value={`$${((result.final_balance || 0) - (result.initial_balance || 0)).toFixed(2)}`} color={(result.final_balance - result.initial_balance) >= 0 ? 'var(--green)' : 'var(--red)'} />
-      <MetricCard title="Win Rate" value={`${((report.win_rate || 0) * 100).toFixed(1)}%`} color={report.win_rate >= 0.5 ? 'var(--green)' : 'var(--red)'} />
-      <MetricCard title="Profit Factor" value={(report.profit_factor || 0).toFixed(2)} />
-      <MetricCard title="Sharpe" value={(report.sharpe_ratio || 0).toFixed(2)} />
-      <MetricCard title="Max DD" value={`${((report.max_drawdown_pct || 0) * 100).toFixed(1)}%`} color="var(--red)" />
-      <MetricCard title="Expectancy (R)" value={(report.expectancy_r || 0).toFixed(2)} />
-      <MetricCard title="Sortino" value={(report.sortino_ratio || 0).toFixed(2)} />
+      <MetricCard title="Final Balance" value={`$${(initialBalance + filteredStats.pnl).toFixed(2)}`} color={filteredStats.pnl >= 0 ? 'var(--green)' : 'var(--red)'} />
+      <MetricCard title="Net P&L" value={`$${filteredStats.pnl.toFixed(2)}`} color={filteredStats.pnl >= 0 ? 'var(--green)' : 'var(--red)'} />
+      <MetricCard title="Win Rate" value={`${(filteredStats.winRate * 100).toFixed(1)}%`} color={filteredStats.winRate >= 0.5 ? 'var(--green)' : 'var(--red)'} />
+      <MetricCard title="Profit Factor" value={filteredStats.profitFactor >= 999 ? '∞' : filteredStats.profitFactor.toFixed(2)} />
+      <MetricCard title="Sharpe" value={filteredStats.sharpe.toFixed(2)} />
+      <MetricCard title="Max DD" value={`${(filteredStats.maxDdPct * 100).toFixed(1)}%`} color="var(--red)" />
+      <MetricCard title="Expectancy (R)" value={filteredStats.expectancyR.toFixed(2)} />
+      <MetricCard title="Sortino" value={filteredStats.sortino >= 999 ? '∞' : filteredStats.sortino.toFixed(2)} />
     </div>
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
       {[1, 2, 3, 4, 5].map(n => { const rate = report[`tp${n}_hit_rate`]; return rate != null && rate > 0 ? <div key={n} className="badge badge-green" style={{ padding: '4px 10px', fontSize: '0.75rem' }}>TP{n}: {(rate * 100).toFixed(0)}%</div> : null; })}
@@ -496,7 +583,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         <ResponsiveContainer width="100%" height={200}><AreaChart data={chartEqData}><XAxis dataKey="bar" hide /><YAxis domain={['auto', 'auto']} fontSize={10} /><Tooltip formatter={v => `$${v.toFixed(2)}`} /><Area type="monotone" dataKey="equity" stroke="#3fb68b" fill="#3fb68b20" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>)}
       <div className="card" style={{ padding: 12 }}><h4 style={{ marginBottom: 8 }}>Win Rate by Session</h4>
-        <ResponsiveContainer width="100%" height={200}><BarChart data={sessionData}><XAxis dataKey="session" fontSize={11} /><YAxis domain={[0, 100]} fontSize={10} /><Tooltip formatter={v => `${v.toFixed(1)}%`} /><Bar dataKey="rate" fill="#58a6ff" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
+        <ResponsiveContainer width="100%" height={200}><BarChart data={filteredSessionData}><XAxis dataKey="session" fontSize={11} /><YAxis domain={[0, 100]} fontSize={10} /><Tooltip formatter={v => `${v.toFixed(1)}%`} /><Bar dataKey="rate" fill="#58a6ff" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
       </div>
     </div>
     {(report.confluence_stats || report.bias_stats) && (
@@ -606,32 +693,96 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         </div>
       </div>
       {viewMode === 'SUMMARY' ? (
-        <div className="table-wrapper" style={{ maxHeight: 500, overflow: 'auto' }}>
+        <div className="table-wrapper" style={{ maxHeight: 600, overflow: 'auto' }}>
           <table>
-            <thead>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--bg-secondary)' }}>
               <tr>
+                <th style={{ width: 24 }}></th>
                 <th>Period</th>
                 <th>Trades</th>
                 <th>Win Rate</th>
                 <th>Starting Balance</th>
                 <th>Ending Balance</th>
                 <th>Period P&L</th>
+                <th>Max DD %</th>
+                <th>Sharpe</th>
+                <th>Sortino</th>
+                <th>Expectancy (R)</th>
               </tr>
             </thead>
             <tbody>
-              {summaryData.length > 0 ? summaryData.map((row, i) => (
-                <tr key={i}>
-                  <td><strong>{row.period}</strong></td>
-                  <td>{row.tradeCount}</td>
-                  <td style={{ color: row.winRate >= 0.5 ? 'var(--green)' : 'var(--red)' }}>{(row.winRate * 100).toFixed(1)}%</td>
-                  <td>${row.startBal != null ? row.startBal.toFixed(2) : '—'}</td>
-                  <td>${row.endBal != null ? row.endBal.toFixed(2) : '—'}</td>
-                  <td style={{ color: row.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
-                    ${row.pnl.toFixed(2)}
-                  </td>
-                </tr>
-              )) : (
-                <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px 0' }}>No summary data available. Select a grouping mode.</td></tr>
+              {summaryData.length > 0 ? summaryData.map((row, i) => {
+                const isExpanded = expandedPeriods.has(row.period);
+                const tpEntries = Object.entries(row.tpBreakdown || {}).sort((a, b) => b[1].count - a[1].count);
+                return (
+                  <React.Fragment key={row.period || i}>
+                    <tr onClick={() => togglePeriod(row.period)} style={{ cursor: 'pointer', background: isExpanded ? 'rgba(255,255,255,0.03)' : 'transparent' }}>
+                      <td style={{ color: 'var(--text-muted)' }}>{isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</td>
+                      <td><strong>{row.period}</strong></td>
+                      <td>{row.tradeCount}</td>
+                      <td style={{ color: row.winRate >= 0.5 ? 'var(--green)' : 'var(--red)' }}>{(row.winRate * 100).toFixed(1)}%</td>
+                      <td>${row.startBal != null ? row.startBal.toFixed(2) : '—'}</td>
+                      <td>${row.endBal != null ? row.endBal.toFixed(2) : '—'}</td>
+                      <td style={{ color: row.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                        ${row.pnl.toFixed(2)}
+                      </td>
+                      <td style={{ color: 'var(--red)' }}>{(row.maxDdPct * 100).toFixed(2)}%</td>
+                      <td>{row.sharpe.toFixed(2)}</td>
+                      <td>{row.sortino >= 999 ? '∞' : row.sortino.toFixed(2)}</td>
+                      <td style={{ color: row.expectancyR > 0 ? 'var(--green)' : 'var(--red)' }}>{row.expectancyR.toFixed(2)}</td>
+                    </tr>
+                    {isExpanded && (
+                      <tr style={{ background: 'var(--bg-tertiary)' }}>
+                        <td></td>
+                        <td colSpan={10} style={{ padding: '12px 16px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: row.symbolBreakdown ? '1fr 1fr' : '1fr', gap: 20 }}>
+                            <div>
+                              <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>
+                                By TP / Exit Reason
+                              </div>
+                              {tpEntries.length > 0 ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                  {tpEntries.map(([reason, d]) => (
+                                    <div key={reason} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                                      <span>{reason} <span style={{ color: 'var(--text-muted)' }}>({d.count})</span></span>
+                                      <span>
+                                        <span style={{ color: d.wins / d.count >= 0.5 ? 'var(--green)' : 'var(--red)', marginRight: 8 }}>
+                                          {((d.wins / d.count) * 100).toFixed(0)}% WR
+                                        </span>
+                                        <span style={{ color: d.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>${d.pnl.toFixed(2)}</span>
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No leg-level data</div>}
+                              <div style={{ marginTop: 10, fontSize: '0.75rem', color: 'var(--text-muted)' }}>Avg Duration: {fmtDur(row.avgDurationMin)}</div>
+                            </div>
+                            {row.symbolBreakdown && (
+                              <div>
+                                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>
+                                  By Symbol
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                  {row.symbolBreakdown.map(s => (
+                                    <div key={s.symbol} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                                      <span>{s.symbol} <span style={{ color: 'var(--text-muted)' }}>({s.trades})</span></span>
+                                      <span>
+                                        <span style={{ color: 'var(--text-muted)', marginRight: 8 }}>{s.wins}W / {s.losses}L</span>
+                                        <span style={{ color: s.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>${s.pnl.toFixed(2)}</span>
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              }) : (
+                <tr><td colSpan={11} style={{ textAlign: 'center', padding: '40px 0' }}>No summary data available. Select a grouping mode.</td></tr>
               )}
             </tbody>
           </table>
@@ -717,8 +868,6 @@ export default function Backtester() {
   const queryClient = useQueryClient();
   const { status } = useConnectionStore();
   const isAuth = useAuthStore(s => s.isAuthenticated);
-  const [selectedBacktests, setSelectedBacktests] = useState(new Set());
-  const [showSummary, setShowSummary] = useState(false);
   const [activeTab, setActiveTab] = useState('single'); // 'single' | 'portfolio'
   const STORAGE_KEY = 'algoedge_bt_config';
   const PORTFOLIO_KEY = 'algoedge_portfolio_config';
@@ -1425,22 +1574,16 @@ export default function Backtester() {
             <option value="PNL">Sort by P&L</option>
             <option value="WinRate">Sort by Win Rate</option>
           </select>
-          {selectedBacktests.size > 0 && (
-            <button className="btn btn-primary btn-sm" onClick={() => setShowSummary(true)}>
-              Open Summary ({selectedBacktests.size})
-            </button>
-          )}
         </div>
       </div>
       <div className="table-wrapper">
         <table>
           <thead><tr>
-            <th style={{ width: 40 }}></th>
             <th>Date</th><th>Symbol</th><th>Trades</th><th>Win Rate</th><th>P&L</th><th>Notes</th><th></th>
           </tr></thead>
           <tbody>
             {(() => {
-              if (!backtests?.length) return <tr><td colSpan="7" style={{ textAlign: 'center', padding: 20 }}>No saved backtests</td></tr>;
+              if (!backtests?.length) return <tr><td colSpan="6" style={{ textAlign: 'center', padding: 20 }}>No saved backtests</td></tr>;
 
               let filtered = [...backtests];
               if (savedBtFilter === 'Profitable') filtered = filtered.filter(b => b.total_pnl > 0);
@@ -1454,31 +1597,8 @@ export default function Backtester() {
               });
 
               return filtered.map(bt => {
-                const isSelected = selectedBacktests.has(bt.id);
-                // Uniqueness constraint check (symbol + strategy_id)
-                const uniqueKey = `${bt.symbol}_${bt.strategy_id}`;
-                const isConflict = !isSelected && Array.from(selectedBacktests).some(id => {
-                  const selBt = backtests.find(b => b.id === id);
-                  return selBt && `${selBt.symbol}_${selBt.strategy_id}` === uniqueKey;
-                });
-
                 return (
-                  <tr key={bt.id} style={{ background: isSelected ? 'rgba(88, 166, 255, 0.1)' : 'transparent' }}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        disabled={isConflict}
-                        title={isConflict ? "Another backtest with the same symbol and strategy is already selected" : ""}
-                        onChange={() => {
-                          const next = new Set(selectedBacktests);
-                          if (isSelected) next.delete(bt.id);
-                          else next.add(bt.id);
-                          setSelectedBacktests(next);
-                        }}
-                        style={{ cursor: isConflict ? 'not-allowed' : 'pointer', width: 14, height: 14 }}
-                      />
-                    </td>
+                  <tr key={bt.id}>
                     <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{bt.created_at ? new Date(bt.created_at).toLocaleString() : 'N/A'}</td>
                     <td><strong>{bt.symbol}</strong></td>
                     <td>{bt.total_trades}</td>
@@ -1499,13 +1619,6 @@ export default function Backtester() {
         </table>
       </div>
     </div>
-
-    {showSummary && selectedBacktests.size > 0 && (
-      <CumulativeSummary
-        selectedIds={selectedBacktests}
-        onClose={() => setShowSummary(false)}
-      />
-    )}
 
     {showSaveModal && (
       <SaveModal

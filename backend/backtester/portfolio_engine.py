@@ -20,7 +20,7 @@ from backend.risk.prop_firm_validator import PropFirmValidator
 from backend.utils.logger import get_logger
 from backend.utils.trade_grouper import group_trades
 from backend.utils.timeutils import detect_session
-from backend.backtester.engine import _epoch_to_iso, _calc_duration_minutes, _validate_position
+from backend.backtester.engine import _epoch_to_iso, _calc_duration_minutes, _validate_position, _to_epoch_seconds
 from backend.risk.compounding import get_instrument_profile
 
 logger = get_logger(__name__)
@@ -221,6 +221,20 @@ class PortfolioBacktestEngine:
                     else:
                         sl_hit = False
 
+                # Update MAE/MFE using this bar's high/low BEFORE the exit checks below,
+                # so the excursion on the closing bar itself is captured — see engine.py
+                # for the single-symbol version of this same fix.
+                if pos["direction"] == "BUY":
+                    adverse = pos["entry_price"] - low
+                    favorable = high - pos["entry_price"]
+                else:
+                    adverse = high - pos["entry_price"]
+                    favorable = pos["entry_price"] - low
+
+                pip_size = get_pip_size(sym)
+                pos["mae_pips"] = max(pos.get("mae_pips", 0), adverse / pip_size if pip_size else 0)
+                pos["mfe_pips"] = max(pos.get("mfe_pips", 0), favorable / pip_size if pip_size else 0)
+
                 if sl_hit:
                     pos["exit_price"] = pos["stop_loss"]
                     pos["exit_reason"] = "BE_SL" if pos.get("be_applied") else "SL"
@@ -235,17 +249,6 @@ class PortfolioBacktestEngine:
                     if pos.get("tp_level") == 1:
                         tp1_hit_groups.add(pos.get("group_id"))
                     continue
-
-                if pos["direction"] == "BUY":
-                    adverse = pos["entry_price"] - low
-                    favorable = high - pos["entry_price"]
-                else:
-                    adverse = high - pos["entry_price"]
-                    favorable = pos["entry_price"] - low
-
-                pip_size = get_pip_size(sym)
-                pos["mae_pips"] = max(pos.get("mae_pips", 0), adverse / pip_size if pip_size else 0)
-                pos["mfe_pips"] = max(pos.get("mfe_pips", 0), favorable / pip_size if pip_size else 0)
 
                 current_atr = symbol_cache[sym]["atr"].get(current_time, 0.0)
                 swing_points = symbol_cache[sym]["swings"].get(current_time, [])
@@ -284,7 +287,15 @@ class PortfolioBacktestEngine:
             for pos in closed_this_bar:
                 pos["exit_time"] = current_time
                 try:
-                    pos["session"] = detect_session(current_time)
+                    # current_time is drawn from global_timeline, which is
+                    # built from df['time'].values (a numpy array) — so each
+                    # element is a numpy.int64/float64, not a plain Python
+                    # int/float. detect_session()'s isinstance(x,(int,float))
+                    # check is False for numpy.int64, so it was silently
+                    # returning "UNKNOWN" for every single exit (no exception
+                    # thrown). sig_time at entry is explicitly float()-cast
+                    # already, which is why entry_session was unaffected.
+                    pos["session"] = detect_session(_to_epoch_seconds(current_time))
                 except Exception:
                     pos["session"] = "UNKNOWN"
                 pos["duration_minutes"] = _calc_duration_minutes(pos.get("entry_time"), pos.get("exit_time"))

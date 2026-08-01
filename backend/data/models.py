@@ -252,6 +252,14 @@ class BacktestRun(Base):
     llm_analysis = Column(Text)
     run_logs = Column(Text)  # JSON serialized logs
     rejection_funnel = Column(JSON, default={})
+    # Computed once at save time (see runner.py) from the full in-memory
+    # grouped trades — including original_signal/metadata, which are
+    # deliberately stripped before persistence (see BacktestTrade below /
+    # runner.py's _slim_sub_trades). by_confirmation in particular can never
+    # be correctly regenerated from the saved trades alone, so it must be
+    # captured here rather than recomputed on every GET /backtests/{id}.
+    bias_stats = Column(JSON, default={})
+    confluence_stats = Column(JSON, default={})
     created_at = Column(DateTime, server_default=func.now())
     trades = relationship(
         "BacktestTrade",

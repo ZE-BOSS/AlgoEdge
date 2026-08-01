@@ -81,6 +81,11 @@ MIGRATIONS = [
         "ALTER TABLE signals ADD COLUMN IF NOT EXISTS chart_data TEXT;",
         "ALTER TABLE signals DROP COLUMN IF EXISTS chart_data;",
     ),
+    (
+        "Add bias_stats and confluence_stats to backtest_runs",
+        "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS bias_stats TEXT;",
+        "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS confluence_stats TEXT;",
+    )
 ]
 
 
