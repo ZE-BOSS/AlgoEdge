@@ -89,7 +89,11 @@ def generate_risk_report(trades: list[dict[str, Any]]) -> RiskReport:
     """
     Generate a full RiskReport from a list of closed trades.
     """
-    initial_balance = trades[0].get("balance_before", 10000.0) if trades else 10000.0
+    # trades[0].get("balance_before", 10000.0) would silently return None
+    # instead of the 10000.0 default when the key is present-but-None
+    # (which grouped trades from trade_grouper.py can have) — guard explicitly.
+    _first_balance = trades[0].get("balance_before") if trades else None
+    initial_balance = _first_balance if _first_balance is not None else 10000.0
     stats = compute_portfolio_stats(trades, initial_balance=initial_balance)
 
     if not trades:
@@ -118,7 +122,8 @@ def generate_risk_report(trades: list[dict[str, Any]]) -> RiskReport:
     loss_r = [r for r in r_values if r <= 0]
 
     # Additional calculations for Drawdown, Calmar, and Streaks
-    initial_balance = trades[0].get("balance_before", 10000.0) if trades else 10000.0
+    # (initial_balance already computed above and hasn't changed — reusing
+    # it here instead of recomputing avoids re-introducing the same bug)
     sorted_trades = sorted(trades, key=lambda t: t.get("exit_time") or t.get("entry_time") or 0)
     equity = [initial_balance]
     for t in sorted_trades:

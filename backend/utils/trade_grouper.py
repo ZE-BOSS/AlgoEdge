@@ -81,10 +81,19 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
         g["pnl"] = g["combined_pnl"]
         g["exit_price"] = g["best_exit"].get("exit_price", 0) if g["best_exit"] else 0
         g["exit_reason"] = g["best_exit"].get("exit_reason", "UNKNOWN") if g["best_exit"] else "UNKNOWN"
-        # Propagate balance_before/after and net_pnl from sub_trades
+        # Propagate balance_before/after and net_pnl from sub_trades.
+        # NOTE: raw trade dicts from portfolio_engine.py never carry a
+        # "balance_before" key at all, so sub_trades[0].get("balance_before")
+        # returns None here. Only overwrite the group's balance_before
+        # (seeded from t.get("balance_before", 0) during group init above)
+        # when a sub-trade actually has a real value — otherwise this line
+        # was silently regressing a sane default back to None, which then
+        # crashes downstream in compute_portfolio_stats' "> 0" check.
         sorted_subs = sorted(sub_trades, key=lambda x: x.get("exit_time", 0))
-        g["balance_before"] = sub_trades[0].get("balance_before") if sub_trades else None
-        g["balance_after"]  = sorted_subs[-1].get("balance_after") if sorted_subs else None
+        first_balance_before = sub_trades[0].get("balance_before") if sub_trades else None
+        if first_balance_before is not None:
+            g["balance_before"] = first_balance_before
+        g["balance_after"] = sorted_subs[-1].get("balance_after") if sorted_subs else None
         g["net_pnl"]        = sum(t.get("pnl", 0) for t in sub_trades)
         
         # Find the last exit time

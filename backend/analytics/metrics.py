@@ -127,6 +127,17 @@ def max_consecutive(values: list[bool]) -> int:
     return max_count
 
 
+def _resolve_balance_before(trade: dict[str, Any], fallback: float) -> float:
+    """
+    dict.get(key, fallback) only applies `fallback` when the key is absent —
+    if the key is present but explicitly None (as happens for grouped trades
+    that never had a balance recorded), .get() returns None and any `> 0`
+    check on the result raises TypeError. Treat None the same as missing.
+    """
+    val = trade.get("balance_before")
+    return val if val is not None else fallback
+
+
 def compute_portfolio_stats(trades: list[dict[str, Any]], initial_balance: float = 10000.0) -> dict[str, Any]:
     """
     Compute aggregate portfolio statistics from a list of closed trades.
@@ -135,8 +146,15 @@ def compute_portfolio_stats(trades: list[dict[str, Any]], initial_balance: float
     if not trades:
         return {"total_trades": 0}
 
+    if initial_balance is None:
+        initial_balance = 10000.0
+
     pnls = [t.get("pnl", 0) for t in trades]
-    pct_returns = [t.get("pnl", 0) / t.get("balance_before", initial_balance) if t.get("balance_before", initial_balance) > 0 else 0 for t in trades]
+    pct_returns = [
+        t.get("pnl", 0) / _resolve_balance_before(t, initial_balance)
+        if _resolve_balance_before(t, initial_balance) > 0 else 0
+        for t in trades
+    ]
     wins = [t for t in trades if t.get("pnl", 0) > 0]
     losses = [t for t in trades if t.get("pnl", 0) <= 0]
 
