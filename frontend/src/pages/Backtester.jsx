@@ -744,6 +744,7 @@ export default function Backtester() {
     mutationFn: () => {
       setResult(null);
       setEvents([]);
+      setBtError(null);
       return runPortfolioBacktest({
         symbols: portfolioSymbols.map(s => ({ symbol: s.symbol, strategy_id: s.strategy_id, strategy_params: {} })),
         start_date: form.start_date || undefined,
@@ -858,6 +859,13 @@ export default function Backtester() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [progress, setProgress] = useState(null);
+  // Surfaces backend-side failures (the 'backtest_error' WS event / polled
+  // status:'error') directly in this page. Previously these were only
+  // logged to the persistent dashboard activity log via
+  // bot_service.log_system_event — nothing here ever cleared `progress`
+  // or showed a message, so a failed run just left the UI stuck on the
+  // last "running" stage forever with no visible error.
+  const [btError, setBtError] = useState(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [savedBtFilter, setSavedBtFilter] = useState('All');
   const [savedBtSort, setSavedBtSort] = useState('Date');
@@ -923,6 +931,13 @@ export default function Backtester() {
             }
             setTimeout(() => setProgress(null), 2000);
           }
+        } else if (m.type === 'backtest_error') {
+          // Backend task failed (e.g. an exception inside the engine) —
+          // the request itself already returned "started" successfully,
+          // so mutation.isError never fires for this. Clear progress so
+          // isRunning drops back to false and show the failure message.
+          setProgress(null);
+          setBtError(m.message || 'Backtest failed. Check the activity log for details.');
         }
       } catch { }
     };
@@ -936,6 +951,9 @@ export default function Backtester() {
       getBacktestStatus().then(res => {
         if (res.data.status === 'running') {
           setProgress(res.data.progress || { stage: 'Restoring...', pct: 0 });
+        } else if (res.data.status === 'error') {
+          setProgress(null);
+          setBtError(res.data.progress?.message || 'Backtest failed. Check the activity log for details.');
         } else if (res.data.status === 'complete' && !result) {
           setIsLoadingDetail(true);
           getLatestBacktestResult().then(r => {
@@ -956,6 +974,7 @@ export default function Backtester() {
     mutationFn: () => {
       setResult(null);
       setEvents([]);
+      setBtError(null);
       const validStrats = ['SMC_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'];
       const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'SMC_v1';
       const payload = { ...form, strategy_id: payload_strategy, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: { prop_firm: form.prop_firm }, strategy_params: {} };
@@ -1356,6 +1375,7 @@ export default function Backtester() {
           </div>
           {(isRunning || progress) && <ProgressBar progress={progress} />}
           {mutation.isError && <div style={{ color: 'var(--red)', fontSize: '0.8rem' }}>Error: {mutation.error?.response?.data?.detail || mutation.error?.message || 'Failed'}</div>}
+          {btError && <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginTop: 6 }}>Backtest failed: {btError}</div>}
         </div>
       </div>
 

@@ -398,25 +398,35 @@ class PortfolioBacktestEngine:
                 strategy_id = sig.get("strategy_name", sig.get("strategy_id", "UNKNOWN"))
 
                 # Mirror engine.py's confirmations list so the frontend's
-                # "Entry Confirmations" panel has something to render.
+                # "Entry Confirmations" panel has something to render. Built
+                # per-TP-level (same as engine.py's _create_position) since
+                # each leg has its own TP price / RR / volume.
+                #
+                # FIX: this used to be built once, ABOVE this loop, but
+                # referenced the loop variable `lvl` before the `for lvl in
+                # tp_levels:` loop that defines it had even started —
+                # `UnboundLocalError: cannot access local variable 'lvl'`,
+                # crashing every portfolio backtest on its first approved
+                # signal. Moved inside the loop so `lvl` is always bound.
                 signal_confirmations = sig.get("confirmations", [])
-                entry_confirmations = [
-                    f"Direction: {sig.get('direction', 'UNKNOWN')}",
-                    f"Symbol: {symbol}",
-                    f"Strategy: {strategy_id}",
-                    f"Entry Price: {sig['entry_price']:.5f}",
-                    f"Stop Loss: {sig['stop_loss']:.5f}",
-                    f"Take Profit (TP{lvl.level}): {lvl.tp_price:.5f}",
-                    f"RR Multiplier: 1:{lvl.rr_multiplier:.1f}",
-                    f"Volume: {lvl.volume:.2f} lots ({lvl.volume_pct * 100:.0f}%)",
-                    f"Entry Session: {entry_session}",
-                    "Entry Mode: ALL AT ENTRY",
-                ]
-                if signal_confirmations:
-                    entry_confirmations.append("── SMC Analysis ──")
-                    entry_confirmations.extend(signal_confirmations)
 
                 for lvl in tp_levels:
+                    entry_confirmations = [
+                        f"Direction: {sig.get('direction', 'UNKNOWN')}",
+                        f"Symbol: {symbol}",
+                        f"Strategy: {strategy_id}",
+                        f"Entry Price: {sig['entry_price']:.5f}",
+                        f"Stop Loss: {sig['stop_loss']:.5f}",
+                        f"Take Profit (TP{lvl.level}): {lvl.tp_price:.5f}",
+                        f"RR Multiplier: 1:{lvl.rr_multiplier:.1f}",
+                        f"Volume: {lvl.volume:.2f} lots ({lvl.volume_pct * 100:.0f}%)",
+                        f"Entry Session: {entry_session}",
+                        "Entry Mode: ALL AT ENTRY",
+                    ]
+                    if signal_confirmations:
+                        entry_confirmations.append("── SMC Analysis ──")
+                        entry_confirmations.extend(signal_confirmations)
+
                     new_pos = {
                         "id": str(uuid.uuid4()),
                         "group_id": group_id,

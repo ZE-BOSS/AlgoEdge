@@ -113,7 +113,14 @@ class PropFirmValidator:
                     self.is_breached = data.get("is_breached", False)
                     self.breach_reason = data.get("breach_reason", "")
                     self.net_deposits = data.get("net_deposits", 0.0)
-                    self.initial_balance = data.get("initial_balance", getattr(config, "initial_balance", 10000.0) if hasattr(self, 'config') else 10000.0)
+                    # FIX: previously referenced an undefined `config` name
+                    # (load_state() has no such variable/attribute — that
+                    # branch just happened to never execute because
+                    # hasattr(self, 'config') is always False). It also
+                    # discarded the value __init__ already set correctly
+                    # from the caller's config. Fall back to the
+                    # already-set self.initial_balance instead.
+                    self.initial_balance = data.get("initial_balance", self.initial_balance)
             except Exception as e:
                 logger.error(f"Failed to load prop firm state: {e}")
 
