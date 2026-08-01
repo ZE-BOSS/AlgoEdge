@@ -32,30 +32,55 @@ from backend.utils.trade_grouper import group_trades
 logger = get_logger(__name__)
 
 
-def _epoch_to_iso(epoch_val) -> str:
-    """Convert epoch timestamp or datetime to ISO string."""
+def _to_epoch_seconds(val) -> float | None:
+    """
+    Robustly convert an epoch number, python/pandas datetime, or numpy scalar
+    to epoch seconds (float).
+
+    This matters because portfolio_engine.py's global timeline is built from
+    `df['time'].values` / `df.index.values`, which yields numpy scalars
+    (np.int64, np.datetime64, ...) rather than plain python int/float.
+    np.int64 does NOT satisfy `isinstance(x, int)` on most platforms and has
+    no `.timestamp()` method, so the old int/float-only check silently fell
+    through and returned 0 / a raw numeric string for every such value.
+    """
+    if val is None:
+        return None
+    if isinstance(val, (int, float, np.integer, np.floating)):
+        return float(val)
+    if isinstance(val, datetime):
+        return val.timestamp()
+    if hasattr(val, "timestamp"):
+        try:
+            return float(val.timestamp())
+        except Exception:
+            pass
     try:
-        if isinstance(epoch_val, (int, float)):
-            return datetime.fromtimestamp(int(epoch_val), tz=timezone.utc).isoformat()
-        elif isinstance(epoch_val, datetime):
-            return epoch_val.isoformat()
-        elif isinstance(epoch_val, str):
-            return epoch_val
+        return pd.Timestamp(val).timestamp()
+    except Exception:
+        return None
+
+
+def _epoch_to_iso(epoch_val) -> str:
+    """Convert epoch timestamp (incl. numpy scalars) or datetime to ISO string."""
+    if isinstance(epoch_val, str):
+        return epoch_val
+    secs = _to_epoch_seconds(epoch_val)
+    if secs is None:
         return str(epoch_val)
+    try:
+        return datetime.fromtimestamp(secs, tz=timezone.utc).isoformat()
     except Exception:
         return str(epoch_val)
 
 
 def _calc_duration_minutes(entry_time, exit_time) -> float:
-    """Calculate trade duration in minutes from timestamps."""
-    try:
-        if isinstance(entry_time, (int, float)) and isinstance(exit_time, (int, float)):
-            return (exit_time - entry_time) / 60.0
-        elif hasattr(entry_time, "timestamp") and hasattr(exit_time, "timestamp"):
-            return (exit_time.timestamp() - entry_time.timestamp()) / 60.0
+    """Calculate trade duration in minutes, robust to numpy scalar / datetime / epoch inputs."""
+    e = _to_epoch_seconds(entry_time)
+    x = _to_epoch_seconds(exit_time)
+    if e is None or x is None:
         return 0.0
-    except Exception:
-        return 0.0
+    return (x - e) / 60.0
 
 
 def _validate_position(direction: str, entry_price: float, stop_loss: float, take_profit: float) -> tuple:
@@ -473,7 +498,7 @@ class BacktestEngine:
         # Group trades by group_id for combined P&L display
         grouped_trades = group_trades(self.trades, candles, candles_m15, candles_m5)
 
-        report = generate_risk_report(grouped_trades)
+        report = generate_risk_report(grouped_trades, initial_balance=initial_balance)
         report.rejection_funnel = self.rejection_funnel
 
         # ── Engine completion summary ──

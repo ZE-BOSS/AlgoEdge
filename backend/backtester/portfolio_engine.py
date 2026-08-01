@@ -76,6 +76,8 @@ class PortfolioBacktestEngine:
         portfolio_signals: dict[str, list[dict[str, Any]]],
         initial_balance: float = 10000.0,
         compounding_enabled: bool = False,
+        portfolio_data_m15: dict[str, pd.DataFrame] = None,
+        portfolio_data_m5: dict[str, pd.DataFrame] = None,
     ) -> dict[str, Any]:
         
         balance = initial_balance
@@ -386,15 +388,45 @@ class PortfolioBacktestEngine:
                     "message": f"Opened {sig['direction']} {symbol} @ {sig['entry_price']:.5f} | {len(tp_levels)} TPs"
                 })
 
+                # Detect entry session (used for session win-rate breakdown and
+                # displayed directly in the trade-expand panel)
+                try:
+                    entry_session = detect_session(sig_time)
+                except Exception:
+                    entry_session = "UNKNOWN"
+
+                strategy_id = sig.get("strategy_name", sig.get("strategy_id", "UNKNOWN"))
+
+                # Mirror engine.py's confirmations list so the frontend's
+                # "Entry Confirmations" panel has something to render.
+                signal_confirmations = sig.get("confirmations", [])
+                entry_confirmations = [
+                    f"Direction: {sig.get('direction', 'UNKNOWN')}",
+                    f"Symbol: {symbol}",
+                    f"Strategy: {strategy_id}",
+                    f"Entry Price: {sig['entry_price']:.5f}",
+                    f"Stop Loss: {sig['stop_loss']:.5f}",
+                    f"Take Profit (TP{lvl.level}): {lvl.tp_price:.5f}",
+                    f"RR Multiplier: 1:{lvl.rr_multiplier:.1f}",
+                    f"Volume: {lvl.volume:.2f} lots ({lvl.volume_pct * 100:.0f}%)",
+                    f"Entry Session: {entry_session}",
+                    "Entry Mode: ALL AT ENTRY",
+                ]
+                if signal_confirmations:
+                    entry_confirmations.append("── SMC Analysis ──")
+                    entry_confirmations.extend(signal_confirmations)
+
                 for lvl in tp_levels:
                     new_pos = {
                         "id": str(uuid.uuid4()),
                         "group_id": group_id,
                         "symbol": symbol,
-                        "strategy": sig.get("strategy_name", "UNKNOWN"),
+                        "strategy_id": strategy_id,
+                        "strategy": strategy_id,  # kept as an alias for backward compatibility
                         "direction": sig["direction"],
                         "entry_time": sig_time,
                         "entry_time_iso": _epoch_to_iso(sig_time),
+                        "entry_session": entry_session,
                         "entry_price": sig["entry_price"],
                         "stop_loss": sig["stop_loss"],
                         "take_profit": lvl.tp_price,
@@ -406,6 +438,13 @@ class PortfolioBacktestEngine:
                         "metadata": sig.get("metadata", {}),
                         "mae_pips": 0.0,
                         "mfe_pips": 0.0,
+                        # ── Previously missing fields — see fix notes ──
+                        "confluence_score": sig.get("confluence_score", 0),
+                        "balance_before": balance,
+                        "status": "OPEN",
+                        "entry_confirmations": entry_confirmations,
+                        "entry_snapshot_b64": sig.get("metadata", {}).get("entry_snapshot_b64", ""),
+                        "original_signal": sig,
                         "_last_known_close": sig["entry_price"]
                     }
                     self.open_positions.append(new_pos)
@@ -439,11 +478,19 @@ class PortfolioBacktestEngine:
         from backend.analytics.reports import generate_risk_report
         import uuid as _uuid
         
-        # Group trades using the shared utility
-        grouped_trades = group_trades(self.trades)
+        # Group trades using the shared utility. Pass the per-symbol candle
+        # dicts through so trade_grouper can extract chart_data / SMC zones
+        # per group (previously this was called with no candle data at all,
+        # so chart_data/chart_data_m15/chart_data_m5 were always empty for
+        # every portfolio backtest — see trade_grouper.py's symbol-aware
+        # candle resolution for how the dict form is handled).
+        grouped_trades = group_trades(self.trades, portfolio_data, portfolio_data_m15, portfolio_data_m5)
         
-        # generate_risk_report takes the grouped trades list; it infers initial_balance from trades[0]
-        report = generate_risk_report(grouped_trades)
+        # Pass the true initial_balance explicitly — do NOT rely on inference
+        # from trades[0].balance_before (fragile, and was the root cause of
+        # every report metric — Sharpe/Sortino/drawdown/equity curve — being
+        # computed off a $0 baseline before balance_before was fixed above).
+        report = generate_risk_report(grouped_trades, initial_balance=initial_balance)
         # Attach rejection funnel directly to the RiskReport object (same pattern as engine.py)
         report.rejection_funnel = self.rejection_funnel
 

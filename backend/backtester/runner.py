@@ -20,6 +20,20 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _json_default(obj):
+    """
+    Fallback serializer for json.dumps() when persisting nested trade data
+    (sub_trades, original_signal, chart_data, ...) which can contain
+    datetime/pandas Timestamp/numpy scalar values that json can't handle
+    natively.
+    """
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    if hasattr(obj, "item"):  # numpy scalar (np.int64, np.float64, ...)
+        return obj.item()
+    return str(obj)
+
+
 async def _broadcast_progress(user_id: str, progress: dict):
     """Send backtest progress event to the user via WebSocket."""
     try:
@@ -159,6 +173,8 @@ async def run_backtest(
         win_rate=report.win_rate,
         profit_factor=report.profit_factor,
         sharpe_ratio=report.sharpe_ratio,
+        sortino_ratio=report.sortino_ratio,
+        expectancy_r=report.expectancy_r,
         max_drawdown_pct=report.max_drawdown_pct,
         total_pnl=report.total_pnl,
         tp1_hit_rate=report.tp1_hit_rate,
@@ -170,6 +186,7 @@ async def run_backtest(
         sl_hit_rate=report.sl_hit_rate,
         trail_hit_rate=report.trail_hit_rate,
         rejection_funnel=report.rejection_funnel,
+        run_logs=json.dumps(results.get("run_logs", []), default=_json_default),
     )
 
     async with get_session() as session:
@@ -196,7 +213,21 @@ async def run_backtest(
                     confluence_score=trade_data.get("confluence_score"),
                     balance_before=trade_data.get("balance_before"),
                     balance_after=trade_data.get("balance_after"),
-                    smc_data=json.dumps(trade_data.get("score_breakdown") or {}),
+                    # Was reading trade_data["score_breakdown"], a key that
+                    # doesn't exist on grouped trades — smc_data (the actual
+                    # OB/FVG/marker zones drawn on the chart, produced by
+                    # trade_grouper.group_trades) was being silently dropped.
+                    smc_data=json.dumps(trade_data.get("smc_data") or {}, default=_json_default),
+                    # Previously never set at all — without these, saved
+                    # backtests can never render a trade chart, and without
+                    # sub_trades the "expand trade" panel (entry confirmations,
+                    # exit info, TP breakdown, confluence score) has nothing
+                    # to key off, since the frontend reads
+                    # group.sub_trades[0].entry_confirmations etc.
+                    chart_data=json.dumps(trade_data.get("chart_data") or [], default=_json_default),
+                    chart_data_m15=json.dumps(trade_data.get("chart_data_m15") or [], default=_json_default),
+                    chart_data_m5=json.dumps(trade_data.get("chart_data_m5") or [], default=_json_default),
+                    sub_trades=json.dumps(trade_data.get("sub_trades") or [], default=_json_default),
                 )
                 session.add(bt_trade)
 

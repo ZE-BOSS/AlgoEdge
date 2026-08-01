@@ -100,15 +100,15 @@ function SaveModal({ result, form, onClose, onSuccess }) {
     setIsSaving(true);
     setError(null);
     try {
-      await saveBacktest(result.backtest_id, { 
-        backtest_data: { 
-          ...result, 
-          strategy_id: form.strategy_id, 
-          symbol: form.symbol, 
+      await saveBacktest(result.backtest_id, {
+        backtest_data: {
+          ...result,
+          strategy_id: form.strategy_id,
+          symbol: form.symbol,
           risk_config: form,
           notes: notesInput
-        }, 
-        save_mode: 'FULL' 
+        },
+        save_mode: 'FULL'
       });
       onSuccess();
     } catch (e) {
@@ -124,8 +124,8 @@ function SaveModal({ result, form, onClose, onSuccess }) {
       <div className="card" style={{ width: '90%', maxWidth: 500, padding: 20 }}>
         <h3 style={{ marginTop: 0 }}>Save Backtest</h3>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Add narration and notes to this backtest run for future review. The current parameters will be saved automatically.</p>
-        <textarea 
-          value={notesInput} 
+        <textarea
+          value={notesInput}
           onChange={e => setNotesInput(e.target.value)}
           placeholder="E.g., Added Killzones to avoid Asian range chop. Improved WR by 5%..."
           style={{ width: '100%', height: 120, marginTop: 10, marginBottom: 15, padding: 10, background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', resize: 'vertical' }}
@@ -148,15 +148,17 @@ const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef
   const [fetchedCharts, setFetchedCharts] = useState(null);
   const [isLoadingChart, setIsLoadingChart] = useState(false);
   const pnl = group.combined_pnl || 0;
-  
+
+  const hasEmbeddedChart = (group.chart_data?.length > 0) || (group.chart_data_m15?.length > 0) || (group.chart_data_m5?.length > 0);
+
   useEffect(() => {
-    if (open && !fetchedCharts && !isLoadingChart) {
+    if (open && !hasEmbeddedChart && !fetchedCharts && !isLoadingChart) {
       setIsLoadingChart(true);
       const req = backtestId ? getSavedTradeChart(backtestId, group.group_id) : getUnsavedTradeChart(group.group_id);
-      req.then(res => setFetchedCharts(res.data)).catch(()=>{}).finally(() => setIsLoadingChart(false));
+      req.then(res => setFetchedCharts(res.data)).catch(() => { }).finally(() => setIsLoadingChart(false));
     }
-  }, [open, fetchedCharts, isLoadingChart, backtestId, group.group_id]);
-  
+  }, [open, hasEmbeddedChart, fetchedCharts, isLoadingChart, backtestId, group.group_id]);
+
   // Use fetched charts, or fallback to any embedded data
   const mergedGroup = {
     ...group,
@@ -165,145 +167,145 @@ const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef
     chart_data_m5: fetchedCharts?.chart_data_m5 || group.chart_data_m5
   };
 
-  
+
   return (
     <tbody ref={measureRef} data-index={vIndex}>
       <tr onClick={() => setOpen(!open)} style={{ cursor: 'pointer', background: pnl >= 0 ? 'rgba(63,182,139,0.04)' : 'rgba(248,81,73,0.04)' }}>
-      <td>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
-      <td>{index + 1}</td>
-      <td><strong>{group.symbol}</strong></td>
-      <td><span className={`badge ${group.direction === 'BUY' ? 'badge-green' : 'badge-red'}`}>{group.direction === 'BUY' ? '▲ BUY' : '▼ SELL'}</span></td>
-      <td>{typeof group.entry_price === 'number' ? group.entry_price.toFixed(2) : group.entry_price}</td>
-      <td>{fmt(group.entry_time_iso)}</td>
-      <td>{fmt(group.exit_time_iso)}</td>
-      <td>{fmtDur(group.duration_minutes)}</td>
-      <td>{group.tp_count} TPs ({group.tp_wins}W/{group.tp_losses}L)</td>
-      <td style={{ color: pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>${pnl.toFixed(2)}</td>
-      <td style={{ fontSize: '0.8rem' }}>${group.balance_before ? group.balance_before.toFixed(2) : '—'}</td>
-      <td style={{ fontSize: '0.8rem' }}>${group.balance_after ? group.balance_after.toFixed(2) : '—'}</td>
-      <td><span className="badge badge-blue">{group.entry_session || '—'}</span>{group.exit_session && group.exit_session !== group.entry_session && <span className="badge badge-blue" style={{ marginLeft: 4 }}>→{group.exit_session}</span>}</td>
-    </tr>
-    {open && group.sub_trades?.map((t, j) => (
-      <tr key={j} style={{ background: 'var(--bg-tertiary)', width: '100%', fontSize: '0.8rem' }}>
-        <td></td><td></td>
-        <td colSpan={2}><span className={`badge ${t.exit_reason?.startsWith('TP') ? 'badge-green' : t.exit_reason === 'BE_SL' ? 'badge-blue' : 'badge-red'}`}>TP{t.tp_level} → {t.exit_reason}</span></td>
-        <td colSpan={2} style={{ fontSize: '0.72rem' }}>{fmt(t.entry_time_iso)} → {fmt(t.exit_time_iso)}</td>
-        <td>{fmtDur(t.duration_minutes)}</td>
-        <td style={{ fontSize: '0.72rem' }}>Vol: {t.volume} | BE: {t.be_applied ? '✓' : '✗'}{t.trail_applied ? ' | Trail: ✓' : ''}</td>
-        <td style={{ fontSize: '0.72rem' }}>
-          MAE: {(t.mae_pips || 0).toFixed(1)}p | MFE: {(t.mfe_pips || 0).toFixed(1)}p
-          <br/>
-          Bal: ${t.balance_before ? t.balance_before.toFixed(2) : '—'} → ${t.balance_after ? t.balance_after.toFixed(2) : '—'}
-        </td>
-        <td style={{ color: (t.pnl || 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-          ${(t.pnl || 0).toFixed(2)}
-        </td>
-        <td>{t.session || '—'}</td>
-        <td></td><td></td>
+        <td>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
+        <td>{index + 1}</td>
+        <td><strong>{group.symbol}</strong></td>
+        <td><span className={`badge ${group.direction === 'BUY' ? 'badge-green' : 'badge-red'}`}>{group.direction === 'BUY' ? '▲ BUY' : '▼ SELL'}</span></td>
+        <td>{typeof group.entry_price === 'number' ? group.entry_price.toFixed(2) : group.entry_price}</td>
+        <td>{fmt(group.entry_time_iso)}</td>
+        <td>{fmt(group.exit_time_iso)}</td>
+        <td>{fmtDur(group.duration_minutes)}</td>
+        <td>{group.tp_count} TPs ({group.tp_wins}W/{group.tp_losses}L)</td>
+        <td style={{ color: pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>${pnl.toFixed(2)}</td>
+        <td style={{ fontSize: '0.8rem' }}>${group.balance_before != null ? group.balance_before.toFixed(2) : '—'}</td>
+        <td style={{ fontSize: '0.8rem' }}>${group.balance_after != null ? group.balance_after.toFixed(2) : '—'}</td>
+        <td><span className="badge badge-blue">{group.entry_session || '—'}</span>{group.exit_session && group.exit_session !== group.entry_session && <span className="badge badge-blue" style={{ marginLeft: 4 }}>→{group.exit_session}</span>}</td>
       </tr>
-    ))}
-    {open && mergedGroup.sub_trades?.[0]?.entry_confirmations && (
-      <tr><td colSpan={13} style={{ padding: 0, border: 'none' }}>
-        <div style={{ display: 'flex', gap: '20px', flexDirection: 'row', padding: '16px', background: 'var(--bg-tertiary)', margin: '4px 0px', borderRadius: 'var(--radius-xs)' }}>
-          <div style={{ width: '300px', flexShrink: 0, maxHeight: '800px', overflowY: 'auto' }}>
-            <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Entry Confirmations (Score: {group.sub_trades[0].confluence_score || '—'})</div>
-            {(group.sub_trades[0].entry_confirmations || []).map((c, i) => {
-              const isHeader = c.startsWith('═') || c.startsWith('──');
-              const isPass = c.startsWith('✓');
-              const isFail = c.startsWith('✗');
-              const isMixed = c.startsWith('△');
-              return <div key={i} style={{
-                fontSize: isHeader ? '0.72rem' : '0.75rem',
-                fontWeight: isHeader ? 700 : 400,
-                color: isHeader ? 'var(--blue)' : isPass ? 'var(--green)' : isFail ? 'var(--text-muted)' : isMixed ? 'var(--yellow)' : 'var(--text-secondary)',
-                padding: '3px 0',
-                borderBottom: isHeader ? 'none' : '1px solid var(--border)',
-                marginTop: isHeader ? 8 : 0,
-              }}>{c}</div>;
-            })}
-            {group.sub_trades[0].exit_confirmations && (
-              <>
-                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 16, marginBottom: 6, fontWeight: 600 }}>Exit Info</div>
-                {group.sub_trades[0].exit_confirmations.map((c, i) =>
-                  <div key={i} style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: '3px 0', borderBottom: '1px solid var(--border)' }}>{c}</div>
-                )}
-              </>
-            )}
-            
-            <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 16, marginBottom: 8, fontWeight: 600 }}>Trade Analytics</div>
-            <div style={{ display: 'grid', gap: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Group ID</span>
-                <span style={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>{group.group_id}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Session</span>
-                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--purple)' }}>{group.entry_session || 'UNKNOWN'}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Confluence Score</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ width: '40px', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
-                    <div style={{ width: `${Math.min(100, Math.max(0, group.confluence_score || 0))}%`, height: '100%', background: (group.confluence_score||0) >= 80 ? 'var(--green)' : (group.confluence_score||0) >= 60 ? 'var(--blue)' : 'var(--yellow)' }} />
-                  </div>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{group.confluence_score || 0}/100</span>
+      {open && group.sub_trades?.map((t, j) => (
+        <tr key={j} style={{ background: 'var(--bg-tertiary)', width: '100%', fontSize: '0.8rem' }}>
+          <td></td><td></td>
+          <td colSpan={2}><span className={`badge ${t.exit_reason?.startsWith('TP') ? 'badge-green' : t.exit_reason === 'BE_SL' ? 'badge-blue' : 'badge-red'}`}>TP{t.tp_level} → {t.exit_reason}</span></td>
+          <td colSpan={2} style={{ fontSize: '0.72rem' }}>{fmt(t.entry_time_iso)} → {fmt(t.exit_time_iso)}</td>
+          <td>{fmtDur(t.duration_minutes)}</td>
+          <td style={{ fontSize: '0.72rem' }}>Vol: {t.volume} | BE: {t.be_applied ? '✓' : '✗'}{t.trail_applied ? ' | Trail: ✓' : ''}</td>
+          <td style={{ fontSize: '0.72rem' }}>
+            MAE: {(t.mae_pips || 0).toFixed(1)}p | MFE: {(t.mfe_pips || 0).toFixed(1)}p
+            <br />
+            Bal: ${t.balance_before != null ? t.balance_before.toFixed(2) : '—'} → ${t.balance_after != null ? t.balance_after.toFixed(2) : '—'}
+          </td>
+          <td style={{ color: (t.pnl || 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+            ${(t.pnl || 0).toFixed(2)}
+          </td>
+          <td>{t.session || '—'}</td>
+          <td></td><td></td>
+        </tr>
+      ))}
+      {open && mergedGroup.sub_trades?.[0]?.entry_confirmations && (
+        <tr><td colSpan={13} style={{ padding: 0, border: 'none' }}>
+          <div style={{ display: 'flex', gap: '20px', flexDirection: 'row', padding: '16px', background: 'var(--bg-tertiary)', margin: '4px 0px', borderRadius: 'var(--radius-xs)' }}>
+            <div style={{ width: '300px', flexShrink: 0, maxHeight: '800px', overflowY: 'auto' }}>
+              <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Entry Confirmations (Score: {group.sub_trades[0].confluence_score || '—'})</div>
+              {(group.sub_trades[0].entry_confirmations || []).map((c, i) => {
+                const isHeader = c.startsWith('═') || c.startsWith('──');
+                const isPass = c.startsWith('✓');
+                const isFail = c.startsWith('✗');
+                const isMixed = c.startsWith('△');
+                return <div key={i} style={{
+                  fontSize: isHeader ? '0.72rem' : '0.75rem',
+                  fontWeight: isHeader ? 700 : 400,
+                  color: isHeader ? 'var(--blue)' : isPass ? 'var(--green)' : isFail ? 'var(--text-muted)' : isMixed ? 'var(--yellow)' : 'var(--text-secondary)',
+                  padding: '3px 0',
+                  borderBottom: isHeader ? 'none' : '1px solid var(--border)',
+                  marginTop: isHeader ? 8 : 0,
+                }}>{c}</div>;
+              })}
+              {group.sub_trades[0].exit_confirmations && (
+                <>
+                  <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 16, marginBottom: 6, fontWeight: 600 }}>Exit Info</div>
+                  {group.sub_trades[0].exit_confirmations.map((c, i) =>
+                    <div key={i} style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: '3px 0', borderBottom: '1px solid var(--border)' }}>{c}</div>
+                  )}
+                </>
+              )}
+
+              <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 16, marginBottom: 8, fontWeight: 600 }}>Trade Analytics</div>
+              <div style={{ display: 'grid', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Group ID</span>
+                  <span style={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>{group.group_id}</span>
                 </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Risk / TP Splits</span>
-                <div style={{ display: 'flex', gap: '4px' }}>
-                  {group.sub_trades?.map((st, idx) => (
-                    <span key={idx} className={`badge badge-${(st.pnl || 0) > 0 ? 'green' : (st.pnl || 0) < 0 ? 'red' : 'secondary'}`} style={{ fontSize: '0.65rem' }}>
-                      TP{st.tp_level || idx+1}: {st.volume}L
-                    </span>
-                  ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Session</span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--purple)' }}>{group.entry_session || 'UNKNOWN'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Confluence Score</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: '40px', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.min(100, Math.max(0, group.confluence_score || 0))}%`, height: '100%', background: (group.confluence_score || 0) >= 80 ? 'var(--green)' : (group.confluence_score || 0) >= 60 ? 'var(--blue)' : 'var(--yellow)' }} />
+                    </div>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{group.confluence_score || 0}/100</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Risk / TP Splits</span>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    {group.sub_trades?.map((st, idx) => (
+                      <span key={idx} className={`badge badge-${(st.pnl || 0) > 0 ? 'green' : (st.pnl || 0) < 0 ? 'red' : 'secondary'}`} style={{ fontSize: '0.65rem' }}>
+                        TP{st.tp_level || idx + 1}: {st.volume}L
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', flexGrow: 1, minWidth: 0 }}>
-            {isLoadingChart ? (
-              <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Loading charts...</div>
-            ) : (mergedGroup.chart_data?.length > 0 || mergedGroup.chart_data_m15?.length > 0 || mergedGroup.chart_data_m5?.length > 0) ? (
-              <div style={{ background: 'rgba(0,0,0,0.1)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-                <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.2)' }}>
-                  {['M15', 'M5'].map(tf => {
-                    const hasData = tf === 'M15' ? mergedGroup.chart_data_m15?.length > 0 : mergedGroup.chart_data_m5?.length > 0;
-                    if (!hasData && !(tf === 'M5' && mergedGroup.chart_data?.length > 0)) return null;
-                    return (
-                      <button
-                        key={tf}
-                        onClick={() => setActiveChart(tf)}
-                        style={{
-                          padding: '8px 16px', background: 'none', border: 'none',
-                          color: activeChart === tf ? 'var(--text-primary)' : 'var(--text-muted)',
-                          fontWeight: activeChart === tf ? 600 : 400,
-                          borderBottom: activeChart === tf ? '2px solid var(--blue)' : '2px solid transparent',
-                          cursor: 'pointer', fontSize: '0.8rem'
-                        }}
-                      >
-                        {tf === 'M15' ? 'HTF Context (M15)' : 'Entry (M5)'}
-                      </button>
-                    )
-                  })}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', flexGrow: 1, minWidth: 0 }}>
+              {isLoadingChart ? (
+                <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Loading charts...</div>
+              ) : (mergedGroup.chart_data?.length > 0 || mergedGroup.chart_data_m15?.length > 0 || mergedGroup.chart_data_m5?.length > 0) ? (
+                <div style={{ background: 'rgba(0,0,0,0.1)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.2)' }}>
+                    {['M15', 'M5'].map(tf => {
+                      const hasData = tf === 'M15' ? mergedGroup.chart_data_m15?.length > 0 : mergedGroup.chart_data_m5?.length > 0;
+                      if (!hasData && !(tf === 'M5' && mergedGroup.chart_data?.length > 0)) return null;
+                      return (
+                        <button
+                          key={tf}
+                          onClick={() => setActiveChart(tf)}
+                          style={{
+                            padding: '8px 16px', background: 'none', border: 'none',
+                            color: activeChart === tf ? 'var(--text-primary)' : 'var(--text-muted)',
+                            fontWeight: activeChart === tf ? 600 : 400,
+                            borderBottom: activeChart === tf ? '2px solid var(--blue)' : '2px solid transparent',
+                            cursor: 'pointer', fontSize: '0.8rem'
+                          }}
+                        >
+                          {tf === 'M15' ? 'HTF Context (M15)' : 'Entry (M5)'}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div style={{ padding: '8px' }}>
+                    {activeChart === 'M15' && <TradeChart group={mergedGroup} timeframe="M15" height={400} />}
+                    {activeChart === 'M5' && <TradeChart group={mergedGroup} timeframe="M5" height={400} />}
+                  </div>
                 </div>
-                <div style={{ padding: '8px' }}>
-                  {activeChart === 'M15' && <TradeChart group={mergedGroup} timeframe="M15" height={400} />}
-                  {activeChart === 'M5' && <TradeChart group={mergedGroup} timeframe="M5" height={400} />}
-                </div>
-              </div>
-            ) : mergedGroup.entry_snapshot_b64 ? (
-              <>
-                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Entry Snapshot</div>
-                <img src={`data:image/png;base64,${mergedGroup.entry_snapshot_b64}`} alt="Chart" style={{ width: '100%', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }} />
-              </>
-            ) : null}
+              ) : mergedGroup.entry_snapshot_b64 ? (
+                <>
+                  <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Entry Snapshot</div>
+                  <img src={`data:image/png;base64,${mergedGroup.entry_snapshot_b64}`} alt="Chart" style={{ width: '100%', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }} />
+                </>
+              ) : null}
+            </div>
           </div>
-        </div>
-      </td></tr>
-    )}
-  </tbody>);
+        </td></tr>
+      )}
+    </tbody>);
 });
 
 const BacktestResults = memo(function BacktestResults({ result, onSave, onDismiss, onClose, isSaving }) {
@@ -329,12 +331,12 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     const s = new Set(grouped.map(g => g.symbol).filter(Boolean));
     return Array.from(s).sort();
   }, [grouped]);
-  
+
   const uniqueStrategies = useMemo(() => {
     const s = new Set(grouped.map(g => g.strategy_id).filter(Boolean));
     return Array.from(s).sort();
   }, [grouped]);
-  
+
   let filteredGrouped = grouped;
   if (activeFilter === 'Wins') filteredGrouped = filteredGrouped.filter(g => (g.net_pnl ?? g.combined_pnl ?? g.pnl) > 0);
   if (activeFilter === 'Losses') filteredGrouped = filteredGrouped.filter(g => (g.net_pnl ?? g.combined_pnl ?? g.pnl) <= 0);
@@ -343,7 +345,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
 
   let displayGroups = [];
   const displayGrouped = filteredGrouped; // Virtualized list handles large datasets efficiently
-  
+
   if (groupBy === 'None') {
     displayGroups = [{ label: 'All Trades', trades: displayGrouped }];
   } else {
@@ -359,7 +361,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       if (!groupsMap[key]) groupsMap[key] = [];
       groupsMap[key].push(g);
     });
-    const sortedKeys = Object.keys(groupsMap).sort((a,b) => new Date(b) - new Date(a));
+    const sortedKeys = Object.keys(groupsMap).sort((a, b) => new Date(b) - new Date(a));
     displayGroups = sortedKeys.map(k => ({ label: k, trades: groupsMap[k] }));
   }
 
@@ -377,8 +379,8 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       let pnl = 0;
       let wins = 0;
       let losses = 0;
-      
-      const sorted = [...group.trades].sort((a,b) => new Date(a.entry_time_iso || 0) - new Date(b.entry_time_iso || 0));
+
+      const sorted = [...group.trades].sort((a, b) => new Date(a.entry_time_iso || 0) - new Date(b.entry_time_iso || 0));
       sorted.forEach(t => {
         if (startBal === null) startBal = t.balance_before;
         endBal = t.balance_after;
@@ -417,7 +419,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       </div>
     </div>
     {result.invalid_signals > 0 && <div style={{ fontSize: '0.8rem', color: 'var(--yellow)', marginBottom: 8 }}><Shield size={12} style={{ display: 'inline', marginRight: 4 }} />{result.invalid_signals} signals rejected (invalid SL/TP)</div>}
-    
+
     {result.notes && (
       <div style={{ marginBottom: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
         <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--blue)', marginBottom: 4 }}>Narration / Notes</div>
@@ -502,7 +504,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         <div className="card" style={{ padding: 12 }}>
           <h4 style={{ marginBottom: 8 }}>Win Rate by Score</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {Object.entries(report.confluence_stats.by_score || {}).sort((a,b)=>Number(b[0])-Number(a[0])).map(([score, data]) => (
+            {Object.entries(report.confluence_stats.by_score || {}).sort((a, b) => Number(b[0]) - Number(a[0])).map(([score, data]) => (
               <div key={score} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
                 <span>Score {score}</span>
                 <span style={{ color: data.win_rate >= 0.5 ? 'var(--green)' : 'var(--red)' }}>
@@ -515,7 +517,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         <div className="card" style={{ padding: 12 }}>
           <h4 style={{ marginBottom: 8 }}>Win Rate by Confirmation</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {Object.entries(report.confluence_stats.by_confirmation || {}).sort((a,b)=>b[1].trades-a[1].trades).map(([conf, data]) => (
+            {Object.entries(report.confluence_stats.by_confirmation || {}).sort((a, b) => b[1].trades - a[1].trades).map(([conf, data]) => (
               <div key={conf} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
                 <span style={{ textTransform: 'capitalize' }}>{conf.replace('_', ' ')}</span>
                 <span style={{ color: data.win_rate >= 0.5 ? 'var(--green)' : 'var(--red)' }}>
@@ -546,34 +548,61 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <span className="card-title">Trade Groups ({filteredGrouped.length})</span>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          {result.portfolio && uniqueSymbols.length > 0 && (
-            <select value={symbolFilter} onChange={e => setSymbolFilter(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
-              <option value="All">All Symbols</option>
-              {uniqueSymbols.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
+          {uniqueSymbols.length > 1 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <label style={{ fontSize: '0.62rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--text-muted)', fontWeight: 600 }}>Symbol</label>
+              <select value={symbolFilter} onChange={e => setSymbolFilter(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
+                <option value="All">All Symbols ({uniqueSymbols.length})</option>
+                {uniqueSymbols.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
           )}
-          {result.portfolio && uniqueStrategies.length > 0 && (
-            <select value={strategyFilter} onChange={e => setStrategyFilter(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
-              <option value="All">All Strategies</option>
-              {uniqueStrategies.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
+          {uniqueStrategies.length > 1 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <label style={{ fontSize: '0.62rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--text-muted)', fontWeight: 600 }}>Strategy</label>
+              <select value={strategyFilter} onChange={e => setStrategyFilter(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
+                <option value="All">All Strategies ({uniqueStrategies.length})</option>
+                {uniqueStrategies.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
           )}
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button className={`btn btn-sm ${activeFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveFilter('All')}>All</button>
-            <button className={`btn btn-sm ${activeFilter === 'Wins' ? 'btn-green' : 'btn-secondary'}`} onClick={() => setActiveFilter('Wins')}>Wins</button>
-            <button className={`btn btn-sm ${activeFilter === 'Losses' ? 'btn-red' : 'btn-secondary'}`} onClick={() => setActiveFilter('Losses')}>Losses</button>
+          {(symbolFilter !== 'All' || strategyFilter !== 'All' || activeFilter !== 'All') && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => { setSymbolFilter('All'); setStrategyFilter('All'); setActiveFilter('All'); }}
+              style={{ fontSize: '0.75rem' }}
+              title="Clear all filters"
+            >
+              <X size={12} /> Clear
+            </button>
+          )}
+          <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '0 2px' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <label style={{ fontSize: '0.62rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--text-muted)', fontWeight: 600 }}>Result</label>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button className={`btn btn-sm ${activeFilter === 'All' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveFilter('All')}>All</button>
+              <button className={`btn btn-sm ${activeFilter === 'Wins' ? 'btn-green' : 'btn-secondary'}`} onClick={() => setActiveFilter('Wins')}>Wins</button>
+              <button className={`btn btn-sm ${activeFilter === 'Losses' ? 'btn-red' : 'btn-secondary'}`} onClick={() => setActiveFilter('Losses')}>Losses</button>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 4, marginLeft: 10 }}>
-            <button className={`btn btn-sm ${viewMode === 'TRADES' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewMode('TRADES')}>List</button>
-            <button className={`btn btn-sm ${viewMode === 'SUMMARY' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setViewMode('SUMMARY'); if(groupBy === 'None') setGroupBy('Month'); }}>Summary</button>
+          <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '0 2px' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <label style={{ fontSize: '0.62rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--text-muted)', fontWeight: 600 }}>View</label>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button className={`btn btn-sm ${viewMode === 'TRADES' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewMode('TRADES')}>List</button>
+              <button className={`btn btn-sm ${viewMode === 'SUMMARY' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setViewMode('SUMMARY'); if (groupBy === 'None') setGroupBy('Month'); }}>Summary</button>
+            </div>
           </div>
-          <select value={groupBy} onChange={e => setGroupBy(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
-            <option value="None">No Grouping</option>
-            <option value="Day">Group by Day</option>
-            <option value="Week">Group by Week</option>
-            <option value="Month">Group by Month</option>
-            <option value="Year">Group by Year</option>
-          </select>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <label style={{ fontSize: '0.62rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--text-muted)', fontWeight: 600 }}>Group By</label>
+            <select value={groupBy} onChange={e => setGroupBy(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
+              <option value="None">No Grouping</option>
+              <option value="Day">Day</option>
+              <option value="Week">Week</option>
+              <option value="Month">Month</option>
+              <option value="Year">Year</option>
+            </select>
+          </div>
         </div>
       </div>
       {viewMode === 'SUMMARY' ? (
@@ -699,12 +728,12 @@ export default function Backtester() {
     try {
       const saved = localStorage.getItem(PORTFOLIO_KEY);
       if (saved) return JSON.parse(saved);
-    } catch {}
+    } catch { }
     return [{ symbol: 'XAUUSD', strategy_id: 'SMC_v1' }];
   });
 
   useEffect(() => {
-    try { localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(portfolioSymbols)); } catch {}
+    try { localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(portfolioSymbols)); } catch { }
   }, [portfolioSymbols]);
 
   const addPortfolioSymbol = () => setPortfolioSymbols(p => [...p, { symbol: 'EURUSD', strategy_id: 'SMC_v1' }]);
@@ -914,10 +943,10 @@ export default function Backtester() {
               setResult(r.data);
               if (r.data.run_logs) setEvents(r.data.run_logs);
             }
-          }).catch(()=>{})
+          }).catch(() => { })
             .finally(() => setIsLoadingDetail(false));
         }
-      }).catch(()=>{});
+      }).catch(() => { });
     }
   }, [status, isAuth]);
 
@@ -933,7 +962,7 @@ export default function Backtester() {
       if (form.manual_bias && form.manual_bias !== 'NONE') {
         payload.manual_bias_overrides = { [form.symbol]: form.manual_bias };
       }
-      
+
       if (payload_strategy === 'SMC_v1') {
         payload.strategy_params = {
           min_signal_score: form.confluence_threshold,
@@ -1000,7 +1029,7 @@ export default function Backtester() {
           dynamic_target_override: form.dynamic_target_override
         };
       }
-      
+
       return runBacktest(payload);
     },
     onSuccess: res => {
@@ -1013,7 +1042,7 @@ export default function Backtester() {
     if (!result) return;
     setShowSaveModal(true);
   };
-  
+
   const handleSaveSuccess = () => {
     setShowSaveModal(false);
     setResult(null);
@@ -1068,7 +1097,7 @@ export default function Backtester() {
           <span className="card-title">Configuration</span>
           <div style={{ display: 'flex', gap: 4, background: 'var(--bg-tertiary)', padding: 4, borderRadius: 'var(--radius-sm)' }}>
             <button className={`btn btn-sm ${activeTab === 'single' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('single')}>Single</button>
-            <button className={`btn btn-sm ${activeTab === 'portfolio' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('portfolio')}><LayoutDashboard size={14} style={{ marginRight: 4 }}/> Portfolio</button>
+            <button className={`btn btn-sm ${activeTab === 'portfolio' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('portfolio')}><LayoutDashboard size={14} style={{ marginRight: 4 }} /> Portfolio</button>
           </div>
         </div>
         <div style={{ display: 'grid', gap: 14 }}>
@@ -1087,7 +1116,7 @@ export default function Backtester() {
             <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 12, background: 'var(--bg-secondary)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Portfolio Symbols ({portfolioSymbols.length})</span>
-                <button className="btn btn-sm btn-ghost" onClick={addPortfolioSymbol}><PlusCircle size={14} style={{ marginRight: 4 }}/> Add</button>
+                <button className="btn btn-sm btn-ghost" onClick={addPortfolioSymbol}><PlusCircle size={14} style={{ marginRight: 4 }} /> Add</button>
               </div>
               <div style={{ display: 'grid', gap: 8, maxHeight: 200, overflowY: 'auto', paddingRight: 4 }}>
                 {portfolioSymbols.map((item, idx) => (
@@ -1216,51 +1245,51 @@ export default function Backtester() {
                     <input type="checkbox" checked={form.bypass_session_synthetics ?? true} onChange={e => u('bypass_session_synthetics', e.target.checked)} />
                     Bypass Session Filter (Synthetics)
                   </label>
-            {form.strategy_id === 'HTFFVGFlip_v1' && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><select value={form.htf_timeframe} onChange={e => u('htf_timeframe', e.target.value)}>{['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Entry Confirm TF</label><select value={form.entry_confirmation_tf} onChange={e => u('entry_confirmation_tf', e.target.value)}>{['M1', 'M5', 'M15'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={form.target_rr} onChange={e => u('target_rr', +e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
-                    <input type="checkbox" checked={form.require_unfilled_htf_fvg ?? true} onChange={e => u('require_unfilled_htf_fvg', e.target.checked)} />
-                    Require Unfilled HTF FVG
-                  </label>
+                  {form.strategy_id === 'HTFFVGFlip_v1' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                      <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><select value={form.htf_timeframe} onChange={e => u('htf_timeframe', e.target.value)}>{['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Entry Confirm TF</label><select value={form.entry_confirmation_tf} onChange={e => u('entry_confirmation_tf', e.target.value)}>{['M1', 'M5', 'M15'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={form.target_rr} onChange={e => u('target_rr', +e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+                          <input type="checkbox" checked={form.require_unfilled_htf_fvg ?? true} onChange={e => u('require_unfilled_htf_fvg', e.target.checked)} />
+                          Require Unfilled HTF FVG
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                  {form.strategy_id === 'BiasIFVG_v1' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                      <div><label style={{ fontSize: '0.7rem' }}>Stop Method</label><input type="text" value={form.stop_method} onChange={e => u('stop_method', e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Target RR Range Min</label><input type="number" step="0.1" value={form.target_rr_range_min} onChange={e => u('target_rr_range_min', +e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Target RR Range Max</label><input type="number" step="0.1" value={form.target_rr_range_max} onChange={e => u('target_rr_range_max', +e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" value={form.max_trades_per_day} onChange={e => u('max_trades_per_day', +e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>
+                    </div>
+                  )}
+                  {form.strategy_id === 'NYOpenRetest_v1' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                      <div><label style={{ fontSize: '0.7rem' }}>Range Start</label><input type="text" value={form.range_window_start} onChange={e => u('range_window_start', e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Range End</label><input type="text" value={form.range_window_end} onChange={e => u('range_window_end', e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Earliest Break Time</label><input type="text" value={form.earliest_valid_break_time} onChange={e => u('earliest_valid_break_time', e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Session End</label><input type="text" value={form.session_end} onChange={e => u('session_end', e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Stop Buffer (pts)</label><input type="number" step="0.1" value={form.stop_buffer_points} onChange={e => u('stop_buffer_points', +e.target.value)} /></div>
+                      <div><label style={{ fontSize: '0.7rem' }}>Fixed Target (pts)</label><input type="number" step="0.1" value={form.fixed_target_points} onChange={e => u('fixed_target_points', +e.target.value)} /></div>
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+                          <input type="checkbox" checked={form.dynamic_target_override ?? true} onChange={e => u('dynamic_target_override', e.target.checked)} />
+                          Dynamic Target Override
+                        </label>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
-            {form.strategy_id === 'BiasIFVG_v1' && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                <div><label style={{ fontSize: '0.7rem' }}>Stop Method</label><input type="text" value={form.stop_method} onChange={e => u('stop_method', e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Target RR Range Min</label><input type="number" step="0.1" value={form.target_rr_range_min} onChange={e => u('target_rr_range_min', +e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Target RR Range Max</label><input type="number" step="0.1" value={form.target_rr_range_max} onChange={e => u('target_rr_range_max', +e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" value={form.max_trades_per_day} onChange={e => u('max_trades_per_day', +e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>
-              </div>
-            )}
-            {form.strategy_id === 'NYOpenRetest_v1' && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                <div><label style={{ fontSize: '0.7rem' }}>Range Start</label><input type="text" value={form.range_window_start} onChange={e => u('range_window_start', e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Range End</label><input type="text" value={form.range_window_end} onChange={e => u('range_window_end', e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Earliest Break Time</label><input type="text" value={form.earliest_valid_break_time} onChange={e => u('earliest_valid_break_time', e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Session End</label><input type="text" value={form.session_end} onChange={e => u('session_end', e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Stop Buffer (pts)</label><input type="number" step="0.1" value={form.stop_buffer_points} onChange={e => u('stop_buffer_points', +e.target.value)} /></div>
-                <div><label style={{ fontSize: '0.7rem' }}>Fixed Target (pts)</label><input type="number" step="0.1" value={form.fixed_target_points} onChange={e => u('fixed_target_points', +e.target.value)} /></div>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
-                    <input type="checkbox" checked={form.dynamic_target_override ?? true} onChange={e => u('dynamic_target_override', e.target.checked)} />
-                    Dynamic Target Override
-                  </label>
-                </div>
-              </div>
-            )}
-                </div>
-              </div>
-            )}
-            
+
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>━ Hard Filters (Optimization)</div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={form.enforce_htf_pd} onChange={e => u('enforce_htf_pd', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce HTF P/D Arrays</label>
@@ -1345,15 +1374,15 @@ export default function Backtester() {
       )}
       {isRunning && (
         <div className="card" style={{ padding: 40, color: 'var(--text-muted)' }}>
-           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-             <div style={{ height: 32, background: 'var(--bg-tertiary)', borderRadius: 4, width: '40%', animation: 'pulse 1.5s infinite ease-in-out' }} />
-             <div style={{ height: 200, background: 'var(--bg-tertiary)', borderRadius: 4, width: '100%', animation: 'pulse 1.5s infinite ease-in-out' }} />
-             <div style={{ display: 'flex', gap: 20 }}>
-               <div style={{ height: 100, background: 'var(--bg-tertiary)', borderRadius: 4, width: '50%', animation: 'pulse 1.5s infinite ease-in-out' }} />
-               <div style={{ height: 100, background: 'var(--bg-tertiary)', borderRadius: 4, width: '50%', animation: 'pulse 1.5s infinite ease-in-out' }} />
-             </div>
-           </div>
-           <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div style={{ height: 32, background: 'var(--bg-tertiary)', borderRadius: 4, width: '40%', animation: 'pulse 1.5s infinite ease-in-out' }} />
+            <div style={{ height: 200, background: 'var(--bg-tertiary)', borderRadius: 4, width: '100%', animation: 'pulse 1.5s infinite ease-in-out' }} />
+            <div style={{ display: 'flex', gap: 20 }}>
+              <div style={{ height: 100, background: 'var(--bg-tertiary)', borderRadius: 4, width: '50%', animation: 'pulse 1.5s infinite ease-in-out' }} />
+              <div style={{ height: 100, background: 'var(--bg-tertiary)', borderRadius: 4, width: '50%', animation: 'pulse 1.5s infinite ease-in-out' }} />
+            </div>
+          </div>
+          <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
         </div>
       )}
       {result && !isLoadingDetail && !isRunning && <BacktestResults result={result} onSave={handleSave} onDismiss={handleDismiss} onClose={() => setResult(null)} isSaving={isSaving} />}
@@ -1392,11 +1421,11 @@ export default function Backtester() {
           <tbody>
             {(() => {
               if (!backtests?.length) return <tr><td colSpan="7" style={{ textAlign: 'center', padding: 20 }}>No saved backtests</td></tr>;
-              
+
               let filtered = [...backtests];
               if (savedBtFilter === 'Profitable') filtered = filtered.filter(b => b.total_pnl > 0);
               if (savedBtFilter === 'HighWinRate') filtered = filtered.filter(b => b.win_rate >= 0.5);
-              
+
               filtered.sort((a, b) => {
                 if (savedBtSort === 'Date') return new Date(b.created_at || 0) - new Date(a.created_at || 0);
                 if (savedBtSort === 'PNL') return (b.total_pnl || 0) - (a.total_pnl || 0);
@@ -1416,8 +1445,8 @@ export default function Backtester() {
                 return (
                   <tr key={bt.id} style={{ background: isSelected ? 'rgba(88, 166, 255, 0.1)' : 'transparent' }}>
                     <td>
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         checked={isSelected}
                         disabled={isConflict}
                         title={isConflict ? "Another backtest with the same symbol and strategy is already selected" : ""}
@@ -1450,14 +1479,14 @@ export default function Backtester() {
         </table>
       </div>
     </div>
-    
+
     {showSummary && selectedBacktests.size > 0 && (
-      <CumulativeSummary 
-        selectedIds={selectedBacktests} 
-        onClose={() => setShowSummary(false)} 
+      <CumulativeSummary
+        selectedIds={selectedBacktests}
+        onClose={() => setShowSummary(false)}
       />
     )}
-    
+
     {showSaveModal && (
       <SaveModal
         result={result}

@@ -1,31 +1,64 @@
+import numpy as np
 import pandas as pd
 from typing import Any
 from backend.utils.timeutils import detect_session
 from datetime import datetime, timezone
 
-def _epoch_to_iso(epoch_val) -> str:
-    """Convert epoch timestamp or datetime to ISO string."""
+def _to_epoch_seconds(val):
+    """
+    Robustly convert an epoch number, python/pandas datetime, or numpy scalar
+    to epoch seconds (float). Mirrors backend/backtester/engine.py's helper —
+    duplicated here (rather than imported) to avoid a circular import between
+    engine.py and this module. Keep both in sync if either changes.
+    """
+    if val is None:
+        return None
+    if isinstance(val, (int, float, np.integer, np.floating)):
+        return float(val)
+    if isinstance(val, datetime):
+        return val.timestamp()
+    if hasattr(val, "timestamp"):
+        try:
+            return float(val.timestamp())
+        except Exception:
+            pass
     try:
-        if isinstance(epoch_val, (int, float)):
-            return datetime.fromtimestamp(int(epoch_val), tz=timezone.utc).isoformat()
-        elif isinstance(epoch_val, datetime):
-            return epoch_val.isoformat()
-        elif isinstance(epoch_val, str):
-            return epoch_val
+        return pd.Timestamp(val).timestamp()
+    except Exception:
+        return None
+
+def _epoch_to_iso(epoch_val) -> str:
+    """Convert epoch timestamp (incl. numpy scalars) or datetime to ISO string."""
+    if isinstance(epoch_val, str):
+        return epoch_val
+    secs = _to_epoch_seconds(epoch_val)
+    if secs is None:
         return str(epoch_val)
+    try:
+        return datetime.fromtimestamp(secs, tz=timezone.utc).isoformat()
     except Exception:
         return str(epoch_val)
 
 def _calc_duration_minutes(entry_time, exit_time) -> float:
-    """Calculate trade duration in minutes from timestamps."""
-    try:
-        if isinstance(entry_time, (int, float)) and isinstance(exit_time, (int, float)):
-            return (exit_time - entry_time) / 60.0
-        elif hasattr(entry_time, "timestamp") and hasattr(exit_time, "timestamp"):
-            return (exit_time.timestamp() - entry_time.timestamp()) / 60.0
+    """Calculate trade duration in minutes, robust to numpy scalar / datetime / epoch inputs."""
+    e = _to_epoch_seconds(entry_time)
+    x = _to_epoch_seconds(exit_time)
+    if e is None or x is None:
         return 0.0
-    except Exception:
-        return 0.0
+    return (x - e) / 60.0
+
+def _resolve_symbol_candles(candles: Any, symbol: str):
+    """
+    `candles` may be a single DataFrame (single-symbol engine.py path) or a
+    {symbol: DataFrame} dict (portfolio_engine.py path, which simulates many
+    symbols on one global timeline and has no single DataFrame to hand over).
+    Normalize to "the DataFrame relevant to this group's symbol", or None.
+    """
+    if candles is None:
+        return None
+    if isinstance(candles, dict):
+        return candles.get(symbol)
+    return candles
 
 def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = None, candles_m5: Any = None) -> list[dict]:
     """Group trades by group_id for combined P&L display, extracting chart data for frontend."""
@@ -37,6 +70,7 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
             groups[gid] = {
                 "group_id": gid,
                 "symbol": t.get("symbol", ""),
+                "strategy_id": t.get("strategy_id", t.get("strategy", "UNKNOWN")),
                 "direction": t.get("direction", ""),
                 "entry_price": t.get("entry_price", 0),
                 "entry_time": t.get("entry_time"),
@@ -109,7 +143,14 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
             g["exit_session"] = "UNKNOWN"
 
         # ── Extract Chart Data and SMC Zones ──
-        if candles is not None and not candles.empty and g.get("entry_time"):
+        # Resolve the right candle set for THIS group's symbol. For a
+        # single-symbol backtest `candles` is already the one DataFrame we
+        # need; for a portfolio backtest it's a {symbol: DataFrame} dict.
+        group_candles = _resolve_symbol_candles(candles, g.get("symbol"))
+        group_candles_m15 = _resolve_symbol_candles(candles_m15, g.get("symbol"))
+        group_candles_m5 = _resolve_symbol_candles(candles_m5, g.get("symbol"))
+
+        if group_candles is not None and not group_candles.empty and g.get("entry_time"):
             # Find entry index
             entry_time = g["entry_time"]
             exit_time = g.get("exit_time", entry_time)
@@ -149,9 +190,9 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
                         })
                     return c_data
 
-                g["chart_data"] = _extract_chart_data(candles, entry_time, exit_time, 30, 15)
-                g["chart_data_m15"] = _extract_chart_data(candles_m15, entry_time, exit_time, 20, 5)
-                g["chart_data_m5"] = _extract_chart_data(candles_m5, entry_time, exit_time, 30, 10)
+                g["chart_data"] = _extract_chart_data(group_candles, entry_time, exit_time, 30, 15)
+                g["chart_data_m15"] = _extract_chart_data(group_candles_m15, entry_time, exit_time, 20, 5)
+                g["chart_data_m5"] = _extract_chart_data(group_candles_m5, entry_time, exit_time, 30, 10)
                 
                 # Generate SMC zones based on the first trade's signal data
                 sig = g.get("original_signal", {})

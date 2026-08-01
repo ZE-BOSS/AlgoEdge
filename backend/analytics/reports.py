@@ -85,15 +85,25 @@ class RiskReport:
     rejection_funnel: dict[str, Any] = field(default_factory=dict)
 
 
-def generate_risk_report(trades: list[dict[str, Any]]) -> RiskReport:
+def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | None = None) -> RiskReport:
     """
     Generate a full RiskReport from a list of closed trades.
+
+    `initial_balance` should be supplied explicitly by the caller (the engine
+    always knows the true starting balance it was run with). Falling back to
+    trades[0].balance_before is a *last resort* only — it's fragile because
+    (a) trades aren't guaranteed to be sorted so trades[0] isn't necessarily
+    the first-opened position, and (b) if the engine forgot to stamp
+    balance_before on positions (as happened for portfolio-engine trades),
+    this silently infers an initial_balance of 0, which then corrupts every
+    downstream ratio (Sharpe/Sortino/Calmar/drawdown %/equity curve).
     """
-    # trades[0].get("balance_before", 10000.0) would silently return None
-    # instead of the 10000.0 default when the key is present-but-None
-    # (which grouped trades from trade_grouper.py can have) — guard explicitly.
-    _first_balance = trades[0].get("balance_before") if trades else None
-    initial_balance = _first_balance if _first_balance is not None else 10000.0
+    if initial_balance is None:
+        # trades[0].get("balance_before", 10000.0) would silently return None
+        # instead of the 10000.0 default when the key is present-but-None
+        # (which grouped trades from trade_grouper.py can have) — guard explicitly.
+        _first_balance = trades[0].get("balance_before") if trades else None
+        initial_balance = _first_balance if _first_balance is not None else 10000.0
     stats = compute_portfolio_stats(trades, initial_balance=initial_balance)
 
     if not trades:
