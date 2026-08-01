@@ -67,6 +67,8 @@ async def init_db():
             "ALTER TABLE users DROP COLUMN IF EXISTS deriv_mt5_password_encrypted;",
             "ALTER TABLE users DROP COLUMN IF EXISTS deriv_mt5_server;",
             "ALTER TABLE users DROP COLUMN IF EXISTS deriv_mt5_path;"
+            "ALTER TABLE backtest_runs ADD COLUMN bias_stats TEXT;",
+            "ALTER TABLE backtest_runs ADD COLUMN confluence_stats TEXT;",
         ]
         
         for query in migrations:
