@@ -7,6 +7,7 @@ Source: TradingBot_MasterPlan-2.md Section 11
 """
 
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -32,6 +33,29 @@ def _json_default(obj):
     if hasattr(obj, "item"):  # numpy scalar (np.int64, np.float64, ...)
         return obj.item()
     return str(obj)
+
+
+def _slim_sub_trades(sub_trades: list) -> list:
+    """
+    Strip heavy/duplicative fields before persisting a group's sub_trades.
+
+    Each TP-level leg carries a full copy of `original_signal` (which nests
+    `metadata`, potentially including a base64 chart snapshot) and its own
+    `entry_snapshot_b64` — all identical across every leg of the same group.
+    None of this is read back from sub_trades by the frontend (chart_data /
+    smc_data / entry_snapshot_b64 are already surfaced once at the group
+    level by trade_grouper.py). Persisting it per-leg multiplies storage for
+    no benefit, so drop it here rather than at read time.
+    """
+    slim = []
+    for i, t in enumerate(sub_trades or []):
+        if not isinstance(t, dict):
+            continue
+        st = {k: v for k, v in t.items() if k not in ("original_signal", "metadata")}
+        if i > 0:
+            st.pop("entry_snapshot_b64", None)
+        slim.append(st)
+    return slim
 
 
 async def _broadcast_progress(user_id: str, progress: dict):
@@ -195,6 +219,7 @@ async def run_backtest(
         if save_mode == "FULL":
             for trade_data in results["grouped_trades"]:
                 bt_trade = BacktestTrade(
+                    id=uuid.uuid4().int & ((1 << 63) - 1),  # generate_id()'s default only has 100 values/ms — unsafe for a tight bulk-insert loop like this one
                     backtest_id=backtest_id,
                     symbol=trade_data.get("symbol", symbol),
                     direction=trade_data.get("direction"),
@@ -211,6 +236,8 @@ async def run_backtest(
                     mae_pips=trade_data.get("mae_pips"),
                     mfe_pips=trade_data.get("mfe_pips"),
                     confluence_score=trade_data.get("confluence_score"),
+                    session=trade_data.get("entry_session", "UNKNOWN"),
+                    strategy_id=trade_data.get("strategy_id", trade_data.get("strategy", strategy_id)),
                     balance_before=trade_data.get("balance_before"),
                     balance_after=trade_data.get("balance_after"),
                     # Was reading trade_data["score_breakdown"], a key that
@@ -227,7 +254,7 @@ async def run_backtest(
                     chart_data=json.dumps(trade_data.get("chart_data") or [], default=_json_default),
                     chart_data_m15=json.dumps(trade_data.get("chart_data_m15") or [], default=_json_default),
                     chart_data_m5=json.dumps(trade_data.get("chart_data_m5") or [], default=_json_default),
-                    sub_trades=json.dumps(trade_data.get("sub_trades") or [], default=_json_default),
+                    sub_trades=json.dumps(_slim_sub_trades(trade_data.get("sub_trades")), default=_json_default),
                 )
                 session.add(bt_trade)
 

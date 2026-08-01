@@ -631,6 +631,7 @@ async def run_backtest_endpoint(
                     t.pop("chart_data", None)
                     t.pop("chart_data_h1", None)
                     t.pop("chart_data_m15", None)
+                    t.pop("chart_data_m5", None)
             
             # Send the run logs immediately as part of the WS payload
             await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
@@ -759,7 +760,10 @@ async def run_portfolio_backtest_endpoint(
 
             # ── Fetch data & generate signals per symbol ──
             portfolio_data = {}
+            portfolio_data_m15 = {}
+            portfolio_data_m5 = {}
             portfolio_signals = {}
+            portfolio_run_logs = []  # Aggregated across all per-symbol strategy engines
             total_symbols = len(req.symbols)
 
             for sym_idx, sym_cfg in enumerate(req.symbols):
@@ -906,7 +910,22 @@ async def run_portfolio_backtest_endpoint(
                     primary_df['time'] = primary_df.index.astype('int64') // 10**9
 
                 portfolio_data[sym] = primary_df
+                # Multi-timeframe candle sets for the HTF chart tabs, when the
+                # strategy actually fetched M15/M5 (mirrors the single-symbol
+                # /backtest endpoint's candles_m15_idx / candles_m5_idx).
+                if "M15" in indexed_by_tf:
+                    portfolio_data_m15[sym] = indexed_by_tf["M15"]
+                if "M5" in indexed_by_tf:
+                    portfolio_data_m5[sym] = indexed_by_tf["M5"]
                 portfolio_signals[sym] = sym_signals
+
+                # Capture this symbol's strategy-engine logs before it goes out
+                # of scope — without this, portfolio backtests never surface
+                # any run log at all (unlike single-symbol runs).
+                for entry in getattr(strategy_engine, 'run_logs', []):
+                    tagged = dict(entry) if isinstance(entry, dict) else {"message": str(entry)}
+                    tagged.setdefault("symbol", sym)
+                    portfolio_run_logs.append(tagged)
 
                 logger.info(f"[PORTFOLIO_BT] {sym}: {len(sym_signals)} signals from {len(primary_df)} bars")
                 
@@ -936,6 +955,8 @@ async def run_portfolio_backtest_endpoint(
                 portfolio_signals,
                 req.initial_balance,
                 req.compounding_enabled,
+                portfolio_data_m15,
+                portfolio_data_m5,
             )
 
             # ── Sanitize and broadcast results ──
@@ -988,6 +1009,7 @@ async def run_portfolio_backtest_endpoint(
                 "trades": results.get("trades", []),
                 "grouped_trades": results.get("grouped_trades", []),
                 "rejection_funnel": results.get("rejection_funnel", {}),
+                "run_logs": portfolio_run_logs[-100:],  # Only keep last 100, same cap as single-symbol runs
                 "report": {
                     "win_rate": getattr(report, 'win_rate', 0) if report else results.get("win_rate", 0),
                     "profit_factor": getattr(report, 'profit_factor', 0) if report else results.get("profit_factor", 0),
@@ -1011,9 +1033,28 @@ async def run_portfolio_backtest_endpoint(
             current_state = await _get_state()
             current_state["status"] = "complete"
             current_state["progress"] = {"stage": "complete", "pct": 100}
+            # Keep the FULL result (with chart_data) server-side — this is
+            # what /backtest_result/trade/{group_id}/chart reads from on demand.
             current_state["result"] = sanitized
 
-            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": sanitized})
+            # Stripped copy for the WS broadcast itself. Previously this
+            # endpoint broadcast `sanitized` directly, with every trade's
+            # chart_data / chart_data_m15 / chart_data_m5 embedded — for a
+            # multi-symbol portfolio run with hundreds of grouped trades,
+            # each carrying up to ~500 candles per timeframe, this is exactly
+            # the "tremendous load" the on-demand chart endpoint exists to
+            # avoid. Mirror the /backtest endpoint's pattern: strip the heavy
+            # fields from what actually goes over the wire.
+            import copy
+            ws_payload = copy.deepcopy(sanitized)
+            if "grouped_trades" in ws_payload:
+                for t in ws_payload["grouped_trades"]:
+                    if isinstance(t, dict):
+                        t.pop("chart_data", None)
+                        t.pop("chart_data_m15", None)
+                        t.pop("chart_data_m5", None)
+
+            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
             await _save_state(current_state)
 
         except Exception as e:
@@ -1068,6 +1109,23 @@ def safe_json_loads(data, default=None):
         return json.loads(data)
     except (json.JSONDecodeError, TypeError):
         return default if default is not None else {}
+
+
+def _slim_sub_trades(sub_trades: list) -> list:
+    """
+    Strip heavy/duplicative fields (original_signal, metadata, and all but
+    the first leg's entry_snapshot_b64) before persisting a group's
+    sub_trades — see the matching helper/comment in backend/backtester/runner.py.
+    """
+    slim = []
+    for i, t in enumerate(sub_trades or []):
+        if not isinstance(t, dict):
+            continue
+        st = {k: v for k, v in t.items() if k not in ("original_signal", "metadata")}
+        if i > 0:
+            st.pop("entry_snapshot_b64", None)
+        slim.append(st)
+    return slim
 
 @router.get("/backtests/{backtest_id}")
 async def get_backtest(
@@ -1178,6 +1236,7 @@ async def get_backtest(
             "mae_pips": t.mae_pips,
             "mfe_pips": t.mfe_pips,
             "confluence_score": t.confluence_score,
+            "strategy_id": getattr(t, "strategy_id", None) or run.strategy_id,
             "smc_data": safe_json_loads(t.smc_data, {}),
             "sub_trades": sub_trades,
             "entry_snapshot_b64": ""
@@ -1222,7 +1281,7 @@ async def get_backtest(
         import dataclasses
 
         from backend.analytics.reports import generate_risk_report
-        risk_report = generate_risk_report(grouped_trades_out)
+        risk_report = generate_risk_report(grouped_trades_out, initial_balance=initial_balance)
         resp["report"] = dataclasses.asdict(risk_report)
         resp["session_win_rates"] = {
             "LONDON": risk_report.london_win_rate,
@@ -1252,9 +1311,26 @@ async def get_saved_trade_chart(
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch massive chart data for a specific trade separately to prevent UI freeze."""
+    try:
+        group_id_int = int(group_id)
+    except (TypeError, ValueError):
+        # Not a valid BacktestTrade row id — e.g. a stale unsaved-run UUID
+        # group_id being used against the saved-backtest endpoint by mistake.
+        raise HTTPException(status_code=404, detail="Trade not found")
+
+    # Ownership check — every other saved-backtest endpoint scopes by
+    # user_id (see get_backtest / delete_backtest above); this one didn't,
+    # which let any authenticated user read another user's chart data for a
+    # guessed/enumerated backtest_id.
+    owner_check = await db.execute(
+        select(BacktestRun.id).where(BacktestRun.id == backtest_id, BacktestRun.user_id == current_user.id)
+    )
+    if owner_check.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Backtest not found")
+
     result = await db.execute(
         select(BacktestTrade)
-        .where(BacktestTrade.backtest_id == backtest_id, BacktestTrade.id == group_id)
+        .where(BacktestTrade.backtest_id == backtest_id, BacktestTrade.id == group_id_int)
     )
     t = result.scalar_one_or_none()
     if not t:
@@ -1381,6 +1457,7 @@ async def save_backtest_from_client(
         sl_hit_rate=report.get("sl_hit_rate", 0),
         be_hit_rate=report.get("be_hit_rate", 0),
         trail_hit_rate=report.get("trail_hit_rate", 0),
+        run_logs=json.dumps(data.get("run_logs", []), default=str),
     )
     
     db.add(run)
@@ -1442,6 +1519,7 @@ async def save_backtest_from_client(
             mae_pips=t.get("mae_pips"),
             mfe_pips=t.get("mfe_pips"),
             confluence_score=t.get("confluence_score"),
+            strategy_id=t.get("strategy_id", t.get("strategy", run.strategy_id)),
             chart_data=json.dumps(t.get("chart_data", [])),
             chart_data_m15=json.dumps(t.get("chart_data_m15", [])),
             chart_data_m5=json.dumps(t.get("chart_data_m5", [])),
@@ -1454,7 +1532,7 @@ async def save_backtest_from_client(
             planned_rr=t.get("planned_rr"),
             realized_rr=t.get("realized_rr"),
             smc_data=json.dumps(t.get("smc_data", {})),
-            sub_trades=json.dumps(t.get("sub_trades", []))
+            sub_trades=json.dumps(_slim_sub_trades(t.get("sub_trades", [])))
         )
         db.add(bt_trade)
         
@@ -1499,6 +1577,7 @@ async def get_bulk_backtests(
                 "exit_time": t.exit_time.isoformat() if t.exit_time else None,
                 "session": getattr(t, "session", None) or "UNKNOWN",
                 "confluence_score": t.confluence_score,
+                "strategy_id": getattr(t, "strategy_id", None) or run.strategy_id,
                 "be_applied": t.be_applied,
                 "pnl_r": t.pnl_r,
                 "realized_rr": t.realized_rr,

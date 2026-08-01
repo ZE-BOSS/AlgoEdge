@@ -253,7 +253,12 @@ class BacktestRun(Base):
     run_logs = Column(Text)  # JSON serialized logs
     rejection_funnel = Column(JSON, default={})
     created_at = Column(DateTime, server_default=func.now())
-    trades = relationship("BacktestTrade", back_populates="backtest_run", cascade="all, delete-orphan")
+    trades = relationship(
+        "BacktestTrade",
+        back_populates="backtest_run",
+        cascade="all, delete-orphan",
+        order_by="BacktestTrade.entry_time",
+    )
 
 
 class BacktestTrade(Base):
@@ -286,6 +291,7 @@ class BacktestTrade(Base):
     mfe_pips = Column(Float)
     confluence_score = Column(Integer)
     session = Column(String(20))
+    strategy_id = Column(String(50))
     llm_analysis = Column(Text)
     
     # Chart & SMC Data
