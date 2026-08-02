@@ -93,24 +93,36 @@ def calculate_sortino(returns: list[float], periods_per_year: float = 252) -> fl
     return val
 
 
-def calculate_max_drawdown(equity_curve: list[float]) -> tuple[float, float]:
+def calculate_max_drawdown(equity_curve: list[float], initial_balance: float | None = None) -> tuple[float, float]:
     """
     Calculate max drawdown from equity curve.
     Returns (max_dd_pct, max_dd_abs).
+
+    max_dd_pct is expressed against `initial_balance` (fixed capital), not
+    the rolling equity peak. Prop-firm drawdown limits (and this codebase's
+    own daily/max drawdown circuit breaker) are evaluated as a fixed dollar
+    loss relative to the account's starting balance — e.g. 5% of a $25,000
+    account breaches the instant you're down $1,250, regardless of whether
+    the account has since grown to $56,000 or $100,000. Dividing by the
+    rolling peak instead means the same dollar loss reports a smaller and
+    smaller % drawdown the more profitable the run becomes, which doesn't
+    match what's actually being measured. If initial_balance isn't supplied,
+    falls back to the first equity point (old behavior) for compatibility.
     """
     if not equity_curve:
         return 0.0, 0.0
+    capital_base = initial_balance if initial_balance is not None and initial_balance > 0 else equity_curve[0]
     peak = equity_curve[0]
     max_dd_abs = 0.0
     max_dd_pct = 0.0
     for val in equity_curve:
         peak = max(peak, val)
         dd_abs = peak - val
-        dd_pct = dd_abs / peak if peak > 0 else 0.0
-        
+        dd_pct = dd_abs / capital_base if capital_base > 0 else 0.0
+
         max_dd_abs = max(max_dd_abs, dd_abs)
         max_dd_pct = max(max_dd_pct, dd_pct)
-            
+
     return max_dd_pct, max_dd_abs
 
 
@@ -150,9 +162,14 @@ def compute_portfolio_stats(trades: list[dict[str, Any]], initial_balance: float
         initial_balance = 10000.0
 
     pnls = [t.get("pnl", 0) for t in trades]
+    # Capital-basis returns for Sharpe/Sortino: each trade's PnL divided by
+    # the FIXED initial_balance, not that trade's own floating pre-trade
+    # balance. Dividing by a growing balance understates later returns'
+    # apparent volatility purely because the account compounded up, which
+    # silently inflates Sharpe/Sortino over the course of a winning run —
+    # same root cause as the drawdown fix above.
     pct_returns = [
-        t.get("pnl", 0) / _resolve_balance_before(t, initial_balance)
-        if _resolve_balance_before(t, initial_balance) > 0 else 0
+        t.get("pnl", 0) / initial_balance if initial_balance > 0 else 0
         for t in trades
     ]
     wins = [t for t in trades if t.get("pnl", 0) > 0]
@@ -179,7 +196,7 @@ def compute_portfolio_stats(trades: list[dict[str, Any]], initial_balance: float
         else:
             equity.append(equity[-1] + t.get("pnl", 0))
 
-    max_dd_pct, max_dd_abs = calculate_max_drawdown(equity)
+    max_dd_pct, max_dd_abs = calculate_max_drawdown(equity, initial_balance)
 
     # TP breakdown
     exit_reasons = [t.get("exit_reason", "") for t in trades]

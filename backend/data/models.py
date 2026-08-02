@@ -229,6 +229,12 @@ class BacktestRun(Base):
     user_id = Column(String(36), nullable=False, index=True)
     strategy_id = Column(String(50), nullable=False)
     symbol = Column(String(20), nullable=False)
+    # User-supplied title, decoupled from `symbol`. Falls back to `symbol` at
+    # read time (see backtest.py) for old rows saved before this column
+    # existed, and remains a sensible default for single-symbol runs — but
+    # for portfolio runs `symbol` isn't a meaningful title at all, so this
+    # lets the user set one explicitly instead of the UI defaulting to it.
+    title = Column(String(200), nullable=True)
     start_date = Column(DateTime, nullable=False)
     end_date = Column(DateTime, nullable=False)
     params_snapshot = Column(Text, nullable=False)  # JSON

@@ -479,11 +479,42 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="USOIL",
         instrument_type="COMMODITY",
         point_size=0.01,
-        point_value_per_lot=1.0,
+        # FIX: contract_size(1000 bbl) x point_size(0.01) = $10/point/lot, not
+        # $1. The old value of 1.0 was 10x too low, which meant the sizer
+        # computed lot sizes ~10x too large for the same intended dollar
+        # risk — i.e. USOIL trades were risking roughly 10x the configured
+        # risk_pct whenever this profile resolved.
+        point_value_per_lot=10.0,
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
         contract_size=1000,
+        session_filter=True,
+        news_filter=True,
+        trades_24_7=False,
+    ),
+    "UKOIL": InstrumentProfile(
+        symbol="UKOIL",
+        instrument_type="COMMODITY",
+        point_size=0.01,
+        point_value_per_lot=10.0,  # Same contract convention as USOIL: 1000 bbl x $0.01
+        lot_min=0.01,
+        lot_max=50.0,
+        lot_step=0.01,
+        contract_size=1000,
+        session_filter=True,
+        news_filter=True,
+        trades_24_7=False,
+    ),
+    "XCUUSD": InstrumentProfile(
+        symbol="XCUUSD",
+        instrument_type="COMMODITY",
+        point_size=0.0001,
+        point_value_per_lot=2.5,  # 25,000 lb contract x $0.0001 — verify against your broker's actual copper contract spec
+        lot_min=0.01,
+        lot_max=50.0,
+        lot_step=0.01,
+        contract_size=25000,
         session_filter=True,
         news_filter=True,
         trades_24_7=False,
@@ -505,7 +536,14 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="GBPJPY",
         instrument_type="FOREX",
         point_size=0.01,
-        point_value_per_lot=0.067, # Approx based on USDJPY
+        # FIX: was 0.067 — off by exactly 100x. contract_size(100000) x
+        # point_size(0.01) = 1000 JPY/point/lot; converted to USD at a
+        # typical ~150 USDJPY rate, that's ~$6.67/point/lot, not $0.067.
+        # The old value caused the sizer to open lots ~100x too large for
+        # the same intended dollar risk on this pair specifically — this was
+        # the single most severe instrument bug found in this audit.
+        # Approximate — rates move; verify against your broker if precision matters.
+        point_value_per_lot=6.7,
         lot_min=0.01,
         lot_max=100.0,
         lot_step=0.01,
@@ -537,13 +575,23 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="GBPCHF", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=1.15, lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "EURJPY": InstrumentProfile(
-        symbol="EURJPY", instrument_type="FOREX", point_size=0.01, point_value_per_lot=0.067, lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+        symbol="EURJPY", instrument_type="FOREX", point_size=0.01,
+        point_value_per_lot=6.7,  # FIX: was 0.067 — same 100x error as GBPJPY, same corrected math
+        lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "AUDJPY": InstrumentProfile(
+        symbol="AUDJPY", instrument_type="FOREX", point_size=0.01, point_value_per_lot=6.7,
+        lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "CADJPY": InstrumentProfile(
+        symbol="CADJPY", instrument_type="FOREX", point_size=0.01, point_value_per_lot=6.7,
+        lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "EURAUD": InstrumentProfile(
         symbol="EURAUD", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=0.65, lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "GER40": InstrumentProfile(
-        symbol="GER40", instrument_type="INDEX", point_size=0.1, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+        symbol="GER40", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "HK50": InstrumentProfile(
         symbol="HK50", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
@@ -594,7 +642,15 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="USDJPY",
         instrument_type="FOREX",
         point_size=0.001,
-        point_value_per_lot=100.0,    # Approx, varies with JPY rate
+        # FIX: was 100.0. contract_size(100000) x point_size(0.001) = 100
+        # JPY/point/lot — that raw JPY figure was being used directly as if
+        # it were already USD, skipping the JPY->USD conversion entirely.
+        # At a typical ~150 USDJPY rate the real value is 100/150 ≈ 0.67,
+        # not 100. The old value was ~150x too large, causing the sizer to
+        # open lots far too SMALL for the intended risk (under-risking,
+        # opposite direction from the GBPJPY/EURJPY bug above).
+        # Approximate — rates move; verify against your broker if precision matters.
+        point_value_per_lot=0.67,
         lot_min=0.01,
         lot_max=100.0,
         lot_step=0.01,
@@ -602,6 +658,26 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         session_filter=True,
         news_filter=True,
         trades_24_7=False,
+    ),
+    "USDCHF": InstrumentProfile(
+        symbol="USDCHF", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=1.15,
+        lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "USDCAD": InstrumentProfile(
+        symbol="USDCAD", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=0.735,
+        lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "NZDUSD": InstrumentProfile(
+        symbol="NZDUSD", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=1.0,
+        lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "GBPCAD": InstrumentProfile(
+        symbol="GBPCAD", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=0.735,
+        lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "EURGBP": InstrumentProfile(
+        symbol="EURGBP", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=1.27,
+        lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
     ),
 
     # ── Indices ───────────────────────────────────────────────────────────────
@@ -682,6 +758,65 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         atr_trail_multiplier_override=2.5,
         max_spread_atr_mult_override=10.0,
     ),
+
+    # ── Additional Indices ───────────────────────────────────────────────────
+
+    "US2000": InstrumentProfile(
+        symbol="US2000", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0,
+        lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "UK100": InstrumentProfile(
+        symbol="UK100", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0,
+        lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "FRA40": InstrumentProfile(
+        symbol="FRA40", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0,
+        lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "EU50": InstrumentProfile(
+        symbol="EU50", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0,
+        lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "NTH25": InstrumentProfile(
+        symbol="NTH25", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0,
+        lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "SWI20": InstrumentProfile(
+        symbol="SWI20", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0,
+        lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "AUS200": InstrumentProfile(
+        symbol="AUS200", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0,
+        lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+    "JP225": InstrumentProfile(
+        symbol="JP225", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0,
+        lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+    ),
+
+    # ── Additional Crypto ────────────────────────────────────────────────────
+
+    # NOTE: the four crypto profiles below are new additions, not audited
+    # against a real broker spec the way the existing instruments above were —
+    # verify contract_size/point_value_per_lot against your actual broker
+    # before trading these live. lot_min is set for a rough ~$15-50 minimum
+    # notional given typical DOGE/XRP/SOL/LTC prices, not a confirmed broker minimum.
+    "DOGUSD": InstrumentProfile(
+        symbol="DOGUSD", instrument_type="CRYPTO", point_size=0.0001, point_value_per_lot=0.0001,
+        lot_min=100.0, lot_max=1000000.0, lot_step=10.0, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
+    ),
+    "SOLUSD": InstrumentProfile(
+        symbol="SOLUSD", instrument_type="CRYPTO", point_size=0.01, point_value_per_lot=0.01,
+        lot_min=0.1, lot_max=1000.0, lot_step=0.1, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
+    ),
+    "XRPUSD": InstrumentProfile(
+        symbol="XRPUSD", instrument_type="CRYPTO", point_size=0.0001, point_value_per_lot=0.0001,
+        lot_min=50.0, lot_max=1000000.0, lot_step=10.0, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
+    ),
+    "LTCUSD": InstrumentProfile(
+        symbol="LTCUSD", instrument_type="CRYPTO", point_size=0.01, point_value_per_lot=0.01,
+        lot_min=0.1, lot_max=1000.0, lot_step=0.1, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
+    ),
 }
 
 # Aliases for Deriv MT5 symbol naming variations
@@ -723,21 +858,45 @@ SYMBOL_ALIASES: dict[str, str] = {
     "Gold": "XAUUSD", "GOLD": "XAUUSD", "XAU": "XAUUSD",
     "Silver": "XAGUSD", "SILVER": "XAGUSD", "XAG": "XAGUSD",
     "Platinum": "XPTUSD", "XPT": "XPTUSD",
-    "WTI": "USOIL", "OIL": "USOIL", "Crude": "USOIL", "Crude Oil": "USOIL", "XTIUSD": "USOIL", "WTICrude": "USOIL", "US Oil": "USOIL",
-    "NG": "NG", "XNGUSD": "NG", "Natural Gas": "NG",
+    "WTI": "USOIL", "OIL": "USOIL", "Crude": "USOIL", "Crude Oil": "USOIL", "XTIUSD": "USOIL", "WTICrude": "USOIL", "US Oil": "USOIL", "USOUSD": "USOIL",
+    "NG": "NG", "XNGUSD": "NG", "Natural Gas": "NG", "NGAS": "NG",
     "ETH": "ETHUSD", "Ethereum": "ETHUSD",
-    "DJI": "US30", "DOW": "US30", "Wall Street 30": "US30", "WS30": "US30", "YM": "US30",
+    "DJI": "US30", "DOW": "US30", "Wall Street 30": "US30", "WS30": "US30", "YM": "US30", "US30.cash": "US30",
     "US100": "NAS100", "USTEC": "NAS100", "NDX": "NAS100",
     "NDX100": "NAS100", "US Tech100": "NAS100", "US Tech 100": "NAS100",
     "USTECH": "NAS100", "NQ100": "NAS100", "NQ": "NAS100",
     "SPX500": "US500", "SPX": "US500", "SP500": "US500", "S&P500": "US500",
-    "S&P 500": "US500", "US 500": "US500", "INX": "US500", "ES": "US500",
+    "S&P 500": "US500", "US 500": "US500", "INX": "US500", "ES": "US500", "US SP 500": "US500", "SP500.cash": "US500",
     "GER40": "GER40", "DAX": "GER40", "DE40": "GER40", "DAX40": "GER40", "GER30": "GER40",
-    "HK50": "HK50", "Hang Seng": "HK50", "HSI": "HK50",
+    "HK50": "HK50", "Hang Seng": "HK50", "HSI": "HK50", "HSI50": "HK50",
     "BTC": "BTCUSD", "Bitcoin": "BTCUSD",
     "Aussie": "AUDUSD", "Geppy": "GBPJPY", "GJ": "GBPJPY",
     "GBPNZD": "GBPNZD", "GBPAUD": "GBPAUD", "GBPCHF": "GBPCHF",
     "EURJPY": "EURJPY", "EURAUD": "EURAUD",
+
+    # ── Brent Crude / Copper ──────────────────────────────────────────────
+    "UKOIL": "UKOIL", "UKOUSD": "UKOIL", "BRENT": "UKOIL", "XBRUSD": "UKOIL", "UK Brent Oil": "UKOIL", "UK OIL": "UKOIL",
+    "COPPER": "XCUUSD", "HG": "XCUUSD", "XCUUSD": "XCUUSD",
+
+    # ── Additional Indices (Deriv / FundedNext / common broker names) ──────
+    "US2000": "US2000", "RUT": "US2000",
+    "UK100": "UK100", "FTSE100": "UK100", "FTSE 100": "UK100", "UK 100": "UK100",
+    "FRA40": "FRA40", "CAC40": "FRA40", "CAC 40": "FRA40", "France 40": "FRA40",
+    "EU50": "EU50", "EUSTX50": "EU50", "ESTX50": "EU50", "Europe 50": "EU50",
+    "NTH25": "NTH25", "NETH25": "NTH25", "AEX25": "NTH25", "Netherlands 25": "NTH25",
+    "SWI20": "SWI20", "SMI20": "SWI20", "Switzerland 20": "SWI20",
+    "AUS200": "AUS200", "ASX200": "AUS200", "Australia 200": "AUS200",
+    "JP225": "JP225", "JPN225": "JP225", "NIK225": "JP225", "Japan 225": "JP225", "Nikkei": "JP225",
+
+    # ── Additional Forex ─────────────────────────────────────────────────
+    "USDCHF": "USDCHF", "USDCAD": "USDCAD", "NZDUSD": "NZDUSD", "Kiwi": "NZDUSD",
+    "AUDJPY": "AUDJPY", "CADJPY": "CADJPY", "GBPCAD": "GBPCAD", "EURGBP": "EURGBP",
+
+    # ── Additional Crypto ────────────────────────────────────────────────
+    "DOGE": "DOGUSD", "Dogecoin": "DOGUSD", "DOGUSD": "DOGUSD",
+    "SOL": "SOLUSD", "Solana": "SOLUSD", "SOLUSD": "SOLUSD",
+    "XRP": "XRPUSD", "Ripple": "XRPUSD", "XRPUSD": "XRPUSD",
+    "LTC": "LTCUSD", "Litecoin": "LTCUSD", "LTCUSD": "LTCUSD",
 }
 
 import re

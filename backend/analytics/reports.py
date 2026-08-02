@@ -143,7 +143,19 @@ def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | 
         else:
             equity.append(equity[-1] + t.get("pnl", 0))
 
-    drawdowns = []
+    # ── Drawdown, on a CAPITAL basis, not a floating-equity-peak basis ──
+    # Prop firms (and this codebase's own daily/max drawdown limits) evaluate
+    # drawdown as a fixed dollar loss relative to the INITIAL account balance
+    # (e.g. "5% of $25,000 = $1,250, breached the instant you're down $1,250
+    # regardless of whether the account has since grown to $56,000 or
+    # $100,000"). The previous version divided by the rolling equity PEAK
+    # instead — since the peak itself grows every time the account compounds
+    # up, the same dollar loss reported a smaller and smaller % drawdown the
+    # more profitable the run became, which is the opposite of what a prop
+    # firm's static drawdown rule actually measures. Every % figure below is
+    # now anchored to initial_balance, which never changes over the run.
+    drawdowns_pct_of_capital = []
+    drawdowns_abs = []
     current_dd_duration = 0
     max_dd_duration = 0
     peak = equity[0]
@@ -154,13 +166,16 @@ def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | 
         else:
             current_dd_duration += 1
             max_dd_duration = max(max_dd_duration, current_dd_duration)
-            if peak > 0:
-                drawdowns.append((peak - val) / peak)
-    
-    avg_drawdown_pct = sum(drawdowns) / len(drawdowns) if drawdowns else 0.0
+            drawdowns_abs.append(peak - val)
+            if initial_balance > 0:
+                drawdowns_pct_of_capital.append((peak - val) / initial_balance)
+
+    avg_drawdown_pct = sum(drawdowns_pct_of_capital) / len(drawdowns_pct_of_capital) if drawdowns_pct_of_capital else 0.0
+    max_drawdown_abs = max(drawdowns_abs) if drawdowns_abs else 0.0
+    max_drawdown_pct = (max_drawdown_abs / initial_balance) if initial_balance > 0 else 0.0
 
     total_return_pct = (equity[-1] - equity[0]) / equity[0] if equity[0] > 0 else 0
-    calmar_ratio = total_return_pct / stats["max_drawdown_pct"] if stats["max_drawdown_pct"] > 0 else float('inf')
+    calmar_ratio = total_return_pct / max_drawdown_pct if max_drawdown_pct > 0 else float('inf')
 
     is_win = [t.get("pnl", 0) > 0 for t in sorted_trades]
     win_streaks = []
@@ -315,8 +330,8 @@ def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | 
         sharpe_ratio=safe_float(stats["sharpe_ratio"]),
         sortino_ratio=safe_float(stats["sortino_ratio"]),
         calmar_ratio=safe_float(calmar_ratio),
-        max_drawdown_pct=stats["max_drawdown_pct"],
-        max_drawdown_abs=stats["max_drawdown_abs"],
+        max_drawdown_pct=max_drawdown_pct,
+        max_drawdown_abs=max_drawdown_abs,
         avg_drawdown_pct=avg_drawdown_pct,
         max_drawdown_duration=max_dd_duration,
         max_consecutive_wins=stats["max_consecutive_wins"],

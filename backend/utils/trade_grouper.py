@@ -2,7 +2,10 @@ import numpy as np
 import pandas as pd
 from typing import Any
 from backend.utils.timeutils import detect_session
+from backend.utils.logger import get_logger
 from datetime import datetime, timezone
+
+logger = get_logger(__name__)
 
 def _to_epoch_seconds(val):
     """
@@ -201,8 +204,33 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
                 g["smc_data"]["boxes"] = [m for m in markings if m["type"] in ("OB", "FVG")]
                 g["smc_data"]["markers"] = [m for m in markings if m["type"] == "STRUCTURE"]
                 
-            except Exception:
-                import traceback
-                traceback.print_exc()
+            except Exception as e:
+                logger.warning(
+                    f"[trade_grouper] chart_data extraction failed for group_id={g.get('group_id')} "
+                    f"symbol={g.get('symbol')}: {e}",
+                    exc_info=True,
+                )
+        else:
+            # chart_data is left at its [] default here — log exactly why, since
+            # silently-empty chart_data is otherwise indistinguishable from "this
+            # symbol legitimately has no candle data" vs. a resolution bug (e.g.
+            # candles_m15/candles_m5 weren't passed to the engine at all, or this
+            # group's symbol string doesn't match a key in the {symbol: DataFrame}
+            # dict for a portfolio run).
+            if group_candles is None:
+                logger.warning(
+                    f"[trade_grouper] No candles resolved for symbol='{g.get('symbol')}' "
+                    f"(group_id={g.get('group_id')}) — chart_data will be empty. For portfolio "
+                    f"runs this means the symbol wasn't a key in the candles dict passed in."
+                )
+            elif group_candles.empty:
+                logger.warning(
+                    f"[trade_grouper] Candles for symbol='{g.get('symbol')}' resolved but were "
+                    f"empty (group_id={g.get('group_id')}) — chart_data will be empty."
+                )
+            elif not g.get("entry_time"):
+                logger.warning(
+                    f"[trade_grouper] Group {g.get('group_id')} has no entry_time — chart_data will be empty."
+                )
 
     return list(groups.values())

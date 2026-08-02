@@ -634,4 +634,4 @@ class BacktestEngine:
             raw_pnl = price_diff * value_per_unit_move * volume
             logger.warning(f"No InstrumentProfile for '{symbol}', using MT5 dynamic fallback (value_per_unit_move={value_per_unit_move})")
 
-        return raw_pnl if direction == "BUY" else -raw_pnl
+        return raw_pnl if direction == "BUY" else -raw_pnl 

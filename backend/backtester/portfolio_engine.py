@@ -470,6 +470,14 @@ class PortfolioBacktestEngine:
                     }
                     self.open_positions.append(new_pos)
 
+        # Record equity once per timestamp — mirrors engine.py's single-symbol
+        # equivalent. Previously equity_curve was only ever initialized to
+        # [balance] and never appended to again in this loop, so it stayed at
+        # length 1 for the whole run. The frontend's Equity Curve chart only
+        # renders when equity_curve.length > 1, so it was silently hidden for
+        # every portfolio backtest regardless of how many trades ran.
+        self.equity_curve.append(balance)
+
         # 4. Force close remaining positions at end of backtest
         if self.open_positions:
             for pos in self.open_positions:
@@ -494,6 +502,8 @@ class PortfolioBacktestEngine:
                 self.trades.append(pos)
                 
             self.open_positions.clear()
+
+        self.equity_curve.append(balance)
 
         # Generate metrics
         from backend.analytics.reports import generate_risk_report

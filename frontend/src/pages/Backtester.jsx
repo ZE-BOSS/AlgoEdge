@@ -12,13 +12,20 @@ const SYMBOLS = [
   'XAUUSD', 'Gold', 'XAU', 'XAGUSD', 'Silver', 'XAG', 'XPTUSD', 'Platinum', 'XPT',
   'EURUSD', 'GBPUSD', 'AUDUSD', 'Aussie', 'GBPJPY', 'Geppy', 'GJ',
   'GBPNZD', 'GBPAUD', 'GBPCHF', 'EURJPY', 'EURAUD', 'USDJPY',
+  'USDCHF', 'USDCAD', 'NZDUSD', 'Kiwi', 'AUDJPY', 'CADJPY', 'GBPCAD', 'EURGBP',
   'US30', 'Wall Street 30', 'WS30', 'DJI', 'DOW', 'YM',
   'NAS100', 'US100', 'USTEC', 'NDX', 'NQ',
   'SPX500', 'US500', 'SPX', 'SP500', 'S&P500', 'ES',
   'GER40', 'DAX', 'DE40', 'GER30', 'HK50', 'Hang Seng', 'HSI',
+  'US2000', 'RUT', 'UK100', 'FTSE100', 'FRA40', 'CAC40',
+  'EU50', 'EUSTX50', 'NTH25', 'AEX25', 'SWI20', 'SMI20',
+  'AUS200', 'ASX200', 'JP225', 'Nikkei',
   'USOIL', 'WTI', 'Crude Oil', 'OIL', 'XTIUSD', 'US Oil',
+  'UKOIL', 'Brent', 'UK Brent Oil', 'XCUUSD', 'Copper',
   'NG', 'XNGUSD', 'Natural Gas',
   'BTCUSD', 'Bitcoin', 'BTC', 'ETHUSD', 'ETH', 'Ethereum',
+  'DOGUSD', 'Dogecoin', 'DOGE', 'SOLUSD', 'Solana', 'SOL',
+  'XRPUSD', 'Ripple', 'XRP', 'LTCUSD', 'Litecoin', 'LTC',
   'Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index',
   'Volatility 75 Index', 'Volatility 100 Index', 'Volatility 150 Index', 'Volatility 250 Index',
   'Volatility 10 (1s) Index', 'Volatility 25 (1s) Index', 'Volatility 50 (1s) Index',
@@ -28,6 +35,92 @@ const SYMBOLS = [
   'Jump 10 Index', 'Jump 25 Index', 'Jump 50 Index', 'Jump 75 Index', 'Jump 100 Index',
   'Step Index', 'Range Break 100 Index', 'Range Break 200 Index',
 ];
+
+// Custom styled autocomplete — replaces the native <input list="..."> /
+// <datalist> approach, which renders as the browser's unstyled native
+// suggestion popup (inconsistent across browsers, no highlighting, shows
+// every option rather than filtering cleanly on some engines). This keeps
+// the same "type to filter, click or Enter to pick" flow but with a
+// dropdown that matches the rest of the app's dark theme, keyboard nav,
+// and a visible "no matches" state.
+const SymbolAutocomplete = memo(function SymbolAutocomplete({ value, onChange, options, placeholder = 'Type to find symbol', autoFocus = false }) {
+  const [query, setQuery] = useState(value || '');
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const wrapRef = useRef(null);
+
+  useEffect(() => { setQuery(value || ''); }, [value]);
+
+  useEffect(() => {
+    const onClickOutside = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options.slice(0, 50);
+    const starts = options.filter(o => o.toLowerCase().startsWith(q));
+    const contains = options.filter(o => !o.toLowerCase().startsWith(q) && o.toLowerCase().includes(q));
+    return [...starts, ...contains].slice(0, 50);
+  }, [query, options]);
+
+  const commit = (val) => {
+    setQuery(val);
+    onChange(val);
+    setOpen(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (!open && (e.key === 'ArrowDown' || e.key === 'Enter')) { setOpen(true); return; }
+    if (!open) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => Math.min(h + 1, filtered.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(h => Math.max(h - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (filtered[highlight]) commit(filtered[highlight]); else { onChange(query); setOpen(false); } }
+    else if (e.key === 'Escape') { setOpen(false); }
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <input
+        type="text"
+        autoFocus={autoFocus}
+        value={query}
+        placeholder={placeholder}
+        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); setHighlight(0); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={handleKeyDown}
+        style={{ width: '100%' }}
+      />
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 50,
+          background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+          maxHeight: 220, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+        }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: '8px 10px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>No matching symbols</div>
+          ) : filtered.map((opt, i) => (
+            <div
+              key={opt}
+              onMouseDown={(e) => { e.preventDefault(); commit(opt); }}
+              onMouseEnter={() => setHighlight(i)}
+              style={{
+                padding: '6px 10px', fontSize: '0.8rem', cursor: 'pointer',
+                background: i === highlight ? 'var(--bg-hover, rgba(255,255,255,0.06))' : 'transparent',
+                color: 'var(--text-primary)',
+              }}
+            >
+              {opt}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
 
 function fmt(v) {
   if (!v) return '—';
@@ -89,13 +182,22 @@ function LiveLogPanel({ events, setEvents }) {
   </div>);
 }
 
-function SaveModal({ result, form, onClose, onSuccess }) {
+function SaveModal({ result, form, isPortfolio, portfolioSymbols, onClose, onSuccess }) {
+  const defaultTitle = isPortfolio
+    ? `Portfolio (${portfolioSymbols?.length || 0} symbols) — ${new Date().toLocaleDateString()}`
+    : (form.symbol || '');
+  const [titleInput, setTitleInput] = useState(defaultTitle);
   const [notesInput, setNotesInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
 
   const confirmSave = async () => {
     if (!result) return;
+    const trimmedTitle = titleInput.trim();
+    if (!trimmedTitle) {
+      setError('Please give this backtest a title.');
+      return;
+    }
     setIsSaving(true);
     setError(null);
     try {
@@ -103,7 +205,12 @@ function SaveModal({ result, form, onClose, onSuccess }) {
         backtest_data: {
           ...result,
           strategy_id: form.strategy_id,
-          symbol: form.symbol,
+          // For portfolio saves, `symbol` on the run row is still populated
+          // (e.g. as a comma-joined list) so older UI that reads .symbol as
+          // a fallback still shows something reasonable — but `title` is
+          // what the saved-backtests list should actually display.
+          symbol: isPortfolio ? (portfolioSymbols || []).map(s => s.symbol).join(', ') : form.symbol,
+          title: trimmedTitle,
           risk_config: form,
           notes: notesInput
         },
@@ -122,12 +229,27 @@ function SaveModal({ result, form, onClose, onSuccess }) {
     <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div className="card" style={{ width: '90%', maxWidth: 500, padding: 20 }}>
         <h3 style={{ marginTop: 0 }}>Save Backtest</h3>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Add narration and notes to this backtest run for future review. The current parameters will be saved automatically.</p>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+          {isPortfolio
+            ? 'This is a portfolio run across multiple symbols — give it a title so you can find it later.'
+            : 'Give this run a title, and add narration and notes for future review. The current parameters will be saved automatically.'}
+        </p>
+
+        <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginTop: 12, marginBottom: 4 }}>Title</label>
+        <input
+          type="text"
+          value={titleInput}
+          onChange={e => setTitleInput(e.target.value)}
+          placeholder="E.g., SMC v1 — London killzone, tight SL"
+          style={{ width: '100%', padding: 10, background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}
+        />
+
+        <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginTop: 12, marginBottom: 4 }}>Description / Notes</label>
         <textarea
           value={notesInput}
           onChange={e => setNotesInput(e.target.value)}
           placeholder="E.g., Added Killzones to avoid Asian range chop. Improved WR by 5%..."
-          style={{ width: '100%', height: 120, marginTop: 10, marginBottom: 15, padding: 10, background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', resize: 'vertical' }}
+          style={{ width: '100%', height: 100, marginBottom: 15, padding: 10, background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', resize: 'vertical' }}
         />
         {error && <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginBottom: 15 }}>{error}</div>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
@@ -1274,10 +1396,12 @@ export default function Backtester() {
               <div><label>Strategy Engine</label><select value={['SMC_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'].includes(form.strategy_id) ? form.strategy_id : 'SMC_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option></select></div>
               <div>
                 <label>Symbol</label>
-                <input type="text" list="symbols-list" value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value })} placeholder="Type to find symbol" />
-                <datalist id="symbols-list">
-                  {backtestSymbols.map(s => <option key={s} value={s} />)}
-                </datalist>
+                <SymbolAutocomplete
+                  value={form.symbol}
+                  onChange={val => setForm({ ...form, symbol: val })}
+                  options={backtestSymbols}
+                  placeholder="Type to find symbol"
+                />
               </div>
             </div>
           ) : (
@@ -1291,7 +1415,12 @@ export default function Backtester() {
                   <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                     <div style={{ flex: 1 }}>
                       <label style={{ fontSize: '0.7rem' }}>Symbol</label>
-                      <input type="text" list="symbols-list" value={item.symbol} onChange={e => updatePortfolioSymbol(idx, 'symbol', e.target.value)} />
+                      <SymbolAutocomplete
+                        value={item.symbol}
+                        onChange={val => updatePortfolioSymbol(idx, 'symbol', val)}
+                        options={backtestSymbols}
+                        placeholder="Type to find symbol"
+                      />
                     </div>
                     <div style={{ flex: 1 }}>
                       <label style={{ fontSize: '0.7rem' }}>Strategy</label>
@@ -1600,7 +1729,7 @@ export default function Backtester() {
                 return (
                   <tr key={bt.id}>
                     <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{bt.created_at ? new Date(bt.created_at).toLocaleString() : 'N/A'}</td>
-                    <td><strong>{bt.symbol}</strong></td>
+                    <td><strong>{bt.title || bt.symbol}</strong></td>
                     <td>{bt.total_trades}</td>
                     <td className={bt.win_rate >= 0.5 ? 'green' : 'yellow'}>{((bt.win_rate || 0) * 100).toFixed(0)}%</td>
                     <td style={{ color: bt.total_pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>${(bt.total_pnl || 0).toFixed(2)}</td>
@@ -1624,6 +1753,8 @@ export default function Backtester() {
       <SaveModal
         result={result}
         form={form}
+        isPortfolio={activeTab === 'portfolio'}
+        portfolioSymbols={portfolioSymbols}
         onClose={() => setShowSaveModal(false)}
         onSuccess={handleSaveSuccess}
       />

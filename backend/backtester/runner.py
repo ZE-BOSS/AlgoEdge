@@ -100,6 +100,7 @@ async def run_backtest(
     candles_m15: pd.DataFrame = None,
     candles_m5: pd.DataFrame = None,
     compounding_enabled: bool = False,
+    title: str | None = None,
 ) -> dict[str, Any]:
     """
     Execute a backtest and optionally persist results to PostgreSQL.
@@ -190,6 +191,7 @@ async def run_backtest(
         user_id=user_id,
         strategy_id=strategy_id,
         symbol=symbol,
+        title=(title or "").strip() or symbol,
         start_date=start_date,
         end_date=end_date,
         params_snapshot=json.dumps(risk_config),

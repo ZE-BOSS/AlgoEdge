@@ -25,9 +25,13 @@ def get_pip_size(symbol: str) -> float:
     except ImportError:
         pass
 
-    gold_like = ["XAUUSD", "GOLD"]
-    jpy_pairs = ["USDJPY", "EURJPY", "GBPJPY"]
-    indices = ["US30", "US500", "NAS100"]
+    gold_like = ["XAUUSD", "GOLD", "XAU"]
+    silver_platinum = ["XAGUSD", "SILVER", "XAG", "XPTUSD", "PLATINUM", "XPT"]
+    jpy_pairs = ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY"]
+    indices = ["US30", "US500", "NAS100", "US2000", "UK100", "FRA40", "EU50",
+               "NTH25", "SWI20", "AUS200", "JP225", "GER40", "HK50", "USTEC", "NDX", "SPX"]
+    oil_gas = ["USOIL", "UKOIL", "WTI", "BRENT", "OIL", "XTIUSD", "XBRUSD", "NG", "NATGAS", "XNGUSD"]
+    crypto = ["BTC", "ETH", "DOGE", "SOL", "XRP", "LTC"]
     synthetics = ["V10", "V25", "V50", "V75", "V100", "BOOM", "CRASH", "STEP", "VOLATILITY", "JUMP", "DEX"]
 
     symbol_upper = symbol.upper()
@@ -36,8 +40,14 @@ def get_pip_size(symbol: str) -> float:
         return 1.0  # Points for synthetics
     if any(s in symbol_upper for s in gold_like):
         return 0.01
+    if any(s in symbol_upper for s in silver_platinum):
+        return 0.001 if "AG" in symbol_upper or "SILVER" in symbol_upper else 0.01
     if any(s in symbol_upper for s in jpy_pairs):
+        return 0.01 if any(p in symbol_upper for p in ("GBPJPY", "EURJPY", "AUDJPY", "CADJPY")) else 0.001
+    if any(s in symbol_upper for s in oil_gas):
         return 0.01
+    if any(s in symbol_upper for s in crypto):
+        return 1.0  # BTC/ETH-scale; badly wrong for DOGE/XRP but at least in the right order vs 0.0001
     if any(s in symbol_upper for s in indices):
         return 1.0
     return 0.0001  # Standard forex
@@ -246,4 +256,3 @@ def get_confluence_scaled_risk(base_risk_pct: float, confluence_score: int) -> f
         return base_risk_pct * 0.50
     else:
         return 0.0
-

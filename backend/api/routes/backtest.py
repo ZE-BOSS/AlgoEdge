@@ -1102,6 +1102,7 @@ async def list_backtests(
         "id": r.id,
         "strategy_id": r.strategy_id,
         "symbol": r.symbol,
+        "title": r.title or r.symbol,
         "total_trades": r.total_trades,
         "win_rate": r.win_rate,
         "sharpe_ratio": r.sharpe_ratio,
@@ -1249,13 +1250,19 @@ async def get_backtest(
             "strategy_id": getattr(t, "strategy_id", None) or run.strategy_id,
             "smc_data": safe_json_loads(t.smc_data, {}),
             "sub_trades": sub_trades,
-            "entry_snapshot_b64": ""
+            # runner.py's _slim_sub_trades keeps entry_snapshot_b64 on
+            # sub_trades[0] specifically (it's identical across every leg of
+            # a group, so it's stripped from legs 1+ to save space, not
+            # dropped entirely). Read it back from there instead of
+            # hardcoding "" and silently losing the saved snapshot image.
+            "entry_snapshot_b64": (sub_trades[0].get("entry_snapshot_b64", "") if sub_trades else "")
         })
 
     resp = {
         "run": {
             "id": run.id,
             "symbol": run.symbol,
+            "title": run.title or run.symbol,
             "strategy_id": run.strategy_id,
             "total_trades": run.total_trades,
             "win_rate": run.win_rate,
@@ -1449,6 +1456,10 @@ async def save_backtest_from_client(
         user_id=current_user.id,
         strategy_id=data.get("strategy_id", "SMC_v1"),
         symbol=data.get("symbol", "Volatility 75 Index"),
+        # User-supplied title takes priority. Falls back to symbol so
+        # single-symbol saves (which didn't bother typing a title) still get
+        # a sensible default, matching prior behavior for that case only.
+        title=(data.get("title") or "").strip() or data.get("symbol", "Volatility 75 Index"),
         start_date=start_date,
         end_date=end_date,
         params_snapshot=json.dumps({
@@ -1484,7 +1495,25 @@ async def save_backtest_from_client(
         from backend.api.routes.backtest import USER_BACKTEST_STATE
         state = USER_BACKTEST_STATE.get(current_user.id)
         if state and state.get("result"):
-            state_trades = state["result"].get("grouped_trades", [])
+            state_result = state["result"]
+            # USER_BACKTEST_STATE is a single slot per user, not per-backtest —
+            # if the user ran ANY other backtest (even just a preview) between
+            # finishing this run and clicking Save, this slot now belongs to a
+            # different run entirely. Using it anyway means every group_id
+            # lookup below silently misses, and since the frontend's own copy
+            # of `trades` already had chart_data stripped before the save
+            # request was sent, BOTH sources end up empty with no error raised
+            # anywhere — exactly the "chart_data": [] symptom. Check the id
+            # actually matches before trusting it.
+            if state_result.get("backtest_id") == backtest_id:
+                state_trades = state_result.get("grouped_trades", [])
+            else:
+                logger.warning(
+                    f"[save_backtest] USER_BACKTEST_STATE for user={current_user.id} holds "
+                    f"backtest_id={state_result.get('backtest_id')!r}, not the one being saved "
+                    f"({backtest_id!r}) — likely another backtest ran in between. chart_data for "
+                    f"this save will be empty for every trade."
+                )
     except Exception as e:
         import logging
         logging.error(f"Failed to load state for chart injection: {e}")
@@ -1605,6 +1634,7 @@ async def get_bulk_backtests(
         response.append({
             "id": run.id,
             "symbol": run.symbol,
+            "title": run.title or run.symbol,
             "strategy_id": run.strategy_id,
             "initial_balance": initial_balance,
             "trades": trades_out

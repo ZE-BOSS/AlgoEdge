@@ -6,6 +6,16 @@ Run with: python -m backend.data.migrate
 
 Since the project uses SQLAlchemy create_all (which only creates missing tables,
 not missing columns), this script handles ALTER TABLE for production databases.
+
+POSTGRES ONLY: every statement below uses "IF NOT EXISTS" / "IF EXISTS" on
+ALTER TABLE, which SQLite's ALTER TABLE grammar does not support at all (not
+even on recent SQLite versions) — running this against a SQLite database
+(e.g. algoedge.db) will fail on every single statement. If your deployment
+actually runs on SQLite, use backend/data/database.py's init_db() instead —
+it applies the equivalent migrations automatically on every app startup and
+is SQLite/Postgres-aware. Only run this script directly against a real
+Postgres database (e.g. as a deploy step for the Postgres/Railway target
+described in main.py).
 """
 
 import asyncio
@@ -83,13 +93,18 @@ MIGRATIONS = [
     ),
     (
         "Add bias_stats",
-        "ALTER TABLE backtest_runs ADD COLUMN bias_stats TEXT;",
-        None,
+        "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS bias_stats TEXT;",
+        "ALTER TABLE backtest_runs DROP COLUMN IF EXISTS bias_stats;",
     ),
     (
         "Add confluence_stats",
-        "ALTER TABLE backtest_runs ADD COLUMN confluence_stats TEXT;",
-        None,
+        "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS confluence_stats TEXT;",
+        "ALTER TABLE backtest_runs DROP COLUMN IF EXISTS confluence_stats;",
+    ),
+    (
+        "Add title to backtest_runs",
+        "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS title TEXT;",
+        "ALTER TABLE backtest_runs DROP COLUMN IF EXISTS title;",
     ),
 ]
 
