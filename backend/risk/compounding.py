@@ -591,7 +591,9 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="EURAUD", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=0.65, lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "GER40": InstrumentProfile(
-        symbol="GER40", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+        # GER30/GER40 (DAX): minimum price move = 0.1 pts. Using point_size=0.1 gives correct lot sizes.
+        # With point_size=1.0 the lot size was 10x too large → causing 10019 No money on FundedNext.
+        symbol="GER40", instrument_type="INDEX", point_size=0.1, point_value_per_lot=0.1, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "HK50": InstrumentProfile(
         symbol="HK50", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
@@ -685,7 +687,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     "US30": InstrumentProfile(
         symbol="US30",
         instrument_type="INDEX",
-        point_size=1.0,
+        point_size=1.0,              # Dow Jones: minimum move = 1.0 point — correct
         point_value_per_lot=1.0,    # $1 per point per standard lot
         lot_min=0.01,
         lot_max=50.0,
@@ -704,8 +706,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     "NAS100": InstrumentProfile(
         symbol="NAS100",
         instrument_type="INDEX",
-        point_size=1.0,
-        point_value_per_lot=1.0,
+        point_size=0.25,             # NASDAQ 100: minimum move = 0.25 points on most CFD brokers
+        point_value_per_lot=0.25,   # $0.25 per 0.25-point tick per lot → $1/full-point/lot
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
@@ -723,8 +725,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     "US500": InstrumentProfile(
         symbol="US500",
         instrument_type="INDEX",
-        point_size=1.0,
-        point_value_per_lot=1.0,
+        point_size=0.1,              # S&P 500: minimum move = 0.1 points on CFD brokers
+        point_value_per_lot=0.1,    # $0.10 per 0.1-point tick per lot → $1/full-point/lot
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
@@ -762,7 +764,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     # ── Additional Indices ───────────────────────────────────────────────────
 
     "US2000": InstrumentProfile(
-        symbol="US2000", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0,
+        # Russell 2000: minimum move = 0.1 points on most CFD brokers
+        symbol="US2000", instrument_type="INDEX", point_size=0.1, point_value_per_lot=0.1,
         lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "UK100": InstrumentProfile(

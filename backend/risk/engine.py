@@ -117,15 +117,14 @@ class RiskEngine:
             return False, "Risk is zero (entry == SL)", []
 
         # 3. Position Sizing
+        # IMPORTANT: Always use the live account_balance for lot sizing.
+        # initial_balance / prop_firm.initial_balance are for drawdown checks only.
+        # Using a stale initial_balance for sizing means the account permanently
+        # sizes off the starting value even as equity grows or shrinks in live trading.
         size_modifier = signal_data.get("metadata", {}).get("size_modifier", 1.0)
-        
-        base_balance = account_balance
-        if hasattr(self, "prop_firm_validator") and self.prop_firm_validator and self.prop_firm_validator.enabled:
-            base_balance = self.prop_firm_validator.initial_balance
-        elif not self.compounding_enabled and initial_balance is not None:
-            base_balance = initial_balance
+        base_balance = account_balance  # Always use current live balance
 
-        if self.compounding_enabled and compounding_risk_dollars > 0 and base_balance == account_balance:
+        if self.compounding_enabled and compounding_risk_dollars > 0:
             requested_risk_dollars = compounding_risk_dollars * size_modifier
             total_lots = calculate_lot_from_dollars(
                 requested_risk_dollars, entry, sl, symbol

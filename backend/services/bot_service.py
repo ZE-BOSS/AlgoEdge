@@ -416,9 +416,6 @@ class BotService:
                         # ── DYNAMIC STRATEGY RESOLUTION ──
                         strategy_id = "SMC_v1"
                         
-                        # Debug exactly what is in the config
-                        self._log_event(f"Debug Config: symbols={getattr(config, 'symbols', self.symbols)}, instruments={[s.symbol + ':' + s.strategy_id for s in getattr(config, 'instrument_settings', [])]}", "DEBUG", "BOT")
-                        
                         if hasattr(config, 'instrument_settings') and config.instrument_settings:
                             for settings in config.instrument_settings:
                                 if settings.symbol == symbol:
@@ -633,6 +630,8 @@ class BotService:
                                         # Place orders via OrderManager with Retry Logic
                                         db_positions = []
                                         import MetaTrader5 as mt5
+                                        # Track per-TP failure messages for detailed Telegram alert
+                                        tp_failure_details: list[str] = []
                                         
                                         for tp in tp_levels:
                                             max_retries = 5
@@ -678,6 +677,8 @@ class BotService:
                                                             mt5.initialize() # Try re-init MT5
                                                             await asyncio.sleep(0.5)
                                                         else:
+                                                            detail = f"TP{tp.level} ({tp.volume}L): {err_msg}"
+                                                            tp_failure_details.append(detail)
                                                             self._log_event(f"Order failed permanently after {max_retries} attempts: TP{tp.level}", "ERROR", "TRADE")
                                                             asyncio.ensure_future(self._broadcast_notification(
                                                                 "MT5 Execution Failed",
@@ -693,6 +694,8 @@ class BotService:
                                                         mt5.initialize()
                                                         await asyncio.sleep(0.5)
                                                     else:
+                                                        detail = f"TP{tp.level} ({tp.volume}L): {str(order_err)[:80]}"
+                                                        tp_failure_details.append(detail)
                                                         self._log_event(f"Permanent placement error: {str(order_err)[:100]}", "ERROR", "TRADE")
                                                         asyncio.ensure_future(self._broadcast_notification(
                                                                 "MT5 Execution Failed",
@@ -703,7 +706,11 @@ class BotService:
                                         if not db_positions:
                                             self.circuit_breaker.rollback_position(group_id)
                                             self._log_event(f"All orders failed. Rolled back risk state for {group_id}.", "WARN", "RISK")
-                                            await self._save_signal_state(signal, "FAILED", "MT5 execution failed for all TP levels", tp_levels=tp_levels)
+                                            # Build detailed failure reason for Telegram (includes MT5 error codes)
+                                            fail_reason = "MT5 execution failed: " + " | ".join(tp_failure_details) if tp_failure_details else "MT5 execution failed for all TP levels"
+                                            if sig_time:
+                                                self._last_signal_time[symbol] = sig_time  # Prevent same signal from re-firing
+                                            await self._save_signal_state(signal, "FAILED", fail_reason, tp_levels=tp_levels)
                                             had_execution_failure = True
                                         elif len(db_positions) < len(tp_levels):
                                             self.circuit_breaker.active_groups[group_id]["sub_trades"] = len(db_positions)
@@ -885,6 +892,22 @@ class BotService:
                                 f"{deal['symbol']} closed for ${net_profit:.2f}",
                                 "success" if net_profit >= 0 else "error"
                             ))
+                            
+                            # Telegram notification for closed trade
+                            try:
+                                from backend.services.telegram import telegram_service
+                                emoji = "✅" if net_profit >= 0 else "❌"
+                                sym = telegram_service.escape_markdown(deal['symbol'])
+                                pnl_str = telegram_service.escape_markdown(f"{net_profit:+.2f}")
+                                tg_msg = (
+                                    f"{emoji} *Trade Closed*\n"
+                                    f"Symbol: {sym}\n"
+                                    f"P&L: ${pnl_str}\n"
+                                    f"Commission: ${deal.get('commission', 0):.2f} | Swap: ${deal.get('swap', 0):.2f}"
+                                )
+                                asyncio.ensure_future(telegram_service.send_message(tg_msg))
+                            except Exception as tg_err:
+                                logger.error(f"Failed to send trade-close Telegram: {tg_err}")
                             
                             # Update circuit breaker state
                             if self.circuit_breaker:
