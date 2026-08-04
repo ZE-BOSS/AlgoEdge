@@ -108,23 +108,6 @@ def calculate_lot_size(
     risk_amount = account_balance * (risk_pct / 100)
     sl_distance = abs(entry_price - stop_loss_price)
 
-    # Try InstrumentProfile first for accurate pip_value
-    try:
-        from backend.risk.compounding import get_instrument_profile
-        profile = get_instrument_profile(symbol)
-        if profile:
-            sl_pips = sl_distance / profile.point_size if profile.point_size else 0
-            pip_value = profile.point_value_per_lot
-            if sl_pips == 0 or pip_value == 0:
-                return 0.0
-            raw_lot = risk_amount / (sl_pips * pip_value)
-            clamped = max(profile.lot_min, min(profile.lot_max, raw_lot))
-            step = profile.lot_step
-            rounded = round(clamped / step) * step if step > 0 else clamped
-            return round(rounded, 3)
-    except ImportError:
-        pass
-
     # Universal calculation: Lot = Risk / (SL_distance * (Tick_Value / Tick_Size))
     info = get_symbol_info(symbol)
     tick_value = info.get("tick_value", 1.0)
@@ -157,23 +140,6 @@ def calculate_lot_from_dollars(
     """
     sl_distance = abs(entry_price - stop_loss_price)
 
-    # Try InstrumentProfile first
-    try:
-        from backend.risk.compounding import get_instrument_profile
-        profile = get_instrument_profile(symbol)
-        if profile:
-            sl_pips = sl_distance / profile.point_size if profile.point_size else 0
-            pip_value = profile.point_value_per_lot
-            if sl_pips == 0 or pip_value == 0:
-                return 0.0
-            raw_lot = risk_dollars / (sl_pips * pip_value)
-            clamped = max(profile.lot_min, min(profile.lot_max, raw_lot))
-            step = profile.lot_step
-            rounded = round(clamped / step) * step if step > 0 else clamped
-            return round(rounded, 3)
-    except ImportError:
-        pass
-
     # Universal calculation: Lot = Risk / (SL_distance * (Tick_Value / Tick_Size))
     info = get_symbol_info(symbol)
     tick_value = info.get("tick_value", 1.0)
@@ -200,15 +166,6 @@ def calculate_risk_dollars(lots: float, entry_price: float, stop_loss_price: flo
 
     sl_distance = abs(entry_price - stop_loss_price)
     
-    try:
-        from backend.risk.compounding import get_instrument_profile
-        profile = get_instrument_profile(symbol)
-        if profile:
-            sl_pips = sl_distance / profile.point_size if profile.point_size else 0
-            return lots * sl_pips * profile.point_value_per_lot
-    except ImportError:
-        pass
-
     info = get_symbol_info(symbol)
     tick_value = info.get("tick_value", 1.0)
     tick_size = info.get("tick_size", 0.00001)
