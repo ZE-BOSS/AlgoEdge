@@ -33,6 +33,8 @@ class BotService:
         self.total_signals_today = 0
         self._last_signal_time = {}
         self.engine = None
+        self.risk_engine = None          # Cached RiskEngine — rebuilt only when config changes
+        self._risk_engine_fp = None      # Fingerprint tuple for cache invalidation
         self.circuit_breaker = None
         self.prop_firm_validator = None
 
@@ -554,6 +556,17 @@ class BotService:
                                         await self._save_signal_state(signal, "SKIPPED", cb_reason)
                                         continue
 
+                                # === News Filter Hard Gate ===
+                                # Explicit block here (not just context injection into the strategy engine)
+                                # ensures no order is ever placed during a news window, regardless of
+                                # whether the strategy checks context["news_blocked"] or not.
+                                if hasattr(self, 'news_filter') and self.news_filter.enabled and self.news_filter.is_blocked(signal.symbol):
+                                    _block_mins = int(self.news_filter.block_window.total_seconds() // 60) if hasattr(self.news_filter, 'block_window') else 30
+                                    _news_msg = f"News filter: high-impact event within {_block_mins}min window"
+                                    self._log_event(f"[REJECTED] {_news_msg} — {signal.symbol}", "SIGNAL", "RISK")
+                                    await self._save_signal_state(signal, "SKIPPED", _news_msg)
+                                    continue
+
                                 # === Execute trade via RiskEngine ===
                                 try:
                                     from backend.brokers.factory import broker_factory
@@ -596,9 +609,21 @@ class BotService:
                                         "trail_method_tp4": config.risk.trail_method_tp4 if hasattr(config.risk, 'trail_method_tp4') else "ATR_TRAIL",
                                         "trail_method_tp5": config.risk.trail_method_tp5 if hasattr(config.risk, 'trail_method_tp5') else "ATR_TRAIL",
                                     }
-                                    risk_engine = RiskEngine(risk_config)
-                                    risk_engine.circuit = self.circuit_breaker
-                                    risk_engine.prop_firm_validator = getattr(self, "prop_firm_validator", None)
+                                    # Cache RiskEngine across scan cycles — only rebuild when key settings change.
+                                    # MultiTPManager/BreakevenManager/TrailingManager are expensive to construct;
+                                    # risk_config dict is still built fresh each signal to pick up config edits.
+                                    _rf = (
+                                        risk_config["risk_per_trade_pct"],
+                                        risk_config.get("tp_count", 3),
+                                        risk_config.get("compounding_enabled", False),
+                                        risk_config.get("min_rr", 3.0),
+                                    )
+                                    if self.risk_engine is None or self._risk_engine_fp != _rf:
+                                        self.risk_engine = RiskEngine(risk_config)
+                                        self._risk_engine_fp = _rf
+                                    # Always refresh injected singletons (they may update between scans)
+                                    self.risk_engine.circuit = self.circuit_breaker
+                                    self.risk_engine.prop_firm_validator = getattr(self, "prop_firm_validator", None)
 
                                     # Enforces 1 active signal per symbol, so symbol is uniquely identifying
                                     group_id = signal.symbol
@@ -611,11 +636,14 @@ class BotService:
                                         "stop_loss": signal.stop_loss,
                                         "take_profit": signal.take_profit,
                                         "chart_data": signal.chart_data,
+                                        # Include metadata so size_modifier and confluence-based
+                                        # risk scaling (get_confluence_scaled_risk) reach the engine.
+                                        "metadata": getattr(signal, 'metadata', {}) or {},
                                     }
 
                                     compounding_risk = config.get_risk_amount(account_balance) if hasattr(config, 'get_risk_amount') else account_balance * (config.risk.risk_per_trade_pct / 100)
 
-                                    approved, reason, tp_levels = risk_engine.evaluate_signal(
+                                    approved, reason, tp_levels = self.risk_engine.evaluate_signal(
                                         signal_data, account_balance, compounding_risk_dollars=compounding_risk,
                                         initial_balance=getattr(config.prop_firm, "initial_balance", 10000.0) if hasattr(config, "prop_firm") else getattr(config.compounding, "starting_balance", 10000.0) if hasattr(config, "compounding") else 10000.0
                                     )
@@ -914,6 +942,8 @@ class BotService:
                                 pos_id = deal.get("position_id")
                                 symbol = deal.get("symbol", "UNKNOWN")
                                 close_time = datetime.fromtimestamp(deal["time"], timezone.utc) if deal.get("time") else None
+                                # group_id == symbol by design (one active signal group per symbol at a time).
+                                # circuit_breaker.position_closed() expects group_id as first arg — this is correct.
                                 self.circuit_breaker.position_closed(symbol, net_profit, close_time)
                             if getattr(self, "prop_firm_validator", None):
                                 self.prop_firm_validator.record_trade_closed(deal.get("symbol", "UNKNOWN"), deal.get("volume", 0.0), net_profit)

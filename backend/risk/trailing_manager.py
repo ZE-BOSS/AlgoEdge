@@ -126,15 +126,22 @@ class TrailingManager:
 
         from backend.risk.multi_tp import _is_buy
         if _is_buy(direction):
-            # Trail to below each confirmed Higher Low
-            lows = [s["price"] for s in swing_points if s["type"] == "LOW"]
+            # Trail to below the highest confirmed Higher Low.
+            # Sort ascending so lows[-1] is the highest low — most recent structural support.
+            lows = sorted(
+                [s["price"] for s in swing_points if s["type"] == "LOW"]
+            )
             if lows:
-                return lows[-1] - atr_buffer  # Most recent swing low - buffer
+                return lows[-1] - atr_buffer  # Highest confirmed low - buffer
         else:
-            # Trail to above each confirmed Lower High
-            highs = [s["price"] for s in swing_points if s["type"] == "HIGH"]
+            # Trail to above the lowest confirmed Lower High.
+            # Sort descending so highs[-1] is the lowest high — most recent structural resistance.
+            highs = sorted(
+                [s["price"] for s in swing_points if s["type"] == "HIGH"],
+                reverse=True
+            )
             if highs:
-                return highs[-1] + atr_buffer  # Most recent swing high + buffer
+                return highs[-1] + atr_buffer  # Lowest confirmed high + buffer
 
         return None
 

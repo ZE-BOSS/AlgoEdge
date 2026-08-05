@@ -13,7 +13,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from backend.risk.position_sizer import get_symbol_info
+from backend.risk.position_sizer import calculate_risk_dollars, get_symbol_info
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -84,10 +84,14 @@ class MultiTPManager:
         symbol: str,
         liquidity_target: float | None = None,
         strategy_id: str = "UNKNOWN",
+        max_risk_cap_dollars: float = 0.0,  # 2% of balance; 0 = no cap
     ) -> list[TPLevel]:
         """
         Calculates prices and volumes for up to 5 TP levels.
         Direction accepts both conventions: "BUY"/"SELL" or "BULLISH"/"BEARISH".
+        If max_risk_cap_dollars > 0, enforces it by:
+          1. Reducing TP count (drops last TPs first)
+          2. Then scaling remaining volumes proportionally
         """
         risk = abs(entry - sl)
         if risk == 0:
@@ -197,9 +201,55 @@ class MultiTPManager:
             if not self._validate_tp(tp, entry, direction):
                 return []
 
+        # ── 2% Risk Cap Enforcement ──────────────────────────────────────────────────
+        # After lot_min enforcement, the actual total volume may exceed what the
+        # position sizer intended. Enforce the hard 2% cap here.
+        if max_risk_cap_dollars > 0 and levels:
+            actual_total_risk = calculate_risk_dollars(
+                sum(tp.volume for tp in levels), entry, sl, symbol
+            )
+            if actual_total_risk > max_risk_cap_dollars:
+                logger.warning(
+                    f"[MultiTP] {symbol}: lot_min enforcement inflated risk to "
+                    f"${actual_total_risk:.2f} (cap=${max_risk_cap_dollars:.2f}). "
+                    f"Reducing TP count first..."
+                )
+
+                # Step 1: Reduce TP count (drop last TPs one by one)
+                while len(levels) > 1:
+                    levels = levels[:-1]  # drop last TP
+                    actual_total_risk = calculate_risk_dollars(
+                        sum(tp.volume for tp in levels), entry, sl, symbol
+                    )
+                    if actual_total_risk <= max_risk_cap_dollars:
+                        logger.info(
+                            f"[MultiTP] {symbol}: Risk capped by reducing to "
+                            f"{len(levels)} TP(s). actual_risk=${actual_total_risk:.2f}"
+                        )
+                        break
+
+                # Step 2: If still over cap after keeping only TP1, scale volumes down
+                actual_total_risk = calculate_risk_dollars(
+                    sum(tp.volume for tp in levels), entry, sl, symbol
+                )
+                if actual_total_risk > max_risk_cap_dollars:
+                    scale_factor = max_risk_cap_dollars / actual_total_risk
+                    for tp in levels:
+                        scaled = tp.volume * scale_factor
+                        scaled = max(lot_min, math.floor(scaled / lot_step) * lot_step)
+                        scaled = min(scaled, max_lot_allowed)
+                        tp.volume = round(scaled, 4)
+                    final_risk = calculate_risk_dollars(
+                        sum(tp.volume for tp in levels), entry, sl, symbol
+                    )
+                    logger.warning(
+                        f"[MultiTP] {symbol}: After TP count reduction still over cap. "
+                        f"Scaled volumes by {scale_factor:.3f}. Final risk=${final_risk:.2f}"
+                    )
+
         logger.debug(
             f"TP levels: {len(levels)} | dir={direction} | entry={entry} | "
-            f"risk={risk:.5f} | tp_count={active_count}"
+            f"risk={abs(entry-sl):.5f} | tp_count={len(levels)}"
         )
 
         return levels

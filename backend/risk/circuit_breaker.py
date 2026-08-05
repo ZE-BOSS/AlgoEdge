@@ -41,7 +41,6 @@ class CircuitBreaker:
         self.daily_trades_count = 0
         self.daily_pnl = 0.0   # Still tracked for reporting, not for gating
         self.weekly_pnl = 0.0  # Still tracked for reporting, not for gating
-        self.open_positions = 0
         self.open_positions_by_symbol: dict[str, int] = {}  # symbol → count of active groups
         self.is_paused = False
         self.pause_reason = ""
@@ -116,7 +115,6 @@ class CircuitBreaker:
 
     def position_opened(self, group_id: str, sub_trade_count: int, symbol: str = ""):
         """Track a new position opening."""
-        self.open_positions += 1
         self.daily_trades_count += 1
         self.active_groups[group_id] = {"pnl": 0.0, "sub_trades": sub_trade_count, "symbol": symbol}
         if symbol:
@@ -140,7 +138,6 @@ class CircuitBreaker:
                 
                 sym = self.active_groups[group_id].get("symbol", "")
                 del self.active_groups[group_id]
-                self.open_positions = max(0, self.open_positions - 1)
                 if sym and sym in self.open_positions_by_symbol:
                     self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
                     if self.open_positions_by_symbol[sym] == 0:
@@ -151,7 +148,6 @@ class CircuitBreaker:
         if group_id in self.active_groups:
             sym = self.active_groups[group_id].get("symbol", "")
             del self.active_groups[group_id]
-            self.open_positions = max(0, self.open_positions - 1)
             self.daily_trades_count = max(0, self.daily_trades_count - 1)
             if sym and sym in self.open_positions_by_symbol:
                 self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
@@ -171,13 +167,26 @@ class CircuitBreaker:
             self.weekly_consecutive_losses += 1
 
     def manual_resume(self):
-        """User manually re-enables trading after a streak pause."""
+        """User manually re-enables trading after a streak pause. Resets ALL state."""
         self.is_paused = False
         self.pause_reason = ""
         self.daily_consecutive_losses = 0
         self.weekly_consecutive_losses = 0
         self.last_trade_closed_m15_time = None
         logger.info("Circuit breaker manually resumed by user")
+
+    def _daily_resume(self):
+        """
+        Auto-resume at start of a new trading day.
+        Only resets DAILY state — does NOT touch weekly_consecutive_losses.
+        Calling manual_resume() here was a bug: it cleared the weekly streak counter
+        at midnight every day, making the weekly limit completely ineffective.
+        """
+        self.is_paused = False
+        self.pause_reason = ""
+        self.daily_consecutive_losses = 0
+        self.last_trade_closed_m15_time = None
+        logger.info("Circuit breaker auto-resumed for new trading day (weekly streak preserved)")
 
     def _parse_timestamp_date(self, ts) -> tuple[datetime.date, int]:
         """Safely parse either seconds or milliseconds epoch into date and week."""
@@ -205,13 +214,12 @@ class CircuitBreaker:
             self.daily_consecutive_losses = 0
             self.daily_trades_count = 0
             self.last_reset_day = today
-            # If paused due to daily limits, auto-resume on new day
+            # Auto-resume daily pauses only — weekly streak is preserved intentionally.
+            # (manual_resume() was previously called here, which wiped weekly_consecutive_losses.)
             if self.is_paused and "daily" in self.pause_reason.lower():
-                self.manual_resume()
-            # Un-pause if it was a daily limit pause
-            if "Daily" in self.pause_reason:
-                self.is_paused = False
-                self.pause_reason = ""
+                self._daily_resume()
+            elif "Daily" in self.pause_reason:
+                self._daily_resume()
 
     def _check_weekly_reset(self, current_time: datetime | None = None):
         """Reset weekly counters on Monday."""

@@ -127,7 +127,8 @@ class RiskEngine:
         if self.compounding_enabled and compounding_risk_dollars > 0:
             requested_risk_dollars = compounding_risk_dollars * size_modifier
             total_lots = calculate_lot_from_dollars(
-                requested_risk_dollars, entry, sl, symbol
+                requested_risk_dollars, entry, sl, symbol,
+                account_balance=base_balance,   # enforces 2% hard cap
             )
         else:
             requested_risk_dollars = base_balance * (self.risk_pct / 100.0) * size_modifier
@@ -135,23 +136,8 @@ class RiskEngine:
                 base_balance, self.risk_pct * size_modifier, entry, sl, symbol
             )
 
-        # Calculate actual dollar risk taken (after any Smart Clamping in the position sizer)
-        actual_risk_dollars = calculate_risk_dollars(total_lots, entry, sl, symbol)
-        
-        # Soft Risk Handling for Broker Minimum Lot Constraint
-        # When the minimum broker lot forces more risk than requested, we log a warning
-        # but DO NOT reject. The minimum lot trade proceeds — the user accepts this slight
-        # overshoot rather than missing the trade entirely.
-        if actual_risk_dollars > (requested_risk_dollars * 1.01):
-            logger.warning(json.dumps({
-                "event": "risk_warning_broker_minimum",
-                "reason": "broker_minimum_lot_exceeds_risk",
-                "requested_risk_dollars": requested_risk_dollars,
-                "actual_risk_dollars": actual_risk_dollars,
-                "balance": account_balance,
-                "note": "Proceeding at minimum lot size — risk overshoot accepted"
-            }))
-            # Continue — do not reject. The trade will be placed at minimum lot.
+        # Calculate actual dollar risk from the sizer output (before TP splits)
+        pre_split_risk_dollars = calculate_risk_dollars(total_lots, entry, sl, symbol)
 
         if total_lots == 0.0:
             logger.warning(json.dumps({
@@ -166,14 +152,35 @@ class RiskEngine:
             self.prop_firm_validator.validate_trade(symbol, total_lots)  # logs warnings only
 
         # 4. Multi-Position Splits (TP1/TP2/TP3)
+        # Pass the 2% cap so multi_tp can reduce TP count / scale volumes if lot_min enforcement
+        # would inflate the total risk above the account cap.
+        max_risk_cap_dollars = base_balance * 0.02  # 2% of live balance
         liquidity_target = signal_data.get("liquidity_target")
         strategy_id = signal_data.get("metadata", {}).get("strategy_id", "UNKNOWN")
         tp_levels = self.multi_tp.calculate_tp_levels(
-            entry, sl, direction, total_lots, symbol, liquidity_target, strategy_id
+            entry, sl, direction, total_lots, symbol, liquidity_target, strategy_id,
+            max_risk_cap_dollars=max_risk_cap_dollars,
         )
 
         if not tp_levels:
             return False, "No valid TP levels calculated", []
+
+        # Compute ACTUAL total risk from the real TP volumes (after lot_min enforcement + scaling).
+        # This is what will really be on the line — use it for all reporting.
+        actual_total_lots = sum(tp.volume for tp in tp_levels)
+        actual_risk_dollars = calculate_risk_dollars(actual_total_lots, entry, sl, symbol)
+
+        # Soft warn if there is any residual overshoot vs. the pre-split calculation.
+        # (Should be near-zero after multi_tp's cap enforcement, but log it for full auditability.)
+        if actual_risk_dollars > (requested_risk_dollars * 1.01):
+            logger.warning(json.dumps({
+                "event": "risk_warning_post_split_overshoot",
+                "requested_risk_dollars": round(requested_risk_dollars, 2),
+                "actual_risk_dollars": round(actual_risk_dollars, 2),
+                "actual_total_lots": actual_total_lots,
+                "balance": account_balance,
+                "note": "Residual overshoot after TP scaling — within tolerance"
+            }))
 
         # 5. Validate minimum RR on last TP
         last_tp_price = tp_levels[-1].tp_price

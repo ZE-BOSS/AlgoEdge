@@ -37,7 +37,8 @@ def get_pip_size(symbol: str) -> float:
     symbol_upper = symbol.upper()
 
     if any(s in symbol_upper for s in synthetics):
-        return 1.0  # Points for synthetics
+        return 0.01  # Deriv synthetic tick/point size (0.01, NOT 1.0)
+        # Using 1.0 here caused the breakeven buffer to be 100× too large for V75 etc.
     if any(s in symbol_upper for s in gold_like):
         return 0.01
     if any(s in symbol_upper for s in silver_platinum):
@@ -202,25 +203,32 @@ def calculate_lot_size(
 
 
 
+
 def calculate_lot_from_dollars(
     risk_dollars: float,
     entry_price: float,
     stop_loss_price: float,
     symbol: str,
+    account_balance: float = 0.0,
+    # Hard cap: total risk across all TPs for this trade must not exceed this % of balance.
+    # 0.0 means no cap (only when account_balance is not provided).
+    max_risk_hard_cap_pct: float = 2.0,
 ) -> float:
     """
     Convert a fixed dollar risk amount to lots (for compounding plan).
-    Uses InstrumentProfile.point_value_per_lot for accurate sizing.
+    The 2% cap (max_risk_hard_cap_pct) covers TOTAL risk across all TPs for this trade.
+    Pass account_balance to enforce the cap; omit (or pass 0) to skip it.
     Source: CompoundingPlan_Spec.md Section 2.5
     """
     sl_distance = abs(entry_price - stop_loss_price)
 
-    # Universal calculation: Lot = Risk / (SL_distance * (Tick_Value / Tick_Size))
     info = get_symbol_info(symbol)
     tick_value = info.get("tick_value", 1.0)
     tick_size = info.get("tick_size", 0.00001)
+    source = info.get("source", "UNKNOWN")
 
     if tick_size == 0 or tick_value == 0 or sl_distance == 0:
+        logger.error(f"[SIZER] {symbol}: Zero tick_size/tick_value/sl_distance in calculate_lot_from_dollars — returning 0.")
         return 0.0
 
     value_per_unit_move = tick_value / tick_size
@@ -229,7 +237,28 @@ def calculate_lot_from_dollars(
     clamped = max(info["volume_min"], min(info["volume_max"], raw_lot))
     step = info["volume_step"]
     rounded = round(clamped / step) * step if step > 0 else clamped
-    return round(rounded, 3)
+    final_lot = round(rounded, 3)
+
+    # ── 2% Hard Cap (covers total risk across all TPs) ────────────────────────
+    if account_balance > 0:
+        max_risk_dollars = account_balance * (max_risk_hard_cap_pct / 100)
+        actual_risk = final_lot * sl_distance * value_per_unit_move
+        if actual_risk > max_risk_dollars:
+            safe_lot = max_risk_dollars / (sl_distance * value_per_unit_move)
+            safe_lot = max(info["volume_min"], safe_lot)
+            safe_lot = round(round(safe_lot / step) * step, 3) if step > 0 else round(safe_lot, 3)
+            logger.warning(
+                f"[SIZER] {symbol}: COMPOUNDING CAP TRIGGERED! "
+                f"requested_risk=${risk_dollars:.2f} → lot={final_lot} → actual_risk=${actual_risk:.2f} "
+                f"({actual_risk/account_balance*100:.2f}% of balance, cap={max_risk_hard_cap_pct}%). "
+                f"Clamped to {safe_lot} lots. Source: {source}"
+            )
+            return safe_lot
+
+    logger.info(
+        f"[SIZER] {symbol} [compounding]: lot={final_lot} | risk_dollars=${risk_dollars:.2f} | source={source}"
+    )
+    return final_lot
 
 def calculate_risk_dollars(lots: float, entry_price: float, stop_loss_price: float, symbol: str) -> float:
     """
