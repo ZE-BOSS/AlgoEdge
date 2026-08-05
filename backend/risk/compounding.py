@@ -129,13 +129,16 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Volatility 75 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
-        point_value_per_lot=0.01,    # $1 per point per standard lot (approx)
+        # Verified from real trades: P&L = lots × price_move × $1.00/point
+        # Universal formula: ratio = point_value_per_lot / point_size = 0.01/0.01 = 1.0
+        # i.e. $1.00 per 1-unit price move per lot. Changing to 1.0 breaks this (ratio=100).
+        point_value_per_lot=0.01,
         lot_min=0.01,
         lot_max=10.0,
         lot_step=0.001,
         contract_size=1,
-        session_filter=False,       # 24/7 — no session filter
-        news_filter=False,          # Not affected by news
+        session_filter=False,
+        news_filter=False,
         trades_24_7=True,
         swing_length_htf_override=3,
         swing_length_ltf_override=2,
@@ -149,7 +152,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Volatility 25 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
-        point_value_per_lot=0.01,    # Lower volatility = lower point value
+        # ratio = 0.01/0.01 = 1.0 → $1 per 1-unit price move per lot (correct)
+        point_value_per_lot=0.01,
         lot_min=0.5,
         lot_max=50.0,
         lot_step=0.001,
@@ -167,8 +171,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Volatility 50 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
-        point_value_per_lot=0.01,
-        lot_min=4.0,
+        point_value_per_lot=0.01,  # ratio=1.0 → $1 per 1-unit move per lot
+        lot_min=0.5,
         lot_max=20.0,
         lot_step=0.001,
         contract_size=1,
@@ -183,8 +187,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Volatility 100 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
-        point_value_per_lot=0.01,    # Higher volatility = higher point value
-        lot_min=0.5,
+        point_value_per_lot=0.01,  # ratio=1.0 → $1 per 1-unit move per lot
+        lot_min=0.1,
         lot_max=5.0,
         lot_step=0.001,
         contract_size=1,
@@ -203,6 +207,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Boom 1000 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
+        # Verified from real Crash 1000 trades: P&L = lots × points × $1.00
+        # ratio = 0.01/0.01 = 1.0 → $1 per 1-unit price move per lot
         point_value_per_lot=0.01,
         lot_min=0.2,
         lot_max=10.0,
@@ -211,9 +217,9 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         session_filter=False,
         news_filter=False,
         trades_24_7=True,
-        swing_length_htf_override=5,  # Longer for spike handling
+        swing_length_htf_override=5,
         swing_length_ltf_override=3,
-        ob_impulse_ratio_override=2.5,  # Stronger impulse required (spike-driven)
+        ob_impulse_ratio_override=2.5,
         liq_sweep_min_atr_mult_override=2.0,
     ),
 
@@ -221,6 +227,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Crash 1000 Index",
         instrument_type="SYNTHETIC",
         point_size=0.01,
+        # Verified: ratio = 0.01/0.01 = 1.0 → $1 per 1-unit price move per lot
         point_value_per_lot=0.01,
         lot_min=0.2,
         lot_max=10.0,
@@ -238,7 +245,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="Volatility 10 Index",
         instrument_type="SYNTHETIC",
         point_size=0.001,
-        point_value_per_lot=0.001,   # Very low volatility
+        # ratio = 0.001/0.001 = 1.0 → $1 per 1-unit price move per lot
+        point_value_per_lot=0.001,
         lot_min=0.5,
         lot_max=100.0,
         lot_step=0.001,
