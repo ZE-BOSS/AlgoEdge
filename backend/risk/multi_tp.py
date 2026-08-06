@@ -85,6 +85,7 @@ class MultiTPManager:
         liquidity_target: float | None = None,
         strategy_id: str = "UNKNOWN",
         max_risk_cap_dollars: float = 0.0,  # 2% of balance; 0 = no cap
+        use_live_mt5: bool = True,
     ) -> list[TPLevel]:
         """
         Calculates prices and volumes for up to 5 TP levels.
@@ -147,7 +148,7 @@ class MultiTPManager:
             total_split = sum(splits)
 
         # Get exact lot constraints for rounding
-        info = get_symbol_info(symbol)
+        info = get_symbol_info(symbol, use_live_mt5=use_live_mt5)
         lot_step = info.get("volume_step", 0.01)
         lot_min = info.get("volume_min", 0.01)
 
@@ -206,7 +207,7 @@ class MultiTPManager:
         # position sizer intended. Enforce the hard 2% cap here.
         if max_risk_cap_dollars > 0 and levels:
             actual_total_risk = calculate_risk_dollars(
-                sum(tp.volume for tp in levels), entry, sl, symbol
+                sum(tp.volume for tp in levels), entry, sl, symbol, use_live_mt5=use_live_mt5
             )
             if actual_total_risk > max_risk_cap_dollars:
                 logger.warning(
@@ -219,7 +220,7 @@ class MultiTPManager:
                 while len(levels) > 1:
                     levels = levels[:-1]  # drop last TP
                     actual_total_risk = calculate_risk_dollars(
-                        sum(tp.volume for tp in levels), entry, sl, symbol
+                        sum(tp.volume for tp in levels), entry, sl, symbol, use_live_mt5=use_live_mt5
                     )
                     if actual_total_risk <= max_risk_cap_dollars:
                         logger.info(
@@ -230,7 +231,7 @@ class MultiTPManager:
 
                 # Step 2: If still over cap after keeping only TP1, scale volumes down
                 actual_total_risk = calculate_risk_dollars(
-                    sum(tp.volume for tp in levels), entry, sl, symbol
+                    sum(tp.volume for tp in levels), entry, sl, symbol, use_live_mt5=use_live_mt5
                 )
                 if actual_total_risk > max_risk_cap_dollars:
                     scale_factor = max_risk_cap_dollars / actual_total_risk
@@ -240,7 +241,7 @@ class MultiTPManager:
                         scaled = min(scaled, max_lot_allowed)
                         tp.volume = round(scaled, 4)
                     final_risk = calculate_risk_dollars(
-                        sum(tp.volume for tp in levels), entry, sl, symbol
+                        sum(tp.volume for tp in levels), entry, sl, symbol, use_live_mt5=use_live_mt5
                     )
                     logger.warning(
                         f"[MultiTP] {symbol}: After TP count reduction still over cap. "

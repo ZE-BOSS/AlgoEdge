@@ -54,16 +54,20 @@ def get_pip_size(symbol: str) -> float:
     return 0.0001  # Standard forex
 
 
-def get_symbol_info(symbol: str) -> dict:
+def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
     """
     Get lot constraints and tick values for a symbol.
-    Priority: Live MT5 (if connected) → InstrumentProfile → Standard defaults.
+    Priority: Live MT5 (if connected AND use_live_mt5=True) → InstrumentProfile → Standard defaults.
+
+    use_live_mt5=False is passed from the backtester so that sizing and PnL always
+    use the same InstrumentProfile source, even when MT5 is connected in the background.
     IMPORTANT: Always logs which source was used so sizing decisions are auditable.
     """
     # ── 1. Live MT5 Data ──────────────────────────────────────────────────────
-    # Check both: library imported AND terminal is actually connected/initialized.
+    # Only query MT5 in live-trading mode.  The backtester always passes
+    # use_live_mt5=False so that sizing and _calc_pnl use the same source.
     mt5_connected = False
-    if mt5:
+    if use_live_mt5 and mt5:
         try:
             terminal = mt5.terminal_info()
             mt5_connected = terminal is not None and terminal.connected
@@ -97,6 +101,8 @@ def get_symbol_info(symbol: str) -> dict:
                 )
         except Exception as e:
             logger.warning(f"[SIZER] {symbol}: MT5 symbol_info error: {e}. Falling back.")
+    elif not use_live_mt5:
+        logger.debug(f"[SIZER] {symbol}: Backtester mode (use_live_mt5=False). Using InstrumentProfile.")
     else:
         logger.debug(f"[SIZER] {symbol}: MT5 not connected. Using InstrumentProfile fallback.")
 
@@ -147,6 +153,7 @@ def calculate_lot_size(
     # Absolute safety cap: if calculated risk exceeds this % of balance, clamp down.
     # Protects against any future misconfiguration regardless of profile values.
     max_risk_hard_cap_pct: float = 3.0,
+    use_live_mt5: bool = True,
 ) -> float:
     """
     Calculate lot size so that if SL is hit, loss = risk_pct% of balance.
@@ -158,7 +165,7 @@ def calculate_lot_size(
     risk_amount = account_balance * (risk_pct / 100)
     sl_distance = abs(entry_price - stop_loss_price)
 
-    info = get_symbol_info(symbol)
+    info = get_symbol_info(symbol, use_live_mt5=use_live_mt5)
     tick_value = info.get("tick_value", 1.0)
     tick_size = info.get("tick_size", 0.00001)
     source = info.get("source", "UNKNOWN")
@@ -204,79 +211,29 @@ def calculate_lot_size(
 
 
 
-def calculate_lot_from_dollars(
-    risk_dollars: float,
+def calculate_risk_dollars(
+    lots: float,
     entry_price: float,
     stop_loss_price: float,
     symbol: str,
-    account_balance: float = 0.0,
-    # Hard cap: total risk across all TPs for this trade must not exceed this % of balance.
-    # 0.0 means no cap (only when account_balance is not provided).
-    max_risk_hard_cap_pct: float = 2.0,
+    use_live_mt5: bool = True,
 ) -> float:
     """
-    Convert a fixed dollar risk amount to lots (for compounding plan).
-    The 2% cap (max_risk_hard_cap_pct) covers TOTAL risk across all TPs for this trade.
-    Pass account_balance to enforce the cap; omit (or pass 0) to skip it.
-    Source: CompoundingPlan_Spec.md Section 2.5
-    """
-    sl_distance = abs(entry_price - stop_loss_price)
-
-    info = get_symbol_info(symbol)
-    tick_value = info.get("tick_value", 1.0)
-    tick_size = info.get("tick_size", 0.00001)
-    source = info.get("source", "UNKNOWN")
-
-    if tick_size == 0 or tick_value == 0 or sl_distance == 0:
-        logger.error(f"[SIZER] {symbol}: Zero tick_size/tick_value/sl_distance in calculate_lot_from_dollars — returning 0.")
-        return 0.0
-
-    value_per_unit_move = tick_value / tick_size
-    raw_lot = risk_dollars / (sl_distance * value_per_unit_move)
-
-    clamped = max(info["volume_min"], min(info["volume_max"], raw_lot))
-    step = info["volume_step"]
-    rounded = round(clamped / step) * step if step > 0 else clamped
-    final_lot = round(rounded, 3)
-
-    # ── 2% Hard Cap (covers total risk across all TPs) ────────────────────────
-    if account_balance > 0:
-        max_risk_dollars = account_balance * (max_risk_hard_cap_pct / 100)
-        actual_risk = final_lot * sl_distance * value_per_unit_move
-        if actual_risk > max_risk_dollars:
-            safe_lot = max_risk_dollars / (sl_distance * value_per_unit_move)
-            safe_lot = max(info["volume_min"], safe_lot)
-            safe_lot = round(round(safe_lot / step) * step, 3) if step > 0 else round(safe_lot, 3)
-            logger.warning(
-                f"[SIZER] {symbol}: COMPOUNDING CAP TRIGGERED! "
-                f"requested_risk=${risk_dollars:.2f} → lot={final_lot} → actual_risk=${actual_risk:.2f} "
-                f"({actual_risk/account_balance*100:.2f}% of balance, cap={max_risk_hard_cap_pct}%). "
-                f"Clamped to {safe_lot} lots. Source: {source}"
-            )
-            return safe_lot
-
-    logger.info(
-        f"[SIZER] {symbol} [compounding]: lot={final_lot} | risk_dollars=${risk_dollars:.2f} | source={source}"
-    )
-    return final_lot
-
-def calculate_risk_dollars(lots: float, entry_price: float, stop_loss_price: float, symbol: str) -> float:
-    """
     Calculates the actual risk in dollars for a given lot size.
-    Used for the 15% Maximum Risk Circuit Breaker.
+    Used for the 15% Maximum Risk Circuit Breaker and MultiTP cap enforcement.
     """
     if lots == 0.0:
         return 0.0
 
     sl_distance = abs(entry_price - stop_loss_price)
-    
-    info = get_symbol_info(symbol)
+
+    info = get_symbol_info(symbol, use_live_mt5=use_live_mt5)
     tick_value = info.get("tick_value", 1.0)
     tick_size = info.get("tick_size", 0.00001)
-    
+
     if tick_size == 0:
         return 0.0
-        
+
     value_per_unit_move = tick_value / tick_size
     return lots * sl_distance * value_per_unit_move
 

@@ -35,10 +35,8 @@ export const useTradesStore = create((set) => ({
 
 export const useRiskStore = create((set) => ({
   stats: null,
-  compounding: null,
   circuitBreaker: { paused: false, reason: '' },
   setStats: (stats) => set({ stats }),
-  setCompounding: (compounding) => set({ compounding }),
   setCircuitBreaker: (circuitBreaker) => set({ circuitBreaker }),
 }));
 

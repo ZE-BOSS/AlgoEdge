@@ -79,8 +79,6 @@ class BacktestRequest(BaseModel):
     trail_method_tp5: str = "STRUCTURE_TRAIL"
     atr_trail_multiplier: float = 1.5
     trail_pips: float = 15.0
-    # ── Compounding ──
-    compounding_enabled: bool = False
     # ── Multi-Strategy Filters ──
     session_filter_enabled: bool = True
     manual_bias_overrides: dict[str, Any] = {}
@@ -135,7 +133,6 @@ class PortfolioBacktestRequest(BaseModel):
     trail_method_tp5: str = "STRUCTURE_TRAIL"
     atr_trail_multiplier: float = 1.5
     trail_pips: float = 15.0
-    compounding_enabled: bool = False
     session_filter_enabled: bool = True
 
 
@@ -520,7 +517,6 @@ async def run_backtest_endpoint(
                 "target_profit_enabled": req.target_profit_enabled,
                 "max_daily_profit": req.max_daily_profit,
                 "max_weekly_profit": req.max_weekly_profit,
-                "compounding_enabled": req.compounding_enabled,
                 "manual_bias_overrides": req.manual_bias_overrides,
                 "prop_firm": req.prop_firm,
                 **req.risk_config,
@@ -540,7 +536,6 @@ async def run_backtest_endpoint(
                 candles_m15=candles_m15_idx,
                 candles_m5=candles_m5_idx,
                 save_mode="DISCARD",
-                compounding_enabled=req.compounding_enabled,
             )
 
             report = results.get("report")
@@ -754,7 +749,6 @@ async def run_portfolio_backtest_endpoint(
                 "target_profit_enabled": req.target_profit_enabled,
                 "max_daily_profit": req.max_daily_profit,
                 "max_weekly_profit": req.max_weekly_profit,
-                "compounding_enabled": req.compounding_enabled,
                 "prop_firm": req.prop_firm,
             }
 
@@ -954,7 +948,6 @@ async def run_portfolio_backtest_endpoint(
                 portfolio_data,
                 portfolio_signals,
                 req.initial_balance,
-                req.compounding_enabled,
                 portfolio_data_m15,
                 portfolio_data_m5,
             )

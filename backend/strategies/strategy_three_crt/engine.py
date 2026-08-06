@@ -41,6 +41,10 @@ class CRTEngine(BaseStrategy):
         self.c2_trigger: dict[str, Any] | None = None
         self.trades_today = 0
         self.last_trade_date = None
+        # Live bar-time deduplication: mirrors backtester's prev_time_by_tf guard.
+        # Prevents the 60-second scan loop from re-presenting the same closed HTF
+        # candle and triggering the c2_trigger timeout prematurely.
+        self._last_htf_bar_time: dict[str, Any] = {}
 
     async def initialize(self):
         logger.info("CRTEngine initialized")
@@ -102,6 +106,17 @@ class CRTEngine(BaseStrategy):
         in_session = self._is_within_session(dt, symbol)
 
         if timeframe == htf:
+            # ── Bar-time deduplication (live mode) ──────────────────────────────
+            # The live scan loop calls on_bar(H1) every 60s with the same closed
+            # candle for an entire hour.  Guard against this so the c2_trigger
+            # timeout only fires when a genuinely NEW H1 candle closes.
+            _current_bar_ts = current_bar.name
+            _last_htf_ts = self._last_htf_bar_time.get(htf)
+            if _last_htf_ts is not None and _current_bar_ts == _last_htf_ts:
+                return None  # Same H1 bar — preserve c2_trigger, skip HTF logic
+            self._last_htf_bar_time[htf] = _current_bar_ts
+            # ────────────────────────────────────────────────────────────────────
+
             # Update HTF market structure
             self.ms_detector.update(candles)
             

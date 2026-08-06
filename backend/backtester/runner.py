@@ -99,7 +99,6 @@ async def run_backtest(
     save_mode: str = "FULL",
     candles_m15: pd.DataFrame = None,
     candles_m5: pd.DataFrame = None,
-    compounding_enabled: bool = False,
     title: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -128,7 +127,7 @@ async def run_backtest(
     # Run CPU-bound engine in a thread pool so it doesn't block the event loop
     # (without this, ALL other API requests hang until the backtest finishes)
     import asyncio
-    results = await asyncio.to_thread(engine.run, candles, signals, initial_balance, candles_m15, candles_m5, compounding_enabled)
+    results = await asyncio.to_thread(engine.run, candles, signals, initial_balance, candles_m15, candles_m5)
 
     # Broadcast: engine complete
     await _broadcast_progress(user_id, {

@@ -15,7 +15,6 @@ from backend.risk.breakeven_manager import BreakevenManager
 from backend.risk.circuit_breaker import CircuitBreaker
 from backend.risk.multi_tp import MultiTPManager
 from backend.risk.position_sizer import (
-    calculate_lot_from_dollars,
     calculate_lot_size,
     calculate_risk_dollars,
     get_pip_size,
@@ -44,13 +43,15 @@ class RiskEngine:
         self.risk_pct = config.get("risk_per_trade_pct", 1.0)
         self.min_rr = config.get("min_rr", 3.0)
         self.sl_buffer_pips = config.get("sl_buffer_pips", 5.0)
-        self.compounding_enabled = config.get("compounding_enabled", False)
+        # is_backtesting is kept for informational purposes / future guards.
+        # Both live and backtest modes use MT5 data when available, with
+        # InstrumentProfile as fallback — so use_live_mt5 is always True.
+        self.is_backtesting: bool = False
 
     def evaluate_signal(
         self,
         signal_data: dict[str, Any],
         account_balance: float,
-        compounding_risk_dollars: float = 0.0,
         current_time: datetime | None = None,
         initial_balance: float | None = None,
     ) -> tuple[bool, str, list[Any]]:
@@ -123,18 +124,13 @@ class RiskEngine:
         # sizes off the starting value even as equity grows or shrinks in live trading.
         size_modifier = signal_data.get("metadata", {}).get("size_modifier", 1.0)
         base_balance = account_balance  # Always use current live balance
+        # Both live and backtest use MT5 data when available → InstrumentProfile fallback.
+        # This matches how _calc_pnl() works (MT5 first via get_symbol_info).
 
-        if self.compounding_enabled and compounding_risk_dollars > 0:
-            requested_risk_dollars = compounding_risk_dollars * size_modifier
-            total_lots = calculate_lot_from_dollars(
-                requested_risk_dollars, entry, sl, symbol,
-                account_balance=base_balance,   # enforces 2% hard cap
-            )
-        else:
-            requested_risk_dollars = base_balance * (self.risk_pct / 100.0) * size_modifier
-            total_lots = calculate_lot_size(
-                base_balance, self.risk_pct * size_modifier, entry, sl, symbol
-            )
+        requested_risk_dollars = base_balance * (self.risk_pct / 100.0) * size_modifier
+        total_lots = calculate_lot_size(
+            base_balance, self.risk_pct * size_modifier, entry, sl, symbol,
+        )
 
         # Calculate actual dollar risk from the sizer output (before TP splits)
         pre_split_risk_dollars = calculate_risk_dollars(total_lots, entry, sl, symbol)

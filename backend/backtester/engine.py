@@ -109,6 +109,8 @@ class BacktestEngine:
 
     def __init__(self, risk_config: dict[str, Any]):
         self.risk_engine = RiskEngine(risk_config)
+        # Mark as backtesting for informational purposes / future guards.
+        self.risk_engine.is_backtesting = True
         self.risk_config = risk_config
         prop_firm_config = risk_config.get("prop_firm", {})
         self.prop_firm_validator = PropFirmValidator(prop_firm_config)
@@ -133,7 +135,6 @@ class BacktestEngine:
         initial_balance: float = 10000.0,
         candles_m15: pd.DataFrame = None,
         candles_m5: pd.DataFrame = None,
-        compounding_enabled: bool = False,
     ) -> dict[str, Any]:
         """Run a backtest on historical candles with pre-generated signals."""
         balance = initial_balance
@@ -602,36 +603,25 @@ class BacktestEngine:
             "original_signal": sig,
         }
 
-
-
     def _calc_pnl(self, direction: str, entry: float, exit_price: float, volume: float, symbol: str) -> float:
         """
-        Calculate P&L using InstrumentProfile point-value model.
-        Formula: pnl = (price_diff / point_size) * point_value_per_lot * volume
-        Fixes Issue #1: was using contract_size which gives wildly wrong results for synthetics.
-        """
-        profile = get_instrument_profile(symbol)
-        if profile:
-            price_diff = exit_price - entry
-            points = price_diff / profile.point_size if profile.point_size else 0
-            raw_pnl = points * profile.point_value_per_lot * volume
-        else:
-            # Fallback for unknown symbols: dynamically fetch from MT5 if available
-            price_diff = exit_price - entry
-            tick_value = 1.0
-            tick_size = 0.00001
-            try:
-                import MetaTrader5 as mt5
-                if mt5 and mt5.terminal_info() and mt5.terminal_info().connected:
-                    info = mt5.symbol_info(symbol)
-                    if info:
-                        tick_value = info.trade_tick_value or 1.0
-                        tick_size = info.trade_tick_size or 0.00001
-            except Exception:
-                pass
-            
-            value_per_unit_move = tick_value / tick_size
-            raw_pnl = price_diff * value_per_unit_move * volume
-            logger.warning(f"No InstrumentProfile for '{symbol}', using MT5 dynamic fallback (value_per_unit_move={value_per_unit_move})")
+        Calculate P&L using the same data source chain as position sizing:
+        MT5 live data (when connected) → InstrumentProfile → Standard defaults.
 
-        return raw_pnl if direction == "BUY" else -raw_pnl 
+        This ensures that backtesting PnL is always computed with the same
+        tick_value / tick_size as the lot sizing, preventing sizing-vs-PnL drift.
+        Formula: pnl = (price_diff / tick_size) * tick_value * volume
+        """
+        from backend.risk.position_sizer import get_symbol_info
+        info = get_symbol_info(symbol)
+        tick_value = info.get("tick_value", 1.0)
+        tick_size  = info.get("tick_size",  0.00001)
+
+        if tick_size == 0 or tick_value == 0:
+            logger.warning(f"[_calc_pnl] {symbol}: tick_size or tick_value is zero — returning 0 PnL.")
+            return 0.0
+
+        price_diff = exit_price - entry
+        value_per_unit_move = tick_value / tick_size
+        raw_pnl = price_diff * value_per_unit_move * volume
+        return raw_pnl if direction == "BUY" else -raw_pnl

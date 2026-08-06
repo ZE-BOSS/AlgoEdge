@@ -162,11 +162,6 @@ export const updateConfig = (config) => api.put('/config', config);
 export const getChartData = (symbol, timeframe, count = 500) =>
   api.get(`/charts/${symbol}/${timeframe}`, { params: { count } });
 
-// ── Compounding ─────────────────────────────────────────────────────────────
-
-export const getCompounding = () => api.get('/compounding');
-export const getCompoundingEvents = () => api.get('/compounding/events');
-
 // ── Signals ─────────────────────────────────────────────────────────────────
 
 export const getSignals = (params) => api.get('/signals', { params });

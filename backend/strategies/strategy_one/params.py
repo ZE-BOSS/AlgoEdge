@@ -15,7 +15,6 @@ Sources:
 from dataclasses import dataclass, field
 from typing import Literal
 
-from backend.risk.compounding import CompoundingParams
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RISK MANAGEMENT PARAMETERS

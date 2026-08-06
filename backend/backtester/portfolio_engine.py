@@ -75,7 +75,6 @@ class PortfolioBacktestEngine:
         portfolio_data: dict[str, pd.DataFrame],
         portfolio_signals: dict[str, list[dict[str, Any]]],
         initial_balance: float = 10000.0,
-        compounding_enabled: bool = False,
         portfolio_data_m15: dict[str, pd.DataFrame] = None,
         portfolio_data_m5: dict[str, pd.DataFrame] = None,
     ) -> dict[str, Any]:

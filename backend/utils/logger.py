@@ -21,10 +21,29 @@ logger.add(
     colorize=True,
 )
 
-# File output for backend.log disabled as per request
+# File output — captures all [SIZER], [ENGINE], [MultiTP] debug log lines
 _LOG_DIR = Path(__file__).parent.parent.parent / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
-# logger.add(_LOG_DIR / "backend.log", ...)
+logger.add(
+    _LOG_DIR / "backend.log",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function} | {message}",
+    level="INFO",
+    rotation="10 MB",
+    retention="30 days",
+    enqueue=True,
+    encoding="utf-8",
+)
+# High-value trade/risk events only
+logger.add(
+    _LOG_DIR / "trades.log",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {message}",
+    level="INFO",
+    rotation="5 MB",
+    retention="90 days",
+    filter=lambda rec: any(k in rec["message"] for k in ("[SIZER]", "[ENGINE]", "[MultiTP]", "[RISK]", "Opened", "Closed", "TP", "SL")),
+    enqueue=True,
+    encoding="utf-8",
+)
 
 # Trade-specific log (high-value events only) disabled as per request
 # logger.add(
