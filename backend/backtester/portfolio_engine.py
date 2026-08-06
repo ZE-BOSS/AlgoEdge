@@ -54,6 +54,10 @@ class PortfolioBacktestEngine:
         info = get_symbol_info(symbol)
         tick_value = info.get("tick_value", 1.0)
         tick_size  = info.get("tick_size",  0.00001)
+        source     = info.get("source", "UNKNOWN")
+
+        if source == "DEFAULT":
+            logger.warning(f"[_calc_pnl] {symbol}: PnL computed with DEFAULT fallback — may be incorrect!")
 
         if tick_size == 0 or tick_value == 0:
             logger.warning(f"[_calc_pnl] {symbol}: tick_size or tick_value is zero — returning 0 PnL.")

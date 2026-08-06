@@ -1,4 +1,4 @@
-﻿"""
+"""
 backend/risk/compounding.py
 
 Instrument profile definitions for all supported trading instruments.
@@ -420,12 +420,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="USOIL",
         instrument_type="COMMODITY",
         point_size=0.01,
-        # FIX: contract_size(1000 bbl) x point_size(0.01) = $10/point/lot, not
-        # $1. The old value of 1.0 was 10x too low, which meant the sizer
-        # computed lot sizes ~10x too large for the same intended dollar
-        # risk — i.e. USOIL trades were risking roughly 10x the configured
-        # risk_pct whenever this profile resolved.
-        point_value_per_lot=10.0,
+        point_value_per_lot=1.0,
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
@@ -438,7 +433,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="UKOIL",
         instrument_type="COMMODITY",
         point_size=0.01,
-        point_value_per_lot=10.0,  # Same contract convention as USOIL: 1000 bbl x $0.01
+        point_value_per_lot=1.0,
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
@@ -532,9 +527,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         symbol="EURAUD", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=0.65, lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "GER40": InstrumentProfile(
-        # GER30/GER40 (DAX): minimum price move = 0.1 pts. Using point_size=0.1 gives correct lot sizes.
-        # With point_size=1.0 the lot size was 10x too large → causing 10019 No money on FundedNext.
-        symbol="GER40", instrument_type="INDEX", point_size=0.1, point_value_per_lot=0.1, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+        symbol="GER40", instrument_type="INDEX", point_size=0.1, point_value_per_lot=1.2, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "HK50": InstrumentProfile(
         symbol="HK50", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
@@ -647,8 +640,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     "NAS100": InstrumentProfile(
         symbol="NAS100",
         instrument_type="INDEX",
-        point_size=0.25,             # NASDAQ 100: minimum move = 0.25 points on most CFD brokers
-        point_value_per_lot=0.25,   # $0.25 per 0.25-point tick per lot → $1/full-point/lot
+        point_size=0.25,
+        point_value_per_lot=2.5,
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
@@ -666,8 +659,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     "US500": InstrumentProfile(
         symbol="US500",
         instrument_type="INDEX",
-        point_size=0.1,              # S&P 500: minimum move = 0.1 points on CFD brokers
-        point_value_per_lot=0.1,    # $0.10 per 0.1-point tick per lot → $1/full-point/lot
+        point_size=0.1,
+        point_value_per_lot=1.0,
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
@@ -705,8 +698,7 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     # ── Additional Indices ───────────────────────────────────────────────────
 
     "US2000": InstrumentProfile(
-        # Russell 2000: minimum move = 0.1 points on most CFD brokers
-        symbol="US2000", instrument_type="INDEX", point_size=0.1, point_value_per_lot=0.1,
+        symbol="US2000", instrument_type="INDEX", point_size=0.1, point_value_per_lot=1.0,
         lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "UK100": InstrumentProfile(
@@ -754,8 +746,8 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         lot_min=0.1, lot_max=1000.0, lot_step=0.1, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "XRPUSD": InstrumentProfile(
-        symbol="XRPUSD", instrument_type="CRYPTO", point_size=0.0001, point_value_per_lot=0.0001,
-        lot_min=50.0, lot_max=1000000.0, lot_step=10.0, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
+        symbol="XRPUSD", instrument_type="CRYPTO", point_size=0.0001, point_value_per_lot=0.01,
+        lot_min=50.0, lot_max=50.0, lot_step=10.0, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "LTCUSD": InstrumentProfile(
         symbol="LTCUSD", instrument_type="CRYPTO", point_size=0.01, point_value_per_lot=0.01,

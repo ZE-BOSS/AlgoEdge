@@ -225,6 +225,12 @@ class BotService:
         from backend.services.position_manager import position_manager
         position_manager.start(user_id)
 
+        try:
+            from backend.risk.position_sizer import update_mt5_cache
+            update_mt5_cache(self.symbols)
+        except Exception as e:
+            logger.error(f"Failed to update MT5 symbol cache on startup: {e}")
+
         # Server restart recovery: Check DB for OPEN trades and verify with MT5
         try:
             import MetaTrader5 as mt5

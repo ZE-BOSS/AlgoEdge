@@ -14,6 +14,47 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+_MT5_SYMBOL_CACHE = {}
+
+def update_mt5_cache(symbols: list[str]):
+    """
+    Fetch and cache MT5 symbol info (tick_value, tick_size, lot limits) for the given symbols.
+    This ensures that if MT5 disconnects mid-session, we still have accurate live data
+    to size positions and calculate PnL properly, preventing extreme over-sizing.
+    """
+    global _MT5_SYMBOL_CACHE
+    if not mt5:
+        return
+        
+    try:
+        terminal = mt5.terminal_info()
+        if not (terminal and terminal.connected):
+            logger.warning("[SIZER] MT5 not connected, cannot update symbol cache.")
+            return
+    except Exception:
+        return
+        
+    updated = 0
+    for symbol in symbols:
+        try:
+            mt5.symbol_select(symbol, True)
+            info = mt5.symbol_info(symbol)
+            if info and info.trade_tick_value > 0 and info.trade_tick_size > 0:
+                _MT5_SYMBOL_CACHE[symbol] = {
+                    "volume_min": info.volume_min,
+                    "volume_max": info.volume_max,
+                    "volume_step": info.volume_step,
+                    "contract_size": info.trade_contract_size,
+                    "tick_value": info.trade_tick_value,
+                    "tick_size": info.trade_tick_size,
+                    "source": "MT5_CACHE",
+                }
+                updated += 1
+        except Exception as e:
+            logger.debug(f"[SIZER] Error caching {symbol}: {e}")
+            
+    if updated > 0:
+        logger.info(f"[SIZER] MT5 symbol cache updated for {updated} symbols.")
 
 def get_pip_size(symbol: str) -> float:
     """Return pip size for the symbol (e.g. 0.0001 for EURUSD, 0.01 for XAUUSD)."""
@@ -78,7 +119,7 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
             mt5.symbol_select(symbol, True)
             info = mt5.symbol_info(symbol)
             if info and info.trade_tick_value > 0 and info.trade_tick_size > 0:
-                logger.info(
+                logger.debug(
                     f"[SIZER] {symbol}: Using LIVE MT5 data — "
                     f"tick_value={info.trade_tick_value}, tick_size={info.trade_tick_size}, "
                     f"vol_min={info.volume_min}, vol_step={info.volume_step}"
@@ -95,14 +136,20 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
             else:
                 logger.warning(
                     f"[SIZER] {symbol}: MT5 connected but symbol_info returned None or zero tick values. "
-                    f"Falling back to InstrumentProfile."
+                    f"Falling back."
                 )
         except Exception as e:
             logger.warning(f"[SIZER] {symbol}: MT5 symbol_info error: {e}. Falling back.")
     elif not use_live_mt5:
-        logger.debug(f"[SIZER] {symbol}: Backtester mode (use_live_mt5=False). Using InstrumentProfile.")
+        logger.debug(f"[SIZER] {symbol}: Backtester mode (use_live_mt5=False). Checking cache and InstrumentProfile.")
     else:
-        logger.debug(f"[SIZER] {symbol}: MT5 not connected. Using InstrumentProfile fallback.")
+        logger.debug(f"[SIZER] {symbol}: MT5 not connected. Checking cache and InstrumentProfile.")
+
+    # ── 1.5. Cached MT5 Data ──────────────────────────────────────────────────
+    if symbol in _MT5_SYMBOL_CACHE:
+        logger.debug(f"[SIZER] {symbol}: Using cached MT5 data.")
+        return _MT5_SYMBOL_CACHE[symbol]
+
 
     # ── 2. InstrumentProfile Fallback ─────────────────────────────────────────
     try:
@@ -171,6 +218,20 @@ def calculate_lot_size(
     if tick_size == 0 or tick_value == 0 or sl_distance == 0:
         logger.error(f"[SIZER] {symbol}: Zero tick_size/tick_value/sl_distance — returning 0 lots.")
         return 0.0
+
+    # CROSS-RATE FX SAFETY GUARD
+    # If source is DEFAULT, it means we have no MT5 data, no cached data, and no InstrumentProfile.
+    # The default vpum is 100,000 (1.0 / 0.00001). If this is a cross-rate pair on a synthetic
+    # or obscure broker where vpum is actually ~70,000 to ~120,000, using 100,000 might be
+    # safe or might be very risky depending on the pair.
+    # We enforce a strict refusal to trade cross-rate pairs or indices if they hit DEFAULT.
+    _SAFE_DEFAULTS = {"EURUSD", "GBPUSD", "USDJPY"}
+    if source == "DEFAULT":
+        if symbol.upper() not in _SAFE_DEFAULTS:
+            logger.error(f"[SIZER] {symbol}: No MT5 data and no profile. Refusing to size. source=DEFAULT")
+            return 0.0
+        logger.warning(f"[SIZER] {symbol}: Sizing using DEFAULT fallback! Risk calculations may be inaccurate.")
+
 
     # MT5 tick_value = profit in account currency for 1 tick move of 1 standard lot.
     # value_per_unit_move = how many account-currency dollars 1 full price unit is worth per lot.
