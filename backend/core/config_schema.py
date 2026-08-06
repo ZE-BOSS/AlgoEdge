@@ -10,7 +10,6 @@ Dynamically includes configuration blocks for all registered strategies.
 from dataclasses import dataclass, field
 from typing import Literal
 
-from backend.risk.compounding import CompoundingParams
 from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
 from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
 from backend.strategies.strategy_one.params import RiskParams, SMCParams
@@ -63,7 +62,6 @@ class InstrumentSettings:
     enabled:         bool  = True           # Trade this symbol at all
     max_lot_override: float | None = None # Cap lot size (safety)
     custom_sl_buffer: float | None = None # Override profile's sl_buffer_pips
-    compounding_enabled: bool = True        # Allow compounding on this symbol
     notes:           str  = ""              # User label (e.g. "V75 main account")
 
 
@@ -136,10 +134,25 @@ class UserConfig:
         return config
 
 
+@dataclass
+class _CompoundingParamsStub:
+    """
+    Minimal stub kept for backward compatibility when deserializing stored
+    UserConfigV2 objects that contain a 'compounding' key. Compounding is
+    no longer an active feature — AlgoEdge uses fixed % risk per trade.
+    """
+    enabled: bool = False
+    starting_balance: float = 0.0
+    # Absorb any other keys silently
+
+# Public alias so existing references (e.g. bot_service hasattr guards) still work
+CompoundingParams = _CompoundingParamsStub
+
+
 @dataclass 
 class UserConfigV2(UserConfig):
     """
-    Extended UserConfig with compounding, instrument settings, and multi-strategy support.
+    Extended UserConfig with instrument settings and multi-strategy support.
     """
     compounding: CompoundingParams = None
     instrument_settings: list[InstrumentSettings] = None

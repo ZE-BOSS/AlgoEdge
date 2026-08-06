@@ -600,7 +600,6 @@ class BotService:
                                         "target_profit_enabled": config.risk.target_profit_enabled if hasattr(config.risk, 'target_profit_enabled') else False,
                                         "max_daily_profit": config.risk.max_daily_profit if hasattr(config.risk, 'max_daily_profit') else 500.0,
                                         "max_weekly_profit": config.risk.max_weekly_profit if hasattr(config.risk, 'max_weekly_profit') else 2000.0,
-                                        "compounding_enabled": config.compounding.enabled if hasattr(config, 'compounding') else False,
                                         "be_trigger_rr": config.risk.be_trigger_rr,
                                         "be_buffer_pips": config.risk.be_buffer_pips,
                                         "be_buffer_atr_mult": getattr(config.risk, "be_buffer_atr_mult", 0.0),
@@ -641,11 +640,11 @@ class BotService:
                                         "metadata": getattr(signal, 'metadata', {}) or {},
                                     }
 
-                                    compounding_risk = config.get_risk_amount(account_balance) if hasattr(config, 'get_risk_amount') else account_balance * (config.risk.risk_per_trade_pct / 100)
-
                                     approved, reason, tp_levels = self.risk_engine.evaluate_signal(
-                                        signal_data, account_balance, compounding_risk_dollars=compounding_risk,
-                                        initial_balance=getattr(config.prop_firm, "initial_balance", 10000.0) if hasattr(config, "prop_firm") else getattr(config.compounding, "starting_balance", 10000.0) if hasattr(config, "compounding") else 10000.0
+                                        signal_data,
+                                        account_balance,
+                                        current_time=None,
+                                        initial_balance=getattr(config.prop_firm, "initial_balance", 10000.0) if hasattr(config, "prop_firm") else 10000.0
                                     )
 
                                     if approved:

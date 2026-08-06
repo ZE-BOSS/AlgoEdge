@@ -601,41 +601,8 @@ FOREX_SMC_PARAMS = SMCParams(
     min_signal_score=65,
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# COMPOUNDING PRESETS
-# ─────────────────────────────────────────────────────────────────────────────
-
-COMPOUNDING_PRESETS = {
-    "default_1_3rr": CompoundingParams(
-        enabled=True,
-        use_default_plan=True,
-        advance_mode="AUTO",
-        downgrade_mode="THRESHOLD",
-    ),
-    "conservative_1_3rr": CompoundingParams(
-        enabled=True,
-        use_default_plan=True,
-        advance_mode="CONSERVATIVE",
-        conservative_wins_required=3,
-        downgrade_mode="LOSS_COUNT",
-        max_losses_before_downgrade=3,
-    ),
-    "manual_control": CompoundingParams(
-        enabled=True,
-        use_default_plan=True,
-        advance_mode="MANUAL",
-        downgrade_mode="THRESHOLD",
-    ),
-    "disabled": CompoundingParams(
-        enabled=False,
-    ),
-}
-
-# Combined optimization grid (SMC + Risk + Compounding)
+# Combined optimization grid (SMC + Risk)
 FULL_OPTIMIZATION_GRID = {
     **SMC_OPTIMIZATION_GRID,
     **RISK_OPTIMIZATION_GRID,
-    "compounding.conservative_wins_required": [1, 2, 3],
-    "compounding.max_losses_before_downgrade": [2, 3, 5],
-    "compounding.advance_mode": ["AUTO", "CONSERVATIVE"],
 }
