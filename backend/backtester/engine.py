@@ -20,7 +20,6 @@ import numpy as np
 import pandas as pd
 
 from backend.analytics.reports import generate_risk_report
-from backend.risk.compounding import get_instrument_profile
 from backend.risk.engine import RiskEngine
 from backend.risk.multi_tp import TPLevel, _is_buy
 from backend.risk.position_sizer import get_pip_size

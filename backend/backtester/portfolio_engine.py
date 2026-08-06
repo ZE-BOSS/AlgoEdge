@@ -15,13 +15,12 @@ import pandas as pd
 from backend.analytics.reports import generate_risk_report
 from backend.risk.engine import RiskEngine
 from backend.risk.multi_tp import TPLevel, _is_buy
-from backend.risk.position_sizer import get_pip_size
+from backend.risk.position_sizer import get_pip_size, get_symbol_info
 from backend.risk.prop_firm_validator import PropFirmValidator
 from backend.utils.logger import get_logger
 from backend.utils.trade_grouper import group_trades
 from backend.utils.timeutils import detect_session
 from backend.backtester.engine import _epoch_to_iso, _calc_duration_minutes, _validate_position, _to_epoch_seconds
-from backend.risk.compounding import get_instrument_profile
 
 logger = get_logger(__name__)
 
@@ -47,27 +46,22 @@ class PortfolioBacktestEngine:
         self.run_logs = []
 
     def _calc_pnl(self, direction: str, entry: float, exit_price: float, volume: float, symbol: str) -> float:
-        profile = get_instrument_profile(symbol)
-        if profile:
-            price_diff = exit_price - entry
-            points = price_diff / profile.point_size if profile.point_size else 0
-            raw_pnl = points * profile.point_value_per_lot * volume
-        else:
-            price_diff = exit_price - entry
-            tick_value = 1.0
-            tick_size = 0.00001
-            try:
-                import MetaTrader5 as mt5
-                if mt5 and mt5.terminal_info() and mt5.terminal_info().connected:
-                    info = mt5.symbol_info(symbol)
-                    if info:
-                        tick_value = info.trade_tick_value or 1.0
-                        tick_size = info.trade_tick_size or 0.00001
-            except Exception:
-                pass
-            value_per_unit_move = tick_value / tick_size
-            raw_pnl = price_diff * value_per_unit_move * volume
+        """
+        Calculate P&L using the same data source chain as position sizing:
+        MT5 live data (when connected) → InstrumentProfile → Standard defaults.
+        Matches engine.py _calc_pnl exactly.
+        """
+        info = get_symbol_info(symbol)
+        tick_value = info.get("tick_value", 1.0)
+        tick_size  = info.get("tick_size",  0.00001)
 
+        if tick_size == 0 or tick_value == 0:
+            logger.warning(f"[_calc_pnl] {symbol}: tick_size or tick_value is zero — returning 0 PnL.")
+            return 0.0
+
+        price_diff = exit_price - entry
+        value_per_unit_move = tick_value / tick_size
+        raw_pnl = price_diff * value_per_unit_move * volume
         return raw_pnl if direction == "BUY" else -raw_pnl
 
     def run(
