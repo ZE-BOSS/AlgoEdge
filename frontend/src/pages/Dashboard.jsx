@@ -409,7 +409,7 @@ function ActivityLog() {
 
 export default function Dashboard() {
   const { status } = useConnectionStore();
-  const { setStats, setCompounding } = useRiskStore();
+  const { setStats } = useRiskStore();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   const { data: dashboardData } = useQuery({
@@ -430,8 +430,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (statsData) setStats(statsData);
-    if (compoundingData) setCompounding(compoundingData);
-  }, [statsData, compoundingData, setStats, setCompounding]);
+  }, [statsData, setStats]);
 
   const [livePositions, setLivePositions] = useState({});
   const queryClient = useQueryClient();
