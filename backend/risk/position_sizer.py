@@ -59,13 +59,11 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
     Get lot constraints and tick values for a symbol.
     Priority: Live MT5 (if connected AND use_live_mt5=True) → InstrumentProfile → Standard defaults.
 
-    use_live_mt5=False is passed from the backtester so that sizing and PnL always
-    use the same InstrumentProfile source, even when MT5 is connected in the background.
+    Both live trading and backtesting use this same chain (use_live_mt5=True by default),
+    so sizing and _calc_pnl always use the same data source — preventing lot-size/PnL drift.
     IMPORTANT: Always logs which source was used so sizing decisions are auditable.
     """
     # ── 1. Live MT5 Data ──────────────────────────────────────────────────────
-    # Only query MT5 in live-trading mode.  The backtester always passes
-    # use_live_mt5=False so that sizing and _calc_pnl use the same source.
     mt5_connected = False
     if use_live_mt5 and mt5:
         try:
