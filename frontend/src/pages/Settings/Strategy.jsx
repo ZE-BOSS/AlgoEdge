@@ -232,15 +232,6 @@ export default function StrategySettings() {
                     </select>
                   </div>
 
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.8rem', marginTop: 16 }}>
-                    <input
-                      type="checkbox"
-                      checked={symConfig.compounding_enabled || false}
-                      onChange={e => updateSymbolSetting(sym, 'compounding_enabled', e.target.checked)}
-                      style={{ width: 14, height: 14 }}
-                    />
-                    Compounding
-                  </label>
                 </div>
               </div>
             );

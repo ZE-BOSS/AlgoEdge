@@ -50,6 +50,7 @@ class BacktestRequest(BaseModel):
     # ── Dynamic Strategy Params ──
     strategy_params: dict[str, Any] = {}
     # ── Risk Params ──
+    compounding_enabled: bool = False
     risk_per_trade_pct: float = 1.0
     min_rr: float = 3.0
     max_daily_consecutive_losses: int = 3
@@ -104,6 +105,7 @@ class PortfolioBacktestRequest(BaseModel):
     initial_balance: float = 10000.0
     prop_firm: dict[str, Any] = {}
     # ── Risk Params (shared across portfolio) ──
+    compounding_enabled: bool = False
     risk_per_trade_pct: float = 1.0
     min_rr: float = 3.0
     max_daily_consecutive_losses: int = 3
@@ -488,6 +490,7 @@ async def run_backtest_endpoint(
             candles = indexed_by_tf.get("M5", indexed_by_tf[primary_tf])
 
             merged_risk_config = {
+                "compounding_enabled": req.compounding_enabled,
                 "risk_per_trade_pct": req.risk_per_trade_pct,
                 "min_rr": req.min_rr,
                 "tp_count": req.tp_count,
@@ -726,6 +729,7 @@ async def run_portfolio_backtest_endpoint(
 
             # Build shared risk config
             merged_risk_config = {
+                "compounding_enabled": req.compounding_enabled,
                 "risk_per_trade_pct": req.risk_per_trade_pct,
                 "min_rr": req.min_rr,
                 "tp_count": req.tp_count,

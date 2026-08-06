@@ -1036,7 +1036,6 @@ export default function Backtester() {
         trail_method_tp5: form.trail_method_tp5,
         atr_trail_multiplier: form.atr_trail_multiplier,
         trail_pips: form.trail_pips,
-        compounding_enabled: form.compounding_enabled,
         session_filter_enabled: form.session_filter_enabled,
         prop_firm: form.prop_firm,
         max_concurrent_positions: form.max_concurrent_positions * portfolioSymbols.length,
@@ -1453,7 +1452,6 @@ export default function Backtester() {
           <div style={{ display: 'flex', gap: 12 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flex: 1 }}><input type="checkbox" checked={form.session_filter_enabled} onChange={e => u('session_filter_enabled', e.target.checked)} style={{ width: 14, height: 14 }} /> Session Filter</label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flex: 1 }}><input type="checkbox" checked={form.news_filter_enabled} onChange={e => u('news_filter_enabled', e.target.checked)} style={{ width: 14, height: 14 }} /> News Filter</label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flex: 1 }}><input type="checkbox" checked={form.compounding_enabled} onChange={e => u('compounding_enabled', e.target.checked)} style={{ width: 14, height: 14 }} /> Compounding</label>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

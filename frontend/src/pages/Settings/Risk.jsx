@@ -248,20 +248,6 @@ export default function RiskSettings() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-header"><span className="card-title">Compounding</span></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.compounding_enabled} onChange={e => update('compounding_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
-            Enable Fixed-Dollar Compounding (overrides % risk)
-          </label>
-        </div>
-        {config.compounding_enabled && (
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
-            When enabled, the bot uses the 18-step compounding plan from CompoundingPlan_Spec.md instead of percentage-based risk.
-          </div>
-        )}
-      </div>
 
       <div className="card">
         <div className="card-header"><span className="card-title">Session Filter</span></div>

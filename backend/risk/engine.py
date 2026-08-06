@@ -43,6 +43,7 @@ class RiskEngine:
         self.risk_pct = config.get("risk_per_trade_pct", 1.0)
         self.min_rr = config.get("min_rr", 3.0)
         self.sl_buffer_pips = config.get("sl_buffer_pips", 5.0)
+        self.compounding_enabled = config.get("compounding_enabled", False)
         # is_backtesting is kept for informational purposes / future guards.
         # Both live and backtest modes use MT5 data when available, with
         # InstrumentProfile as fallback — so use_live_mt5 is always True.
@@ -118,12 +119,12 @@ class RiskEngine:
             return False, "Risk is zero (entry == SL)", []
 
         # 3. Position Sizing
-        # IMPORTANT: Always use the live account_balance for lot sizing.
-        # initial_balance / prop_firm.initial_balance are for drawdown checks only.
-        # Using a stale initial_balance for sizing means the account permanently
-        # sizes off the starting value even as equity grows or shrinks in live trading.
+        # IMPORTANT: We have completely removed compounding per user request.
+        # Position sizing MUST always use the static `initial_balance` (e.g. $25,000)
+        # so that risk size does not balloon as the account grows.
         size_modifier = signal_data.get("metadata", {}).get("size_modifier", 1.0)
-        base_balance = account_balance  # Always use current live balance
+        
+        base_balance = initial_balance if initial_balance is not None else account_balance
         # Both live and backtest use MT5 data when available → InstrumentProfile fallback.
         # This matches how _calc_pnl() works (MT5 first via get_symbol_info).
 
