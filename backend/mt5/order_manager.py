@@ -56,7 +56,21 @@ class OrderManager:
         price = tick.ask if direction.upper() in ("BUY", "BULLISH") else tick.bid
         
         sym_info = mt5.symbol_info(symbol)
-        filling_type = mt5.ORDER_FILLING_FOK if sym_info and (sym_info.filling_mode & 1) else mt5.ORDER_FILLING_IOC
+        if not sym_info:
+            logger.error(f"Order failed: Could not get symbol info for {symbol}")
+            return {"success": False, "error": "Symbol info error"}
+            
+        digits = sym_info.digits
+        sl = round(sl, digits) if sl > 0 else 0.0
+        tp = round(tp, digits) if tp > 0 else 0.0
+        
+        vol_step = sym_info.volume_step
+        if vol_step > 0:
+            volume = round(volume / vol_step) * vol_step
+        volume = max(sym_info.volume_min, min(volume, sym_info.volume_max))
+        volume = round(volume, 8)  # Clean float artifacts
+        
+        filling_type = mt5.ORDER_FILLING_FOK if (sym_info.filling_mode & 1) else mt5.ORDER_FILLING_IOC
         
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -127,11 +141,15 @@ class OrderManager:
         if not position:
             return False
             
+        sym_info = mt5.symbol_info(position[0].symbol)
+        digits = sym_info.digits if sym_info else 5
+        rounded_sl = round(new_sl, digits)
+        
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "position": ticket,
             "symbol": position[0].symbol,
-            "sl": new_sl,
+            "sl": rounded_sl,
             "tp": position[0].tp,
             "magic": position[0].magic
         }
