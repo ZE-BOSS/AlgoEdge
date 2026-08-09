@@ -1258,7 +1258,7 @@ export default function Backtester() {
           entry_timeframe: form.entry_timeframe || "M5",
           minor_fractal_m: form.minor_fractal_m || 3,
           major_fractal_n: form.major_fractal_n || 5,
-          enforce_strong_choch: form.enforce_strong_choch !== undefined ? form.enforce_strong_choch : True
+          enforce_strong_choch: form.enforce_strong_choch !== undefined ? form.enforce_strong_choch : true
         };
       } else if (form.strategy_id === 'VWAP_v1') {
         payload.strategy_params = {
