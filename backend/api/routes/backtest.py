@@ -342,7 +342,10 @@ async def run_backtest_endpoint(
                         
             config.instrument_settings = [InstrumentSettings(symbol=req.symbol, strategy_id=req.strategy_id)]
             
-            engine_class = get_strategy(req.strategy_id)
+            strategy_id = req.strategy_id
+            if strategy_id == "SMC_v1":
+                strategy_id = "APA_v1"
+            engine_class = get_strategy(strategy_id)
             engine = engine_class(config)
             engine.is_backtesting = True
 
@@ -802,6 +805,8 @@ async def run_portfolio_backtest_endpoint(
                         setattr(config.ny_open_retest, k, v)
 
                 config.instrument_settings = [InstrumentSettings(symbol=sym, strategy_id=strat_id)]
+                if strat_id == "SMC_v1":
+                    strat_id = "APA_v1"
                 engine_class = get_strategy(strat_id)
                 strategy_engine = engine_class(config)
                 strategy_engine.is_backtesting = True

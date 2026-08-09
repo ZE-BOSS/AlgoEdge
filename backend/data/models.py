@@ -62,7 +62,7 @@ class Trade(Base):
     __tablename__ = "trades"
     id = Column(BigInteger, primary_key=True, default=generate_id)
     user_id = Column(String(36), nullable=False, index=True)
-    strategy_id = Column(String(50), nullable=False, default="SMC_v1")
+    strategy_id = Column(String(50), nullable=False, default="APA_v1")
     symbol = Column(String(20), nullable=False)
     direction = Column(String(10), nullable=False)  # BUY / SELL
     entry_price = Column(Float)
@@ -177,7 +177,7 @@ class User(Base):
 
     license_key = Column(String(100))
     subscription_status = Column(String(50), default="active")
-    active_strategy = Column(String(50), default="SMC_v1")
+    active_strategy = Column(String(50), default="APA_v1")
     risk_per_trade = Column(Float, default=1.0)
     max_daily_loss = Column(Float, default=5.0)
     allowed_symbols = Column(Text)  # JSON array
