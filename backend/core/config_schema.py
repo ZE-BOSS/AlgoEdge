@@ -121,7 +121,6 @@ class PropFirmParams:
 class UserConfig:
     """Legacy base structure."""
     user_id:    str = ""
-    smc:        SMCParams  = field(default_factory=SMCParams)
     risk:       RiskParams = field(default_factory=RiskParams)
     
     mt5_account: int  = 0
@@ -153,7 +152,6 @@ class UserConfig:
 
     @classmethod
     def from_dict(cls, data: dict) -> "UserConfig":
-        smc_data  = data.pop("smc",  {})
         risk_data = data.pop("risk", {})
         
         import dataclasses
@@ -161,7 +159,6 @@ class UserConfig:
         filtered_data = {k: v for k, v in data.items() if k in known_fields}
         
         config = cls(**filtered_data)
-        config.smc  = SMCParams(**smc_data)
         config.risk = RiskParams(**risk_data)
         return config
 
