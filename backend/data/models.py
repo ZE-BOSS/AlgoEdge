@@ -6,23 +6,42 @@ PostgreSQL backend hosted on Railway.
 Source: TradingBot_MasterPlan-2.md Section 5 — Database Schema
 """
 
+import random
+import time
+
 from sqlalchemy import (
-    Column, Integer, BigInteger, Float, Text, String, Boolean, LargeBinary,
-    ForeignKey, Index, UniqueConstraint, DateTime, func, JSON
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
-from datetime import datetime
 
 
 class Base(DeclarativeBase):
     pass
 
 
+def generate_id():
+    """Generates a pseudo-random integer ID."""
+    return int(time.time() * 1000) * 100 + random.randint(0, 99)
+
+
 # ── OHLCV History ────────────────────────────────────────────────────────────
 
 class OHLCV(Base):
     __tablename__ = "ohlcv"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, default=generate_id)
     symbol = Column(String(20), nullable=False)
     timeframe = Column(String(10), nullable=False)
     timestamp = Column(BigInteger, nullable=False)  # Unix epoch ms
@@ -41,7 +60,7 @@ class OHLCV(Base):
 
 class Trade(Base):
     __tablename__ = "trades"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, default=generate_id)
     user_id = Column(String(36), nullable=False, index=True)
     strategy_id = Column(String(50), nullable=False, default="SMC_v1")
     symbol = Column(String(20), nullable=False)
@@ -78,7 +97,7 @@ class Trade(Base):
 
 class TradePosition(Base):
     __tablename__ = "trade_positions"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, default=generate_id)
     parent_trade_id = Column(BigInteger, ForeignKey("trades.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(String(36), nullable=False)
     tp_level = Column(Integer, nullable=False)  # 1, 2, 3, 4, or 5
@@ -106,7 +125,7 @@ class TradePosition(Base):
 
 class Signal(Base):
     __tablename__ = "signals"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, default=generate_id)
     user_id = Column(String(36), nullable=False, index=True)
     strategy_id = Column(String(50), nullable=False)
     symbol = Column(String(20), nullable=False)
@@ -150,18 +169,14 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     name = Column(String(100), nullable=False)
 
-    # Standard Broker (forex, commodities, indices)
+    # Standard Broker (forex, commodities, indices, synthetics)
     mt5_account = Column(BigInteger)
     mt5_password_encrypted = Column(LargeBinary)  # Fernet encrypted
     mt5_server = Column(String(100))
     mt5_path = Column(String(500))
 
-    # Deriv Broker (synthetics)
-    deriv_mt5_account = Column(BigInteger)
-    deriv_mt5_password_encrypted = Column(LargeBinary)  # Fernet encrypted
-    deriv_mt5_server = Column(String(100))
-    deriv_mt5_path = Column(String(500))
-
+    license_key = Column(String(100))
+    subscription_status = Column(String(50), default="active")
     active_strategy = Column(String(50), default="SMC_v1")
     risk_per_trade = Column(Float, default=1.0)
     max_daily_loss = Column(Float, default=5.0)
@@ -214,7 +229,12 @@ class BacktestRun(Base):
     user_id = Column(String(36), nullable=False, index=True)
     strategy_id = Column(String(50), nullable=False)
     symbol = Column(String(20), nullable=False)
-    title = Column(String(100), nullable=True)
+    # User-supplied title, decoupled from `symbol`. Falls back to `symbol` at
+    # read time (see backtest.py) for old rows saved before this column
+    # existed, and remains a sensible default for single-symbol runs — but
+    # for portfolio runs `symbol` isn't a meaningful title at all, so this
+    # lets the user set one explicitly instead of the UI defaulting to it.
+    title = Column(String(200), nullable=True)
     start_date = Column(DateTime, nullable=False)
     end_date = Column(DateTime, nullable=False)
     params_snapshot = Column(Text, nullable=False)  # JSON
@@ -222,6 +242,8 @@ class BacktestRun(Base):
     win_rate = Column(Float)
     profit_factor = Column(Float)
     sharpe_ratio = Column(Float)
+    sortino_ratio = Column(Float)
+    expectancy_r = Column(Float)
     max_drawdown_pct = Column(Float)
     total_pnl = Column(Float)
     tp1_hit_rate = Column(Float)
@@ -236,13 +258,26 @@ class BacktestRun(Base):
     llm_analysis = Column(Text)
     run_logs = Column(Text)  # JSON serialized logs
     rejection_funnel = Column(JSON, default={})
+    # Computed once at save time (see runner.py) from the full in-memory
+    # grouped trades — including original_signal/metadata, which are
+    # deliberately stripped before persistence (see BacktestTrade below /
+    # runner.py's _slim_sub_trades). by_confirmation in particular can never
+    # be correctly regenerated from the saved trades alone, so it must be
+    # captured here rather than recomputed on every GET /backtests/{id}.
+    bias_stats = Column(JSON, default={})
+    confluence_stats = Column(JSON, default={})
     created_at = Column(DateTime, server_default=func.now())
-    trades = relationship("BacktestTrade", back_populates="backtest_run", cascade="all, delete-orphan")
+    trades = relationship(
+        "BacktestTrade",
+        back_populates="backtest_run",
+        cascade="all, delete-orphan",
+        order_by="BacktestTrade.entry_time",
+    )
 
 
 class BacktestTrade(Base):
     __tablename__ = "backtest_trades"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, default=generate_id)
     backtest_id = Column(String(36), ForeignKey("backtest_runs.id", ondelete="CASCADE"), nullable=False)
     symbol = Column(String(20))
     direction = Column(String(10))
@@ -270,6 +305,7 @@ class BacktestTrade(Base):
     mfe_pips = Column(Float)
     confluence_score = Column(Integer)
     session = Column(String(20))
+    strategy_id = Column(String(50))
     llm_analysis = Column(Text)
     
     # Chart & SMC Data
@@ -281,6 +317,36 @@ class BacktestTrade(Base):
     
     backtest_run = relationship("BacktestRun", back_populates="trades")
 
+
+# ── Compounding State ────────────────────────────────────────────────────────
+
+class CompoundingStateModel(Base):
+    __tablename__ = "compounding_state"
+    user_id = Column(String(36), primary_key=True)
+    current_step = Column(Integer, default=1)
+    risk_amount = Column(Float, default=20.0)
+    entry_balance = Column(Float, default=0.0)
+    consecutive_wins = Column(Integer, default=0)
+    consecutive_losses = Column(Integer, default=0)
+    total_wins_at_level = Column(Integer, default=0)
+    total_losses_at_level = Column(Integer, default=0)
+    last_step_change_reason = Column(String(30), default="INIT")
+    last_step_change_balance = Column(Float, default=0.0)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class CompoundingEvent(Base):
+    __tablename__ = "compounding_events"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), nullable=False, index=True)
+    event_type = Column(String(40), nullable=False)  # ADVANCE, DOWNGRADE_THRESHOLD, etc.
+    from_step = Column(Integer)
+    to_step = Column(Integer)
+    from_risk = Column(Float)
+    to_risk = Column(Float)
+    balance_at_event = Column(Float)
+    trade_id = Column(String(36))
+    created_at = Column(DateTime, server_default=func.now())
 
 
 # ── LLM Analyses ─────────────────────────────────────────────────────────────
@@ -328,22 +394,3 @@ class UserConfigModel(Base):
     config_json = Column(Text, nullable=False)  # Full UserConfig as JSON
     preset_name = Column(String(30))
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-# ── Strategy 4: Statistical Validation ───────────────────────────────────────
-
-class StatisticalValidationResult(Base):
-    __tablename__ = "statistical_validation_results"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    symbol = Column(String(50), nullable=False, index=True)
-    timestamp = Column(DateTime, default=func.now(), nullable=False)
-    
-    # Test Flags
-    autocorrelation_passed = Column(Boolean, nullable=False)
-    variance_ratio_passed = Column(Boolean, nullable=False)
-    runs_test_passed = Column(Boolean, nullable=False)
-    gbm_test_passed = Column(Boolean, nullable=False)
-    
-    overall_passed = Column(Boolean, nullable=False)
-    
-    # Optional metadata or JSON blob for metrics
-    metrics_json = Column(JSON, nullable=True)
