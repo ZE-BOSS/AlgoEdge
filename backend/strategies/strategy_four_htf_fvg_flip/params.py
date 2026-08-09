@@ -1,17 +1,10 @@
 from dataclasses import dataclass
 
-
 @dataclass
 class HTFFVGFlipParams:
-    """
-    Tunable parameters for Strategy 1: HTF Key Level -> 5M FVG -> Inversion Flip
-    """
+    session_filter_enabled: bool = False
+    session_start: str = "08:00"
+    session_cutoff: str = "17:00"
     htf_timeframe: str = "H1"
     entry_confirmation_tf: str = "M5"
-    target_rr: float = 1.0
-    require_unfilled_htf_fvg: bool = True
-    
-    # Session filter (disabled by default for this strategy, per spec)
-    session_filter_enabled: bool = False
-    session_start: str = "09:30"
-    session_cutoff: str = "11:00"
+    target_rr: float = 2.0

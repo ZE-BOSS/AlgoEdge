@@ -39,7 +39,7 @@ class BulkBacktestRequest(BaseModel):
     ids: list[str]
 
 class BacktestRequest(BaseModel):
-    strategy_id: str = "SMC_v1"
+    strategy_id: str = "APA_v1"
     symbol: str
     start_date: str | None = None
     end_date: str | None = None
@@ -50,7 +50,7 @@ class BacktestRequest(BaseModel):
     # ── Dynamic Strategy Params ──
     strategy_params: dict[str, Any] = {}
     # ── Risk Params ──
-    compounding_enabled: bool = False
+
     risk_per_trade_pct: float = 1.0
     min_rr: float = 3.0
     max_daily_consecutive_losses: int = 3
@@ -92,7 +92,7 @@ class SaveBacktestRequest(BaseModel):
 class PortfolioSymbolConfig(BaseModel):
     """Config for a single symbol/strategy pair in a portfolio backtest."""
     symbol: str
-    strategy_id: str = "SMC_v1"
+    strategy_id: str = "APA_v1"
     strategy_params: dict[str, Any] = {}
 
 
@@ -105,7 +105,7 @@ class PortfolioBacktestRequest(BaseModel):
     initial_balance: float = 10000.0
     prop_firm: dict[str, Any] = {}
     # ── Risk Params (shared across portfolio) ──
-    compounding_enabled: bool = False
+
     risk_per_trade_pct: float = 1.0
     min_rr: float = 3.0
     max_daily_consecutive_losses: int = 3
@@ -309,13 +309,16 @@ async def run_backtest_endpoint(
             config.risk.max_concurrent_positions = req.max_concurrent_positions
             config.risk.max_positions_per_symbol = req.max_positions_per_symbol
             config.risk.max_daily_trades = req.max_daily_trades
-            config.smc.manual_bias_overrides = req.manual_bias_overrides
             
             # Inject dynamic strategy parameters
-            if req.strategy_id == "SMC_v1":
+            if req.strategy_id == "APA_v1":
                 for k, v in req.strategy_params.items():
-                    if hasattr(config.smc, k):
-                        setattr(config.smc, k, v)
+                    if hasattr(config.apa, k):
+                        setattr(config.apa, k, v)
+            elif req.strategy_id == "VWAP_v1":
+                for k, v in req.strategy_params.items():
+                    if hasattr(config.vwap, k):
+                        setattr(config.vwap, k, v)
             elif req.strategy_id == "DriftJumpAlpha_v1":
                 for k, v in req.strategy_params.items():
                     if hasattr(config.drift_jump_alpha, k):
@@ -490,7 +493,7 @@ async def run_backtest_endpoint(
             candles = indexed_by_tf.get("M5", indexed_by_tf[primary_tf])
 
             merged_risk_config = {
-                "compounding_enabled": req.compounding_enabled,
+
                 "risk_per_trade_pct": req.risk_per_trade_pct,
                 "min_rr": req.min_rr,
                 "tp_count": req.tp_count,
@@ -729,7 +732,7 @@ async def run_portfolio_backtest_endpoint(
 
             # Build shared risk config
             merged_risk_config = {
-                "compounding_enabled": req.compounding_enabled,
+
                 "risk_per_trade_pct": req.risk_per_trade_pct,
                 "min_rr": req.min_rr,
                 "tp_count": req.tp_count,
@@ -783,8 +786,10 @@ async def run_portfolio_backtest_endpoint(
                 config.risk.min_rr = req.min_rr
                 config.risk.risk_per_trade_pct = req.risk_per_trade_pct
                 for k, v in sym_cfg.strategy_params.items():
-                    if strat_id == "SMC_v1" and hasattr(config.smc, k):
-                        setattr(config.smc, k, v)
+                    if strat_id == "APA_v1" and hasattr(config.apa, k):
+                        setattr(config.apa, k, v)
+                    elif strat_id == "VWAP_v1" and hasattr(config.vwap, k):
+                        setattr(config.vwap, k, v)
                     elif strat_id == "DriftJumpAlpha_v1" and hasattr(config.drift_jump_alpha, k):
                         setattr(config.drift_jump_alpha, k, v)
                     elif strat_id == "CRT_v1" and hasattr(config.crt, k):
@@ -1451,7 +1456,7 @@ async def save_backtest_from_client(
     run = BacktestRun(
         id=backtest_id,
         user_id=current_user.id,
-        strategy_id=data.get("strategy_id", "SMC_v1"),
+        strategy_id=data.get("strategy_id", "APA_v1"),
         symbol=data.get("symbol", "Volatility 75 Index"),
         # User-supplied title takes priority. Falls back to symbol so
         # single-symbol saves (which didn't bother typing a title) still get

@@ -30,6 +30,8 @@ class BiasIFVGEngine(BaseStrategy):
                 "key_level": None,
                 "status": "AWAIT_BIAS",
                 "m5_fvg_to_invert": None,
+                "m5_swing_point": None,
+                "manipulation_leg_start": None,
                 "trades_today": 0,
             }
             self.htf_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
@@ -66,61 +68,71 @@ class BiasIFVGEngine(BaseStrategy):
         if self.last_trade_date != current_time.date():
             state["trades_today"] = 0
             self.last_trade_date = current_time.date()
-            state["status"] = "AWAIT_BIAS"
         
         # 1. Determine Bias (HTF: H4)
         if timeframe == "H4":
             htf_fvgs = self.htf_detectors[symbol].update(candles)
-            if not htf_fvgs:
-                return None
-            
-            # Simple bias: if the most recent FVG is bullish, bias is BUY, else SELL
-            last_fvg = htf_fvgs[-1]
-            if last_fvg["type"] == "BULLISH":
-                state["bias"] = "BUY"
-            else:
-                state["bias"] = "SELL"
-                
-            if state["status"] == "AWAIT_BIAS":
-                state["status"] = "AWAIT_KEY_LEVEL"
-                self.log_event(f"[{symbol}] Bias established: {state['bias']} based on HTF FVG", category="BIAS_IFVG")
+            if htf_fvgs:
+                # Bias holds as long as we have a recent unresolved HTF FVG
+                last_fvg = htf_fvgs[-1]
+                state["bias"] = "BUY" if last_fvg["type"] == "BULLISH" else "SELL"
+                if state["status"] == "AWAIT_BIAS":
+                    state["status"] = "AWAIT_KEY_LEVEL"
+                    self.log_event(f"[{symbol}] Bias established: {state['bias']} based on HTF FVG", category="BIAS_IFVG")
         
-        # 2. Key Levels (M15)
+        # 2. Key Levels (M15 tracker update)
         elif timeframe == "M15":
-            m15_fvgs = self.m15_detectors[symbol].update(candles)
+            self.m15_detectors[symbol].update(candles)
+
+        # 3. IFVG Confirmation and Entry (M5)
+        elif timeframe == "M5":
+            m5_fvgs = []
+            
+            # Update M5 FVGs
+            if state["status"] in ["AWAIT_IFVG_SETUP", "AWAIT_IFVG_CLOSE"]:
+                m5_fvgs = self.m5_detectors[symbol].update(candles)
+                
+            # Check for M15 Tap (Real-time detection using M5 candle)
             if state["status"] in ["AWAIT_KEY_LEVEL", "AWAIT_IFVG_SETUP"]:
-                # Wait for price to tap an M15 FVG in the direction of bias
+                m15_fvgs = self.m15_detectors[symbol].active_fvgs
                 for fvg in reversed(m15_fvgs):
                     if state["bias"] == "BUY" and fvg["type"] == "BULLISH" and fvg["bottom"] <= latest["low"] <= fvg["top"]:
                         state["key_level"] = fvg
                         state["status"] = "AWAIT_IFVG_SETUP"
-                        self.log_event(f"[{symbol}] M15 Bullish FVG tapped. Awaiting M5 IFVG.", category="BIAS_IFVG")
+                        state["manipulation_leg_start"] = current_time
+                        self.log_event(f"[{symbol}] M15 Bullish FVG tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                         break
                     elif state["bias"] == "SELL" and fvg["type"] == "BEARISH" and fvg["bottom"] <= latest["high"] <= fvg["top"]:
                         state["key_level"] = fvg
                         state["status"] = "AWAIT_IFVG_SETUP"
-                        self.log_event(f"[{symbol}] M15 Bearish FVG tapped. Awaiting M5 IFVG.", category="BIAS_IFVG")
+                        state["manipulation_leg_start"] = current_time
+                        self.log_event(f"[{symbol}] M15 Bearish FVG tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                         break
-
-        # 3. IFVG Confirmation and Entry (M5)
-        elif timeframe == "M5":
-            m5_fvgs = self.m5_detectors[symbol].update(candles)
             
+            # Look for an opposing M5 FVG that forms DURING the reaction
             if state["status"] == "AWAIT_IFVG_SETUP":
-                # Look for an opposing M5 FVG that forms during the reaction
                 for fvg in reversed(m5_fvgs):
-                    if state["bias"] == "BUY" and fvg["type"] == "BEARISH":
-                        state["m5_fvg_to_invert"] = fvg
-                        state["status"] = "AWAIT_IFVG_CLOSE"
-                        break
-                    elif state["bias"] == "SELL" and fvg["type"] == "BULLISH":
-                        state["m5_fvg_to_invert"] = fvg
-                        state["status"] = "AWAIT_IFVG_CLOSE"
-                        break
+                    fvg_time = fvg.get("index", pd.Timestamp.min)
+                    if fvg_time >= state.get("manipulation_leg_start", pd.Timestamp.min):
+                        if state["bias"] == "BUY" and fvg["type"] == "BEARISH":
+                            state["m5_fvg_to_invert"] = fvg
+                            state["status"] = "AWAIT_IFVG_CLOSE"
+                            lookback = candles.iloc[-20:]
+                            state["m5_swing_point"] = lookback["low"].min()
+                            break
+                        elif state["bias"] == "SELL" and fvg["type"] == "BULLISH":
+                            state["m5_fvg_to_invert"] = fvg
+                            state["status"] = "AWAIT_IFVG_CLOSE"
+                            lookback = candles.iloc[-20:]
+                            state["m5_swing_point"] = lookback["high"].max()
+                            break
 
-            elif state["status"] == "AWAIT_IFVG_CLOSE":
+            if state["status"] == "AWAIT_IFVG_CLOSE":
+                # Session filter blocks entries, but doesn't delete active setup
                 if not self._is_within_session(current_time):
-                    state["status"] = "AWAIT_KEY_LEVEL"
+                    return None
+                    
+                if state["trades_today"] >= self.params.max_trades_per_day:
                     return None
                     
                 fvg = state["m5_fvg_to_invert"]
@@ -132,15 +144,24 @@ class BiasIFVGEngine(BaseStrategy):
                 elif state["bias"] == "SELL" and latest["close"] < fvg["bottom"]:
                     triggered = True
                     
+                # Invalidate if price breaks the swing extreme before inversion
+                if state["bias"] == "BUY" and latest["close"] < state.get("m5_swing_point", 0):
+                    state["status"] = "AWAIT_KEY_LEVEL"
+                    self.log_event(f"[{symbol}] Bias IFVG setup failed (Swing low broken).", category="BIAS_IFVG")
+                    return None
+                elif state["bias"] == "SELL" and latest["close"] > state.get("m5_swing_point", float('inf')):
+                    state["status"] = "AWAIT_KEY_LEVEL"
+                    self.log_event(f"[{symbol}] Bias IFVG setup failed (Swing high broken).", category="BIAS_IFVG")
+                    return None
+
                 if triggered:
                     entry = latest["close"]
-                    # SL is the recent swing extreme
-                    recent_candles = candles.iloc[-20:]
+                    sl = state.get("m5_swing_point", entry * 0.99 if state["bias"]=="BUY" else entry * 1.01)
+                    
+                    # 1:2 RR target by default
                     if state["bias"] == "BUY":
-                        sl = recent_candles["low"].min()
-                        tp = entry + (entry - sl) * 2.0  # 1:2 RR
+                        tp = entry + (entry - sl) * 2.0
                     else:
-                        sl = recent_candles["high"].max()
                         tp = entry - (sl - entry) * 2.0
                         
                     state["status"] = "AWAIT_KEY_LEVEL"
@@ -154,7 +175,7 @@ class BiasIFVGEngine(BaseStrategy):
                         stop_loss=sl,
                         take_profit=tp,
                         confluence_score=85,
-                        timestamp=float(latest["time"]) if "time" in latest else current_time.timestamp(),
+                        timestamp=float(latest.get("time", current_time.timestamp())),
                         metadata={"setup": "BIAS_IFVG"}
                     )
 

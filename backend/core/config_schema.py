@@ -12,8 +12,40 @@ from typing import Literal
 
 from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
 from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
-from backend.strategies.strategy_one.params import RiskParams, SMCParams
 from backend.strategies.strategy_six_ny_open_retest.params import NYOpenRetestParams
+from backend.strategies.strategy_apa.params import APAParams
+from backend.strategies.strategy_vwap.params import VWAPParams
+# ─────────────────────────────────────────────────────────────────────────────
+# RISK MANAGEMENT PARAMETERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class RiskParams:
+    """
+    Complete risk management configuration.
+    Stored per-user in the database. Editable from the frontend Settings panel.
+    Applied identically in live trading and backtesting.
+    """
+    risk_per_trade_pct: float = 1.0
+    sizing_method: Literal["fixed_pct", "kelly"] = "fixed_pct"
+    kelly_fraction: float = 0.25
+    kelly_lookback_trades: int = 50
+    multi_position_mode: bool = True
+    tp_levels: int = 5
+    tp_count: int = 3
+    tp_splits: list[float] = field(default_factory=lambda: [40.0, 35.0, 25.0])
+    tp1_rr: float = 1.0
+    tp2_rr: float = 3.0
+    tp3_rr: float = 5.0
+    tp4_rr: float = 10.0
+    tp5_rr: float = 15.0
+    be_trigger_rr: float = 1.0
+    be_offset_pips: float = 2.0
+    max_daily_loss_pct: float = 5.0
+    max_daily_trades: int = 10
+    trailing_stop_activation_rr: float = 2.0
+    trailing_step_pips: float = 5.0
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STRATEGY TWO (CRASHBOOM) PARAMETERS
@@ -161,6 +193,8 @@ class UserConfigV2(UserConfig):
     htf_fvg_flip: HTFFVGFlipParams = field(default_factory=HTFFVGFlipParams)
     bias_ifvg: BiasIFVGParams = field(default_factory=BiasIFVGParams)
     ny_open_retest: NYOpenRetestParams = field(default_factory=NYOpenRetestParams)
+    apa: APAParams = field(default_factory=APAParams)
+    vwap: VWAPParams = field(default_factory=VWAPParams)
     prop_firm: PropFirmParams = field(default_factory=PropFirmParams)
 
     @classmethod
@@ -174,6 +208,8 @@ class UserConfigV2(UserConfig):
         htf_fvg_flip_data = data.pop("htf_fvg_flip", {})
         bias_ifvg_data = data.pop("bias_ifvg", {})
         ny_open_retest_data = data.pop("ny_open_retest", {})
+        apa_data = data.pop("apa", {})
+        vwap_data = data.pop("vwap", {})
         prop_firm_data = data.pop("prop_firm", {})
         import dataclasses
         known_fields = {f.name for f in dataclasses.fields(cls)}
@@ -193,6 +229,8 @@ class UserConfigV2(UserConfig):
         config.htf_fvg_flip = HTFFVGFlipParams(**filter_kwargs(HTFFVGFlipParams, htf_fvg_flip_data))
         config.bias_ifvg = BiasIFVGParams(**filter_kwargs(BiasIFVGParams, bias_ifvg_data))
         config.ny_open_retest = NYOpenRetestParams(**filter_kwargs(NYOpenRetestParams, ny_open_retest_data))
+        config.apa = APAParams(**filter_kwargs(APAParams, apa_data))
+        config.vwap = VWAPParams(**filter_kwargs(VWAPParams, vwap_data))
         config.prop_firm = PropFirmParams(**filter_kwargs(PropFirmParams, prop_firm_data))
         
         if compounding_data:
@@ -222,6 +260,10 @@ class UserConfigV2(UserConfig):
             self.bias_ifvg = BiasIFVGParams()
         if self.ny_open_retest is None:
             self.ny_open_retest = NYOpenRetestParams()
+        if self.apa is None:
+            self.apa = APAParams()
+        if self.vwap is None:
+            self.vwap = VWAPParams()
         if self.prop_firm is None:
             self.prop_firm = PropFirmParams()
 

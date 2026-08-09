@@ -20,7 +20,7 @@ python-multipart
 pandas
 numpy
 smartmoneyconcepts
-pandas-ta
+
 scipy
 
 # ── Database (PostgreSQL) ────────────────────────────────────
@@ -40,6 +40,7 @@ Pillow
 # ── Security & Crypto ────────────────────────────────────────
 cryptography
 python-jose[cryptography]
+bcrypt==3.2.2
 passlib[bcrypt]
 
 # ── Config & Env ─────────────────────────────────────────────
