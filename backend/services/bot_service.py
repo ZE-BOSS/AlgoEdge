@@ -329,7 +329,7 @@ class BotService:
 
                 from sqlalchemy import select
 
-                from backend.core.config_schema import UserConfig, UserConfigV2
+                from backend.core.config_schema import UserConfigV2
                 from backend.data.database import async_session
                 from backend.data.models import UserConfigModel
                 
@@ -348,9 +348,13 @@ class BotService:
                         
                         config = UserConfigV2.from_dict(config_dict)
                     elif config_db and getattr(config_db, 'config', None):
-                        config = UserConfig.parse_obj(config_db.config)
+                        # Migrate legacy Pydantic blob to UserConfigV2 if dict conversion is possible
+                        try:
+                            config = UserConfigV2.from_dict(json.loads(config_db.config)) if isinstance(config_db.config, str) else UserConfigV2.from_dict(config_db.config)
+                        except Exception:
+                            config = UserConfigV2()
                     else:
-                        config = UserConfig()
+                        config = UserConfigV2()
 
                 from backend.risk.circuit_breaker import CircuitBreaker
                 from backend.risk.prop_firm_validator import PropFirmValidator
@@ -368,16 +372,16 @@ class BotService:
                     self.prop_firm_validator.initial_balance = getattr(pf_config, "initial_balance", 10000.0)
                     self.prop_firm_validator.max_lot_sizes = getattr(pf_config, "max_lot_sizes", {})
 
-                # Initialize and refresh news filter if enabled
+                # Initialize and refresh news filter if enabled (defaults to False, no global config)
                 if not hasattr(self, 'news_filter'):
                     from backend.risk.news_filter import NewsFilter
                     self.news_filter = NewsFilter(
-                        enabled=getattr(config.smc, 'news_filter_enabled', False),
-                        block_window_minutes=getattr(config.smc, 'news_buffer_minutes', 30)
+                        enabled=False,
+                        block_window_minutes=30
                     )
                 else:
-                    self.news_filter.enabled = getattr(config.smc, 'news_filter_enabled', False)
-                    self.news_filter.block_window = timedelta(minutes=getattr(config.smc, 'news_buffer_minutes', 30))
+                    self.news_filter.enabled = False
+                    self.news_filter.block_window = timedelta(minutes=30)
                 
                 if self.news_filter.enabled:
                     await self.news_filter.refresh_calendar()
