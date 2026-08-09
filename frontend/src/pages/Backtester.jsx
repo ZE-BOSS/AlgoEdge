@@ -1260,6 +1260,13 @@ export default function Backtester() {
           major_fractal_n: form.major_fractal_n || 5,
           enforce_strong_choch: form.enforce_strong_choch !== undefined ? form.enforce_strong_choch : True
         };
+      } else if (form.strategy_id === 'VWAP_v1') {
+        payload.strategy_params = {
+          vwap_anchor_minutes: form.vwap_anchor_minutes || 15,
+          momentum_lookback_bars: form.momentum_lookback_bars || 4,
+          momentum_threshold_pct: form.momentum_threshold_pct || 0.1,
+          sl_points: form.sl_points || 40.0
+        };
       } else if (form.strategy_id === 'DriftJumpAlpha_v1') {
         payload.strategy_params = {
           drift_ema_fast: form.drift_ema_fast,

@@ -47,7 +47,7 @@ export default function RiskSettings() {
     trail_step_pips: 5.0,
     trail_structure_bars: 3,
     compounding_enabled: false,
-    session_filter_enabled: true,
+
     prop_firm: {
       account_mode: 'personal',
       challenge_type: 'none',
@@ -77,7 +77,6 @@ export default function RiskSettings() {
         // Additional top-level mapping
         prop_firm: cfg.prop_firm || prev.prop_firm,
         compounding_enabled: cfg.compounding?.compounding_enabled ?? prev.compounding_enabled,
-        session_filter_enabled: cfg.smc?.session_filter_enabled ?? prev.session_filter_enabled,
       }));
     }
   }, [remoteConfig]);
@@ -94,12 +93,11 @@ export default function RiskSettings() {
   const update = (key, val) => setConfig({ ...config, [key]: val });
 
   const handleSave = () => {
-    const { prop_firm, compounding_enabled, session_filter_enabled, ...riskParams } = config;
+    const { prop_firm, compounding_enabled, ...riskParams } = config;
     mutation.mutate({
       risk: riskParams,
       prop_firm: prop_firm,
-      compounding: { compounding_enabled },
-      smc: { session_filter_enabled }
+      compounding: { compounding_enabled }
     });
   };
 
@@ -245,23 +243,6 @@ export default function RiskSettings() {
           <div><label>Trail Activation (RR)</label><input type="number" step="0.1" value={config.trail_activation_rr} onChange={e => update('trail_activation_rr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Start trailing after this R</div></div>
           <div><label>Trail Step (Pips)</label><input type="number" step="0.5" value={config.trail_step_pips} onChange={e => update('trail_step_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Minimum SL hop distance</div></div>
           <div><label>Structure Swing Bars</label><input type="number" value={config.trail_structure_bars} onChange={e => update('trail_structure_bars', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Left/Right bars for structure</div></div>
-        </div>
-      </div>
-
-
-      <div className="card">
-        <div className="card-header"><span className="card-title">Session Filter</span></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.session_filter_enabled} onChange={e => update('session_filter_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
-            Enable Session Filter (London/NY Kill Zones only)
-          </label>
-        </div>
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 8 }}>
-          {config.session_filter_enabled
-            ? 'Only trading during London and NY kill zones. Asian session signals are blocked.'
-            : 'Trading during all sessions including Asian session (22:00–06:00 GMT).'
-          }
         </div>
       </div>
 

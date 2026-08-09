@@ -50,7 +50,7 @@ export default function StrategySettings() {
       session_cutoff: '12:00',
       bypass_session_synthetics: true,
     },
-    manual_bias_overrides: {},
+
   });
 
   // Load current config from backend
@@ -151,13 +151,7 @@ export default function StrategySettings() {
     setConfig({ ...config, instrument_settings: settings });
   };
 
-  const updateBias = (sym, bias) => {
-    const smc = config.smc || {};
-    const next = { ...(smc.manual_bias_overrides || {}) };
-    if (bias === 'NONE') delete next[sym];
-    else next[sym] = bias;
-    setConfig({ ...config, smc: { ...smc, manual_bias_overrides: next } });
-  };
+
 
   return (
     <div style={{ display: 'grid', gap: 20, maxWidth: 800 }}>
@@ -220,18 +214,7 @@ export default function StrategySettings() {
                     </select>
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Manual HTF Bias</label>
-                    <select
-                      value={(config.smc?.manual_bias_overrides || {})[sym] || 'NONE'}
-                      onChange={e => updateBias(sym, e.target.value)}
-                      style={{ fontSize: '0.8rem', padding: '4px 8px' }}
-                    >
-                      <option value="NONE">Auto-Detect</option>
-                      <option value="BULLISH">Force Bullish</option>
-                      <option value="BEARISH">Force Bearish</option>
-                    </select>
-                  </div>
+
 
                 </div>
               </div>
