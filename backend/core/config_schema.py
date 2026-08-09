@@ -196,7 +196,6 @@ class UserConfigV2(UserConfig):
 
     @classmethod
     def from_dict(cls, data: dict) -> "UserConfigV2":
-        smc_data  = data.pop("smc",  {})
         risk_data = data.pop("risk", {})
         compounding_data = data.pop("compounding", None)
         instrument_data = data.pop("instrument_settings", None)
@@ -219,7 +218,6 @@ class UserConfigV2(UserConfig):
             known = {f.name for f in dataclasses.fields(dataclass_type)}
             return {k: v for k, v in data_dict.items() if k in known}
 
-        config.smc  = SMCParams(**filter_kwargs(SMCParams, smc_data))
         config.risk = RiskParams(**filter_kwargs(RiskParams, risk_data))
         config.drift_jump_alpha = DriftJumpAlphaParams(**filter_kwargs(DriftJumpAlphaParams, drift_jump_alpha_data))
         config.crt = CRTParams(**filter_kwargs(CRTParams, crt_data))
