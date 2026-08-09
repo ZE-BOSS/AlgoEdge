@@ -572,9 +572,9 @@ class BacktestEngine:
             f"FVG: {'Yes' if sig.get('has_fvg') else 'No'}",
             f"Liquidity Sweep: {'Yes' if sig.get('has_liquidity_sweep') else 'No'}",
         ]
-        # Append full SMC analysis
-        if signal_confirmations:
-            entry_confirmations.append("── SMC Analysis ──")
+        # Append full Structural analysis
+        if "confluence_breakdown" in sig.get("metadata", {}):
+            entry_confirmations.append("── Structural Analysis ──")
             entry_confirmations.extend(signal_confirmations)
 
         return {

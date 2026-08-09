@@ -13,9 +13,9 @@ export default function StrategySettings() {
   const [config, setConfig] = useState({
     symbols: ['XAUUSD', 'XAGUSD', 'XPTUSD', 'EURUSD', 'GBPUSD'], // legacy support
     instrument_settings: [
-      { symbol: 'XAUUSD', strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false },
-      { symbol: 'EURUSD', strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false },
-      { symbol: 'GBPUSD', strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false }
+      { symbol: 'XAUUSD', strategy_id: 'APA_v1', enabled: true, compounding_enabled: false },
+      { symbol: 'EURUSD', strategy_id: 'APA_v1', enabled: true, compounding_enabled: false },
+      { symbol: 'GBPUSD', strategy_id: 'APA_v1', enabled: true, compounding_enabled: false }
     ],
     smc: {
       confluence_threshold: 60,
@@ -133,7 +133,7 @@ export default function StrategySettings() {
     if (exists) {
       exists.enabled = !exists.enabled;
     } else {
-      settings.push({ symbol: sym, strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false });
+      settings.push({ symbol: sym, strategy_id: 'APA_v1', enabled: true, compounding_enabled: false });
     }
 
     const active = settings.filter(i => i.enabled).map(i => i.symbol);
@@ -144,7 +144,7 @@ export default function StrategySettings() {
     let settings = [...(config.instrument_settings || [])];
     let exists = settings.find(i => i.symbol === sym);
     if (!exists) {
-      exists = { symbol: sym, strategy_id: 'SMC_v1', enabled: true, compounding_enabled: false };
+      exists = { symbol: sym, strategy_id: 'APA_v1', enabled: true, compounding_enabled: false };
       settings.push(exists);
     }
     exists[key] = val;
@@ -206,11 +206,12 @@ export default function StrategySettings() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Strategy Engine</label>
                     <select
-                      value={symConfig.strategy_id || 'SMC_v1'}
+                      value={symConfig.strategy_id || 'APA_v1'}
                       onChange={e => updateSymbolSetting(sym, 'strategy_id', e.target.value)}
                       style={{ fontSize: '0.8rem', padding: '4px 8px' }}
                     >
-                      <option value="SMC_v1">SMC Multi-TF</option>
+                      <option value="APA_v1">APA (Adv. Price Action)</option>
+                      <option value="VWAP_v1">VWAP Institutional</option>
                       <option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option>
                       <option value="CRT_v1">CRT Strategy</option>
                       <option value="HTFFVGFlip_v1">HTF FVG Flip</option>
@@ -239,21 +240,7 @@ export default function StrategySettings() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-header"><span className="card-title">SMC Parameters</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div>
-            <label>Confluence Threshold</label>
-            <input type="number" value={config.smc?.min_signal_score || config.smc?.confluence_threshold || 60} onChange={e => updateNested('smc', 'min_signal_score', +e.target.value)} />
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Min score to execute (0-100)</div>
-          </div>
-          <div><label>Swing Length HTF</label><input type="number" value={config.smc?.swing_length_htf || 5} onChange={e => updateNested('smc', 'swing_length_htf', +e.target.value)} /></div>
-          <div><label>Swing Length LTF</label><input type="number" value={config.smc?.swing_length_ltf || 3} onChange={e => updateNested('smc', 'swing_length_ltf', +e.target.value)} /></div>
-          <div><label>OB Impulse Ratio</label><input type="number" step="0.1" value={config.smc?.ob_impulse_ratio || 2.0} onChange={e => updateNested('smc', 'ob_impulse_ratio', +e.target.value)} /></div>
-          <div><label>FVG Min Gap (pips)</label><input type="number" value={config.smc?.fvg_min_gap_pips || 5.0} onChange={e => updateNested('smc', 'fvg_min_gap_pips', +e.target.value)} /></div>
-          <div><label>Liq Sweep Min (pips)</label><input type="number" value={config.smc?.liq_sweep_min_pips || 5.0} onChange={e => updateNested('smc', 'liq_sweep_min_pips', +e.target.value)} /></div>
-        </div>
-      </div>
+
 
       <div className="card">
         <div className="card-header"><span className="card-title">Drift & Jump Alpha Parameters</span></div>

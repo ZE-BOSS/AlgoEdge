@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 class TradeSignal(BaseModel):
     """Standardized output from any strategy."""
-    strategy_id: str = "SMC_v1"
+    strategy_id: str = "APA_v1"
     symbol: str
     direction: str  # "BUY" or "SELL"
     signal_type: str = "OB_ENTRY"  # OB_ENTRY, FVG_ENTRY, BOS, CHOCH

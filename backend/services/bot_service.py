@@ -422,12 +422,12 @@ class BotService:
                             return df
 
                         # ── DYNAMIC STRATEGY RESOLUTION ──
-                        strategy_id = "SMC_v1"
+                        strategy_id = "APA_v1"
                         
                         if hasattr(config, 'instrument_settings') and config.instrument_settings:
                             for settings in config.instrument_settings:
                                 if settings.symbol == symbol:
-                                    strategy_id = getattr(settings, 'strategy_id', "SMC_v1")
+                                    strategy_id = getattr(settings, 'strategy_id', "APA_v1")
                                     break
                         
                         # Instantiate engine if not exists

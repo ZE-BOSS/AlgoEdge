@@ -1000,14 +1000,14 @@ export default function Backtester() {
       const saved = localStorage.getItem(PORTFOLIO_KEY);
       if (saved) return JSON.parse(saved);
     } catch { }
-    return [{ symbol: 'XAUUSD', strategy_id: 'SMC_v1' }];
+    return [{ symbol: 'XAUUSD', strategy_id: 'APA_v1' }];
   });
 
   useEffect(() => {
     try { localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(portfolioSymbols)); } catch { }
   }, [portfolioSymbols]);
 
-  const addPortfolioSymbol = () => setPortfolioSymbols(p => [...p, { symbol: 'EURUSD', strategy_id: 'SMC_v1' }]);
+  const addPortfolioSymbol = () => setPortfolioSymbols(p => [...p, { symbol: 'EURUSD', strategy_id: 'APA_v1' }]);
   const removePortfolioSymbol = (i) => setPortfolioSymbols(p => p.filter((_, idx) => idx !== i));
   const updatePortfolioSymbol = (i, field, val) => setPortfolioSymbols(p => p.map((s, idx) => idx === i ? { ...s, [field]: val } : s));
 
@@ -1097,7 +1097,7 @@ export default function Backtester() {
       },
       target_profit_enabled: false, max_daily_profit: 500.0, max_weekly_profit: 2000.0,
       manual_bias: 'NONE',
-      strategy_id: 'SMC_v1',
+      strategy_id: 'APA_v1',
       drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20, jump_entry_percentile_threshold: 95.0, trade_jumps_enabled: false, control_test_passed: false, aggregate_max_lots_per_symbol: 6.0,
       htf_timeframe: 'H1', ltf_timeframe: 'M5', target_r_multiple: 1.5, max_trades_per_session: 1, session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
       entry_confirmation_tf: 'M5', target_rr: 1.0, require_unfilled_htf_fvg: true,
@@ -1245,28 +1245,20 @@ export default function Backtester() {
       setResult(null);
       setEvents([]);
       setBtError(null);
-      const validStrats = ['SMC_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'];
-      const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'SMC_v1';
+      const validStrats = ['APA_v1', 'VWAP_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'];
+      const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'APA_v1';
       const payload = { ...form, strategy_id: payload_strategy, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: { prop_firm: form.prop_firm }, strategy_params: {} };
       if (form.manual_bias && form.manual_bias !== 'NONE') {
         payload.manual_bias_overrides = { [form.symbol]: form.manual_bias };
       }
 
-      if (payload_strategy === 'SMC_v1') {
+      if (payload_strategy === 'APA_v1') {
         payload.strategy_params = {
-          min_signal_score: form.confluence_threshold,
-          swing_length_htf: form.swing_length,
-          ob_impulse_ratio: form.ob_impulse_ratio,
-          fvg_min_gap_pips: form.fvg_min_gap_pips,
-          liq_sweep_min_pips: form.liq_sweep_min_pips,
-          max_spread_pips: form.max_spread_pips,
-          session_filter_enabled: form.session_filter_enabled,
-          news_filter_enabled: form.news_filter_enabled,
-          enforce_htf_pd: form.enforce_htf_pd,
-          enforce_fvg_displacement: form.enforce_fvg_displacement,
-          enforce_asian_range_sweep: form.enforce_asian_range_sweep,
-          asian_range_start_hour: form.asian_range_start_hour,
-          asian_range_end_hour: form.asian_range_end_hour
+          structure_timeframe: form.structure_timeframe || "M15",
+          entry_timeframe: form.entry_timeframe || "M5",
+          minor_fractal_m: form.minor_fractal_m || 3,
+          major_fractal_n: form.major_fractal_n || 5,
+          enforce_strong_choch: form.enforce_strong_choch !== undefined ? form.enforce_strong_choch : True
         };
       } else if (form.strategy_id === 'DriftJumpAlpha_v1') {
         payload.strategy_params = {
@@ -1392,7 +1384,7 @@ export default function Backtester() {
         <div style={{ display: 'grid', gap: 14 }}>
           {activeTab === 'single' ? (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label>Strategy Engine</label><select value={['SMC_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'].includes(form.strategy_id) ? form.strategy_id : 'SMC_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="SMC_v1">SMC Multi-TF</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option></select></div>
+              <div><label>Strategy Engine</label><select value={['APA_v1', 'VWAP_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'].includes(form.strategy_id) ? form.strategy_id : 'APA_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option></select></div>
               <div>
                 <label>Symbol</label>
                 <SymbolAutocomplete
@@ -1424,7 +1416,7 @@ export default function Backtester() {
                     <div style={{ flex: 1 }}>
                       <label style={{ fontSize: '0.7rem' }}>Strategy</label>
                       <select value={item.strategy_id} onChange={e => updatePortfolioSymbol(idx, 'strategy_id', e.target.value)}>
-                        <option value="SMC_v1">SMC Multi-TF</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option>
+                        <option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option>
                       </select>
                     </div>
                     <button className="btn btn-icon btn-ghost" style={{ color: 'var(--red)', marginBottom: 2 }} onClick={() => removePortfolioSymbol(idx)} disabled={portfolioSymbols.length <= 1}><MinusCircle size={16} /></button>
@@ -1495,7 +1487,7 @@ export default function Backtester() {
           <button className="btn btn-secondary btn-sm" onClick={() => setShowAdvanced(!showAdvanced)} style={{ width: '100%' }}><Settings2 size={14} /> {showAdvanced ? 'Hide' : 'Show'} Advanced Parameters</button>
           {showAdvanced && (<div style={{ display: 'grid', gap: 14, padding: 14, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>━ Strategy Engines</div>
-            {form.strategy_id === 'SMC_v1' && (
+            {form.strategy_id === 'APA_v1' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                 <div><label style={{ fontSize: '0.7rem' }}>Confluence Threshold</label><input type="number" value={form.confluence_threshold} onChange={e => u('confluence_threshold', +e.target.value)} /></div>
                 <div><label style={{ fontSize: '0.7rem' }}>Swing Length</label><input type="number" value={form.swing_length} onChange={e => u('swing_length', +e.target.value)} /></div>
