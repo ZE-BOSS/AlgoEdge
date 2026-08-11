@@ -208,7 +208,12 @@ class CircuitBreaker:
         
         # Free up open risk tracking for the closed group
         if group_id in self.active_groups:
+            sym = self.active_groups[group_id].get("symbol", "")
             del self.active_groups[group_id]
+            if sym and sym in self.open_positions_by_symbol:
+                self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
+                if self.open_positions_by_symbol[sym] == 0:
+                    del self.open_positions_by_symbol[sym]
         
         # We don't save state to disk here because backtester runs in a tight loop in-memory,
         # but we could update M15 cooldown if we wanted to enforce it during backtests.
