@@ -309,8 +309,8 @@ async def run_backtest_endpoint(
             # Map risk fields
             config.risk.min_rr = req.min_rr
             config.risk.risk_per_trade_pct = req.risk_per_trade_pct
-            config.risk.max_daily_consecutive_losses = req.max_daily_consecutive_losses
-            config.risk.max_weekly_consecutive_losses = req.max_weekly_consecutive_losses
+            config.risk.max_daily_drawdown_pct = req.max_daily_drawdown_pct
+            config.risk.max_weekly_drawdown_pct = req.max_weekly_drawdown_pct
             config.risk.max_concurrent_positions = req.max_concurrent_positions
             config.risk.max_positions_per_symbol = req.max_positions_per_symbol
             config.risk.max_daily_trades = req.max_daily_trades
@@ -522,8 +522,8 @@ async def run_backtest_endpoint(
                 "trail_pips": req.trail_pips,
                 "session_filter_enabled": req.session_filter_enabled,
                 "multi_position_mode": req.tp_count > 1,
-                "max_daily_consecutive_losses": req.max_daily_consecutive_losses,
-                "max_weekly_consecutive_losses": req.max_weekly_consecutive_losses,
+                "max_daily_drawdown_pct": req.max_daily_drawdown_pct,
+                "max_weekly_drawdown_pct": req.max_weekly_drawdown_pct,
                 "max_concurrent_positions": req.max_concurrent_positions,
                 "max_positions_per_symbol": req.max_positions_per_symbol,
                 "max_daily_trades": req.max_daily_trades,
@@ -760,8 +760,8 @@ async def run_portfolio_backtest_endpoint(
                 "trail_pips": req.trail_pips,
                 "session_filter_enabled": req.session_filter_enabled,
                 "multi_position_mode": req.tp_count > 1,
-                "max_daily_consecutive_losses": req.max_daily_consecutive_losses,
-                "max_weekly_consecutive_losses": req.max_weekly_consecutive_losses,
+                "max_daily_drawdown_pct": req.max_daily_drawdown_pct,
+                "max_weekly_drawdown_pct": req.max_weekly_drawdown_pct,
                 "max_concurrent_positions": req.max_concurrent_positions,
                 "max_positions_per_symbol": req.max_positions_per_symbol,
                 "max_daily_trades": req.max_daily_trades,
