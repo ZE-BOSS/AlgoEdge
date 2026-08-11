@@ -670,6 +670,10 @@ class BotService:
                                     )
 
                                     if approved:
+                                        group_id = signal_data.get("group_id", "unknown")
+                                        if self.circuit_breaker:
+                                            self.circuit_breaker.position_opened(group_id, len(tp_levels), symbol=signal.symbol)
+                                            
                                         # Place ALL TP positions at entry (no deferred stacking)
                                         self._log_event(
                                             f"Trade approved: {len(tp_levels)} positions — all at entry",

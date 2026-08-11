@@ -389,16 +389,22 @@ class BacktestEngine:
                 balance += pos.get("pnl", 0)
                 pos["balance_after"] = balance
                 is_win = pos.get("pnl", 0) > 0
+                # If the group is now fully closed, notify strategy
                 group_id_closed = pos.get("group_id", "unknown")
-                # Check before calling — circuit breaker removes the group when all legs close
-                group_was_open = group_id_closed in self.risk_engine.circuit.active_groups
-                self.risk_engine.on_position_closed(group_id_closed, pos.get("pnl", 0), current_time)
-                # If the group is now fully closed (removed from active_groups), notify strategy
-                if group_was_open and group_id_closed not in self.risk_engine.circuit.active_groups:
+                # Fallback to simple sub-trade counting to know when group is done
+                # Count remaining open positions for this group
+                remaining_legs = sum(1 for p in self.open_positions if p.get("group_id") == group_id_closed and p != pos)
+                
+                if remaining_legs == 0:
                     group_pnl = sum(
                         p.get("pnl", 0) for p in self.trades
                         if p.get("group_id") == group_id_closed
                     ) + pos.get("pnl", 0)
+                    
+                    # Safely feed PnL back to the Risk Engine's Circuit Breaker
+                    if hasattr(self.risk_engine, "on_backtest_position_closed"):
+                        self.risk_engine.on_backtest_position_closed(group_pnl, current_time)
+                        
                     strategy = getattr(self, "_strategy", None)
                     if strategy is not None:
                         strategy.notify_outcome(
@@ -513,20 +519,14 @@ class BacktestEngine:
                         bar_open_price = float(bar.get("open", current_price))
                         position = self._create_position(sig, tp, current_time, bar_open_price, group_id, balance)
                         self.open_positions.append(position)
-                        actual_opened_count += 1
                         logger.debug(f"[ENGINE]   Position opened: TP{tp.level} @ {bar_open_price:.5f} (bar open) | vol={tp.volume:.4f}")
                         
-                    if actual_opened_count > 0:
-                        self.risk_engine.on_position_opened(group_id, actual_opened_count, symbol)
-
-                        self.run_logs.append({
-                            "time": _epoch_to_iso(current_time),
-                            "level": "INFO",
-                            "category": "BACKTEST_LOG",
-                            "message": f"Opened {sig.get('direction')} {sig.get('symbol', 'UNKNOWN')} @ {bar_open_price:.5f} | {actual_opened_count} TPs"
-                        })
-                    else:
-                        logger.warning(f"[ENGINE] ❌ Signal APPROVED but 0 sub-trades were valid. Group {group_id} not opened.")
+                    self.run_logs.append({
+                        "time": _epoch_to_iso(current_time),
+                        "level": "INFO",
+                        "category": "BACKTEST_LOG",
+                        "message": f"Opened {sig.get('direction')} {sig.get('symbol', 'UNKNOWN')} @ {bar_open_price:.5f} | {len(tp_levels)} TPs"
+                    })
                 else:
                     self.rejection_funnel["risk_rejections"][reason] = self.rejection_funnel["risk_rejections"].get(reason, 0) + 1
                     logger.trace(f"[ENGINE] ❌ Signal REJECTED (Risk): {reason}")

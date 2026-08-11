@@ -188,6 +188,21 @@ class CircuitBreaker:
             self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
         self.save_state()
 
+    def record_backtest_close(self, pnl: float, current_time: datetime | None = None):
+        """
+        Feed closed trade PnL directly into Circuit Breaker during backtesting.
+        This avoids the complexity of tracking 'active_groups' and 'sub_trades' which
+        can get out of sync during backtesting simulation and freeze the bot.
+        """
+        self.daily_pnl += pnl
+        self.weekly_pnl += pnl
+        
+        # We don't save state to disk here because backtester runs in a tight loop in-memory,
+        # but we could update M15 cooldown if we wanted to enforce it during backtests.
+        if current_time is not None:
+            current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
+            self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
+
     def save_state(self):
         """Persist CB state to disk so it survives bot restarts."""
         try:

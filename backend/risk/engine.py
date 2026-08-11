@@ -182,8 +182,7 @@ class RiskEngine:
         actual_total_lots = sum(tp.volume for tp in tp_levels)
         actual_risk_dollars = calculate_risk_dollars(actual_total_lots, entry, sl, symbol)
 
-        # 4.5 Predictive Drawdown Guard
-        # Check if taking this loss would push us over the daily/weekly drawdown limits.
+        # Predictive Drawdown Guard
         max_daily_dd = self.circuit.max_daily_drawdown_pct
         max_weekly_dd = self.circuit.max_weekly_drawdown_pct
         
@@ -244,7 +243,8 @@ class RiskEngine:
             return False, f"Last TP RR {last_tp_rr:.1f} below minimum {self.min_rr}", []
 
         group_id = signal_data.get("group_id", "unknown")
-        self.circuit.position_opened(group_id, len(tp_levels), symbol=symbol)
+        # Removed state modification: self.circuit.position_opened(group_id, len(tp_levels), symbol=symbol)
+        # State tracking is now handled directly by the executing engine (live trading) to avoid ghost trades.
         
         if hasattr(self, "prop_firm_validator") and self.prop_firm_validator:
             self.prop_firm_validator.record_trade_opened(symbol, total_lots)
@@ -350,9 +350,14 @@ class RiskEngine:
         return actions
 
     def on_position_opened(self, group_id: str, sub_trade_count: int, symbol: str = ""):
-        """Track a new position opening."""
+        """Track a new position opening (unused in backtest)."""
         self.circuit.position_opened(group_id, sub_trade_count, symbol)
 
     def on_position_closed(self, group_id: str, pnl: float, current_time: datetime | None = None):
-        """Update circuit breaker state after a position closes."""
+        """Update circuit breaker state after a position closes (unused in backtest)."""
         self.circuit.position_closed(group_id, pnl, current_time)
+
+    def on_backtest_position_closed(self, pnl: float, current_time: datetime | None = None):
+        """Feed closed trade PnL directly into Circuit Breaker during backtesting."""
+        if hasattr(self.circuit, "record_backtest_close"):
+            self.circuit.record_backtest_close(pnl, current_time)
