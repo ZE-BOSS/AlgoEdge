@@ -35,33 +35,39 @@ async def sync_mt5_history(user: User, db: AsyncSession, hours_back: int = 72) -
         return {"status": "error", "reason": "MetaTrader5 not installed"}
 
     loop = asyncio.get_event_loop()
-    encryption = get_encryption_service()
     
-    try:
-        password = encryption.decrypt(user.mt5_password_encrypted)
-    except Exception as e:
-        logger.error(f"Failed to decrypt MT5 password for {user.email}: {e}")
-        return {"status": "error", "reason": "Decryption failed"}
+    # Check if we are already connected to the correct account
+    acc_info = await loop.run_in_executor(None, mt5.account_info)
+    is_already_connected = (acc_info is not None and acc_info.login == user.mt5_account)
 
-    # Connect to MT5
-    if user.mt5_path:
-        init_ok = await loop.run_in_executor(None, lambda: mt5.initialize(path=user.mt5_path))
-    else:
-        init_ok = await loop.run_in_executor(None, mt5.initialize)
+    if not is_already_connected:
+        encryption = get_encryption_service()
+        
+        try:
+            password = encryption.decrypt(user.mt5_password_encrypted)
+        except Exception as e:
+            logger.error(f"Failed to decrypt MT5 password for {user.email}: {e}")
+            return {"status": "error", "reason": "Decryption failed"}
 
-    if not init_ok:
-        logger.error(f"MT5 Init failed for sync: {mt5.last_error()}")
-        return {"status": "error", "reason": f"MT5 Init failed: {mt5.last_error()}"}
+        # Connect to MT5
+        if user.mt5_path:
+            init_ok = await loop.run_in_executor(None, lambda: mt5.initialize(path=user.mt5_path))
+        else:
+            init_ok = await loop.run_in_executor(None, mt5.initialize)
 
-    login_ok = await loop.run_in_executor(
-        None,
-        lambda: mt5.login(user.mt5_account, password=password, server=user.mt5_server)
-    )
+        if not init_ok:
+            logger.error(f"MT5 Init failed for sync: {mt5.last_error()}")
+            return {"status": "error", "reason": f"MT5 Init failed: {mt5.last_error()}"}
 
-    if not login_ok:
-        logger.error(f"MT5 Login failed for sync: {mt5.last_error()}")
-        await loop.run_in_executor(None, mt5.shutdown)
-        return {"status": "error", "reason": f"MT5 Login failed: {mt5.last_error()}"}
+        login_ok = await loop.run_in_executor(
+            None,
+            lambda: mt5.login(user.mt5_account, password=password, server=user.mt5_server)
+        )
+
+        if not login_ok:
+            logger.error(f"MT5 Login failed for sync: {mt5.last_error()}")
+            await loop.run_in_executor(None, mt5.shutdown)
+            return {"status": "error", "reason": f"MT5 Login failed: {mt5.last_error()}"}
 
     now = datetime.now(timezone.utc)
     from_date = now - timedelta(hours=hours_back)
@@ -72,7 +78,8 @@ async def sync_mt5_history(user: User, db: AsyncSession, hours_back: int = 72) -
     # Also fetch account info to sync live balance/equity
     account_info = await loop.run_in_executor(None, mt5.account_info)
     
-    await loop.run_in_executor(None, mt5.shutdown)
+    if not is_already_connected:
+        await loop.run_in_executor(None, mt5.shutdown)
 
     if deals is None:
         logger.warning(f"No deals returned from MT5 for {user.email}")
