@@ -182,6 +182,39 @@ class RiskEngine:
         actual_total_lots = sum(tp.volume for tp in tp_levels)
         actual_risk_dollars = calculate_risk_dollars(actual_total_lots, entry, sl, symbol)
 
+        # 4.5 Predictive Drawdown Guard
+        # Check if taking this loss would push us over the daily/weekly drawdown limits.
+        max_daily_dd = self.circuit.max_daily_drawdown_pct
+        max_weekly_dd = self.circuit.max_weekly_drawdown_pct
+        
+        start_of_day_balance = account_balance - self.circuit.daily_pnl
+        if max_daily_dd > 0 and start_of_day_balance > 0:
+            projected_daily_pnl = self.circuit.daily_pnl - actual_risk_dollars
+            if projected_daily_pnl < 0:
+                projected_dd_pct = (-projected_daily_pnl / start_of_day_balance) * 100
+                if projected_dd_pct > max_daily_dd:
+                    logger.warning(json.dumps({
+                        "event": "risk_rejected",
+                        "reason": "projected_daily_drawdown_exceeded",
+                        "projected_dd": round(projected_dd_pct, 2),
+                        "limit": max_daily_dd
+                    }))
+                    return False, f"Risking ${actual_risk_dollars:.2f} would exceed {max_daily_dd}% daily drawdown limit (projected {projected_dd_pct:.2f}%)", []
+                    
+        start_of_week_balance = account_balance - self.circuit.weekly_pnl
+        if max_weekly_dd > 0 and start_of_week_balance > 0:
+            projected_weekly_pnl = self.circuit.weekly_pnl - actual_risk_dollars
+            if projected_weekly_pnl < 0:
+                projected_dd_pct = (-projected_weekly_pnl / start_of_week_balance) * 100
+                if projected_dd_pct > max_weekly_dd:
+                    logger.warning(json.dumps({
+                        "event": "risk_rejected",
+                        "reason": "projected_weekly_drawdown_exceeded",
+                        "projected_dd": round(projected_dd_pct, 2),
+                        "limit": max_weekly_dd
+                    }))
+                    return False, f"Risking ${actual_risk_dollars:.2f} would exceed {max_weekly_dd}% weekly drawdown limit (projected {projected_dd_pct:.2f}%)", []
+
         # Soft warn if there is any residual overshoot vs. the pre-split calculation.
         # (Should be near-zero after multi_tp's cap enforcement, but log it for full auditability.)
         if actual_risk_dollars > (requested_risk_dollars * 1.01):
@@ -315,6 +348,10 @@ class RiskEngine:
                 actions.append({"action": "MODIFY_SL", "new_sl": new_sl, "reason": "TRAIL"})
 
         return actions
+
+    def on_position_opened(self, group_id: str, sub_trade_count: int, symbol: str = ""):
+        """Track a new position opening."""
+        self.circuit.position_opened(group_id, sub_trade_count, symbol)
 
     def on_position_closed(self, group_id: str, pnl: float, current_time: datetime | None = None):
         """Update circuit breaker state after a position closes."""

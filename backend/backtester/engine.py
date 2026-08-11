@@ -514,6 +514,8 @@ class BacktestEngine:
                         self.open_positions.append(position)
                         logger.debug(f"[ENGINE]   Position opened: TP{tp.level} @ {bar_open_price:.5f} (bar open) | vol={tp.volume:.4f}")
                         
+                    self.risk_engine.on_position_opened(group_id, len(tp_levels), symbol)
+
                     self.run_logs.append({
                         "time": _epoch_to_iso(current_time),
                         "level": "INFO",
