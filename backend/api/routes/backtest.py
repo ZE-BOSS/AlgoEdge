@@ -53,8 +53,8 @@ class BacktestRequest(BaseModel):
 
     risk_per_trade_pct: float = 1.0
     min_rr: float = 3.0
-    max_daily_consecutive_losses: int = 3
-    max_weekly_consecutive_losses: int = 5
+    max_daily_drawdown_pct: float = 3.0
+    max_weekly_drawdown_pct: float = 6.0
     max_concurrent_positions: int = 3
     max_positions_per_symbol: int = 1
     max_daily_trades: int = 5

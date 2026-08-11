@@ -53,8 +53,8 @@ class RiskParams:
     be_buffer_atr_mult: float = 0.0
 
     # Circuit breakers — trade-count-based (always active)
-    max_daily_consecutive_losses: int = 3
-    max_weekly_consecutive_losses: int = 5
+    max_daily_drawdown_pct: float = 3.0
+    max_weekly_drawdown_pct: float = 6.0
     max_daily_trades: int = 5
     max_concurrent_positions: int = 3
     max_positions_per_symbol: int = 1

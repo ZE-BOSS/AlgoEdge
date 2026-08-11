@@ -12,8 +12,8 @@ export default function RiskSettings() {
 
   const [config, setConfig] = useState({
     risk_per_trade_pct: 1.0,
-    max_daily_consecutive_losses: 3,
-    max_weekly_consecutive_losses: 5,
+    max_daily_drawdown_pct: 3.0,
+    max_weekly_drawdown_pct: 6.0,
     max_daily_trades: 5,
     max_concurrent_positions: 3,
     max_positions_per_symbol: 1,
@@ -113,8 +113,8 @@ export default function RiskSettings() {
       <div className="card">
         <div className="card-header"><span className="card-title">Circuit Breakers</span></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Max Daily Consec. Losses</label><input type="number" step="1" min="1" value={config.max_daily_consecutive_losses} onChange={e => update('max_daily_consecutive_losses', +e.target.value)} /></div>
-          <div><label>Max Weekly Consec. Losses</label><input type="number" step="1" min="1" value={config.max_weekly_consecutive_losses} onChange={e => update('max_weekly_consecutive_losses', +e.target.value)} /></div>
+          <div><label>Max Daily Drawdown (%)</label><input type="number" step="0.1" min="0.1" value={config.max_daily_drawdown_pct} onChange={e => update('max_daily_drawdown_pct', +e.target.value)} /></div>
+          <div><label>Max Weekly Drawdown (%)</label><input type="number" step="0.1" min="0.1" value={config.max_weekly_drawdown_pct} onChange={e => update('max_weekly_drawdown_pct', +e.target.value)} /></div>
           <div><label>Max Daily Trades</label><input type="number" step="1" min="1" value={config.max_daily_trades} onChange={e => update('max_daily_trades', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Prevents overtrading in chop</div></div>
           <div><label>Max Open Positions</label><input type="number" value={config.max_concurrent_positions} onChange={e => update('max_concurrent_positions', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Global across all symbols</div></div>
           <div><label>Max Positions / Symbol</label><input type="number" value={config.max_positions_per_symbol} onChange={e => update('max_positions_per_symbol', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Limit trades per symbol</div></div>
