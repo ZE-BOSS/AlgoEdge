@@ -57,6 +57,7 @@ class APAEngine(BaseStrategy):
                 "sl_level": None,         # SL = wick extreme of right shoulder (+ buffer)
                 "invalidation_head": None,# Price beyond which the thesis is void
                 "bos_confirmed": False,
+                "last_trade_date": None,
             }
 
     def _is_within_session(self, current_time: pd.Timestamp) -> bool:
@@ -77,6 +78,24 @@ class APAEngine(BaseStrategy):
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         self._init_state(symbol)
         state = self.state[symbol]
+
+        # Reset daily state on calendar day change to clear stale setups
+        current_time_dt = candles.index[-1]
+        if isinstance(current_time_dt, (int, float)):
+             current_time_dt = pd.to_datetime(current_time_dt, unit='s', utc=True)
+        current_date = pd.Timestamp(current_time_dt, tz='UTC').date()
+
+        if state.get("last_trade_date") != current_date:
+            state.update({
+                "status": "AWAIT_PATTERN",
+                "pattern": None,
+                "direction": None,
+                "invalid_zone_top": None,
+                "invalid_zone_bottom": None,
+                "fvg_created": False,
+                "last_trade_date": current_date
+            })
+            self.log_event(f"[{symbol}] State reset for new trading day.", category="APA")
 
         if len(candles) < (self.params.major_fractal_m * 2 + 5):
             return None
@@ -199,6 +218,9 @@ class APAEngine(BaseStrategy):
                 # Body enters IZ if any overlap
                 if body_bottom <= iz_top and body_top >= iz_bottom:
                     state["status"] = "AWAIT_CONFIRMATION"
+                    # Re-read status so the AWAIT_CONFIRMATION block below
+                    # can run on the same bar as the retest touch (no 1-bar delay).
+                    status = state["status"]
                     self.log_event(
                         f"[{symbol}] Retest into Invalidation Zone confirmed. Checking confirmation rules.",
                         category="APA",

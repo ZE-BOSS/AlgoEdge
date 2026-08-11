@@ -383,7 +383,24 @@ class BacktestEngine:
                 balance += pos.get("pnl", 0)
                 pos["balance_after"] = balance
                 is_win = pos.get("pnl", 0) > 0
-                self.risk_engine.on_position_closed(pos.get("group_id", "unknown"), pos.get("pnl", 0), current_time)
+                group_id_closed = pos.get("group_id", "unknown")
+                # Check before calling — circuit breaker removes the group when all legs close
+                group_was_open = group_id_closed in self.risk_engine.circuit.active_groups
+                self.risk_engine.on_position_closed(group_id_closed, pos.get("pnl", 0), current_time)
+                # If the group is now fully closed (removed from active_groups), notify strategy
+                if group_was_open and group_id_closed not in self.risk_engine.circuit.active_groups:
+                    group_pnl = sum(
+                        p.get("pnl", 0) for p in self.trades
+                        if p.get("group_id") == group_id_closed
+                    ) + pos.get("pnl", 0)
+                    strategy = getattr(self, "_strategy", None)
+                    if strategy is not None:
+                        strategy.notify_outcome(
+                            symbol=pos.get("symbol", ""),
+                            group_id=group_id_closed,
+                            is_win=group_pnl > 0,
+                            pnl=group_pnl,
+                        )
                 self.trades.append(pos)
                 positions_to_remove.append(pos)
 
@@ -501,10 +518,15 @@ class BacktestEngine:
                     self.rejection_funnel["risk_rejections"][reason] = self.rejection_funnel["risk_rejections"].get(reason, 0) + 1
                     logger.trace(f"[ENGINE] ❌ Signal REJECTED (Risk): {reason}")
 
-            # Track floating equity (balance + unrealized open P&L).
-            # Previously only appended balance (closed trades only), understating
-            # drawdown during adverse open excursions.
-            self.equity_curve.append(balance + open_pnl)
+            # Track floating equity AFTER processing closes this bar:
+            # Recompute open_pnl from positions that are still actually open
+            # (not those just closed above). Prevents closed-trade PnL from
+            # being double-counted in the equity curve on the bar they exit.
+            post_close_pnl = sum(
+                self._calc_pnl(p["direction"], p["entry_price"], current_price, p["volume"], p.get("symbol", ""))
+                for p in self.open_positions
+            )
+            self.equity_curve.append(balance + post_close_pnl)
 
         # Close any remaining open positions at last price
         last_price = candles.iloc[-1]["close"] if len(candles) > 0 else 0

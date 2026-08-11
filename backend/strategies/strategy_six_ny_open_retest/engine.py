@@ -30,7 +30,8 @@ class NYOpenRetestEngine(BaseStrategy):
             }
 
     def get_required_timeframes(self) -> list[str]:
-        return ["H4", "M15", "M5"]
+        # Spec (strategy-3-nyopen-break-retest.md): only M15 (range marking) and M5 (break+retest)
+        return ["M15", "M5"]
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         self._init_state(symbol)
@@ -110,11 +111,15 @@ class NYOpenRetestEngine(BaseStrategy):
                         recent_candles = candles.iloc[-50:]
                         if state["bias"] == "BUY":
                             recent_high = recent_candles["high"].max()
-                            if recent_high - entry > target:
+                            swing_dist = recent_high - entry
+                            # Spec: use NEARER swing level if it's closer than the fixed target
+                            # — avoids holding through a resistance level just to reach the fixed TP.
+                            if 0 < swing_dist < target:
                                 take_profit = recent_high
                         else:
                             recent_low = recent_candles["low"].min()
-                            if entry - recent_low > target:
+                            swing_dist = entry - recent_low
+                            if 0 < swing_dist < target:
                                 take_profit = recent_low
                     
                     state["status"] = "DONE"

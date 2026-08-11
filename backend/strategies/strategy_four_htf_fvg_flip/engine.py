@@ -117,14 +117,16 @@ class HTFFVGFlipEngine(BaseStrategy):
                         if state["bias"] == "BUY" and fvg["type"] == "BEARISH":
                             state["m5_fvg"] = fvg
                             state["status"] = "AWAIT_INVERSION_CLOSE"
-                            lookback = candles.iloc[-20:]
+                            tap_time = state.get("tap_time")
+                            lookback = candles.loc[tap_time:] if tap_time is not None and tap_time in candles.index else candles.iloc[-20:]
                             state["m5_swing_point"] = lookback["low"].min()
                             self.log_event(f"[{symbol}] {timeframe} Bearish FVG formed. Awaiting Bullish inversion.", category="FVG_FLIP")
                             break
                         elif state["bias"] == "SELL" and fvg["type"] == "BULLISH":
                             state["m5_fvg"] = fvg
                             state["status"] = "AWAIT_INVERSION_CLOSE"
-                            lookback = candles.iloc[-20:]
+                            tap_time = state.get("tap_time")
+                            lookback = candles.loc[tap_time:] if tap_time is not None and tap_time in candles.index else candles.iloc[-20:]
                             state["m5_swing_point"] = lookback["high"].max()
                             self.log_event(f"[{symbol}] {timeframe} Bullish FVG formed. Awaiting Bearish inversion.", category="FVG_FLIP")
                             break

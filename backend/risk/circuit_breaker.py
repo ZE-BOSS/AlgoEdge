@@ -134,11 +134,14 @@ class CircuitBreaker:
             self.active_groups[group_id]["pnl"] += pnl
             self.active_groups[group_id]["sub_trades"] -= 1
             
-            # Record result PER LEG instead of waiting for the full group
-            self._record_trade_result(pnl, pnl >= 0)
-            
-            # If all sub-trades for this group are closed
+            # If all sub-trades for this group are closed, record the group outcome.
+            # DO NOT call _record_trade_result per leg — a TP1 win should not reset
+            # the consecutive-loss streak if TP2/TP3 subsequently stop out at BE.
+            # The circuit breaker tracks SIGNAL (group) outcomes, not individual leg outcomes.
             if self.active_groups[group_id]["sub_trades"] <= 0:
+                group_pnl = self.active_groups[group_id]["pnl"]
+                self._record_trade_result(group_pnl, group_pnl >= 0)
+                
                 # Set M15 cooldown
                 if current_time is not None:
                     current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
@@ -309,8 +312,6 @@ class CircuitBreaker:
             # Auto-resume daily pauses only — weekly streak is preserved intentionally.
             # (manual_resume() was previously called here, which wiped weekly_consecutive_losses.)
             if self.is_paused and "daily" in self.pause_reason.lower():
-                self._daily_resume()
-            elif "Daily" in self.pause_reason:
                 self._daily_resume()
 
     def _check_weekly_reset(self, current_time: datetime | None = None):

@@ -59,6 +59,8 @@ class PropFirmValidator:
 
         # Alert dedup: track which alerts were already sent this session
         self._alerts_sent: set = set()
+        # Breach logging dedup: ensures the breach is only logged once per engine run
+        self._breach_logged: bool = False
 
         if self.enabled:
             self.load_state()
@@ -183,8 +185,10 @@ class PropFirmValidator:
         current_trading_date = shifted_time.date().isoformat()
 
         if self.last_eod_date != current_trading_date:
-            # We crossed into a new trading day — snapshot the higher of Balance or Equity
-            self.eod_baseline = max(balance, equity)
+            # We crossed into a new trading day — snapshot CLOSED-TRADE balance only.
+            # Using max(balance, equity) previously inflated the baseline by unrealized
+            # floating gains, creating a falsely strict daily drawdown floor the next day.
+            self.eod_baseline = balance
             self.last_eod_date = current_trading_date
 
             # Check minimum trading day requirement

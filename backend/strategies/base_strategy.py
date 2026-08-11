@@ -85,3 +85,13 @@ class BaseStrategy:
     def get_required_timeframes(self) -> list[str]:
         """Return list of timeframes this strategy needs."""
         raise NotImplementedError
+
+    def notify_outcome(self, symbol: str, group_id: str, is_win: bool, pnl: float) -> None:
+        """
+        Called by the backtester/live engine after a full signal group closes.
+        Strategies that track internal per-day win/loss counters (e.g. VWAP's
+        `losses_today`, BiasIFVG's `trades_today`) should override this method
+        to update those counters from actual outcomes rather than guessing.
+        Default implementation is a no-op.
+        """
+        pass

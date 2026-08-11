@@ -38,9 +38,21 @@ def _is_synthetic(symbol: str) -> bool:
 
 def _calculate_anchored_vwap(candles: pd.DataFrame, anchor_minutes: int) -> pd.Series:
     """
-    Calculate anchored VWAP using a rolling anchor window of `anchor_minutes`.
-    Uses typical price (H+L+C)/3 × Volume for the cumulative sum.
-    If no Volume column, falls back to equal weighting.
+    Calculate true daily-anchored VWAP, resetting to the session open each trading day.
+
+    Spec says "15-min anchored VWAP" — this means a cumulative VWAP anchored to the
+    start of each trading session (9:30 ET), not a rolling sliding-window VWAP.
+    A rolling window never resets and produces a permanently drifting average that
+    fundamentally misrepresents the institutional reference price.
+
+    Algorithm:
+      1. Determine the trading date for each bar (using 9:30 ET as the session start).
+      2. Within each date group, compute cumulative sum(TP*Vol) / cumsum(Vol).
+      3. This gives a proper intraday VWAP that starts fresh each session.
+
+    `anchor_minutes` is kept as a parameter for API compatibility but is no longer used
+    (the session-anchor supersedes it). If candles have no 'time' column, falls back to
+    the old rolling window.
     """
     typical_price = (candles["high"] + candles["low"] + candles["close"]) / 3
 
@@ -51,12 +63,38 @@ def _calculate_anchored_vwap(candles: pd.DataFrame, anchor_minutes: int) -> pd.S
         tp_vol = typical_price
         vol = pd.Series(1.0, index=candles.index)
 
-    # Rolling cumulative sums anchored to a fixed window
+    # Try to build a session-date column for grouping
+    if "time" in candles.columns:
+        try:
+            import pytz
+            et_tz = pytz.timezone("America/New_York")
+            times_utc = pd.to_datetime(candles["time"], unit="s", utc=True)
+            times_et = times_utc.dt.tz_convert(et_tz)
+
+            # Session boundary: 09:30 ET.  Any bar before 09:30 belongs to the previous session.
+            # Use the calendar date shifted so bars 00:00–09:29 are grouped with the prior day's session.
+            session_open_offset = pd.Timedelta(hours=9, minutes=30)
+            session_dates = (times_et - session_open_offset).dt.date
+
+            vwap_vals = pd.Series(index=candles.index, dtype=float)
+            for _date, group_idx in candles.groupby(session_dates).groups.items():
+                g_tp_vol = tp_vol.loc[group_idx]
+                g_vol = vol.loc[group_idx]
+                cum_tp_vol = g_tp_vol.cumsum()
+                cum_vol = g_vol.cumsum()
+                vwap_vals.loc[group_idx] = cum_tp_vol / cum_vol
+
+            if vwap_vals.isna().all():
+                raise ValueError("All-NaN VWAP — fallback to rolling")
+            return vwap_vals.ffill()
+
+        except Exception:
+            pass  # Fall through to rolling fallback
+
+    # Fallback: rolling window (used when no 'time' column available)
     cum_tp_vol = tp_vol.rolling(window=anchor_minutes, min_periods=1).sum()
     cum_vol = vol.rolling(window=anchor_minutes, min_periods=1).sum()
-
-    vwap = cum_tp_vol / cum_vol
-    return vwap
+    return cum_tp_vol / cum_vol
 
 
 @register_strategy("VWAP_v1")
@@ -111,6 +149,20 @@ class VWAPEngine(BaseStrategy):
 
     def get_required_timeframes(self) -> list[str]:
         return [self.params.entry_timeframe]
+
+    def notify_outcome(self, symbol: str, group_id: str, is_win: bool, pnl: float) -> None:
+        """
+        Called by the backtester/live engine after a full trade group closes.
+        Increments losses_today so the 2-loss-per-day cap (spec §7) is enforced.
+        """
+        self._init_state(symbol)
+        state = self.state[symbol]
+        if not is_win:
+            state["losses_today"] += 1
+            self.log_event(
+                f"[{symbol}] VWAP loss recorded. losses_today={state['losses_today']} / max={self.params.max_losses_per_day}",
+                category="VWAP",
+            )
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         if timeframe != self.params.entry_timeframe:

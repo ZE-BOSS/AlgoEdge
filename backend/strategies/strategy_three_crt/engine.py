@@ -246,7 +246,6 @@ class CRTEngine(BaseStrategy):
                     else:
                         sl = current_price + sl_dist
 
-                        
                     return TradeSignal(
                         strategy_id="CRT_v1",
                         symbol=symbol,

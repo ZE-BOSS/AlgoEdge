@@ -79,14 +79,25 @@ class BiasIFVGEngine(BaseStrategy):
             self.last_trade_date[symbol] = current_date
             self.log_event(f"[{symbol}] State reset for new trading day.", category="BIAS_IFVG")
         
-        # 1. Determine Bias (HTF: H4)
+        # 1. Determine Bias (HTF: H4) — always update on each H4 bar regardless of status.
+        # Spec: "15m secondary check can flip bias intraday" — bias must be re-evaluated continuously.
         if timeframe == "H4":
             htf_fvgs = self.htf_detectors[symbol].update(candles)
             if htf_fvgs:
-                # Bias holds as long as we have a recent unresolved HTF FVG
                 last_fvg = htf_fvgs[-1]
-                state["bias"] = "BUY" if last_fvg["type"] == "BULLISH" else "SELL"
-                if state["status"] == "AWAIT_BIAS":
+                new_bias = "BUY" if last_fvg["type"] == "BULLISH" else "SELL"
+                if new_bias != state["bias"]:
+                    self.log_event(f"[{symbol}] HTF Bias flipped: {state['bias']} → {new_bias}", category="BIAS_IFVG")
+                    # Bias flip invalidates any in-progress setup — restart from key-level search.
+                    state["bias"] = new_bias
+                    state["key_level"] = None
+                    state["m5_fvg_to_invert"] = None
+                    state["m5_swing_point"] = None
+                    state["manipulation_leg_start"] = None
+                    state["status"] = "AWAIT_KEY_LEVEL"
+                elif state["status"] == "AWAIT_BIAS":
+                    # First time bias is established
+                    state["bias"] = new_bias
                     state["status"] = "AWAIT_KEY_LEVEL"
                     self.log_event(f"[{symbol}] Bias established: {state['bias']} based on HTF FVG", category="BIAS_IFVG")
         
@@ -168,11 +179,12 @@ class BiasIFVGEngine(BaseStrategy):
                     entry = latest["close"]
                     sl = state.get("m5_swing_point", entry * 0.99 if state["bias"]=="BUY" else entry * 1.01)
                     
-                    # 1:2 RR target by default
+                    # Use configurable RR target (default 2.0)
+                    target_rr = getattr(self.params, 'target_rr', 2.0)
                     if state["bias"] == "BUY":
-                        tp = entry + (entry - sl) * 2.0
+                        tp = entry + (entry - sl) * target_rr
                     else:
-                        tp = entry - (sl - entry) * 2.0
+                        tp = entry - (sl - entry) * target_rr
                         
                     state["status"] = "AWAIT_KEY_LEVEL"
                     state["trades_today"] += 1

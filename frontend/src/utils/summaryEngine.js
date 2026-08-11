@@ -76,24 +76,30 @@ export function bucketByPeriod(trades, period) {
 
 /**
  * Calculate max drawdown given an equity curve (array of balances).
+ * Both the absolute ($) and percentage (%) drawdown are anchored from
+ * `initialBalance` (capital) — matching backend metrics.py and the user's
+ * explicit rule: "drawdown is calculated from capital."
+ * The rolling-peak is still used to find the worst trough relative to any
+ * previous high, but the percentage is always expressed as a fraction of
+ * the starting capital, not of the peak itself.
  */
 export function maxDrawdown(equityCurve, initialBalance) {
   if (!equityCurve || equityCurve.length === 0) return { maxDdPct: 0, maxDdAbs: 0 };
-  
-  let maxDdAbs = 0;
-  let maxDdPct = 0;
+
   const capital = initialBalance !== undefined ? initialBalance : equityCurve[0];
   let peak = equityCurve[0];
-  
+  let maxDdAbs = 0;
+  let maxDdPct = 0;
+
   for (const val of equityCurve) {
-    peak = Math.max(peak, val);
-    const ddAbs = peak - val;
-    const ddPct = capital > 0 ? ddAbs / capital : 0;
-    
-    maxDdAbs = Math.max(maxDdAbs, ddAbs);
-    maxDdPct = Math.max(maxDdPct, ddPct);
+    if (val > peak) peak = val;
+    const ddAbs = peak - val;          // absolute $ drawdown from rolling peak
+    const ddPct = capital > 0 ? ddAbs / capital : 0;  // % anchored to initial capital
+
+    if (ddAbs > maxDdAbs) maxDdAbs = ddAbs;
+    if (ddPct > maxDdPct) maxDdPct = ddPct;
   }
-  
+
   return { maxDdPct, maxDdAbs };
 }
 
