@@ -188,7 +188,9 @@ class RiskEngine:
         
         start_of_day_balance = account_balance - self.circuit.daily_pnl
         if max_daily_dd > 0 and start_of_day_balance > 0:
-            projected_daily_pnl = self.circuit.daily_pnl - actual_risk_dollars
+            # Subtract open risk from projected PnL to account for floating drawdown
+            open_risk = getattr(self.circuit, "get_open_risk", lambda: 0.0)()
+            projected_daily_pnl = self.circuit.daily_pnl - open_risk - actual_risk_dollars
             if projected_daily_pnl < 0:
                 projected_dd_pct = (-projected_daily_pnl / start_of_day_balance) * 100
                 if projected_dd_pct > max_daily_dd:
@@ -198,11 +200,12 @@ class RiskEngine:
                         "projected_dd": round(projected_dd_pct, 2),
                         "limit": max_daily_dd
                     }))
-                    return False, f"Risking ${actual_risk_dollars:.2f} would exceed {max_daily_dd}% daily drawdown limit (projected {projected_dd_pct:.2f}%)", []
+                    return False, f"Risking ${actual_risk_dollars:.2f} (with ${open_risk:.2f} open risk) would exceed {max_daily_dd}% daily drawdown limit (projected {projected_dd_pct:.2f}%)", []
                     
         start_of_week_balance = account_balance - self.circuit.weekly_pnl
         if max_weekly_dd > 0 and start_of_week_balance > 0:
-            projected_weekly_pnl = self.circuit.weekly_pnl - actual_risk_dollars
+            open_risk = getattr(self.circuit, "get_open_risk", lambda: 0.0)()
+            projected_weekly_pnl = self.circuit.weekly_pnl - open_risk - actual_risk_dollars
             if projected_weekly_pnl < 0:
                 projected_dd_pct = (-projected_weekly_pnl / start_of_week_balance) * 100
                 if projected_dd_pct > max_weekly_dd:
@@ -212,7 +215,7 @@ class RiskEngine:
                         "projected_dd": round(projected_dd_pct, 2),
                         "limit": max_weekly_dd
                     }))
-                    return False, f"Risking ${actual_risk_dollars:.2f} would exceed {max_weekly_dd}% weekly drawdown limit (projected {projected_dd_pct:.2f}%)", []
+                    return False, f"Risking ${actual_risk_dollars:.2f} (with ${open_risk:.2f} open risk) would exceed {max_weekly_dd}% weekly drawdown limit (projected {projected_dd_pct:.2f}%)", []
 
         # Soft warn if there is any residual overshoot vs. the pre-split calculation.
         # (Should be near-zero after multi_tp's cap enforcement, but log it for full auditability.)

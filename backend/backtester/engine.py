@@ -22,7 +22,7 @@ import pandas as pd
 from backend.analytics.reports import generate_risk_report
 from backend.risk.engine import RiskEngine
 from backend.risk.multi_tp import TPLevel, _is_buy
-from backend.risk.position_sizer import get_pip_size
+from backend.risk.position_sizer import get_pip_size, calculate_risk_dollars
 from backend.risk.prop_firm_validator import PropFirmValidator
 from backend.utils.logger import get_logger
 from backend.utils.timeutils import detect_session
@@ -393,7 +393,8 @@ class BacktestEngine:
                 group_id_closed = pos.get("group_id", "unknown")
                 # Fallback to simple sub-trade counting to know when group is done
                 # Count remaining open positions for this group
-                remaining_legs = sum(1 for p in self.open_positions if p.get("group_id") == group_id_closed and p != pos)
+                # Count remaining open positions for this group, ignoring those already queued for removal
+                remaining_legs = sum(1 for p in self.open_positions if p.get("group_id") == group_id_closed and p not in positions_to_remove and p != pos)
                 
                 if remaining_legs == 0:
                     group_pnl = sum(
@@ -527,6 +528,19 @@ class BacktestEngine:
                         "category": "BACKTEST_LOG",
                         "message": f"Opened {sig.get('direction')} {sig.get('symbol', 'UNKNOWN')} @ {bar_open_price:.5f} | {len(tp_levels)} TPs"
                     })
+                    
+                    # Notify CircuitBreaker of the new group
+                    if hasattr(self.risk_engine, "circuit") and hasattr(self.risk_engine.circuit, "position_opened"):
+                        actual_risk_dollars = sum(
+                            calculate_risk_dollars(tp.volume, sig.get("entry_price", current_price), sig.get("stop_loss", 0), sig.get("symbol", ""))
+                            for tp in tp_levels
+                        )
+                        self.risk_engine.circuit.position_opened(
+                            group_id, 
+                            len(tp_levels), 
+                            symbol=sig.get("symbol", ""),
+                            initial_risk_dollars=actual_risk_dollars
+                        )
                 else:
                     self.rejection_funnel["risk_rejections"][reason] = self.rejection_funnel["risk_rejections"].get(reason, 0) + 1
                     logger.trace(f"[ENGINE] ❌ Signal REJECTED (Risk): {reason}")

@@ -124,13 +124,22 @@ class CircuitBreaker:
             return False, f"Max positions reached for {symbol} ({sym_open}/{self.max_positions_per_symbol})"
         return True, "OK"
 
-    def position_opened(self, group_id: str, sub_trade_count: int, symbol: str = ""):
+    def position_opened(self, group_id: str, sub_trade_count: int, symbol: str = "", initial_risk_dollars: float = 0.0):
         """Track a new position opening."""
         self.daily_trades_count += 1
-        self.active_groups[group_id] = {"pnl": 0.0, "sub_trades": sub_trade_count, "symbol": symbol}
+        self.active_groups[group_id] = {
+            "pnl": 0.0, 
+            "sub_trades": sub_trade_count, 
+            "symbol": symbol,
+            "initial_risk": initial_risk_dollars
+        }
         if symbol:
             self.open_positions_by_symbol[symbol] = self.open_positions_by_symbol.get(symbol, 0) + 1
         self.save_state()
+
+    def get_open_risk(self) -> float:
+        """Sum the initial risk of all currently active groups."""
+        return sum(group.get("initial_risk", 0.0) for group in self.active_groups.values())
 
     def position_closed(self, group_id: str, pnl: float, current_time: datetime | None = None):
         """Track a position closing."""
