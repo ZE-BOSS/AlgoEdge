@@ -79,10 +79,11 @@ class PropFirmValidator:
 
         try:
             from backend.services.telegram import telegram_service
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
+            try:
+                loop = asyncio.get_running_loop()
                 loop.create_task(telegram_service.send_message(message))
-            else:
+            except RuntimeError:
+                # No running event loop in this thread, safe to use asyncio.run
                 asyncio.run(telegram_service.send_message(message))
         except Exception as e:
             logger.error(f"[PropFirm] Failed to send Telegram alert: {e}")
