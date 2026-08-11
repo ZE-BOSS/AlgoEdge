@@ -493,6 +493,7 @@ class BacktestEngine:
                     self.rejection_funnel["approved"] += 1
                     logger.trace(f"[ENGINE] ✅ Signal APPROVED at bar {i}: {sig.get('direction')} @ {sig.get('entry_price', current_price):.5f} | {len(tp_levels)} TP levels | balance=${balance:.2f}")
 
+                    actual_opened_count = 0
                     for tp in tp_levels:
                         # Validate before opening
                         is_valid, err = _validate_position(
@@ -512,16 +513,20 @@ class BacktestEngine:
                         bar_open_price = float(bar.get("open", current_price))
                         position = self._create_position(sig, tp, current_time, bar_open_price, group_id, balance)
                         self.open_positions.append(position)
+                        actual_opened_count += 1
                         logger.debug(f"[ENGINE]   Position opened: TP{tp.level} @ {bar_open_price:.5f} (bar open) | vol={tp.volume:.4f}")
                         
-                    self.risk_engine.on_position_opened(group_id, len(tp_levels), symbol)
+                    if actual_opened_count > 0:
+                        self.risk_engine.on_position_opened(group_id, actual_opened_count, symbol)
 
-                    self.run_logs.append({
-                        "time": _epoch_to_iso(current_time),
-                        "level": "INFO",
-                        "category": "BACKTEST_LOG",
-                        "message": f"Opened {sig.get('direction')} {sig.get('symbol', 'UNKNOWN')} @ {bar_open_price:.5f} | {len(tp_levels)} TPs"
-                    })
+                        self.run_logs.append({
+                            "time": _epoch_to_iso(current_time),
+                            "level": "INFO",
+                            "category": "BACKTEST_LOG",
+                            "message": f"Opened {sig.get('direction')} {sig.get('symbol', 'UNKNOWN')} @ {bar_open_price:.5f} | {actual_opened_count} TPs"
+                        })
+                    else:
+                        logger.warning(f"[ENGINE] ❌ Signal APPROVED but 0 sub-trades were valid. Group {group_id} not opened.")
                 else:
                     self.rejection_funnel["risk_rejections"][reason] = self.rejection_funnel["risk_rejections"].get(reason, 0) + 1
                     logger.trace(f"[ENGINE] ❌ Signal REJECTED (Risk): {reason}")
