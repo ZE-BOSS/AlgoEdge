@@ -204,14 +204,14 @@ function SaveModal({ result, form, isPortfolio, portfolioSymbols, onClose, onSuc
       await saveBacktest(result.backtest_id, {
         backtest_data: {
           ...result,
-          strategy_id: form.strategy_id,
+          strategy_id: result.params_snapshot?.strategy_id || form.strategy_id,
           // For portfolio saves, `symbol` on the run row is still populated
           // (e.g. as a comma-joined list) so older UI that reads .symbol as
           // a fallback still shows something reasonable — but `title` is
           // what the saved-backtests list should actually display.
-          symbol: isPortfolio ? (portfolioSymbols || []).map(s => s.symbol).join(', ') : form.symbol,
+          symbol: isPortfolio ? (portfolioSymbols || []).map(s => s.symbol).join(', ') : (result.params_snapshot?.symbol || form.symbol),
           title: trimmedTitle,
-          risk_config: form,
+          risk_config: result.params_snapshot || form,
           notes: notesInput
         },
         save_mode: 'FULL'
@@ -1038,10 +1038,11 @@ export default function Backtester() {
         trail_pips: form.trail_pips,
         session_filter_enabled: form.session_filter_enabled,
         prop_firm: form.prop_firm,
+        max_risk_hard_cap_pct: form.prop_firm?.max_risk_hard_cap_pct ?? 3.0,
+
         max_concurrent_positions: form.max_concurrent_positions * portfolioSymbols.length,
         max_daily_consecutive_losses: form.max_daily_consecutive_losses,
         max_weekly_consecutive_losses: form.max_weekly_consecutive_losses,
-        max_consecutive_losses: form.max_consecutive_losses,
         max_positions_per_symbol: form.max_positions_per_symbol || 1,
         max_daily_trades: (form.max_daily_trades || 5) * portfolioSymbols.length,
         target_profit_enabled: form.target_profit_enabled,
@@ -1080,7 +1081,7 @@ export default function Backtester() {
       session_filter_enabled: true, news_filter_enabled: true,
       risk_per_trade_pct: 1.0, min_rr: 3.0,
       max_daily_consecutive_losses: 3, max_weekly_consecutive_losses: 5,
-      max_consecutive_losses: 5, max_concurrent_positions: 3, max_daily_trades: 5,
+      max_concurrent_positions: 3, max_daily_trades: 5,
       tp_count: 3, tp1_rr: 1.0, tp2_rr: 3.0, tp3_rr: 5.0, tp4_rr: 10.0, tp5_rr: 15.0,
       tp_splits: '30,25,20,15,10',
       be_trigger_rr: 1.0, be_buffer_pips: 2.0,
@@ -1247,7 +1248,7 @@ export default function Backtester() {
       setBtError(null);
       const validStrats = ['APA_v1', 'VWAP_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'];
       const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'APA_v1';
-      const payload = { ...form, strategy_id: payload_strategy, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: { prop_firm: form.prop_firm }, strategy_params: {} };
+      const payload = { ...form, strategy_id: payload_strategy, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: { prop_firm: form.prop_firm }, max_risk_hard_cap_pct: form.prop_firm?.max_risk_hard_cap_pct ?? 3.0, strategy_params: {} };
       if (form.manual_bias && form.manual_bias !== 'NONE') {
         payload.manual_bias_overrides = { [form.symbol]: form.manual_bias };
       }
@@ -1599,7 +1600,6 @@ export default function Backtester() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
               <div><label style={{ fontSize: '0.7rem' }}>Max Daily Consec. Losses</label><input type="number" step="1" min="1" value={form.max_daily_consecutive_losses} onChange={e => u('max_daily_consecutive_losses', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Max Weekly Consec. Losses</label><input type="number" step="1" min="1" value={form.max_weekly_consecutive_losses} onChange={e => u('max_weekly_consecutive_losses', +e.target.value)} /></div>
-              <div><label style={{ fontSize: '0.7rem' }}>Max Consec. Losses</label><input type="number" value={form.max_consecutive_losses} onChange={e => u('max_consecutive_losses', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Max Daily Trades</label><input type="number" value={form.max_daily_trades} onChange={e => u('max_daily_trades', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Max Open Positions</label><input type="number" value={form.max_concurrent_positions} onChange={e => u('max_concurrent_positions', +e.target.value)} /></div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center', marginTop: 4 }}>

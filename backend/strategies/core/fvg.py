@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 class FVGDetector:
     """Detects 3-candle Fair Value Gaps."""
 
-    def __init__(self, fvg_min_gap_atr_mult: float = 0.2, min_gap_pips: float = None):
+    def __init__(self, fvg_min_gap_atr_mult: float = 0.2, min_gap_pips: float = None, max_fvgs: int = 20):
         # Backward compatibility for one release
         if min_gap_pips is not None:
             logger.warning("min_gap_pips is deprecated; use fvg_min_gap_atr_mult instead.")
@@ -24,6 +24,7 @@ class FVGDetector:
         else:
             self.atr_multiplier = fvg_min_gap_atr_mult
         self.active_fvgs = []
+        self.max_fvgs = max_fvgs
 
     def update(self, candles: pd.DataFrame) -> list[dict[str, Any]]:
         """
@@ -109,4 +110,9 @@ class FVGDetector:
                 }
                 self.active_fvgs.append(new_fvg)
                 logger.debug(f"New BEARISH FVG created: {new_fvg}")
+
+        # 4. Prune array to prevent memory leaks in backtesting
+        if len(self.active_fvgs) > self.max_fvgs:
+            self.active_fvgs = self.active_fvgs[-self.max_fvgs:]
+
         return self.active_fvgs

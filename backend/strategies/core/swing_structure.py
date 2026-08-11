@@ -30,40 +30,67 @@ def calculate_atr(candles: pd.DataFrame, lookback: int = 14) -> float:
 def detect_swings(candles: pd.DataFrame, fractal_m: int = 3) -> list[dict[str, Any]]:
     """
     Detect swing highs and lows using a fractal method.
-
-    A swing HIGH at index i requires: candles.high[i] > candles.high[i±1..i±M]
-    A swing LOW  at index i requires: candles.low[i]  < candles.low[i±1..i±M]
-
-    Returns list of dicts: {"type": "HIGH"|"LOW", "price": float, "wick": float, "index": pd.Timestamp}
-    The list is ordered chronologically. Only confirmed swings (where i+M candles
-    have already closed) are returned.
+    Vectorized implementation.
     """
-    swings = []
+    import numpy as np
+    
     n = len(candles)
-    m = fractal_m
-
-    for i in range(m, n - m):
-        bar = candles.iloc[i]
-        window_highs = candles["high"].iloc[i - m: i + m + 1]
-        window_lows = candles["low"].iloc[i - m: i + m + 1]
-
-        if bar["high"] == window_highs.max() and (window_highs == bar["high"]).sum() == 1:
-            swings.append({
-                "type": "HIGH",
-                "price": bar["high"],
-                "body_high": max(bar["open"], bar["close"]),
-                "body_low": min(bar["open"], bar["close"]),
-                "index": candles.index[i],
-            })
-        elif bar["low"] == window_lows.min() and (window_lows == bar["low"]).sum() == 1:
-            swings.append({
-                "type": "LOW",
-                "price": bar["low"],
-                "body_high": max(bar["open"], bar["close"]),
-                "body_low": min(bar["open"], bar["close"]),
-                "index": candles.index[i],
-            })
-
+    if n < 2 * fractal_m + 1:
+        return []
+        
+    highs = candles["high"].values
+    lows = candles["low"].values
+    opens = candles["open"].values
+    closes = candles["close"].values
+    indices = candles.index
+    
+    is_high = np.ones(n, dtype=bool)
+    is_low = np.ones(n, dtype=bool)
+    
+    for shift in range(1, fractal_m + 1):
+        left_high = np.full(n, np.inf)
+        left_high[shift:] = highs[:-shift]
+        is_high &= (highs > left_high)
+        
+        right_high = np.full(n, np.inf)
+        right_high[:-shift] = highs[shift:]
+        is_high &= (highs > right_high)
+        
+        left_low = np.full(n, -np.inf)
+        left_low[shift:] = lows[:-shift]
+        is_low &= (lows < left_low)
+        
+        right_low = np.full(n, -np.inf)
+        right_low[:-shift] = lows[shift:]
+        is_low &= (lows < right_low)
+        
+    is_high[:fractal_m] = False
+    is_high[-fractal_m:] = False
+    is_low[:fractal_m] = False
+    is_low[-fractal_m:] = False
+    
+    high_idx = np.where(is_high)[0]
+    low_idx = np.where(is_low)[0]
+    
+    swings = []
+    for i in high_idx:
+        swings.append({
+            "type": "HIGH",
+            "price": highs[i],
+            "body_high": max(opens[i], closes[i]),
+            "body_low": min(opens[i], closes[i]),
+            "index": indices[i],
+        })
+    for i in low_idx:
+        swings.append({
+            "type": "LOW",
+            "price": lows[i],
+            "body_high": max(opens[i], closes[i]),
+            "body_low": min(opens[i], closes[i]),
+            "index": indices[i],
+        })
+        
+    swings.sort(key=lambda x: x["index"])
     return swings
 
 
@@ -92,7 +119,7 @@ def detect_hs_pattern(
 
     # Need at least 3 highs for Bearish H&S
     if len(highs) >= 3:
-        for i in range(len(highs) - 2):
+        for i in range(len(highs) - 3, -1, -1):
             ls, head, rs = highs[i], highs[i + 1], highs[i + 2]
             if head["price"] > ls["price"] and head["price"] > rs["price"]:
                 if abs(ls["price"] - rs["price"]) <= tolerance:
@@ -114,7 +141,7 @@ def detect_hs_pattern(
 
     # Need at least 3 lows for Bullish IH&S
     if len(lows) >= 3:
-        for i in range(len(lows) - 2):
+        for i in range(len(lows) - 3, -1, -1):
             ls, head, rs = lows[i], lows[i + 1], lows[i + 2]
             if head["price"] < ls["price"] and head["price"] < rs["price"]:
                 if abs(ls["price"] - rs["price"]) <= tolerance:

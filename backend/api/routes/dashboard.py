@@ -122,3 +122,47 @@ async def get_dashboard(
         "prop_firm_status": pf_state,
         "mt5_sync": mt5_sync_result
     }
+
+
+@router.post("/prop-firm/reset-breach")
+async def reset_prop_firm_breach(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Manually clear a prop firm drawdown breach.
+    Allows the user to resume trading after reviewing the breach reason.
+    Sends a Telegram notification on reset.
+    """
+    try:
+        from backend.services.bot_service import bot_service
+        pv = getattr(bot_service, "prop_firm_validator", None)
+        if pv and pv.enabled:
+            if not pv.is_breached:
+                return {"status": "ok", "message": "No active breach to reset."}
+            prev_reason = pv.breach_reason
+            pv.reset_breach()
+            return {"status": "ok", "message": f"Breach cleared. Previous reason: {prev_reason}"}
+        return {"status": "ok", "message": "Prop Firm mode is not active."}
+    except Exception as e:
+        logger.error(f"Failed to reset prop firm breach: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/circuit-breaker/reset")
+async def reset_circuit_breaker(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Manually reset the circuit breaker (clears all streaks and resumes trading).
+    Equivalent to calling manual_resume() on the live CircuitBreaker instance.
+    """
+    try:
+        from backend.services.bot_service import bot_service
+        cb = getattr(bot_service, "circuit_breaker", None)
+        if cb:
+            cb.manual_resume()
+            return {"status": "ok", "message": "Circuit breaker reset. Trading resumed."}
+        return {"status": "ok", "message": "Circuit breaker not initialized (bot not running)."}
+    except Exception as e:
+        logger.error(f"Failed to reset circuit breaker: {e}")
+        return {"status": "error", "message": str(e)}

@@ -14,7 +14,6 @@ export default function RiskSettings() {
     risk_per_trade_pct: 1.0,
     max_daily_consecutive_losses: 3,
     max_weekly_consecutive_losses: 5,
-    max_consecutive_losses: 5,
     max_daily_trades: 5,
     max_concurrent_positions: 3,
     max_positions_per_symbol: 1,
@@ -116,7 +115,6 @@ export default function RiskSettings() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <div><label>Max Daily Consec. Losses</label><input type="number" step="1" min="1" value={config.max_daily_consecutive_losses} onChange={e => update('max_daily_consecutive_losses', +e.target.value)} /></div>
           <div><label>Max Weekly Consec. Losses</label><input type="number" step="1" min="1" value={config.max_weekly_consecutive_losses} onChange={e => update('max_weekly_consecutive_losses', +e.target.value)} /></div>
-          <div><label>Max Consec. Losses</label><input type="number" value={config.max_consecutive_losses} onChange={e => update('max_consecutive_losses', +e.target.value)} /></div>
           <div><label>Max Daily Trades</label><input type="number" step="1" min="1" value={config.max_daily_trades} onChange={e => update('max_daily_trades', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Prevents overtrading in chop</div></div>
           <div><label>Max Open Positions</label><input type="number" value={config.max_concurrent_positions} onChange={e => update('max_concurrent_positions', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Global across all symbols</div></div>
           <div><label>Max Positions / Symbol</label><input type="number" value={config.max_positions_per_symbol} onChange={e => update('max_positions_per_symbol', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Limit trades per symbol</div></div>
@@ -254,6 +252,26 @@ export default function RiskSettings() {
             Enable Prop Firm Rules (BloomFunded strict rules)
           </label>
         </div>
+        {/* max_risk_hard_cap_pct: applies to ALL account modes — it is the absolute safety cap on
+            the position sizer and is stored in prop_firm config but always active. */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 12, padding: '10px 12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border-subtle)' }}>
+          <div>
+            <label>Max Risk Hard Cap (% of balance)</label>
+            <input type="number" step="0.1" min="0.5" max="10"
+              value={config.prop_firm?.max_risk_hard_cap_pct ?? 3.0}
+              onChange={e => update('prop_firm', { ...config.prop_firm, max_risk_hard_cap_pct: +e.target.value })} />
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginTop: 2 }}>
+              Absolute position sizer cap — overrides lot sizing. Active for ALL account modes. Reset to 3.0 to restore default.
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 4 }}>
+            <button type="button" className="btn btn-secondary" style={{ fontSize: '0.78rem', padding: '5px 12px' }}
+              onClick={() => update('prop_firm', { ...config.prop_firm, max_risk_hard_cap_pct: 3.0 })}>
+              Reset Cap to Default (3%)
+            </button>
+          </div>
+        </div>
+
         {config.prop_firm?.account_mode === 'prop_firm' && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
             <div>
@@ -273,13 +291,31 @@ export default function RiskSettings() {
               <input type="number" step="1000" value={config.prop_firm.initial_balance} onChange={e => update('prop_firm', { ...config.prop_firm, initial_balance: +e.target.value })} />
             </div>
             <div>
-              <label>Max Daily Loss (%)</label>
-              <input type="number" step="0.1" value={config.prop_firm.max_daily_loss_pct || (config.prop_firm.challenge_type === '1-step' ? 4.0 : 5.0)} onChange={e => update('prop_firm', { ...config.prop_firm, max_daily_loss_pct: +e.target.value })} />
+              <label>Max Daily Drawdown — Hard Block (%)</label>
+              <input type="number" step="0.1" min="0.1" max="20"
+                value={config.prop_firm.max_daily_loss_pct ?? (config.prop_firm.challenge_type === '1-step' ? 4.0 : 5.0)}
+                onChange={e => update('prop_firm', { ...config.prop_firm, max_daily_loss_pct: +e.target.value })} />
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>When breached, no new signals until manually reset</span>
             </div>
             <div>
-              <label>Max Overall DD (%)</label>
-              <input type="number" step="0.1" value={config.prop_firm.max_total_drawdown_pct || (config.prop_firm.challenge_type === '1-step' ? 6.0 : 10.0)} onChange={e => update('prop_firm', { ...config.prop_firm, max_total_drawdown_pct: +e.target.value })} />
+              <label>Max Overall Drawdown — Hard Block (%)</label>
+              <input type="number" step="0.1" min="0.1" max="50"
+                value={config.prop_firm.max_total_drawdown_pct ?? (config.prop_firm.challenge_type === '1-step' ? 6.0 : 10.0)}
+                onChange={e => update('prop_firm', { ...config.prop_firm, max_total_drawdown_pct: +e.target.value })} />
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>From peak/initial balance</span>
             </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label>Drawdown Uses Floating Equity</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400, cursor: 'pointer' }}>
+                <input type="checkbox"
+                  checked={config.prop_firm.drawdown_uses_equity ?? true}
+                  onChange={e => update('prop_firm', { ...config.prop_firm, drawdown_uses_equity: e.target.checked })} />
+                <span style={{ fontSize: '0.8rem' }}>
+                  {(config.prop_firm.drawdown_uses_equity ?? true) ? '✅ Balance + unrealized P&L' : '⚠️ Closed balance only'}
+                </span>
+              </label>
+            </div>
+
             <div style={{ gridColumn: '1 / -1', marginTop: '4px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <label style={{ margin: 0 }}>Max Lot Sizes per Asset</label>
@@ -317,6 +353,33 @@ export default function RiskSettings() {
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No max lot limits defined (defaults to unlimited).</div>
                 )}
               </div>
+            </div>
+            {/* Reset breach button — visible only when prop firm is in breached state */}
+            <div style={{ gridColumn: '1 / -1', marginTop: 8, display: 'flex', gap: 12, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--border-subtle)' }}>
+              <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '6px 14px', borderColor: 'var(--yellow)', color: 'var(--yellow)' }}
+                onClick={async () => {
+                  try {
+                    const { api } = await import('../../services/api');
+                    const res = await api.post('/api/prop-firm/reset-breach');
+                    alert(res.data?.message || 'Breach reset.');
+                  } catch (e) { alert('Failed to reset breach: ' + e.message); }
+                }}>
+                ⚠️ Reset Drawdown Breach
+              </button>
+              <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '6px 14px', borderColor: 'var(--red)', color: 'var(--red)' }}
+                onClick={async () => {
+                  if (!confirm('Reset circuit breaker? This will clear all loss streaks and resume trading.')) return;
+                  try {
+                    const { api } = await import('../../services/api');
+                    const res = await api.post('/api/circuit-breaker/reset');
+                    alert(res.data?.message || 'Circuit breaker reset.');
+                  } catch (e) { alert('Failed to reset CB: ' + e.message); }
+                }}>
+                🔄 Reset Circuit Breaker
+              </button>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                Use these if the bot is incorrectly blocked after a restart or manual trade intervention.
+              </span>
             </div>
           </div>
         )}

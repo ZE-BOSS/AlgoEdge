@@ -55,7 +55,6 @@ class BacktestRequest(BaseModel):
     min_rr: float = 3.0
     max_daily_consecutive_losses: int = 3
     max_weekly_consecutive_losses: int = 5
-    max_consecutive_losses: int = 5
     max_concurrent_positions: int = 3
     max_positions_per_symbol: int = 1
     max_daily_trades: int = 5
@@ -80,6 +79,8 @@ class BacktestRequest(BaseModel):
     trail_method_tp5: str = "STRUCTURE_TRAIL"
     atr_trail_multiplier: float = 1.5
     trail_pips: float = 15.0
+    # ── Risk Safety Cap ──
+    max_risk_hard_cap_pct: float = 3.0  # Absolute safety cap from PropFirmParams
     # ── Multi-Strategy Filters ──
     session_filter_enabled: bool = True
     manual_bias_overrides: dict[str, Any] = {}
@@ -110,7 +111,6 @@ class PortfolioBacktestRequest(BaseModel):
     min_rr: float = 3.0
     max_daily_consecutive_losses: int = 3
     max_weekly_consecutive_losses: int = 5
-    max_consecutive_losses: int = 5
     max_concurrent_positions: int = 5
     max_positions_per_symbol: int = 1
     max_daily_trades: int = 10
@@ -135,6 +135,8 @@ class PortfolioBacktestRequest(BaseModel):
     trail_method_tp5: str = "STRUCTURE_TRAIL"
     atr_trail_multiplier: float = 1.5
     trail_pips: float = 15.0
+    # ── Risk Safety Cap ──
+    max_risk_hard_cap_pct: float = 3.0  # Absolute safety cap from PropFirmParams
     session_filter_enabled: bool = True
 
 
@@ -236,6 +238,10 @@ async def run_backtest_endpoint(
     """
     Run a backtest in the background to prevent frontend timeouts.
     """
+    state = await get_backtest_status(current_user)
+    if state and state.get("status") == "running":
+        raise HTTPException(status_code=400, detail="A backtest is already running for this user.")
+        
     from backend.services.bot_service import bot_service
     bot_service.log_system_event(f"Backtest queued: {req.symbol}", category="BACKTEST")
 
@@ -305,7 +311,6 @@ async def run_backtest_endpoint(
             config.risk.risk_per_trade_pct = req.risk_per_trade_pct
             config.risk.max_daily_consecutive_losses = req.max_daily_consecutive_losses
             config.risk.max_weekly_consecutive_losses = req.max_weekly_consecutive_losses
-            config.risk.max_consecutive_losses = req.max_consecutive_losses
             config.risk.max_concurrent_positions = req.max_concurrent_positions
             config.risk.max_positions_per_symbol = req.max_positions_per_symbol
             config.risk.max_daily_trades = req.max_daily_trades
@@ -519,7 +524,6 @@ async def run_backtest_endpoint(
                 "multi_position_mode": req.tp_count > 1,
                 "max_daily_consecutive_losses": req.max_daily_consecutive_losses,
                 "max_weekly_consecutive_losses": req.max_weekly_consecutive_losses,
-                "max_consecutive_losses": req.max_consecutive_losses,
                 "max_concurrent_positions": req.max_concurrent_positions,
                 "max_positions_per_symbol": req.max_positions_per_symbol,
                 "max_daily_trades": req.max_daily_trades,
@@ -528,8 +532,10 @@ async def run_backtest_endpoint(
                 "max_weekly_profit": req.max_weekly_profit,
                 "manual_bias_overrides": req.manual_bias_overrides,
                 "prop_firm": req.prop_firm,
+                "max_risk_hard_cap_pct": req.max_risk_hard_cap_pct,
                 **req.risk_config,
             }
+
 
             current_state = await _get_state()
             current_state["progress"] = {"stage": "Finalizing backtest...", "pct": 95}
@@ -593,7 +599,7 @@ async def run_backtest_endpoint(
                 "trades": results.get("trades", []),
                 "grouped_trades": results.get("grouped_trades", []),
                 "run_logs": getattr(engine, 'run_logs', [])[-100:],  # Only keep last 100 to prevent UI/Redis freezing
-                "params_snapshot": getattr(results, 'params_snapshot', req.strategy_params),
+                "params_snapshot": req.model_dump() if hasattr(req, "model_dump") else req.dict(),
                 "report": {
                     "win_rate": report.win_rate if report else 0,
                     "profit_factor": report.profit_factor if report else 0,
@@ -678,6 +684,10 @@ async def run_portfolio_backtest_endpoint(
     Run a portfolio (multi-symbol, multi-strategy) backtest in the background.
     All symbols share the same global risk parameters, tracked on a single timeline.
     """
+    state = await get_backtest_status(current_user)
+    if state and state.get("status") == "running":
+        raise HTTPException(status_code=400, detail="A backtest is already running for this user.")
+        
     from backend.services.bot_service import bot_service
     sym_list = [s.symbol for s in req.symbols]
     bot_service.log_system_event(f"Portfolio backtest queued: {', '.join(sym_list)}", category="BACKTEST")
@@ -752,7 +762,6 @@ async def run_portfolio_backtest_endpoint(
                 "multi_position_mode": req.tp_count > 1,
                 "max_daily_consecutive_losses": req.max_daily_consecutive_losses,
                 "max_weekly_consecutive_losses": req.max_weekly_consecutive_losses,
-                "max_consecutive_losses": req.max_consecutive_losses,
                 "max_concurrent_positions": req.max_concurrent_positions,
                 "max_positions_per_symbol": req.max_positions_per_symbol,
                 "max_daily_trades": req.max_daily_trades,
@@ -760,7 +769,9 @@ async def run_portfolio_backtest_endpoint(
                 "max_daily_profit": req.max_daily_profit,
                 "max_weekly_profit": req.max_weekly_profit,
                 "prop_firm": req.prop_firm,
+                "max_risk_hard_cap_pct": req.max_risk_hard_cap_pct,
             }
+
 
             # ── Fetch data & generate signals per symbol ──
             portfolio_data = {}
@@ -1453,10 +1464,34 @@ async def save_backtest_from_client(
     trades = data.get("grouped_trades", data.get("trades", []))
     if trades:
         try:
-            start_date = datetime.fromisoformat(trades[0].get("entry_time")).replace(tzinfo=None)
-            end_date = datetime.fromisoformat(trades[-1].get("exit_time") or trades[-1].get("entry_time")).replace(tzinfo=None)
-        except:
-            pass
+            valid_start = []
+            valid_end = []
+            for t in trades:
+                # Try iso strings first
+                t_start_iso = t.get("entry_time_iso")
+                t_end_iso = t.get("exit_time_iso") or t.get("entry_time_iso")
+                
+                # If missing, try epoch timestamps
+                if not t_start_iso and t.get("entry_time"):
+                    t_start_iso = datetime.fromtimestamp(t["entry_time"], timezone.utc).isoformat()
+                if not t_end_iso:
+                    if t.get("exit_time"):
+                        t_end_iso = datetime.fromtimestamp(t["exit_time"], timezone.utc).isoformat()
+                    elif t.get("entry_time"):
+                        t_end_iso = datetime.fromtimestamp(t["entry_time"], timezone.utc).isoformat()
+                
+                if t_start_iso:
+                    # Clean up 'Z' if present
+                    valid_start.append(datetime.fromisoformat(t_start_iso.replace('Z', '+00:00')).replace(tzinfo=None))
+                if t_end_iso:
+                    valid_end.append(datetime.fromisoformat(t_end_iso.replace('Z', '+00:00')).replace(tzinfo=None))
+
+            if valid_start:
+                start_date = min(valid_start)
+            if valid_end:
+                end_date = max(valid_end)
+        except Exception as e:
+            logger.warning(f"Failed to parse dates for backtest {backtest_id}: {e}")
 
     run = BacktestRun(
         id=backtest_id,

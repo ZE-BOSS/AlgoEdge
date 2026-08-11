@@ -38,7 +38,6 @@ def test_backtest():
         "min_rr": 1.0,
         "max_daily_consecutive_losses": 3,
         "max_weekly_consecutive_losses": 5,
-        "max_consecutive_losses": 5,
         "max_concurrent_positions": 3,
         "tp_count": 3,
         "tp1_rr": 1.0,

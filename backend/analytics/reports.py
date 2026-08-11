@@ -217,7 +217,7 @@ def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | 
     per_symbol = {}
     for sym in symbols:
         sym_trades = [t for t in trades if t.get("symbol") == sym]
-        sym_stats = compute_portfolio_stats(sym_trades)
+        sym_stats = compute_portfolio_stats(sym_trades, initial_balance=initial_balance)
         per_symbol[sym] = {
             "win_rate": sym_stats.get("win_rate", 0),
             "pnl": sym_stats.get("total_pnl", 0),

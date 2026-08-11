@@ -22,6 +22,7 @@ class HTFFVGFlipEngine(BaseStrategy):
         self.state = {}
         self.htf_detectors = {}
         self.m5_detectors = {}
+        self.last_trade_date = {}
         
     def _init_state(self, symbol: str):
         if symbol not in self.state:
@@ -54,7 +55,7 @@ class HTFFVGFlipEngine(BaseStrategy):
 
     def get_required_timeframes(self) -> list[str]:
         # Dynamically request timeframes configured by the user
-        return [self.params.htf_timeframe, "M15", self.params.entry_confirmation_tf]
+        return [self.params.htf_timeframe, self.params.entry_confirmation_tf]
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         self._init_state(symbol)
@@ -62,6 +63,20 @@ class HTFFVGFlipEngine(BaseStrategy):
         
         current_time = candles.index[-1]
         latest = candles.iloc[-1]
+        
+        current_date = current_time.date()
+        if symbol not in self.last_trade_date or self.last_trade_date[symbol] != current_date:
+            # Reset state for the new trading day
+            self.state[symbol] = {
+                "status": "AWAIT_HTF_TAP",
+                "bias": None,
+                "tap_time": None,
+                "m5_fvg": None,
+                "m5_swing_point": None,
+            }
+            state = self.state[symbol]
+            self.last_trade_date[symbol] = current_date
+            self.log_event(f"[{symbol}] State reset for new trading day.", category="FVG_FLIP")
         
         # Process HTF (Keep trackers updated)
         if timeframe == self.params.htf_timeframe:
@@ -139,6 +154,35 @@ class HTFFVGFlipEngine(BaseStrategy):
                     return None
 
                 if triggered:
+                    state["status"] = "AWAIT_5M_RETEST"
+                    self.log_event(f"[{symbol}] Inversion confirmed. Awaiting retest of inverted FVG.", category="FVG_FLIP")
+                    # Fall through to check retest on the same bar if possible, 
+                    # but usually it happens on subsequent bars.
+
+            if state["status"] == "AWAIT_5M_RETEST":
+                if not self._is_within_session(current_time):
+                    return None
+                    
+                fvg = state["m5_fvg"]
+                retest_triggered = False
+                
+                # Check for tap into the inverted FVG
+                if state["bias"] == "BUY" and latest["low"] <= fvg["top"]:
+                    retest_triggered = True
+                elif state["bias"] == "SELL" and latest["high"] >= fvg["bottom"]:
+                    retest_triggered = True
+
+                # Invalidate if price breaks the swing extreme before retest
+                if state["bias"] == "BUY" and latest["close"] < state.get("m5_swing_point", 0):
+                    state["status"] = "AWAIT_HTF_TAP"
+                    self.log_event(f"[{symbol}] Retest setup failed (Swing low broken).", category="FVG_FLIP")
+                    return None
+                elif state["bias"] == "SELL" and latest["close"] > state.get("m5_swing_point", float('inf')):
+                    state["status"] = "AWAIT_HTF_TAP"
+                    self.log_event(f"[{symbol}] Retest setup failed (Swing high broken).", category="FVG_FLIP")
+                    return None
+
+                if retest_triggered:
                     entry = latest["close"]
                     sl = state.get("m5_swing_point", entry * 0.99 if state["bias"]=="BUY" else entry * 1.01)
                     
@@ -152,6 +196,7 @@ class HTFFVGFlipEngine(BaseStrategy):
                     state["status"] = "AWAIT_HTF_TAP"
                     
                     return TradeSignal(
+                        strategy_id="HTFFVGFlip_v1",
                         symbol=symbol,
                         direction=state["bias"],
                         timeframe=timeframe,

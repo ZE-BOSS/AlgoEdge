@@ -201,6 +201,18 @@ class PortfolioBacktestEngine:
                     closed_this_bar.append(pos)
                     continue
 
+                hard_close_time = pos.get("hard_close_time")
+                if hard_close_time:
+                    import pytz
+                    et = current_time_dt.astimezone(pytz.timezone("America/New_York"))
+                    time_str = et.strftime("%H:%M")
+                    if time_str >= hard_close_time:
+                        pos["exit_price"] = current_price
+                        pos["exit_reason"] = "SESSION_END"
+                        pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym)
+                        closed_this_bar.append(pos)
+                        continue
+
                 sl_hit = False
                 tp_hit = False
                 if pos["direction"] == "BUY":
@@ -362,6 +374,11 @@ class PortfolioBacktestEngine:
                         self.rejection_funnel["strategy_rejections"][gate] = self.rejection_funnel["strategy_rejections"].get(gate, 0) + 1
                     continue
 
+                # Prop Firm hard block — skip new signals when drawdown limit is breached
+                if self.prop_firm_validator.enabled and self.prop_firm_validator.is_breached:
+                    self.rejection_funnel["risk_rejections"]["prop_firm_drawdown_block"] = self.rejection_funnel["risk_rejections"].get("prop_firm_drawdown_block", 0) + 1
+                    continue
+
                 approved, reason, tp_levels = False, "Error", []
                 try:
                     approved, reason, tp_levels = self.risk_engine.evaluate_signal(
@@ -473,7 +490,9 @@ class PortfolioBacktestEngine:
         # length 1 for the whole run. The frontend's Equity Curve chart only
         # renders when equity_curve.length > 1, so it was silently hidden for
         # every portfolio backtest regardless of how many trades ran.
-        self.equity_curve.append(balance)
+        # Record floating equity once per timestamp.
+        # Previously equity_curve was only ever [balance] at start and nothing else.
+        self.equity_curve.append(balance + open_pnl)
 
         # 4. Force close remaining positions at end of backtest
         if self.open_positions:

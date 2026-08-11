@@ -119,7 +119,13 @@ class VWAPEngine(BaseStrategy):
         self._init_state(symbol)
         state = self.state[symbol]
 
-        if len(candles) < self.params.momentum_lookback_bars + 5:
+        # Determine entry timeframe minutes (e.g., 'M5' -> 5)
+        tf_str = self.params.entry_timeframe
+        tf_mins = int(tf_str[1:]) if tf_str.startswith('M') else 5
+        bar_multiplier = self.params.vwap_anchor_minutes // tf_mins
+        actual_lookback = self.params.momentum_lookback_bars * bar_multiplier
+        
+        if len(candles) < actual_lookback + 5:
             return None
 
         current_time = candles.index[-1]
@@ -136,9 +142,9 @@ class VWAPEngine(BaseStrategy):
 
         time_str = self._et_time_str(current_time)
 
-        # Hard close — flatten all (return special signal handled upstream)
-        if self._is_hard_close_time(time_str):
-            return None  # Risk engine handles hard close via its own daily scheduler
+        # Let the risk engine and backtester handle hard close via the metadata marker
+        # if self._is_hard_close_time(time_str):
+        #     return None
 
         # Guard rails
         if state["trades_today"] >= self.params.max_trades_per_day:
@@ -198,6 +204,8 @@ class VWAPEngine(BaseStrategy):
                 metadata={
                     "setup": "VWAP_PULLBACK",
                     "vwap": round(vwap_now, 5),
+                    "slope": state.get("slope", 0.0),
+                    "hard_close_time": self.params.hard_close,
                 },
             )
 
@@ -214,7 +222,9 @@ class VWAPEngine(BaseStrategy):
         vwap_falling = vwap_now < vwap_prev
 
         # ── Momentum (1hr price move) ─────────────────────────────────────
-        lookback_close = candles["close"].iloc[-(self.params.momentum_lookback_bars + 1)]
+        # momentum_lookback_bars is defined in terms of anchor-timeframe bars (e.g. 15m)
+        # We are on M5 candles, so we already computed actual_lookback above.
+        lookback_close = candles["close"].iloc[-(actual_lookback + 1)]
         price_move_pct = (latest["close"] - lookback_close) / lookback_close * 100
 
         momentum_up = price_move_pct >= self.params.momentum_threshold_pct

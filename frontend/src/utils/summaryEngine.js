@@ -77,17 +77,18 @@ export function bucketByPeriod(trades, period) {
 /**
  * Calculate max drawdown given an equity curve (array of balances).
  */
-export function maxDrawdown(equityCurve) {
+export function maxDrawdown(equityCurve, initialBalance) {
   if (!equityCurve || equityCurve.length === 0) return { maxDdPct: 0, maxDdAbs: 0 };
   
-  let peak = equityCurve[0];
-  let maxDdPct = 0;
   let maxDdAbs = 0;
+  let maxDdPct = 0;
+  const capital = initialBalance !== undefined ? initialBalance : equityCurve[0];
+  let peak = equityCurve[0];
   
   for (const val of equityCurve) {
     peak = Math.max(peak, val);
     const ddAbs = peak - val;
-    const ddPct = peak > 0 ? ddAbs / peak : 0;
+    const ddPct = capital > 0 ? ddAbs / capital : 0;
     
     maxDdAbs = Math.max(maxDdAbs, ddAbs);
     maxDdPct = Math.max(maxDdPct, ddPct);
@@ -251,7 +252,7 @@ export function computePeriodStats(trades, initialBalance = 10000) {
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : 999.0;
   const expectancyR = (winRate * avgWinR) - ((1 - winRate) * Math.abs(avgLossR));
   
-  const { maxDdPct, maxDdAbs } = maxDrawdown(equityCurve);
+  const { maxDdPct, maxDdAbs } = maxDrawdown(equityCurve, initialBalance);
   const sh = sharpe(returns);
   const so = sortino(returns);
   

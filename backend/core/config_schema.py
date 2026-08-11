@@ -26,11 +26,17 @@ class RiskParams:
     Stored per-user in the database. Editable from the frontend Settings panel.
     Applied identically in live trading and backtesting.
     """
+    # Core sizing
     risk_per_trade_pct: float = 1.0
+    min_rr: float = 3.0
     sizing_method: Literal["fixed_pct", "kelly"] = "fixed_pct"
     kelly_fraction: float = 0.25
     kelly_lookback_trades: int = 50
     multi_position_mode: bool = True
+    compounding_enabled: bool = False
+    sl_buffer_pips: float = 5.0
+
+    # TP structure
     tp_levels: int = 5
     tp_count: int = 3
     tp_splits: list[float] = field(default_factory=lambda: [40.0, 35.0, 25.0])
@@ -39,12 +45,46 @@ class RiskParams:
     tp3_rr: float = 5.0
     tp4_rr: float = 10.0
     tp5_rr: float = 15.0
+
+    # Break-even
     be_trigger_rr: float = 1.0
-    be_offset_pips: float = 2.0
+    be_buffer_pips: float = 2.0
+    be_offset_pips: float = 2.0  # legacy alias kept for db compat
+    be_buffer_atr_mult: float = 0.0
+
+    # Circuit breakers — trade-count-based (always active)
+    max_daily_consecutive_losses: int = 3
+    max_weekly_consecutive_losses: int = 5
+    max_daily_trades: int = 5
+    max_concurrent_positions: int = 3
+    max_positions_per_symbol: int = 1
+
+    # Target profit halts
+    target_profit_enabled: bool = False
+    max_daily_profit: float = 500.0
+    max_weekly_profit: float = 2000.0
+
+    # Trailing stops
+    trail_method_tp2: str = "ATR_TRAIL"
+    trail_method_tp3: str = "STRUCTURE_TRAIL"
+    trail_method_tp4: str = "ATR_TRAIL"
+    trail_method_tp5: str = "STRUCTURE_TRAIL"
+    atr_trail_multiplier: float = 1.5
+    atr_trail_multiplier_tp1: float = 1.5
+    atr_trail_multiplier_tp2: float = 1.5
+    atr_trail_multiplier_tp3: float = 1.5
+    atr_trail_multiplier_tp4: float = 1.5
+    atr_trail_multiplier_tp5: float = 1.5
+    trail_pips: float = 15.0
+    trail_pct: float = 0.5
+    trail_activation_rr: float = 1.0
+    trail_step_pips: float = 5.0
+    trail_structure_bars: int = 3
+    trailing_stop_activation_rr: float = 2.0  # legacy alias
+    trailing_step_pips: float = 5.0           # legacy alias
+
+    # Legacy field — kept for db compat
     max_daily_loss_pct: float = 5.0
-    max_daily_trades: int = 10
-    trailing_stop_activation_rr: float = 2.0
-    trailing_step_pips: float = 5.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -69,6 +109,10 @@ class DriftJumpAlphaParams:
 class CRTParams:
     """
     Tunable parameters for the Candle Range Theory engine.
+    Spec: CRT_Strategy_Spec.md
+    The SL formula (sl_dist = tp_dist / target_r_multiple) is per-spec (Section 6).
+    min_sl_pips and sl_atr_mult are additional guards added above the spec to prevent
+    microscopic SL values on small HTF candles causing huge lot sizes in live execution.
     """
     htf_timeframe: str = "H1"
     ltf_timeframe: str = "M5"
@@ -77,6 +121,9 @@ class CRTParams:
     session_start: str = "09:30"
     session_cutoff: str = "12:00"
     bypass_session_synthetics: bool = True
+    # Minimum SL floor — prevents spec-correct but tiny SLs causing extreme lot sizes
+    min_sl_pips: float = 15.0     # Hard minimum SL distance in pips
+    sl_atr_mult: float = 1.0      # SL must be at least N × ATR (0 = disabled)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -104,13 +151,23 @@ class InstrumentSettings:
 @dataclass
 class PropFirmParams:
     """
-    BloomFunded Synthetic Challenge Parameters
+    Prop Firm (e.g. BloomFunded) challenge parameters.
+    Drawdown fields here are HARD CIRCUIT BREAKERS when account_mode = 'prop_firm'.
+    max_risk_hard_cap_pct is an absolute safety cap on the position sizer —
+    active for ALL modes (personal and prop_firm).
+    All fields are user-configurable and resettable from the Settings UI.
     """
     account_mode: Literal["personal", "prop_firm"] = "personal"
     challenge_type: Literal["none", "1-step", "2-step", "flex"] = "none"
     account_size: float = 10000.0
     initial_balance: float = 10000.0
     max_lot_sizes: dict[str, float] = field(default_factory=dict)
+    # Drawdown hard blocks (active when account_mode = 'prop_firm')
+    max_daily_loss_pct: float = 5.0          # Daily equity drawdown limit (%)
+    max_total_drawdown_pct: float = 10.0     # Overall drawdown from peak/initial (%)
+    drawdown_uses_equity: bool = True        # True = floating equity; False = closed balance only
+    # Absolute risk cap — applied by position sizer regardless of account_mode
+    max_risk_hard_cap_pct: float = 3.0       # Max single-trade risk as % of balance (safety net)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

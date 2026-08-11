@@ -119,6 +119,7 @@ class NYOpenRetestEngine(BaseStrategy):
                     
                     state["status"] = "DONE"
                     return TradeSignal(
+                        strategy_id="NYOpenRetest_v1",
                         symbol=symbol,
                         direction=state["bias"],
                         timeframe=timeframe,

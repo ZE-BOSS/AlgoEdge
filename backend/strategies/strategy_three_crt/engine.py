@@ -98,6 +98,8 @@ class CRTEngine(BaseStrategy):
             self.trades_today = 0
             self.last_trade_date = dt.date()
             self.ms_detector = MarketStructureDetector(swing_length=5, min_bos_count=1)
+            self.c1 = None
+            self.c2_trigger = None
             
         max_trades = self.params.max_trades_per_session if getattr(self, 'params', None) else SPEC_DEFAULTS['max_trades_per_session']
         if self.trades_today >= max_trades:
@@ -192,12 +194,58 @@ class CRTEngine(BaseStrategy):
                     
                     target_r = self.params.target_r_multiple if getattr(self, 'params', None) else SPEC_DEFAULTS['target_r_multiple']
                     tp_dist = abs(tp - current_price)
+                    # Per spec (CRT_Strategy_Spec.md Section 6): SL is derived backward from TP.
                     sl_dist = tp_dist / target_r
-                    
+
+                    # ── Minimum SL floor (addition above spec) ──────────────────────
+                    # Small C1 candles produce spec-correct but tiny SL distances,
+                    # which cause extreme lot sizes in the risk engine.
+                    # Apply configurable floors: min_sl_pips (hard pips minimum)
+                    # and sl_atr_mult (fraction of recent ATR). Whichever is larger wins.
+                    from backend.risk.position_sizer import get_pip_size
+                    pip_size = get_pip_size(symbol)
+                    min_sl_pips_val = getattr(self.params, 'min_sl_pips', 15.0) if self.params else 15.0
+                    sl_atr_mult_val = getattr(self.params, 'sl_atr_mult', 1.0) if self.params else 1.0
+
+                    min_sl_from_pips = min_sl_pips_val * pip_size
+
+                    # Standard ATR (Average True Range) over 14 periods
+                    try:
+                        import numpy as np
+                        if len(candles) >= 15:
+                            highs = candles['high'].values[-14:].astype(float)
+                            lows  = candles['low'].values[-14:].astype(float)
+                            prev_closes = candles['close'].values[-15:-1].astype(float)
+                            
+                            tr1 = highs - lows
+                            tr2 = np.abs(highs - prev_closes)
+                            tr3 = np.abs(lows - prev_closes)
+                            
+                            true_range = np.maximum(tr1, np.maximum(tr2, tr3))
+                            atr_approx = float(true_range.mean())
+                        else:
+                            atr_approx = tp_dist  # fallback: use TP dist as proxy
+                    except Exception:
+                        atr_approx = tp_dist
+
+                    min_sl_from_atr = atr_approx * sl_atr_mult_val
+                    # Apply the most restrictive floor (largest SL distance wins)
+                    sl_dist = max(sl_dist, min_sl_from_pips, min_sl_from_atr)
+
+                    # If flooring the SL makes the TP distance shorter than 1R, extend TP
+                    # so the trade still meets the target_r ratio (keeps the edge intact).
+                    if tp_dist < sl_dist * target_r:
+                        if direction == "BUY":
+                            tp = current_price + sl_dist * target_r
+                        else:
+                            tp = current_price - sl_dist * target_r
+                    # ────────────────────────────────────────────────────────────────
+
                     if direction == "BUY":
                         sl = current_price - sl_dist
                     else:
                         sl = current_price + sl_dist
+
                         
                     return TradeSignal(
                         strategy_id="CRT_v1",

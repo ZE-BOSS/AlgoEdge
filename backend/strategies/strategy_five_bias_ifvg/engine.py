@@ -22,6 +22,7 @@ class BiasIFVGEngine(BaseStrategy):
         self.htf_detectors = {}
         self.m15_detectors = {}
         self.m5_detectors = {}
+        self.last_trade_date = {}
         
     def _init_state(self, symbol: str):
         if symbol not in self.state:
@@ -37,8 +38,6 @@ class BiasIFVGEngine(BaseStrategy):
             self.htf_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
             self.m15_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
             self.m5_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.05)
-        if not hasattr(self, 'last_trade_date'):
-            self.last_trade_date = None
 
     def _is_within_session(self, current_time: pd.Timestamp) -> bool:
         if current_time.tzinfo is None:
@@ -65,9 +64,20 @@ class BiasIFVGEngine(BaseStrategy):
         current_time = candles.index[-1]
         latest = candles.iloc[-1]
         
-        if self.last_trade_date != current_time.date():
-            state["trades_today"] = 0
-            self.last_trade_date = current_time.date()
+        current_date = current_time.date()
+        if symbol not in self.last_trade_date or self.last_trade_date[symbol] != current_date:
+            self.state[symbol] = {
+                "bias": None,
+                "key_level": None,
+                "status": "AWAIT_BIAS",
+                "m5_fvg_to_invert": None,
+                "m5_swing_point": None,
+                "manipulation_leg_start": None,
+                "trades_today": 0,
+            }
+            state = self.state[symbol]
+            self.last_trade_date[symbol] = current_date
+            self.log_event(f"[{symbol}] State reset for new trading day.", category="BIAS_IFVG")
         
         # 1. Determine Bias (HTF: H4)
         if timeframe == "H4":
@@ -168,6 +178,7 @@ class BiasIFVGEngine(BaseStrategy):
                     state["trades_today"] += 1
                     
                     return TradeSignal(
+                        strategy_id="BiasIFVG_v1",
                         symbol=symbol,
                         direction=state["bias"],
                         timeframe="M5",

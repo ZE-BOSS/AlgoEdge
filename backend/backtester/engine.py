@@ -252,6 +252,18 @@ class BacktestEngine:
                     closed_this_bar.append(pos)
                     continue
 
+                hard_close_time = pos.get("hard_close_time")
+                if hard_close_time:
+                    import pytz
+                    et = current_time_dt.astimezone(pytz.timezone("America/New_York"))
+                    time_str = et.strftime("%H:%M")
+                    if time_str >= hard_close_time:
+                        pos["exit_price"] = current_price
+                        pos["exit_reason"] = "SESSION_END"
+                        pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
+                        closed_this_bar.append(pos)
+                        continue
+
                 # Check SL and TP hits
                 sl_hit = False
                 tp_hit = False
@@ -432,6 +444,14 @@ class BacktestEngine:
 
                 # Evaluate signal through RiskEngine
                 approved, reason, tp_levels = False, "Error during evaluation", []
+
+                # Prop Firm hard block — if drawdown limit is breached in backtest,
+                # skip new signals (mirrors live trading behaviour via should_block_trading())
+                if self.prop_firm_validator.enabled and self.prop_firm_validator.is_breached:
+                    self.rejection_funnel["risk_rejections"]["prop_firm_drawdown_block"] = self.rejection_funnel["risk_rejections"].get("prop_firm_drawdown_block", 0) + 1
+                    logger.trace(f"[ENGINE] ❌ Signal BLOCKED by prop firm drawdown: {self.prop_firm_validator.breach_reason}")
+                    continue
+
                 try:
                     approved, reason, tp_levels = self.risk_engine.evaluate_signal(
                         signal_data=sig,
@@ -481,7 +501,10 @@ class BacktestEngine:
                     self.rejection_funnel["risk_rejections"][reason] = self.rejection_funnel["risk_rejections"].get(reason, 0) + 1
                     logger.trace(f"[ENGINE] ❌ Signal REJECTED (Risk): {reason}")
 
-            self.equity_curve.append(balance)
+            # Track floating equity (balance + unrealized open P&L).
+            # Previously only appended balance (closed trades only), understating
+            # drawdown during adverse open excursions.
+            self.equity_curve.append(balance + open_pnl)
 
         # Close any remaining open positions at last price
         last_price = candles.iloc[-1]["close"] if len(candles) > 0 else 0

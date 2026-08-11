@@ -1,9 +1,11 @@
 """
 backend/risk/prop_firm_validator.py
 
-Validates trades against strict Prop Firm (BloomFunded) rules without compounding.
-Prop Firm is a SOFT MONITOR only — it never blocks or modifies trades.
-It logs warnings and sends Telegram alerts for informational awareness only.
+Validates trades against Prop Firm (e.g. BloomFunded) rules.
+When account_mode = 'prop_firm', drawdown breaches are HARD circuit breakers:
+- should_block_trading() returns True when is_breached, preventing new signals.
+- reset_breach() allows the user to manually clear a breach from the UI.
+When account_mode = 'personal', all checks are informational (soft monitor) only.
 """
 import asyncio
 import json
@@ -20,19 +22,24 @@ STATE_FILE = "backend/data/prop_firm_state.json"
 class PropFirmValidator:
     def __init__(self, config: Any):
         """
-        config: PropFirmParams
+        config: PropFirmParams or dict
         """
-        self.enabled = getattr(config, "account_mode", "personal") == "prop_firm"
-        self.challenge_type = getattr(config, "challenge_type", "none")
-        self.account_size = getattr(config, "account_size", 10000.0)
-        self.initial_balance = getattr(config, "initial_balance", 10000.0)
-        self.max_lot_sizes = getattr(config, "max_lot_sizes", {})
+        get_val = lambda key, default: config.get(key, default) if isinstance(config, dict) else getattr(config, key, default)
+
+        self.enabled = get_val("account_mode", "personal") == "prop_firm"
+        self.challenge_type = get_val("challenge_type", "none")
+        self.account_size = get_val("account_size", 10000.0)
+        self.initial_balance = get_val("initial_balance", 10000.0)
+        self.max_lot_sizes = get_val("max_lot_sizes", {})
         
-        # Drawdown limits (customizable, fallback to defaults)
+        # Drawdown limits (user-configurable, resettable from the UI)
         default_daily = 4.0 if self.challenge_type in ["1-step", "flex"] else 5.0
         default_max = 8.0 if self.challenge_type in ["1-step", "flex"] else 10.0
-        self.max_daily_loss_pct = getattr(config, "max_daily_loss_pct", default_daily)
-        self.max_total_drawdown_pct = getattr(config, "max_total_drawdown_pct", default_max)
+        self.max_daily_loss_pct = get_val("max_daily_loss_pct", default_daily)
+        self.max_total_drawdown_pct = get_val("max_total_drawdown_pct", default_max)
+        # When True, breach checks use floating equity (balance + unrealized P&L)
+        # When False, only closed-trade balance is used
+        self.drawdown_uses_equity = get_val("drawdown_uses_equity", True)
 
         # State
         self.high_water_mark = self.initial_balance
@@ -201,7 +208,7 @@ class PropFirmValidator:
             daily_dd_allowance = self.initial_balance * (self.max_daily_loss_pct / 100.0)
             daily_floor = self.eod_baseline - daily_dd_allowance
             max_dd_allowance = self.initial_balance * (self.max_total_drawdown_pct / 100.0)
-            max_dd_floor = (self.high_water_mark - max_dd_allowance) if self.challenge_type in ["1-step", "flex"] else (self.initial_balance - max_dd_allowance)
+            max_dd_floor = self.initial_balance - max_dd_allowance
             # Only auto-recover if equity is above both floors
             if equity >= daily_floor and equity >= max_dd_floor:
                 logger.info(f"[PropFirm] Equity recovered to {equity:.2f}. Clearing breach state.")
@@ -237,51 +244,28 @@ class PropFirmValidator:
                 alert_key=f"daily_dd_{self.last_eod_date}"
             )
             return
-
-        # B. Max Drawdown Check
-        if self.challenge_type in ["1-step", "flex"]:
-            max_dd_allowance = self.initial_balance * (self.max_total_drawdown_pct / 100.0)
-            max_dd_floor = self.high_water_mark - max_dd_allowance
-            if equity < max_dd_floor:
-                self.is_breached = True
-                self.breach_reason = (
-                    f"Max Trailing Drawdown Breach! Equity {equity:.2f} fell below "
-                    f"HWM {self.high_water_mark:.2f} - {max_dd_allowance:.2f}"
-                )
-                self.save_state()
-                logger.error(f"[PROP FIRM] {self.breach_reason}")
-                self._telegram_alert(
-                    f"\U0001f534 *Prop Firm Alert \u2014 Max Trailing Drawdown Breached*\n"
-                    f"Equity: ${equity:.2f}\n"
-                    f"HWM: ${self.high_water_mark:.2f}\n"
-                    f"Max DD Allowance: ${max_dd_allowance:.2f}\n"
-                    f"Floor: ${max_dd_floor:.2f}\n"
-                    f"\u26a0\ufe0f Trading continues (monitor only \u2014 no signals blocked)",
-                    alert_key="max_trailing_dd"
-                )
-                return
-
-        elif self.challenge_type == "2-step":
-            max_dd_allowance = self.initial_balance * (self.max_total_drawdown_pct / 100.0)
-            max_dd_floor = self.initial_balance - max_dd_allowance
-            if equity < max_dd_floor:
-                self.is_breached = True
-                self.breach_reason = (
-                    f"Max Static Drawdown Breach! Equity {equity:.2f} fell below "
-                    f"{self.initial_balance:.2f} - {max_dd_allowance:.2f}"
-                )
-                self.save_state()
-                logger.error(f"[PROP FIRM] {self.breach_reason}")
-                self._telegram_alert(
-                    f"\U0001f534 *Prop Firm Alert \u2014 Max Static Drawdown Breached*\n"
-                    f"Equity: ${equity:.2f}\n"
-                    f"Initial Balance: ${self.initial_balance:.2f}\n"
-                    f"Max DD Allowance: ${max_dd_allowance:.2f}\n"
-                    f"Floor: ${max_dd_floor:.2f}\n"
-                    f"\u26a0\ufe0f Trading continues (monitor only \u2014 no signals blocked)",
-                    alert_key="max_static_dd"
-                )
-                return
+        # B. Max Drawdown Check (Always Static from Capital per user spec)
+        max_dd_allowance = self.initial_balance * (self.max_total_drawdown_pct / 100.0)
+        max_dd_floor = self.initial_balance - max_dd_allowance
+        
+        if equity < max_dd_floor:
+            self.is_breached = True
+            self.breach_reason = (
+                f"Max Static Drawdown Breach! Equity {equity:.2f} fell below "
+                f"{self.initial_balance:.2f} - {max_dd_allowance:.2f}"
+            )
+            self.save_state()
+            logger.error(f"[PROP FIRM] {self.breach_reason}")
+            self._telegram_alert(
+                f"🔴 *Prop Firm Alert — Max Static Drawdown Breached*\n"
+                f"Equity: ${equity:.2f}\n"
+                f"Initial Balance: ${self.initial_balance:.2f}\n"
+                f"Max DD Allowance: ${max_dd_allowance:.2f}\n"
+                f"Floor: ${max_dd_floor:.2f}\n"
+                f"⚠️ Trading continues (monitor only — no signals blocked)",
+                alert_key="max_static_dd"
+            )
+            return
 
         # C. Yellow Warning — 50% of daily DD used
         daily_used = self.eod_baseline - equity
@@ -295,7 +279,40 @@ class PropFirmValidator:
                 alert_key=f"daily_dd_warn_{self.last_eod_date}"
             )
 
-    # ── Trade validation (SOFT MONITOR \u2014 never blocks) ────────────────────────
+    # ── Hard block gate — called by RiskEngine before approving signals ────────
+
+    def should_block_trading(self) -> tuple[bool, str]:
+        """
+        Returns (is_blocked, reason). Called by RiskEngine.evaluate_signal().
+        Only active when account_mode = 'prop_firm' (self.enabled = True).
+        """
+        if not self.enabled:
+            return False, ""
+        if self.is_breached:
+            return True, f"Prop Firm drawdown breached: {self.breach_reason}"
+        return False, ""
+
+    def reset_breach(self):
+        """
+        Manually clear a drawdown breach from the UI.
+        Allows the user to resume trading after reviewing the breach.
+        Sends a Telegram notification that trading has been manually resumed.
+        """
+        if not self.is_breached:
+            return
+        logger.info(f"[PropFirm] Breach manually reset. Previous reason: {self.breach_reason}")
+        self._telegram_alert(
+            f"\u26a0\ufe0f *Prop Firm — Breach Manually Reset*\n"
+            f"Previous breach: {self.breach_reason}\n"
+            f"Trading manually resumed by user. Monitor closely.",
+            alert_key=f"manual_reset_{self.last_eod_date}"
+        )
+        self.is_breached = False
+        self.breach_reason = ""
+        self._breach_logged = False
+        self.save_state()
+
+    # ── Trade validation (SOFT MONITOR — never blocks) ────────────────────────
 
     def validate_trade(self, symbol: str, requested_lots: float) -> tuple:
         """

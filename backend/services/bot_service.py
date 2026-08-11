@@ -529,18 +529,14 @@ class BotService:
                                 try:
                                     import MetaTrader5 as mt5
                                     mt5_positions = mt5.positions_get()
-                                    # Count unique position groups by symbol+time to match our Trade grouping
-                                    # Each group of TP positions counts as 1 trade
                                     if mt5_positions:
-                                        seen_groups = set()
-                                        symbol_groups = set()
-                                        for p in mt5_positions:
-                                            group_key = (p.symbol, round(p.time / 5) * 5)
-                                            seen_groups.add(group_key)
-                                            if p.symbol == signal.symbol:
-                                                symbol_groups.add(group_key)
-                                        live_trade_count = len(seen_groups)
-                                        symbol_trade_count = len(symbol_groups)
+                                        # Count unique open symbols — our design is 1 group per
+                                        # symbol, so any positions on a symbol = 1 signal counted.
+                                        # Previously used round(time/5) time-bucket grouping, which
+                                        # counted 3 TP sub-positions as 3 signals (Bug A).
+                                        open_symbols = set(p.symbol for p in mt5_positions)
+                                        live_trade_count = len(open_symbols)
+                                        symbol_trade_count = 1 if signal.symbol in open_symbols else 0
                                     else:
                                         live_trade_count = 0
                                         symbol_trade_count = 0
@@ -559,6 +555,7 @@ class BotService:
                                         continue
                                 except Exception as e:
                                     logger.error(f"Error checking open positions: {e}")
+
 
                                 # === Check Circuit Breaker ===
                                 if self.circuit_breaker:
@@ -594,32 +591,36 @@ class BotService:
                                         "tp1_rr": config.risk.tp1_rr,
                                         "tp2_rr": config.risk.tp2_rr,
                                         "tp3_rr": config.risk.tp3_rr,
-                                        "tp4_rr": config.risk.tp4_rr if hasattr(config.risk, 'tp4_rr') else 0,
-                                        "tp5_rr": config.risk.tp5_rr if hasattr(config.risk, 'tp5_rr') else 0,
-                                        "tp_count": config.risk.tp_count if hasattr(config.risk, 'tp_count') else 3,
-                                        "tp_splits": config.risk.tp_splits if hasattr(config.risk, 'tp_splits') else [40, 35, 25],
+                                        "tp4_rr": config.risk.tp4_rr,
+                                        "tp5_rr": config.risk.tp5_rr,
+                                        "tp_count": config.risk.tp_count,
+                                        "tp_splits": config.risk.tp_splits,
                                         "multi_position_mode": True,
                                         "max_daily_consecutive_losses": config.risk.max_daily_consecutive_losses,
-                                        "max_weekly_consecutive_losses": config.risk.max_weekly_consecutive_losses if hasattr(config.risk, 'max_weekly_consecutive_losses') else 5,
-                                        "max_consecutive_losses": config.risk.max_consecutive_losses if hasattr(config.risk, 'max_consecutive_losses') else 5,
-                                        "max_daily_trades": config.risk.max_daily_trades if hasattr(config.risk, 'max_daily_trades') else 5,
+                                        "max_weekly_consecutive_losses": config.risk.max_weekly_consecutive_losses,
+                                        "max_daily_trades": config.risk.max_daily_trades,
                                         "max_concurrent_positions": config.risk.max_concurrent_positions,
+                                        "max_positions_per_symbol": config.risk.max_positions_per_symbol,
                                         "prop_firm": {
                                             "account_mode": getattr(config.prop_firm, "account_mode", "personal"),
                                             "max_lot_sizes": getattr(config.prop_firm, "max_lot_sizes", {}),
                                             "initial_balance": getattr(config.prop_firm, "initial_balance", 10000.0)
                                         },
-                                        "target_profit_enabled": config.risk.target_profit_enabled if hasattr(config.risk, 'target_profit_enabled') else False,
-                                        "max_daily_profit": config.risk.max_daily_profit if hasattr(config.risk, 'max_daily_profit') else 500.0,
-                                        "max_weekly_profit": config.risk.max_weekly_profit if hasattr(config.risk, 'max_weekly_profit') else 2000.0,
+                                        # max_risk_hard_cap_pct: user-configurable absolute safety cap from PropFirmParams.
+                                        # Active for ALL account modes (personal and prop_firm).
+                                        "max_risk_hard_cap_pct": getattr(config.prop_firm, "max_risk_hard_cap_pct", 3.0),
+                                        "target_profit_enabled": config.risk.target_profit_enabled,
+                                        "max_daily_profit": config.risk.max_daily_profit,
+                                        "max_weekly_profit": config.risk.max_weekly_profit,
                                         "be_trigger_rr": config.risk.be_trigger_rr,
                                         "be_buffer_pips": config.risk.be_buffer_pips,
-                                        "be_buffer_atr_mult": getattr(config.risk, "be_buffer_atr_mult", 0.0),
-                                        "trail_method_tp2": config.risk.trail_method_tp2 if hasattr(config.risk, 'trail_method_tp2') else "ATR_TRAIL",
-                                        "trail_method_tp3": config.risk.trail_method_tp3 if hasattr(config.risk, 'trail_method_tp3') else "STRUCTURE_TRAIL",
-                                        "trail_method_tp4": config.risk.trail_method_tp4 if hasattr(config.risk, 'trail_method_tp4') else "ATR_TRAIL",
-                                        "trail_method_tp5": config.risk.trail_method_tp5 if hasattr(config.risk, 'trail_method_tp5') else "ATR_TRAIL",
+                                        "be_buffer_atr_mult": config.risk.be_buffer_atr_mult,
+                                        "trail_method_tp2": config.risk.trail_method_tp2,
+                                        "trail_method_tp3": config.risk.trail_method_tp3,
+                                        "trail_method_tp4": config.risk.trail_method_tp4,
+                                        "trail_method_tp5": config.risk.trail_method_tp5,
                                     }
+
                                     # Cache RiskEngine across scan cycles — only rebuild when key settings change.
                                     # MultiTPManager/BreakevenManager/TrailingManager are expensive to construct;
                                     # risk_config dict is still built fresh each signal to pick up config edits.
@@ -635,6 +636,15 @@ class BotService:
                                     # Always refresh injected singletons (they may update between scans)
                                     self.risk_engine.circuit = self.circuit_breaker
                                     self.risk_engine.prop_firm_validator = getattr(self, "prop_firm_validator", None)
+
+                                    # Feed live equity to prop firm validator so drawdown checks use
+                                    # floating equity (balance + unrealized P&L), not just closed balance.
+                                    if getattr(self, "prop_firm_validator", None) and self.prop_firm_validator.enabled:
+                                        live_equity = broker.account_info.equity if hasattr(broker.account_info, 'equity') else account_balance
+                                        self.prop_firm_validator.update_equity_balance(
+                                            live_equity, account_balance, datetime.now(timezone.utc)
+                                        )
+
 
                                     # Enforces 1 active signal per symbol, so symbol is uniquely identifying
                                     group_id = signal.symbol
@@ -953,9 +963,10 @@ class BotService:
                                 pos_id = deal.get("position_id")
                                 symbol = deal.get("symbol", "UNKNOWN")
                                 close_time = datetime.fromtimestamp(deal["time"], timezone.utc) if deal.get("time") else None
-                                # group_id == symbol by design (one active signal group per symbol at a time).
-                                # circuit_breaker.position_closed() expects group_id as first arg — this is correct.
-                                self.circuit_breaker.position_closed(symbol, net_profit, close_time)
+                                # record_external_close() handles the post-restart case where
+                                # active_groups is empty (position_closed() would be a no-op).
+                                # group_id == symbol by design (one active signal group per symbol).
+                                self.circuit_breaker.record_external_close(symbol, net_profit, close_time)
                             if getattr(self, "prop_firm_validator", None):
                                 self.prop_firm_validator.record_trade_closed(deal.get("symbol", "UNKNOWN"), deal.get("volume", 0.0), net_profit)
                                 

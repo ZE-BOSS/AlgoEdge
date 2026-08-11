@@ -84,6 +84,17 @@ class RiskEngine:
             }))
             return False, reason, []
 
+        # 1b. Prop Firm drawdown hard block (only when account_mode = 'prop_firm')
+        if hasattr(self, "prop_firm_validator") and self.prop_firm_validator and self.prop_firm_validator.enabled:
+            pf_blocked, pf_reason = self.prop_firm_validator.should_block_trading()
+            if pf_blocked:
+                logger.warning(json.dumps({
+                    "event": "risk_rejected",
+                    "reason": "prop_firm_drawdown_block",
+                    "details": pf_reason
+                }))
+                return False, pf_reason, []
+
         # 2. Minimum RR Check and Direction Validation
         from backend.risk.multi_tp import _is_buy
         is_buy = _is_buy(direction)
@@ -129,8 +140,12 @@ class RiskEngine:
         # This matches how _calc_pnl() works (MT5 first via get_symbol_info).
 
         requested_risk_dollars = base_balance * (self.risk_pct / 100.0) * size_modifier
+        # max_risk_hard_cap_pct: user-configurable safety cap from PropFirmParams.
+        # Passed through the risk_config dict, defaults to 3.0 if not set.
+        max_risk_hard_cap_pct_val = self.config.get("max_risk_hard_cap_pct", 3.0)
         total_lots = calculate_lot_size(
             base_balance, self.risk_pct * size_modifier, entry, sl, symbol,
+            max_risk_hard_cap_pct=max_risk_hard_cap_pct_val,
         )
 
         # Calculate actual dollar risk from the sizer output (before TP splits)
@@ -144,14 +159,14 @@ class RiskEngine:
             }))
             return False, "Lot size calculation returned 0", []
 
-        # 3.5 Prop Firm Monitor (informational only — never blocks or modifies trades)
+        # 3.5 Prop Firm lot validation (informational — logs if max_lots per symbol exceeded)
         if hasattr(self, "prop_firm_validator") and self.prop_firm_validator and self.prop_firm_validator.enabled:
             self.prop_firm_validator.validate_trade(symbol, total_lots)  # logs warnings only
 
         # 4. Multi-Position Splits (TP1/TP2/TP3)
-        # Pass the 2% cap so multi_tp can reduce TP count / scale volumes if lot_min enforcement
-        # would inflate the total risk above the account cap.
-        max_risk_cap_dollars = base_balance * 0.02  # 2% of live balance
+        # Cap = configured risk × 1.05 (5% rounding tolerance).
+        # Previously used base_balance × 0.02 (hardcoded 2%) — now user-driven.
+        max_risk_cap_dollars = requested_risk_dollars * 1.05
         liquidity_target = signal_data.get("liquidity_target")
         strategy_id = signal_data.get("metadata", {}).get("strategy_id", "UNKNOWN")
         tp_levels = self.multi_tp.calculate_tp_levels(

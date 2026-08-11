@@ -8,12 +8,16 @@ Refactored: Replaced percentage-based daily/weekly drawdown with trade-count-bas
 consecutive loss limits per user request.
 """
 
+import json
+import os
 from datetime import datetime, timezone
 from typing import Any
 
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+CB_STATE_FILE = "backend/data/cb_state.json"
 
 
 class CircuitBreaker:
@@ -39,17 +43,20 @@ class CircuitBreaker:
         self.daily_consecutive_losses = 0
         self.weekly_consecutive_losses = 0
         self.daily_trades_count = 0
-        self.daily_pnl = 0.0   # Still tracked for reporting, not for gating
-        self.weekly_pnl = 0.0  # Still tracked for reporting, not for gating
-        self.open_positions_by_symbol: dict[str, int] = {}  # symbol → count of active groups
+        self.daily_pnl = 0.0
+        self.weekly_pnl = 0.0
+        self.open_positions_by_symbol: dict[str, int] = {}
         self.is_paused = False
         self.pause_reason = ""
         self.last_reset_day = datetime.now(timezone.utc).date()
         self.last_reset_week = datetime.now(timezone.utc).isocalendar()[1]
         self.last_trade_closed_m15_time: int | None = None
-        
+
         # Track active grouped trades (signal)
-        self.active_groups = {} # group_id -> {"pnl": 0.0, "sub_trades": 0}
+        self.active_groups = {}  # group_id -> {"pnl": 0.0, "sub_trades": 0}
+
+        # Load persisted state (restores counters after bot restart)
+        self.load_state()
 
 
     def check_all(self, account_balance: float, current_time: datetime | None = None) -> tuple[bool, str]:
@@ -119,6 +126,7 @@ class CircuitBreaker:
         self.active_groups[group_id] = {"pnl": 0.0, "sub_trades": sub_trade_count, "symbol": symbol}
         if symbol:
             self.open_positions_by_symbol[symbol] = self.open_positions_by_symbol.get(symbol, 0) + 1
+        self.save_state()
 
     def position_closed(self, group_id: str, pnl: float, current_time: datetime | None = None):
         """Track a position closing."""
@@ -126,11 +134,11 @@ class CircuitBreaker:
             self.active_groups[group_id]["pnl"] += pnl
             self.active_groups[group_id]["sub_trades"] -= 1
             
+            # Record result PER LEG instead of waiting for the full group
+            self._record_trade_result(pnl, pnl >= 0)
+            
             # If all sub-trades for this group are closed
             if self.active_groups[group_id]["sub_trades"] <= 0:
-                final_pnl = self.active_groups[group_id]["pnl"]
-                self._record_trade_result(final_pnl, final_pnl >= 0)
-                
                 # Set M15 cooldown
                 if current_time is not None:
                     current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
@@ -153,6 +161,87 @@ class CircuitBreaker:
                 self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
                 if self.open_positions_by_symbol[sym] == 0:
                     del self.open_positions_by_symbol[sym]
+        self.save_state()
+
+    def record_external_close(self, symbol: str, pnl: float, current_time: datetime | None = None):
+        """
+        Record a trade close from the MT5 sync loop WITHOUT requiring an active_groups entry.
+        Fixes the bug where position_closed() was a no-op after a bot restart because
+        active_groups was wiped. Called from BotService._trade_sync_loop.
+        """
+        self._record_trade_result(pnl, pnl >= 0)
+        # Decrement symbol count if tracked
+        if symbol in self.open_positions_by_symbol:
+            self.open_positions_by_symbol[symbol] = max(0, self.open_positions_by_symbol[symbol] - 1)
+            if self.open_positions_by_symbol[symbol] == 0:
+                del self.open_positions_by_symbol[symbol]
+        # Set M15 cooldown
+        if current_time is not None:
+            current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
+            self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
+        self.save_state()
+
+    def save_state(self):
+        """Persist CB state to disk so it survives bot restarts."""
+        try:
+            os.makedirs(os.path.dirname(CB_STATE_FILE), exist_ok=True)
+            state = {
+                "daily_consecutive_losses": self.daily_consecutive_losses,
+                "weekly_consecutive_losses": self.weekly_consecutive_losses,
+                "daily_trades_count": self.daily_trades_count,
+                "daily_pnl": self.daily_pnl,
+                "weekly_pnl": self.weekly_pnl,
+                "open_positions_by_symbol": self.open_positions_by_symbol,
+                "is_paused": self.is_paused,
+                "pause_reason": self.pause_reason,
+                "last_reset_day": str(self.last_reset_day),
+                "last_reset_week": self.last_reset_week,
+            }
+            with open(CB_STATE_FILE, "w") as f:
+                json.dump(state, f, indent=2)
+        except Exception as e:
+            logger.error(f"[CB] Failed to save state: {e}")
+
+    def load_state(self):
+        """
+        Load persisted state from disk after a bot restart.
+        Auto-resets daily counters if it is a new calendar day.
+        """
+        try:
+            if not os.path.exists(CB_STATE_FILE):
+                return
+            with open(CB_STATE_FILE) as f:
+                data = json.load(f)
+            from datetime import date
+            saved_day_str = data.get("last_reset_day", "")
+            today = datetime.now(timezone.utc).date()
+            is_new_day = str(today) != saved_day_str
+
+            # Always restore weekly state (survives day boundaries)
+            self.weekly_consecutive_losses = data.get("weekly_consecutive_losses", 0)
+            self.weekly_pnl = data.get("weekly_pnl", 0.0)
+            self.last_reset_week = data.get("last_reset_week", today.isocalendar()[1])
+
+            if is_new_day:
+                # New day — reset daily counters (do not carry over daily streak or daily trades)
+                logger.info("[CB] New day detected on load — daily counters reset.")
+            else:
+                self.daily_consecutive_losses = data.get("daily_consecutive_losses", 0)
+                self.daily_trades_count = data.get("daily_trades_count", 0)
+                self.daily_pnl = data.get("daily_pnl", 0.0)
+                self.open_positions_by_symbol = data.get("open_positions_by_symbol", {})
+                # Only restore paused state for weekly-level pauses (daily pauses clear each day)
+                if not is_new_day:
+                    saved_pause = data.get("is_paused", False)
+                    saved_reason = data.get("pause_reason", "")
+                    if saved_pause and "weekly" in saved_reason.lower():
+                        self.is_paused = saved_pause
+                        self.pause_reason = saved_reason
+            self.last_reset_day = today
+            logger.info(f"[CB] State loaded from disk. daily_losses={self.daily_consecutive_losses}, weekly_losses={self.weekly_consecutive_losses}, open={self.open_positions_by_symbol}")
+        except Exception as e:
+            logger.error(f"[CB] Failed to load state: {e}")
+
 
     def _record_trade_result(self, pnl: float, is_win: bool):
         """Update state after a grouped trade fully closes."""
@@ -165,6 +254,7 @@ class CircuitBreaker:
         else:
             self.daily_consecutive_losses += 1
             self.weekly_consecutive_losses += 1
+        self.save_state()
 
     def manual_resume(self):
         """User manually re-enables trading after a streak pause. Resets ALL state."""
@@ -173,7 +263,9 @@ class CircuitBreaker:
         self.daily_consecutive_losses = 0
         self.weekly_consecutive_losses = 0
         self.last_trade_closed_m15_time = None
+        self.save_state()
         logger.info("Circuit breaker manually resumed by user")
+
 
     def _daily_resume(self):
         """
