@@ -548,7 +548,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         stop_loss: t.stop_loss,
         exit_price: t.exit_price,
       }));
-      const stats = summaryEngine.computePeriodStats(normalized, startBal ?? initialBalance);
+      const stats = summaryEngine.computePeriodStats(normalized, startBal ?? initialBalance, initialBalance);
 
       // TP-level / exit-reason breakdown across every leg in this period —
       // this is what the row's expand panel drills into.

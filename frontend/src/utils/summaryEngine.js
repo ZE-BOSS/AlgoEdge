@@ -162,7 +162,7 @@ function maxConsecutive(boolArray) {
  * Compute detailed period stats for a given set of trades.
  * Mirrors backend compute_portfolio_stats and RiskReport logic.
  */
-export function computePeriodStats(trades, initialBalance = 10000) {
+export function computePeriodStats(trades, initialBalance = 10000, accountInitialBalance = null) {
   if (!trades || trades.length === 0) {
     return {
       totalTrades: 0, wins: 0, losses: 0, winRate: 0,
@@ -258,7 +258,8 @@ export function computePeriodStats(trades, initialBalance = 10000) {
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : 999.0;
   const expectancyR = (winRate * avgWinR) - ((1 - winRate) * Math.abs(avgLossR));
   
-  const { maxDdPct, maxDdAbs } = maxDrawdown(equityCurve, initialBalance);
+  const anchorBalance = accountInitialBalance !== null ? accountInitialBalance : initialBalance;
+  const { maxDdPct, maxDdAbs } = maxDrawdown(equityCurve, anchorBalance);
   const sh = sharpe(returns);
   const so = sortino(returns);
   
@@ -371,7 +372,7 @@ export function computePeriodSymbolMatrix(bucketsMap, initialBalance = 10000) {
   
   for (const period of keys) {
     const trades = bucketsMap.get(period);
-    const periodStats = computePeriodStats(trades, initialBalance + cumulativePnl);
+    const periodStats = computePeriodStats(trades, initialBalance + cumulativePnl, initialBalance);
     
     // Sub-group by symbol inside this period
     const symbolBreakdown = {};
