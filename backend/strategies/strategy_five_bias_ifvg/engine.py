@@ -34,10 +34,67 @@ class BiasIFVGEngine(BaseStrategy):
                 "m5_swing_point": None,
                 "manipulation_leg_start": None,
                 "trades_today": 0,
+                "extra_levels": []
             }
             self.htf_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
             self.m15_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
             self.m5_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.05)
+
+    def _detect_cisd_and_rejections(self, candles: pd.DataFrame, bias: str) -> list:
+        if len(candles) < 5 or bias is None:
+            return []
+        
+        levels = []
+        latest = candles.iloc[-2]  # Check the most recently completed candle
+        body_size = abs(latest["close"] - latest["open"])
+        total_size = latest["high"] - latest["low"]
+        
+        if total_size > 0:
+            if bias == "BUY":
+                lower_wick = min(latest["close"], latest["open"]) - latest["low"]
+                if lower_wick > body_size * 2:
+                    levels.append({
+                        "type": "BULLISH_REJECTION",
+                        "top": min(latest["close"], latest["open"]),
+                        "bottom": latest["low"],
+                        "time": candles.index[-2]
+                    })
+            elif bias == "SELL":
+                upper_wick = latest["high"] - max(latest["close"], latest["open"])
+                if upper_wick > body_size * 2:
+                    levels.append({
+                        "type": "BEARISH_REJECTION",
+                        "top": latest["high"],
+                        "bottom": max(latest["close"], latest["open"]),
+                        "time": candles.index[-2]
+                    })
+                    
+        # Simple CISD
+        if len(candles) >= 4:
+            c1, c2, c3 = candles.iloc[-4], candles.iloc[-3], candles.iloc[-2]
+            if bias == "BUY":
+                if c1["close"] < c1["open"] and c2["close"] < c2["open"]:
+                    cisd_line = c1["open"]
+                    if c3["close"] > cisd_line:
+                        buffer = (c3["close"] - cisd_line) * 0.1
+                        levels.append({
+                            "type": "BULLISH_CISD",
+                            "top": cisd_line + buffer,
+                            "bottom": cisd_line - buffer,
+                            "time": candles.index[-2]
+                        })
+            elif bias == "SELL":
+                if c1["close"] > c1["open"] and c2["close"] > c2["open"]:
+                    cisd_line = c1["open"]
+                    if c3["close"] < cisd_line:
+                        buffer = (cisd_line - c3["close"]) * 0.1
+                        levels.append({
+                            "type": "BEARISH_CISD",
+                            "top": cisd_line + buffer,
+                            "bottom": cisd_line - buffer,
+                            "time": candles.index[-2]
+                        })
+        return levels
 
     def _is_within_session(self, current_time: pd.Timestamp) -> bool:
         if current_time.tzinfo is None:
@@ -104,6 +161,12 @@ class BiasIFVGEngine(BaseStrategy):
         # 2. Key Levels (M15 tracker update)
         elif timeframe == "M15":
             self.m15_detectors[symbol].update(candles)
+            if state["bias"] is not None:
+                new_extra = self._detect_cisd_and_rejections(candles, state["bias"])
+                if new_extra:
+                    state["extra_levels"].extend(new_extra)
+                    # Keep only the latest 10 to avoid bloat
+                    state["extra_levels"] = state["extra_levels"][-10:]
 
         # 3. IFVG Confirmation and Entry (M5)
         elif timeframe == "M5":
@@ -115,6 +178,7 @@ class BiasIFVGEngine(BaseStrategy):
                 
             # Check for M15 Tap (Real-time detection using M5 candle)
             if state["status"] in ["AWAIT_KEY_LEVEL", "AWAIT_IFVG_SETUP"]:
+                # Check FVGs
                 m15_fvgs = self.m15_detectors[symbol].active_fvgs
                 for fvg in reversed(m15_fvgs):
                     if state["bias"] == "BUY" and fvg["type"] == "BULLISH" and fvg["bottom"] <= latest["low"] <= fvg["top"]:
@@ -129,6 +193,22 @@ class BiasIFVGEngine(BaseStrategy):
                         state["manipulation_leg_start"] = current_time
                         self.log_event(f"[{symbol}] M15 Bearish FVG tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                         break
+
+                # Check Extra Levels (CISD / Rejections)
+                if state["status"] == "AWAIT_KEY_LEVEL":
+                    for lvl in reversed(state.get("extra_levels", [])):
+                        if state["bias"] == "BUY" and lvl["type"] in ["BULLISH_CISD", "BULLISH_REJECTION"] and lvl["bottom"] <= latest["low"] <= lvl["top"]:
+                            state["key_level"] = lvl
+                            state["status"] = "AWAIT_IFVG_SETUP"
+                            state["manipulation_leg_start"] = current_time
+                            self.log_event(f"[{symbol}] M15 {lvl['type']} tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
+                            break
+                        elif state["bias"] == "SELL" and lvl["type"] in ["BEARISH_CISD", "BEARISH_REJECTION"] and lvl["bottom"] <= latest["high"] <= lvl["top"]:
+                            state["key_level"] = lvl
+                            state["status"] = "AWAIT_IFVG_SETUP"
+                            state["manipulation_leg_start"] = current_time
+                            self.log_event(f"[{symbol}] M15 {lvl['type']} tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
+                            break
             
             # Look for an opposing M5 FVG that forms DURING the reaction
             if state["status"] == "AWAIT_IFVG_SETUP":

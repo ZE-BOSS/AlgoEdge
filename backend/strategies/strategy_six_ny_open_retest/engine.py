@@ -4,6 +4,7 @@ import pytz
 from backend.core.config_schema import UserConfigV2
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
 from backend.strategies.registry import register_strategy
+from backend.risk.position_sizer import get_pip_size
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -84,10 +85,12 @@ class NYOpenRetestEngine(BaseStrategy):
                 if latest["close"] > state["range_high"]:
                     state["bias"] = "BUY"
                     state["status"] = "AWAIT_RETEST"
+                    state["breakout_extreme"] = candles.iloc[-10:]["low"].min()  # Lowest point of breakout swing
                     self.log_event(f"[{symbol}] NY Open bullish break detected. Awaiting retest to {state['range_mid']}", category="NY_OPEN")
                 elif latest["close"] < state["range_low"]:
                     state["bias"] = "SELL"
                     state["status"] = "AWAIT_RETEST"
+                    state["breakout_extreme"] = candles.iloc[-10:]["high"].max() # Highest point of breakout swing
                     self.log_event(f"[{symbol}] NY Open bearish break detected. Awaiting retest to {state['range_mid']}", category="NY_OPEN")
 
             elif state["status"] == "AWAIT_RETEST":
@@ -98,13 +101,12 @@ class NYOpenRetestEngine(BaseStrategy):
                 if triggered:
                     entry = state["range_mid"]
                     
-                    # Convert fixed points to actual price deltas based on pip size if needed.
-                    # Assuming price is raw for now, as standard for the engine API to handle point conversions internally.
-                    # Or rely on position manager for fixed targets.
-                    buffer = self.params.stop_buffer_points
-                    target = self.params.fixed_target_points
+                    # Convert points to price delta
+                    pip_size = get_pip_size(symbol)
+                    buffer = self.params.stop_buffer_points * pip_size
+                    target = self.params.fixed_target_points * pip_size
                     
-                    stop_loss = state["range_low"] - buffer if state["bias"] == "BUY" else state["range_high"] + buffer
+                    stop_loss = state["breakout_extreme"] - buffer if state["bias"] == "BUY" else state["breakout_extreme"] + buffer
                     take_profit = entry + target if state["bias"] == "BUY" else entry - target
                     
                     if getattr(self.params, 'dynamic_target_override', True):

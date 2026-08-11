@@ -300,6 +300,10 @@ class PropFirmValidator:
         """
         if not self.enabled:
             return False, ""
+        # Never block trades in backtesting, we just want to flag/monitor breaches.
+        if getattr(self, "is_backtesting", False):
+            return False, ""
+            
         if self.is_breached:
             return True, f"Prop Firm drawdown breached: {self.breach_reason}"
         return False, ""

@@ -57,39 +57,41 @@ def update_mt5_cache(symbols: list[str]):
         logger.info(f"[SIZER] MT5 symbol cache updated for {updated} symbols.")
 
 def get_pip_size(symbol: str) -> float:
-    """Return pip size for the symbol (e.g. 0.0001 for EURUSD, 0.01 for XAUUSD)."""
+    """Return pip size for the symbol (e.g. 0.0001 for EURUSD, 0.01 for JPY pairs, 0.1 for XAUUSD)."""
+    symbol_upper = symbol.upper()
     try:
         from backend.risk.compounding import get_instrument_profile
         profile = get_instrument_profile(symbol)
         if profile and profile.point_size:
+            if profile.instrument_type == "FOREX":
+                return profile.point_size * 10.0
+            elif profile.instrument_type == "COMMODITY" and "XAU" in symbol_upper:
+                return profile.point_size * 10.0  # Gold standard pip is 10 points
             return profile.point_size
     except ImportError:
         pass
 
     gold_like = ["XAUUSD", "GOLD", "XAU"]
     silver_platinum = ["XAGUSD", "SILVER", "XAG", "XPTUSD", "PLATINUM", "XPT"]
-    jpy_pairs = ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY"]
+    jpy_pairs = ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY", "NZDJPY"]
     indices = ["US30", "US500", "NAS100", "US2000", "UK100", "FRA40", "EU50",
                "NTH25", "SWI20", "AUS200", "JP225", "GER40", "HK50", "USTEC", "NDX", "SPX"]
     oil_gas = ["USOIL", "UKOIL", "WTI", "BRENT", "OIL", "XTIUSD", "XBRUSD", "NG", "NATGAS", "XNGUSD"]
     crypto = ["BTC", "ETH", "DOGE", "SOL", "XRP", "LTC"]
     synthetics = ["V10", "V25", "V50", "V75", "V100", "BOOM", "CRASH", "STEP", "VOLATILITY", "JUMP", "DEX"]
 
-    symbol_upper = symbol.upper()
-
     if any(s in symbol_upper for s in synthetics):
-        return 0.01  # Deriv synthetic tick/point size (0.01, NOT 1.0)
-        # Using 1.0 here caused the breakeven buffer to be 100× too large for V75 etc.
-    if any(s in symbol_upper for s in gold_like):
         return 0.01
+    if any(s in symbol_upper for s in gold_like):
+        return 0.1  # Pip is 0.1 for Gold
     if any(s in symbol_upper for s in silver_platinum):
-        return 0.001 if "AG" in symbol_upper or "SILVER" in symbol_upper else 0.01
+        return 0.01
     if any(s in symbol_upper for s in jpy_pairs):
-        return 0.01 if any(p in symbol_upper for p in ("GBPJPY", "EURJPY", "AUDJPY", "CADJPY")) else 0.001
+        return 0.01  # JPY pip is 0.01
     if any(s in symbol_upper for s in oil_gas):
         return 0.01
     if any(s in symbol_upper for s in crypto):
-        return 1.0  # BTC/ETH-scale; badly wrong for DOGE/XRP but at least in the right order vs 0.0001
+        return 1.0 
     if any(s in symbol_upper for s in indices):
         return 1.0
     return 0.0001  # Standard forex

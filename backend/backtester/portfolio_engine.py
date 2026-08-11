@@ -160,6 +160,8 @@ class PortfolioBacktestEngine:
         all_signals.sort(key=lambda x: float(x.get("time", float("inf"))))
         signal_idx = 0
         
+        breach_days = set()
+        
         for current_time in global_timeline:
             current_timestamp = float(current_time)
             
@@ -174,9 +176,11 @@ class PortfolioBacktestEngine:
             
             current_time_dt = datetime.fromtimestamp(current_timestamp, timezone.utc)
             self.prop_firm_validator.update_equity_balance(balance + open_pnl, balance, current_time_dt)
-            if self.prop_firm_validator.is_breached and not self.prop_firm_validator._breach_logged:
-                logger.warning(f"[PROP FIRM MONITOR] Breach detected: {self.prop_firm_validator.breach_reason} — continuing")
-                self.prop_firm_validator._breach_logged = True
+            if self.prop_firm_validator.is_breached:
+                breach_date = current_time_dt.date().isoformat()
+                if breach_date not in breach_days:
+                    logger.warning(f"[PROP FIRM MONITOR] Breach detected on {breach_date}: {self.prop_firm_validator.breach_reason} — continuing")
+                    breach_days.add(breach_date)
                 
             # 2. Process open positions
             closed_this_bar = []
@@ -380,8 +384,8 @@ class PortfolioBacktestEngine:
                         self.rejection_funnel["strategy_rejections"][gate] = self.rejection_funnel["strategy_rejections"].get(gate, 0) + 1
                     continue
 
-                # Prop Firm hard block — skip new signals when drawdown limit is breached
-                if self.prop_firm_validator.enabled and self.prop_firm_validator.is_breached:
+                # Prop Firm hard block — skip new signals when drawdown limit is breached (except in backtesting where we only flag)
+                if self.prop_firm_validator.enabled and self.prop_firm_validator.is_breached and not getattr(self.prop_firm_validator, 'is_backtesting', False):
                     self.rejection_funnel["risk_rejections"]["prop_firm_drawdown_block"] = self.rejection_funnel["risk_rejections"].get("prop_firm_drawdown_block", 0) + 1
                     continue
 
@@ -562,6 +566,7 @@ class PortfolioBacktestEngine:
             "report": report,
             "rejection_funnel": self.rejection_funnel,
             "run_logs": self.run_logs,
+            "prop_firm_breach_days": sorted(list(breach_days))
         }
 
         logger.info(f"[PORTFOLIO] ═══ Global backtest complete ═══")

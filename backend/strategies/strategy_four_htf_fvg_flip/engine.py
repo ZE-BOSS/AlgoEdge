@@ -116,21 +116,32 @@ class HTFFVGFlipEngine(BaseStrategy):
                     if fvg_time >= state.get("tap_time", pd.Timestamp.min):
                         if state["bias"] == "BUY" and fvg["type"] == "BEARISH":
                             state["m5_fvg"] = fvg
-                            state["status"] = "AWAIT_INVERSION_CLOSE"
+                            state["status"] = "AWAIT_RETEST"
                             tap_time = state.get("tap_time")
                             lookback = candles.loc[tap_time:] if tap_time is not None and tap_time in candles.index else candles.iloc[-20:]
                             state["m5_swing_point"] = lookback["low"].min()
-                            self.log_event(f"[{symbol}] {timeframe} Bearish FVG formed. Awaiting Bullish inversion.", category="FVG_FLIP")
+                            self.log_event(f"[{symbol}] {timeframe} Bearish FVG formed. Awaiting retest.", category="FVG_FLIP")
                             break
                         elif state["bias"] == "SELL" and fvg["type"] == "BULLISH":
                             state["m5_fvg"] = fvg
-                            state["status"] = "AWAIT_INVERSION_CLOSE"
+                            state["status"] = "AWAIT_RETEST"
                             tap_time = state.get("tap_time")
                             lookback = candles.loc[tap_time:] if tap_time is not None and tap_time in candles.index else candles.iloc[-20:]
                             state["m5_swing_point"] = lookback["high"].max()
-                            self.log_event(f"[{symbol}] {timeframe} Bullish FVG formed. Awaiting Bearish inversion.", category="FVG_FLIP")
+                            self.log_event(f"[{symbol}] {timeframe} Bullish FVG formed. Awaiting retest.", category="FVG_FLIP")
                             break
 
+            # 4. Wait for price to retest the FVG
+            if state["status"] == "AWAIT_RETEST":
+                fvg = state["m5_fvg"]
+                if state["bias"] == "BUY" and latest["high"] >= fvg["bottom"]:
+                    state["status"] = "AWAIT_INVERSION_CLOSE"
+                    self.log_event(f"[{symbol}] Bearish FVG retested. Awaiting inversion close.", category="FVG_FLIP")
+                elif state["bias"] == "SELL" and latest["low"] <= fvg["top"]:
+                    state["status"] = "AWAIT_INVERSION_CLOSE"
+                    self.log_event(f"[{symbol}] Bullish FVG retested. Awaiting inversion close.", category="FVG_FLIP")
+
+            # 5. Wait for inversion close
             if state["status"] == "AWAIT_INVERSION_CLOSE":
                 # Only block new trades outside session; do not reset state mid-setup
                 if not self._is_within_session(current_time):
@@ -156,35 +167,8 @@ class HTFFVGFlipEngine(BaseStrategy):
                     return None
 
                 if triggered:
-                    state["status"] = "AWAIT_5M_RETEST"
-                    self.log_event(f"[{symbol}] Inversion confirmed. Awaiting retest of inverted FVG.", category="FVG_FLIP")
-                    # Fall through to check retest on the same bar if possible, 
-                    # but usually it happens on subsequent bars.
-
-            if state["status"] == "AWAIT_5M_RETEST":
-                if not self._is_within_session(current_time):
-                    return None
+                    self.log_event(f"[{symbol}] Inversion confirmed. Entering trade.", category="FVG_FLIP")
                     
-                fvg = state["m5_fvg"]
-                retest_triggered = False
-                
-                # Check for tap into the inverted FVG
-                if state["bias"] == "BUY" and latest["low"] <= fvg["top"]:
-                    retest_triggered = True
-                elif state["bias"] == "SELL" and latest["high"] >= fvg["bottom"]:
-                    retest_triggered = True
-
-                # Invalidate if price breaks the swing extreme before retest
-                if state["bias"] == "BUY" and latest["close"] < state.get("m5_swing_point", 0):
-                    state["status"] = "AWAIT_HTF_TAP"
-                    self.log_event(f"[{symbol}] Retest setup failed (Swing low broken).", category="FVG_FLIP")
-                    return None
-                elif state["bias"] == "SELL" and latest["close"] > state.get("m5_swing_point", float('inf')):
-                    state["status"] = "AWAIT_HTF_TAP"
-                    self.log_event(f"[{symbol}] Retest setup failed (Swing high broken).", category="FVG_FLIP")
-                    return None
-
-                if retest_triggered:
                     entry = latest["close"]
                     sl = state.get("m5_swing_point", entry * 0.99 if state["bias"]=="BUY" else entry * 1.01)
                     

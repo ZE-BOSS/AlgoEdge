@@ -528,11 +528,15 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     return displayGroups.map(group => {
       let startBal = null;
       let endBal = null;
+      let isBreached = false;
 
       const sorted = [...group.trades].sort((a, b) => new Date(a.entry_time_iso || 0) - new Date(b.entry_time_iso || 0));
       sorted.forEach(t => {
         if (startBal === null) startBal = t.balance_before;
         endBal = t.balance_after;
+        
+        const dStr = (t.entry_time_iso || '').split('T')[0];
+        if ((result.prop_firm_breach_days || []).includes(dStr)) isBreached = true;
       });
 
       // Reuse the exact same stats math as the top-level cards (and as
@@ -593,6 +597,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         avgDurationMin: stats.avgDurationMin,
         tpBreakdown,
         symbolBreakdown,
+        isBreached
       };
     });
   }, [displayGroups, groupBy, symbolFilter, initialBalance]);
@@ -838,9 +843,12 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
                 const tpEntries = Object.entries(row.tpBreakdown || {}).sort((a, b) => b[1].count - a[1].count);
                 return (
                   <React.Fragment key={row.period || i}>
-                    <tr onClick={() => togglePeriod(row.period)} style={{ cursor: 'pointer', background: isExpanded ? 'rgba(255,255,255,0.03)' : 'transparent' }}>
+                    <tr onClick={() => togglePeriod(row.period)} style={{ cursor: 'pointer', background: row.isBreached ? 'rgba(248, 81, 73, 0.1)' : (isExpanded ? 'rgba(255,255,255,0.03)' : 'transparent'), borderLeft: row.isBreached ? '3px solid var(--red)' : 'none' }}>
                       <td style={{ color: 'var(--text-muted)' }}>{isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</td>
-                      <td><strong>{row.period}</strong></td>
+                      <td>
+                        <strong>{row.period}</strong>
+                        {row.isBreached && <span style={{ marginLeft: 8, fontSize: '0.65rem', background: 'var(--red)', color: '#fff', padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase' }}>Prop Firm Breach</span>}
+                      </td>
                       <td>{row.tradeCount}</td>
                       <td style={{ color: row.winRate >= 0.5 ? 'var(--green)' : 'var(--red)' }}>{(row.winRate * 100).toFixed(1)}%</td>
                       <td>${row.startBal != null ? row.startBal.toFixed(2) : '—'}</td>

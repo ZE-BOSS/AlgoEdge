@@ -52,11 +52,9 @@ Step 1 bias.
 - Define the **manipulation leg**: the swing (high→low, or low→high) that
   actually touched the Step 2 key level.
 - Scan the 5m timeframe for FVGs that exist *within* that specific leg (not elsewhere on chart).
-- Take the **highest** timeframe FVG found inside the leg — this is the IFVG.
-- Entry trigger = a body close through that FVG, on its native timeframe.
-- Rule of thumb: lower-timeframe-only confirmations (e.g. jumping straight to
-  a lower-timeframe signal when a higher gap exists in the same leg) are a common beginner
-  error and reduce win rate, even though they'd give better R:R.
+- Identify the FVG found inside the leg — this is the IFVG.
+- Entry trigger = a body close through that FVG on the 5m timeframe.
+- Rule of thumb: jumping straight to a lower-timeframe signal (e.g., 1m) when a higher gap exists in the same leg is a common beginner error and reduces win rate, even though it gives better R:R. This is why we stick to the 5m confirmation.
 
 ## Step 4 — Execution & Risk Management
 - **Entry:** market at the IFVG body-close candle; OR a limit order back at
@@ -123,7 +121,7 @@ timezone-aligned to US Eastern.
 - Need explicit tie-breaking logic when multiple key-level types (FVG, CISD,
   rejection block) overlap at the same zone — treat as higher-confidence
   confluence rather than separate signals.
-- "Highest timeframe FVG within the leg" requires precise leg boundaries;
+- "FVG within the leg" requires precise leg boundaries;
   define the leg as the exact swing-high-to-swing-low (or reverse) price path
   that first touched the key level, not the whole visible chart range.
 - CISD and rejection-block detectors are new relative to Strategy 1 — build

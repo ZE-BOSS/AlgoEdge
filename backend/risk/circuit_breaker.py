@@ -28,9 +28,9 @@ class CircuitBreaker:
     """
 
     def __init__(self, config: dict[str, Any]):
-        # Trade-count-based limits (replaces percentage-based)
-        self.max_daily_consecutive_losses = config.get("max_daily_consecutive_losses", 5)
-        self.max_weekly_consecutive_losses = config.get("max_weekly_consecutive_losses", 15)
+        # Drawdown percentage limits (replaces consecutive loss limits)
+        self.max_daily_drawdown_pct = config.get("max_daily_drawdown_pct", 3.0)
+        self.max_weekly_drawdown_pct = config.get("max_weekly_drawdown_pct", 6.0)
         self.max_concurrent_positions = config.get("max_concurrent_positions", 3)
         self.max_positions_per_symbol = config.get("max_positions_per_symbol", 1)
         self.max_correlated_risk_pct = config.get("max_correlated_risk_pct", 4.0)
@@ -40,8 +40,6 @@ class CircuitBreaker:
         self.max_weekly_profit = config.get("max_weekly_profit", 2000.0)
 
         # State
-        self.daily_consecutive_losses = 0
-        self.weekly_consecutive_losses = 0
         self.daily_trades_count = 0
         self.daily_pnl = 0.0
         self.weekly_pnl = 0.0
@@ -85,17 +83,23 @@ class CircuitBreaker:
         if total_open >= self.max_concurrent_positions:
             return False, f"Max open positions reached ({total_open}/{self.max_concurrent_positions})"
 
-        # 4. Daily consecutive losses
-        if self.max_daily_consecutive_losses > 0 and self.daily_consecutive_losses >= self.max_daily_consecutive_losses:
-            self.is_paused = True
-            self.pause_reason = f"Daily consecutive loss limit reached: {self.daily_consecutive_losses}/{self.max_daily_consecutive_losses}"
-            return False, self.pause_reason
+        # 4. Daily Drawdown Percentage
+        start_of_day_balance = account_balance - self.daily_pnl
+        if self.max_daily_drawdown_pct > 0 and self.daily_pnl < 0 and start_of_day_balance > 0:
+            daily_dd_pct = (-self.daily_pnl / start_of_day_balance) * 100
+            if daily_dd_pct >= self.max_daily_drawdown_pct:
+                self.is_paused = True
+                self.pause_reason = f"Daily drawdown limit reached: {daily_dd_pct:.2f}% >= {self.max_daily_drawdown_pct}%"
+                return False, self.pause_reason
             
-        # 5. Weekly consecutive losses
-        if self.max_weekly_consecutive_losses > 0 and self.weekly_consecutive_losses >= self.max_weekly_consecutive_losses:
-            self.is_paused = True
-            self.pause_reason = f"Weekly consecutive loss limit reached: {self.weekly_consecutive_losses}/{self.max_weekly_consecutive_losses}"
-            return False, self.pause_reason
+        # 5. Weekly Drawdown Percentage
+        start_of_week_balance = account_balance - self.weekly_pnl
+        if self.max_weekly_drawdown_pct > 0 and self.weekly_pnl < 0 and start_of_week_balance > 0:
+            weekly_dd_pct = (-self.weekly_pnl / start_of_week_balance) * 100
+            if weekly_dd_pct >= self.max_weekly_drawdown_pct:
+                self.is_paused = True
+                self.pause_reason = f"Weekly drawdown limit reached: {weekly_dd_pct:.2f}% >= {self.max_weekly_drawdown_pct}%"
+                return False, self.pause_reason
 
         # 6. Target Profit
         if self.target_profit_enabled:
@@ -189,8 +193,6 @@ class CircuitBreaker:
         try:
             os.makedirs(os.path.dirname(CB_STATE_FILE), exist_ok=True)
             state = {
-                "daily_consecutive_losses": self.daily_consecutive_losses,
-                "weekly_consecutive_losses": self.weekly_consecutive_losses,
                 "daily_trades_count": self.daily_trades_count,
                 "daily_pnl": self.daily_pnl,
                 "weekly_pnl": self.weekly_pnl,
@@ -221,7 +223,6 @@ class CircuitBreaker:
             is_new_day = str(today) != saved_day_str
 
             # Always restore weekly state (survives day boundaries)
-            self.weekly_consecutive_losses = data.get("weekly_consecutive_losses", 0)
             self.weekly_pnl = data.get("weekly_pnl", 0.0)
             self.last_reset_week = data.get("last_reset_week", today.isocalendar()[1])
 
@@ -229,7 +230,6 @@ class CircuitBreaker:
                 # New day — reset daily counters (do not carry over daily streak or daily trades)
                 logger.info("[CB] New day detected on load — daily counters reset.")
             else:
-                self.daily_consecutive_losses = data.get("daily_consecutive_losses", 0)
                 self.daily_trades_count = data.get("daily_trades_count", 0)
                 self.daily_pnl = data.get("daily_pnl", 0.0)
                 self.open_positions_by_symbol = data.get("open_positions_by_symbol", {})
@@ -241,7 +241,7 @@ class CircuitBreaker:
                         self.is_paused = saved_pause
                         self.pause_reason = saved_reason
             self.last_reset_day = today
-            logger.info(f"[CB] State loaded from disk. daily_losses={self.daily_consecutive_losses}, weekly_losses={self.weekly_consecutive_losses}, open={self.open_positions_by_symbol}")
+            logger.info(f"[CB] State loaded from disk. open={self.open_positions_by_symbol}")
         except Exception as e:
             logger.error(f"[CB] Failed to load state: {e}")
 
@@ -250,21 +250,12 @@ class CircuitBreaker:
         """Update state after a grouped trade fully closes."""
         self.daily_pnl += pnl
         self.weekly_pnl += pnl
-
-        if is_win:
-            self.daily_consecutive_losses = 0
-            self.weekly_consecutive_losses = 0
-        else:
-            self.daily_consecutive_losses += 1
-            self.weekly_consecutive_losses += 1
         self.save_state()
 
     def manual_resume(self):
         """User manually re-enables trading after a streak pause. Resets ALL state."""
         self.is_paused = False
         self.pause_reason = ""
-        self.daily_consecutive_losses = 0
-        self.weekly_consecutive_losses = 0
         self.last_trade_closed_m15_time = None
         self.save_state()
         logger.info("Circuit breaker manually resumed by user")
@@ -279,7 +270,6 @@ class CircuitBreaker:
         """
         self.is_paused = False
         self.pause_reason = ""
-        self.daily_consecutive_losses = 0
         self.last_trade_closed_m15_time = None
         logger.info("Circuit breaker auto-resumed for new trading day (weekly streak preserved)")
 
@@ -306,7 +296,6 @@ class CircuitBreaker:
                 
         if today != self.last_reset_day:
             self.daily_pnl = 0.0
-            self.daily_consecutive_losses = 0
             self.daily_trades_count = 0
             self.last_reset_day = today
             # Auto-resume daily pauses only — weekly streak is preserved intentionally.
@@ -324,7 +313,6 @@ class CircuitBreaker:
                 
         if current_week != self.last_reset_week:
             self.weekly_pnl = 0.0
-            self.weekly_consecutive_losses = 0
             self.last_reset_week = current_week
             if "Weekly" in self.pause_reason:
                 self.is_paused = False
