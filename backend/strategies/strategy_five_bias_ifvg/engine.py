@@ -131,6 +131,7 @@ class BiasIFVGEngine(BaseStrategy):
                 "m5_swing_point": None,
                 "manipulation_leg_start": None,
                 "trades_today": 0,
+                "extra_levels": []
             }
             state = self.state[symbol]
             self.last_trade_date[symbol] = current_date
@@ -164,6 +165,8 @@ class BiasIFVGEngine(BaseStrategy):
             if state["bias"] is not None:
                 new_extra = self._detect_cisd_and_rejections(candles, state["bias"])
                 if new_extra:
+                    if "extra_levels" not in state:
+                        state["extra_levels"] = []
                     state["extra_levels"].extend(new_extra)
                     # Keep only the latest 10 to avoid bloat
                     state["extra_levels"] = state["extra_levels"][-10:]
