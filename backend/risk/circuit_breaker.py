@@ -197,7 +197,7 @@ class CircuitBreaker:
             self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
         self.save_state()
 
-    def record_backtest_close(self, pnl: float, current_time: datetime | None = None):
+    def record_backtest_close(self, group_id: str, pnl: float, current_time: datetime | None = None):
         """
         Feed closed trade PnL directly into Circuit Breaker during backtesting.
         This avoids the complexity of tracking 'active_groups' and 'sub_trades' which
@@ -205,6 +205,10 @@ class CircuitBreaker:
         """
         self.daily_pnl += pnl
         self.weekly_pnl += pnl
+        
+        # Free up open risk tracking for the closed group
+        if group_id in self.active_groups:
+            del self.active_groups[group_id]
         
         # We don't save state to disk here because backtester runs in a tight loop in-memory,
         # but we could update M15 cooldown if we wanted to enforce it during backtests.

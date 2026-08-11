@@ -360,7 +360,7 @@ class RiskEngine:
         """Update circuit breaker state after a position closes (unused in backtest)."""
         self.circuit.position_closed(group_id, pnl, current_time)
 
-    def on_backtest_position_closed(self, pnl: float, current_time: datetime | None = None):
+    def on_backtest_position_closed(self, group_id: str, pnl: float, current_time: datetime | None = None):
         """Feed closed trade PnL directly into Circuit Breaker during backtesting."""
         if hasattr(self.circuit, "record_backtest_close"):
-            self.circuit.record_backtest_close(pnl, current_time)
+            self.circuit.record_backtest_close(group_id, pnl, current_time)

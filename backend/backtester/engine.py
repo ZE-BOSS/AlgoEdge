@@ -404,7 +404,7 @@ class BacktestEngine:
                     
                     # Safely feed PnL back to the Risk Engine's Circuit Breaker
                     if hasattr(self.risk_engine, "on_backtest_position_closed"):
-                        self.risk_engine.on_backtest_position_closed(group_pnl, current_time)
+                        self.risk_engine.on_backtest_position_closed(group_id_closed, group_pnl, current_time)
                         
                     strategy = getattr(self, "_strategy", None)
                     if strategy is not None:
