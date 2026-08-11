@@ -57,12 +57,14 @@ class PropFirmValidator:
         self.open_positions_by_symbol = {}
         self.open_lots_by_symbol = {}
 
+        self.is_backtesting = get_val("is_backtesting", False)
+
         # Alert dedup: track which alerts were already sent this session
         self._alerts_sent: set = set()
         # Breach logging dedup: ensures the breach is only logged once per engine run
         self._breach_logged: bool = False
 
-        if self.enabled:
+        if self.enabled and not self.is_backtesting:
             self.load_state()
 
     # ── Telegram alerting ─────────────────────────────────────────────────────
@@ -72,6 +74,9 @@ class PropFirmValidator:
         Fire-and-forget Telegram alert. alert_key deduplicates repeated alerts
         within the same session so the same breach does not spam every tick.
         """
+        if self.is_backtesting:
+            return
+
         if alert_key:
             if alert_key in self._alerts_sent:
                 return
@@ -91,6 +96,8 @@ class PropFirmValidator:
     # ── Persistence ───────────────────────────────────────────────────────────
 
     def save_state(self):
+        if self.is_backtesting:
+            return
         os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
         try:
             with open(STATE_FILE, "w") as f:

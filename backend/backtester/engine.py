@@ -112,6 +112,12 @@ class BacktestEngine:
         self.risk_engine.is_backtesting = True
         self.risk_config = risk_config
         prop_firm_config = risk_config.get("prop_firm", {})
+        if isinstance(prop_firm_config, dict):
+            prop_firm_config = prop_firm_config.copy()
+            prop_firm_config["is_backtesting"] = True
+        else:
+            setattr(prop_firm_config, "is_backtesting", True)
+            
         self.prop_firm_validator = PropFirmValidator(prop_firm_config)
         self.risk_engine.prop_firm_validator = self.prop_firm_validator
         self.trades: list[dict[str, Any]] = []
