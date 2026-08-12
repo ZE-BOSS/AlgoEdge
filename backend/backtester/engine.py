@@ -242,13 +242,12 @@ class BacktestEngine:
             current_atr = atr_array[i] if i < len(atr_array) else 0.0
             swing_points = swing_cache.get(i, [])
 
-            # Calculate floating equity for Prop Firm tracking ONLY if open positions exist
-            if self.open_positions:
-                open_pnl = sum(self._calc_pnl(p["direction"], p["entry_price"], current_price, p["volume"], p.get("symbol", "")) for p in self.open_positions)
-                self.prop_firm_validator.update_equity_balance(balance + open_pnl, balance, current_time_dt)
-                if self.prop_firm_validator.is_breached and not getattr(self.prop_firm_validator, '_breach_logged', False):
-                    logger.warning(f"[PROP FIRM MONITOR] Drawdown breach detected: {self.prop_firm_validator.breach_reason} — continuing backtest (informational only)")
-                    self.prop_firm_validator._breach_logged = True  # log once, don't spam
+            # Calculate floating equity for Prop Firm tracking
+            open_pnl = sum(self._calc_pnl(p["direction"], p["entry_price"], current_price, p["volume"], p.get("symbol", "")) for p in self.open_positions)
+            self.prop_firm_validator.update_equity_balance(balance + open_pnl, balance, current_time_dt)
+            if self.prop_firm_validator.is_breached and not getattr(self.prop_firm_validator, '_breach_logged', False):
+                logger.warning(f"[PROP FIRM MONITOR] Drawdown breach detected: {self.prop_firm_validator.breach_reason} — continuing backtest (informational only)")
+                self.prop_firm_validator._breach_logged = True  # log once, don't spam
 
             # 1. Manage existing open positions
             closed_this_bar = []
@@ -499,7 +498,7 @@ class BacktestEngine:
                 group_id = str(uuid.uuid4())[:8]
                 sig["group_id"] = group_id
 
-                current_time_dt = datetime.fromtimestamp(float(current_time), timezone.utc) if isinstance(current_time, (int, float)) else pd.to_datetime(current_time).to_pydatetime()
+                current_time_dt = dt_arr[i]
                 
                 self.rejection_funnel["total_evaluated"] += 1
                 
@@ -516,12 +515,7 @@ class BacktestEngine:
                 # Evaluate signal through RiskEngine
                 approved, reason, tp_levels = False, "Error during evaluation", []
 
-                # Prop Firm hard block — if drawdown limit is breached in backtest,
-                # skip new signals (mirrors live trading behaviour via should_block_trading())
-                if self.prop_firm_validator.enabled and self.prop_firm_validator.is_breached:
-                    self.rejection_funnel["risk_rejections"]["prop_firm_drawdown_block"] = self.rejection_funnel["risk_rejections"].get("prop_firm_drawdown_block", 0) + 1
-                    logger.trace(f"[ENGINE] ❌ Signal BLOCKED by prop firm drawdown: {self.prop_firm_validator.breach_reason}")
-                    continue
+                # (Prop Firm validator is informational only in backtesting, we do not block signals here so the backtest can continue)
 
                 try:
                     approved, reason, tp_levels = self.risk_engine.evaluate_signal(

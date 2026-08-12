@@ -66,7 +66,8 @@ class RiskEngine:
         entry = signal_data.get("entry_price", 0.0)
         sl = signal_data.get("stop_loss", 0.0)
 
-        # 1. Circuit Breaker: symbol-level check (blocks if position already open on symbol)
+        base_balance = initial_balance if initial_balance is not None else account_balance
+
         cb_ok, cb_reason = self.circuit.check_symbol(symbol)
         if not cb_ok:
             logger.warning(json.dumps({
@@ -76,7 +77,7 @@ class RiskEngine:
             }))
             return False, cb_reason, []
             
-        can_trade, reason = self.circuit.check_all(account_balance, current_time)
+        can_trade, reason = self.circuit.check_all(base_balance, current_time)
         if not can_trade:
             logger.warning(json.dumps({
                 "event": "risk_rejected",
@@ -136,7 +137,6 @@ class RiskEngine:
         # so that risk size does not balloon as the account grows.
         size_modifier = signal_data.get("metadata", {}).get("size_modifier", 1.0)
         
-        base_balance = initial_balance if initial_balance is not None else account_balance
         # Both live and backtest use MT5 data when available → InstrumentProfile fallback.
         # This matches how _calc_pnl() works (MT5 first via get_symbol_info).
 
@@ -146,7 +146,7 @@ class RiskEngine:
         max_daily_dd = self.circuit.max_daily_drawdown_pct
         max_weekly_dd = self.circuit.max_weekly_drawdown_pct
         
-        start_of_day_balance = account_balance - self.circuit.daily_pnl
+        start_of_day_balance = base_balance - self.circuit.daily_pnl
         if max_daily_dd > 0 and start_of_day_balance > 0:
             open_risk = getattr(self.circuit, "get_open_risk", lambda: 0.0)()
             max_loss_dollars = start_of_day_balance * (max_daily_dd / 100.0)
@@ -161,7 +161,7 @@ class RiskEngine:
                 logger.info(f"Scaling down risk from ${requested_risk_dollars:.2f} to ${remaining_daily_risk:.2f} to honor {max_daily_dd}% daily drawdown.")
                 requested_risk_dollars = remaining_daily_risk
                 
-        start_of_week_balance = account_balance - self.circuit.weekly_pnl
+        start_of_week_balance = base_balance - self.circuit.weekly_pnl
         if max_weekly_dd > 0 and start_of_week_balance > 0:
             open_risk = getattr(self.circuit, "get_open_risk", lambda: 0.0)()
             max_weekly_loss_dollars = start_of_week_balance * (max_weekly_dd / 100.0)
