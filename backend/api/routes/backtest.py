@@ -517,7 +517,6 @@ async def run_backtest_endpoint(
             candles = indexed_by_tf.get("M5", indexed_by_tf[primary_tf])
 
             merged_risk_config = {
-
                 "risk_per_trade_pct": req.risk_per_trade_pct,
                 "min_rr": req.min_rr,
                 "tp_count": req.tp_count,

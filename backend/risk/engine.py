@@ -37,7 +37,8 @@ class RiskEngine:
         self.multi_tp = MultiTPManager(config)
         self.breakeven = BreakevenManager(config)
         self.trailing = TrailingManager(config)
-        self.circuit = CircuitBreaker(config)
+        self.is_backtesting = config.get("is_backtest", False)
+        self.circuit = CircuitBreaker(config, is_backtest=self.is_backtesting)
 
         # Risk params
         self.risk_pct = config.get("risk_per_trade_pct", 1.0)
@@ -47,7 +48,7 @@ class RiskEngine:
         # is_backtesting is kept for informational purposes / future guards.
         # Both live and backtest modes use MT5 data when available, with
         # InstrumentProfile as fallback — so use_live_mt5 is always True.
-        self.is_backtesting: bool = False
+        # self.is_backtesting is now populated earlier
 
     def evaluate_signal(
         self,

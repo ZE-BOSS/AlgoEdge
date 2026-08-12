@@ -32,13 +32,13 @@ class CircuitBreaker:
     Source: RiskManagement_Spec.md Section 6.1–6.5
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], is_backtest: bool = False):
+        self.is_backtest = is_backtest
         # Drawdown percentage limits (replaces consecutive loss limits)
         self.max_daily_drawdown_pct = config.get("max_daily_drawdown_pct", 3.0)
         self.max_weekly_drawdown_pct = config.get("max_weekly_drawdown_pct", 6.0)
         self.max_concurrent_positions = config.get("max_concurrent_positions", 3)
         self.max_positions_per_symbol = config.get("max_positions_per_symbol", 1)
-        self.max_correlated_risk_pct = config.get("max_correlated_risk_pct", 4.0)
         self.max_daily_trades = config.get("max_daily_trades", 5)
         self.target_profit_enabled = config.get("target_profit_enabled", False)
         self.max_daily_profit = config.get("max_daily_profit", 500.0)
@@ -59,7 +59,8 @@ class CircuitBreaker:
         self.active_groups = {}  # group_id -> {"pnl": 0.0, "sub_trades": 0}
 
         # Load persisted state (restores counters after bot restart)
-        self.load_state()
+        if not self.is_backtest:
+            self.load_state()
 
 
     def check_all(self, account_balance: float, current_time: datetime | None = None) -> tuple[bool, str]:
@@ -85,6 +86,8 @@ class CircuitBreaker:
 
         # 3. Max open positions (total across symbols)
         total_open = sum(self.open_positions_by_symbol.values())
+        # Fallback to active groups if there's a discrepancy (e.g., symbol-less groups)
+        total_open = max(total_open, len(self.active_groups))
         if total_open >= self.max_concurrent_positions:
             return False, f"Max open positions reached ({total_open}/{self.max_concurrent_positions})"
 
@@ -119,6 +122,10 @@ class CircuitBreaker:
                 return False, self.pause_reason
 
         return True, "OK"
+
+    def get_open_risk(self) -> float:
+        """Calculate the total initial risk dollars of all currently active groups."""
+        return sum(g.get("initial_risk", 0.0) for g in self.active_groups.values())
 
     def check_symbol(self, symbol: str) -> tuple[bool, str]:
         """Check if a new position can be opened on the given symbol.
@@ -217,16 +224,14 @@ class CircuitBreaker:
             self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
         self.save_state()
 
-    def record_backtest_close(self, group_id: str, pnl: float, current_time: datetime | None = None):
-        """
-        Feed closed trade PnL directly into Circuit Breaker during backtesting.
-        This avoids the complexity of tracking 'active_groups' and 'sub_trades' which
-        can get out of sync during backtesting simulation and freeze the bot.
-        """
-        self.daily_pnl += pnl
-        self.weekly_pnl += pnl
+    def record_backtest_close(self, group_id: str, group_pnl: float, current_time: datetime | None = None):
+        """Used by backtester to finalize a group's total PnL at once, triggering drawdown checks."""
+        self._record_trade_result(group_pnl, group_pnl >= 0)
         
-        # Free up open risk tracking for the closed group
+        if current_time is not None:
+            current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
+            self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
+            
         if group_id in self.active_groups:
             sym = self.active_groups[group_id].get("symbol", "")
             del self.active_groups[group_id]
@@ -234,15 +239,12 @@ class CircuitBreaker:
                 self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
                 if self.open_positions_by_symbol[sym] == 0:
                     del self.open_positions_by_symbol[sym]
-        
-        # We don't save state to disk here because backtester runs in a tight loop in-memory,
-        # but we could update M15 cooldown if we wanted to enforce it during backtests.
-        if current_time is not None:
-            current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
-            self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
 
     def save_state(self):
-        """Persist CB state to disk so it survives bot restarts."""
+        """Save current state to file (skipped in backtest)."""
+        if self.is_backtest:
+            return
+            
         try:
             os.makedirs(os.path.dirname(CB_STATE_FILE), exist_ok=True)
             state = {

@@ -5,6 +5,7 @@ Position sizing engine: Fixed % and Kelly Criterion.
 Source: RiskManagement_Spec.md Section 5
 """
 
+import time
 from backend.utils.logger import get_logger
 
 try:
@@ -56,18 +57,28 @@ def update_mt5_cache(symbols: list[str]):
     if updated > 0:
         logger.info(f"[SIZER] MT5 symbol cache updated for {updated} symbols.")
 
+_pip_size_cache: dict[str, tuple[float, float]] = {}  # {symbol: (timestamp, size)}
+
 def get_pip_size(symbol: str) -> float:
     """Return pip size for the symbol (e.g. 0.0001 for EURUSD, 0.01 for JPY pairs, 0.1 for XAUUSD)."""
+    now = time.time()
+    if symbol in _pip_size_cache:
+        cached_time, size = _pip_size_cache[symbol]
+        if now - cached_time < 60:
+            return size
+
     symbol_upper = symbol.upper()
+    size = None
     try:
         from backend.risk.compounding import get_instrument_profile
         profile = get_instrument_profile(symbol)
         if profile and profile.point_size:
             if profile.instrument_type == "FOREX":
-                return profile.point_size * 10.0
+                size = profile.point_size * 10.0
             elif profile.instrument_type == "COMMODITY" and "XAU" in symbol_upper:
-                return profile.point_size * 10.0  # Gold standard pip is 10 points
-            return profile.point_size
+                size = profile.point_size * 10.0  # Gold standard pip is 10 points
+            else:
+                size = profile.point_size
     except ImportError:
         pass
 
@@ -80,22 +91,28 @@ def get_pip_size(symbol: str) -> float:
     crypto = ["BTC", "ETH", "DOGE", "SOL", "XRP", "LTC"]
     synthetics = ["V10", "V25", "V50", "V75", "V100", "BOOM", "CRASH", "STEP", "VOLATILITY", "JUMP", "DEX"]
 
-    if any(s in symbol_upper for s in synthetics):
-        return 0.01
-    if any(s in symbol_upper for s in gold_like):
-        return 0.1  # Pip is 0.1 for Gold
-    if any(s in symbol_upper for s in silver_platinum):
-        return 0.01
-    if any(s in symbol_upper for s in jpy_pairs):
-        return 0.01  # JPY pip is 0.01
-    if any(s in symbol_upper for s in oil_gas):
-        return 0.01
-    if any(s in symbol_upper for s in crypto):
-        return 1.0 
-    if any(s in symbol_upper for s in indices):
-        return 1.0
-    return 0.0001  # Standard forex
+    if size is None:
+        if any(s in symbol_upper for s in synthetics):
+            size = 0.01
+        elif any(s in symbol_upper for s in gold_like):
+            size = 0.1  # Pip is 0.1 for Gold
+        elif any(s in symbol_upper for s in silver_platinum):
+            size = 0.01
+        elif any(s in symbol_upper for s in jpy_pairs):
+            size = 0.01  # JPY pip is 0.01
+        elif any(s in symbol_upper for s in oil_gas):
+            size = 0.01
+        elif any(s in symbol_upper for s in crypto):
+            size = 1.0 
+        elif any(s in symbol_upper for s in indices):
+            size = 1.0
+        else:
+            size = 0.0001  # Standard forex
+            
+    _pip_size_cache[symbol] = (now, size)
+    return size
 
+_symbol_info_cache: dict[tuple[str, bool], tuple[float, dict]] = {}  # {(symbol, use_live_mt5): (timestamp, info)}
 
 def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
     """
@@ -106,6 +123,13 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
     so sizing and _calc_pnl always use the same data source — preventing lot-size/PnL drift.
     IMPORTANT: Always logs which source was used so sizing decisions are auditable.
     """
+    now = time.time()
+    cache_key = (symbol, use_live_mt5)
+    if cache_key in _symbol_info_cache:
+        cached_time, info = _symbol_info_cache[cache_key]
+        if now - cached_time < 60:
+            return info
+
     # ── 1. Live MT5 Data ──────────────────────────────────────────────────────
     mt5_connected = False
     if use_live_mt5 and mt5:
@@ -117,16 +141,10 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
 
     if mt5_connected:
         try:
-            # Ensure symbol is visible (select it into Market Watch if needed)
             mt5.symbol_select(symbol, True)
             info = mt5.symbol_info(symbol)
             if info and info.trade_tick_value > 0 and info.trade_tick_size > 0:
-                logger.debug(
-                    f"[SIZER] {symbol}: Using LIVE MT5 data — "
-                    f"tick_value={info.trade_tick_value}, tick_size={info.trade_tick_size}, "
-                    f"vol_min={info.volume_min}, vol_step={info.volume_step}"
-                )
-                return {
+                res = {
                     "volume_min": info.volume_min,
                     "volume_max": info.volume_max,
                     "volume_step": info.volume_step,
@@ -135,35 +153,21 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
                     "tick_size": info.trade_tick_size,
                     "source": "MT5",
                 }
-            else:
-                logger.warning(
-                    f"[SIZER] {symbol}: MT5 connected but symbol_info returned None or zero tick values. "
-                    f"Falling back."
-                )
+                _symbol_info_cache[cache_key] = (now, res)
+                return res
         except Exception as e:
             logger.warning(f"[SIZER] {symbol}: MT5 symbol_info error: {e}. Falling back.")
-    elif not use_live_mt5:
-        logger.debug(f"[SIZER] {symbol}: Backtester mode (use_live_mt5=False). Checking cache and InstrumentProfile.")
-    else:
-        logger.debug(f"[SIZER] {symbol}: MT5 not connected. Checking cache and InstrumentProfile.")
 
     # ── 1.5. Cached MT5 Data ──────────────────────────────────────────────────
     if symbol in _MT5_SYMBOL_CACHE:
-        logger.debug(f"[SIZER] {symbol}: Using cached MT5 data.")
         return _MT5_SYMBOL_CACHE[symbol]
-
 
     # ── 2. InstrumentProfile Fallback ─────────────────────────────────────────
     try:
         from backend.risk.compounding import get_instrument_profile
         profile = get_instrument_profile(symbol)
         if profile:
-            logger.info(
-                f"[SIZER] {symbol}: Using InstrumentProfile — "
-                f"point_value_per_lot={profile.point_value_per_lot}, point_size={profile.point_size}, "
-                f"lot_min={profile.lot_min}, lot_step={profile.lot_step}"
-            )
-            return {
+            res = {
                 "volume_min": profile.lot_min,
                 "volume_max": profile.lot_max,
                 "volume_step": profile.lot_step,
@@ -172,15 +176,13 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
                 "tick_size": profile.point_size,
                 "source": "InstrumentProfile",
             }
+            _symbol_info_cache[cache_key] = (now, res)
+            return res
     except ImportError:
         pass
 
     # ── 3. Last Resort: Standard Forex Defaults ───────────────────────────────
-    logger.warning(
-        f"[SIZER] {symbol}: No MT5 data and no InstrumentProfile found. "
-        f"Using standard forex defaults — THIS MAY BE INCORRECT FOR NON-FOREX SYMBOLS!"
-    )
-    return {
+    res = {
         "volume_min": 0.01,
         "volume_max": 100.0,
         "volume_step": 0.01,
