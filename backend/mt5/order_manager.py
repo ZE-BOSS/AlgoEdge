@@ -61,8 +61,15 @@ class OrderManager:
             return {"success": False, "error": "Symbol info error"}
             
         digits = sym_info.digits
-        sl = round(sl, digits) if sl > 0 else 0.0
-        tp = round(tp, digits) if tp > 0 else 0.0
+        tick_size = sym_info.trade_tick_size
+        
+        # Round prices to the nearest valid tick step for the instrument
+        if tick_size > 0:
+            sl = round(round(sl / tick_size) * tick_size, digits) if sl > 0 else 0.0
+            tp = round(round(tp / tick_size) * tick_size, digits) if tp > 0 else 0.0
+        else:
+            sl = round(sl, digits) if sl > 0 else 0.0
+            tp = round(tp, digits) if tp > 0 else 0.0
         
         vol_step = sym_info.volume_step
         if vol_step > 0:
@@ -143,7 +150,12 @@ class OrderManager:
             
         sym_info = mt5.symbol_info(position[0].symbol)
         digits = sym_info.digits if sym_info else 5
-        rounded_sl = round(new_sl, digits)
+        tick_size = sym_info.trade_tick_size if sym_info else 0.0
+        
+        if tick_size > 0:
+            rounded_sl = round(round(new_sl / tick_size) * tick_size, digits)
+        else:
+            rounded_sl = round(new_sl, digits)
         
         request = {
             "action": mt5.TRADE_ACTION_SLTP,

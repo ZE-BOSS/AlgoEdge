@@ -107,11 +107,13 @@ class BacktestEngine:
     """
 
     def __init__(self, risk_config: dict[str, Any]):
-        self.risk_engine = RiskEngine(risk_config)
+        self.risk_config = risk_config.copy()
+        self.risk_config["is_backtest"] = True  # CRITICAL: Prevent loading live bot state from disk
+        
+        self.risk_engine = RiskEngine(self.risk_config)
         # Mark as backtesting for informational purposes / future guards.
         self.risk_engine.is_backtesting = True
-        self.risk_config = risk_config
-        prop_firm_config = risk_config.get("prop_firm", {})
+        prop_firm_config = self.risk_config.get("prop_firm", {})
         if isinstance(prop_firm_config, dict):
             prop_firm_config = prop_firm_config.copy()
             prop_firm_config["is_backtesting"] = True
@@ -174,7 +176,25 @@ class BacktestEngine:
 
         signal_idx = 0
 
-        # ── Pre-compute ATR array (vectorized, O(n)) ──
+        # ── Pre-compute time arrays to avoid pd.to_datetime in the loop ──
+        if 'time' in candles.columns:
+            time_series = candles['time']
+        else:
+            time_series = pd.Series(candles.index)
+            
+        if pd.api.types.is_datetime64_any_dtype(time_series):
+            time_arr = time_series.astype('int64').values / 10**9
+        else:
+            try:
+                time_arr = time_series.astype(float).values
+            except Exception:
+                time_arr = pd.to_datetime(time_series).astype('int64').values / 10**9
+                
+        dt_series = pd.to_datetime(time_series, unit='s' if not pd.api.types.is_datetime64_any_dtype(time_series) else None, utc=True)
+        dt_arr = dt_series.dt.to_pydatetime()
+        
+        # ── Pre-compute OHLC arrays (vectorized, O(n)) ──
+        opens_arr = candles["open"].values.astype(float)
         highs_arr = candles["high"].values.astype(float)
         lows_arr = candles["low"].values.astype(float)
         closes_arr = candles["close"].values.astype(float)
@@ -211,28 +231,24 @@ class BacktestEngine:
 
 
         for i in range(len(candles)):
-            bar = candles.iloc[i]
-            if 'time' in candles.columns:
-                current_time = bar['time']
-            elif hasattr(bar.name, 'timestamp'):
-                current_time = bar.name
-            else:
-                current_time = i
-            current_price = bar["close"]
-            high = bar["high"]
-            low = bar["low"]
+            current_time = time_arr[i]
+            current_time_dt = dt_arr[i]
+            current_price = closes_arr[i]
+            high = highs_arr[i]
+            low = lows_arr[i]
+            open_p = opens_arr[i]
 
             # Look up pre-computed ATR and swing points
             current_atr = atr_array[i] if i < len(atr_array) else 0.0
             swing_points = swing_cache.get(i, [])
 
-            # Calculate floating equity for Prop Firm tracking
-            open_pnl = sum(self._calc_pnl(p["direction"], p["entry_price"], current_price, p["volume"], p.get("symbol", "")) for p in self.open_positions)
-            current_time_dt = datetime.fromtimestamp(float(current_time), timezone.utc) if isinstance(current_time, (int, float)) else pd.to_datetime(current_time).to_pydatetime()
-            self.prop_firm_validator.update_equity_balance(balance + open_pnl, balance, current_time_dt)
-            if self.prop_firm_validator.is_breached and not getattr(self.prop_firm_validator, '_breach_logged', False):
-                logger.warning(f"[PROP FIRM MONITOR] Drawdown breach detected: {self.prop_firm_validator.breach_reason} — continuing backtest (informational only)")
-                self.prop_firm_validator._breach_logged = True  # log once, don't spam
+            # Calculate floating equity for Prop Firm tracking ONLY if open positions exist
+            if self.open_positions:
+                open_pnl = sum(self._calc_pnl(p["direction"], p["entry_price"], current_price, p["volume"], p.get("symbol", "")) for p in self.open_positions)
+                self.prop_firm_validator.update_equity_balance(balance + open_pnl, balance, current_time_dt)
+                if self.prop_firm_validator.is_breached and not getattr(self.prop_firm_validator, '_breach_logged', False):
+                    logger.warning(f"[PROP FIRM MONITOR] Drawdown breach detected: {self.prop_firm_validator.breach_reason} — continuing backtest (informational only)")
+                    self.prop_firm_validator._breach_logged = True  # log once, don't spam
 
             # 1. Manage existing open positions
             closed_this_bar = []
@@ -246,7 +262,7 @@ class BacktestEngine:
                     pos["lowest_price"] = min(pos.get("lowest_price", pos["entry_price"]), low)
 
                 # Check Max Holding Time (48 hours for Forex, 400 bars for CrashBoom)
-                c_ts = current_time.timestamp() if hasattr(current_time, "timestamp") else current_time
+                c_ts = current_time
                 e_ts = pos["entry_time"].timestamp() if hasattr(pos.get("entry_time"), "timestamp") else pos.get("entry_time")
                 
                 pos["bars_held"] = pos.get("bars_held", 0) + 1
@@ -287,12 +303,11 @@ class BacktestEngine:
                     tp_hit = low <= pos["take_profit"]
                     
                 # Resolve ambiguous same-bar SL+TP hit using OHLC shadow-weighted path model.
-                # If both SL and TP were touched in the same bar, use shadow (wick) lengths
-                # and distance from open to determine which was most likely hit first.
+                # If both SL and TP were touched in the same bar, use shadow lengths and
+                # distance from open to determine which was most likely hit first.
                 # Longer SL-side shadow = SL assumed first (conservative).
                 if sl_hit and tp_hit:
                     if self._simulate_wicks:
-                        open_p = bar.get("open", current_price)
                         if pos["direction"] == "BUY":
                             sl_shadow = open_p - low   # downward shadow towards SL
                             tp_shadow = high - open_p  # upward shadow towards TP
@@ -308,8 +323,8 @@ class BacktestEngine:
                             sl_hit = False
                     else:
                         # Fallback: distance-from-open tie-breaker
-                        dist_to_sl = abs(pos["stop_loss"] - bar.get("open", current_price))
-                        dist_to_tp = abs(pos["take_profit"] - bar.get("open", current_price))
+                        dist_to_sl = abs(pos["stop_loss"] - open_p)
+                        dist_to_tp = abs(pos["take_profit"] - open_p)
                         if dist_to_sl <= dist_to_tp:
                             tp_hit = False
                         else:
