@@ -83,7 +83,7 @@ export function bucketByPeriod(trades, period) {
  * previous high, but the percentage is always expressed as a fraction of
  * the starting capital, not of the peak itself.
  */
-export function maxDrawdown(equityCurve, initialBalance) {
+export function maxDrawdown(equityCurve, initialBalance, fromStartOnly = false) {
   if (!equityCurve || equityCurve.length === 0) return { maxDdPct: 0, maxDdAbs: 0 };
 
   const capital = initialBalance !== undefined ? initialBalance : equityCurve[0];
@@ -92,13 +92,23 @@ export function maxDrawdown(equityCurve, initialBalance) {
   let maxDdPct = 0;
 
   for (const val of equityCurve) {
-    if (val > peak) peak = val;
-    const ddAbs = peak - val;          // absolute $ drawdown from rolling peak
-    const ddPct = capital > 0 ? ddAbs / capital : 0;  // % anchored to initial capital
+    if (fromStartOnly) {
+      const ddAbs = equityCurve[0] - val;
+      const ddPct = capital > 0 ? ddAbs / capital : 0;
+      if (ddAbs > maxDdAbs) maxDdAbs = ddAbs;
+      if (ddPct > maxDdPct) maxDdPct = ddPct;
+    } else {
+      if (val > peak) peak = val;
+      const ddAbs = peak - val;          // absolute $ drawdown from rolling peak
+      const ddPct = capital > 0 ? ddAbs / capital : 0;  // % anchored to initial capital
 
-    if (ddAbs > maxDdAbs) maxDdAbs = ddAbs;
-    if (ddPct > maxDdPct) maxDdPct = ddPct;
+      if (ddAbs > maxDdAbs) maxDdAbs = ddAbs;
+      if (ddPct > maxDdPct) maxDdPct = ddPct;
+    }
   }
+
+  if (maxDdAbs < 0) maxDdAbs = 0;
+  if (maxDdPct < 0) maxDdPct = 0;
 
   return { maxDdPct, maxDdAbs };
 }
@@ -162,7 +172,7 @@ function maxConsecutive(boolArray) {
  * Compute detailed period stats for a given set of trades.
  * Mirrors backend compute_portfolio_stats and RiskReport logic.
  */
-export function computePeriodStats(trades, initialBalance = 10000, accountInitialBalance = null) {
+export function computePeriodStats(trades, initialBalance = 10000, accountInitialBalance = null, isSubPeriod = false) {
   if (!trades || trades.length === 0) {
     return {
       totalTrades: 0, wins: 0, losses: 0, winRate: 0,
@@ -259,7 +269,7 @@ export function computePeriodStats(trades, initialBalance = 10000, accountInitia
   const expectancyR = (winRate * avgWinR) - ((1 - winRate) * Math.abs(avgLossR));
   
   const anchorBalance = accountInitialBalance !== null ? accountInitialBalance : initialBalance;
-  const { maxDdPct, maxDdAbs } = maxDrawdown(equityCurve, anchorBalance);
+  const { maxDdPct, maxDdAbs } = maxDrawdown(equityCurve, anchorBalance, isSubPeriod);
   const sh = sharpe(returns);
   const so = sortino(returns);
   
@@ -372,7 +382,8 @@ export function computePeriodSymbolMatrix(bucketsMap, initialBalance = 10000) {
   
   for (const period of keys) {
     const trades = bucketsMap.get(period);
-    const periodStats = computePeriodStats(trades, initialBalance + cumulativePnl, initialBalance);
+    // Passing isSubPeriod = true to track Prop-Firm Absolute Drawdown from the period start
+    const periodStats = computePeriodStats(trades, initialBalance + cumulativePnl, initialBalance, true);
     
     // Sub-group by symbol inside this period
     const symbolBreakdown = {};
