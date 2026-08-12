@@ -93,18 +93,16 @@ class CircuitBreaker:
             return False, f"Max open positions reached ({total_open}/{self.max_concurrent_positions})"
 
         # 4. Daily Drawdown Percentage
-        start_of_day_balance = account_balance - self.daily_pnl
-        if self.max_daily_drawdown_pct > 0 and self.daily_pnl < 0 and start_of_day_balance > 0:
-            daily_dd_pct = (-self.daily_pnl / start_of_day_balance) * 100
+        if self.max_daily_drawdown_pct > 0 and self.daily_pnl < 0 and account_balance > 0:
+            daily_dd_pct = (-self.daily_pnl / account_balance) * 100
             if daily_dd_pct >= self.max_daily_drawdown_pct:
                 self.is_paused = True
                 self.pause_reason = f"Daily drawdown limit reached: {daily_dd_pct:.2f}% >= {self.max_daily_drawdown_pct}%"
                 return False, self.pause_reason
             
         # 5. Weekly Drawdown Percentage
-        start_of_week_balance = account_balance - self.weekly_pnl
-        if self.max_weekly_drawdown_pct > 0 and self.weekly_pnl < 0 and start_of_week_balance > 0:
-            weekly_dd_pct = (-self.weekly_pnl / start_of_week_balance) * 100
+        if self.max_weekly_drawdown_pct > 0 and self.weekly_pnl < 0 and account_balance > 0:
+            weekly_dd_pct = (-self.weekly_pnl / account_balance) * 100
             if weekly_dd_pct >= self.max_weekly_drawdown_pct:
                 self.is_paused = True
                 self.pause_reason = f"Weekly drawdown limit reached: {weekly_dd_pct:.2f}% >= {self.max_weekly_drawdown_pct}%"

@@ -442,9 +442,14 @@ class BacktestEngine:
                         if p.get("group_id") == group_id_closed
                     ) + pos.get("pnl", 0)
                     
+                    group_lots = sum(
+                        p.get("volume", 0.0) for p in self.trades
+                        if p.get("group_id") == group_id_closed
+                    ) + pos.get("volume", 0.0)
+                    
                     # Safely feed PnL back to the Risk Engine's Circuit Breaker
                     if hasattr(self.risk_engine, "on_backtest_position_closed"):
-                        self.risk_engine.on_backtest_position_closed(group_id_closed, group_pnl, current_time)
+                        self.risk_engine.on_backtest_position_closed(group_id_closed, group_pnl, current_time, pos.get("symbol", ""), group_lots)
                         
                     strategy = getattr(self, "_strategy", None)
                     if strategy is not None:

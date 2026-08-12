@@ -146,10 +146,9 @@ class RiskEngine:
         max_daily_dd = self.circuit.max_daily_drawdown_pct
         max_weekly_dd = self.circuit.max_weekly_drawdown_pct
         
-        start_of_day_balance = base_balance - self.circuit.daily_pnl
-        if max_daily_dd > 0 and start_of_day_balance > 0:
+        if max_daily_dd > 0 and base_balance > 0:
             open_risk = getattr(self.circuit, "get_open_risk", lambda: 0.0)()
-            max_loss_dollars = start_of_day_balance * (max_daily_dd / 100.0)
+            max_loss_dollars = base_balance * (max_daily_dd / 100.0)
             already_lost_dollars = -self.circuit.daily_pnl + open_risk
             remaining_daily_risk = max_loss_dollars - already_lost_dollars
             
@@ -161,10 +160,9 @@ class RiskEngine:
                 logger.info(f"Scaling down risk from ${requested_risk_dollars:.2f} to ${remaining_daily_risk:.2f} to honor {max_daily_dd}% daily drawdown.")
                 requested_risk_dollars = remaining_daily_risk
                 
-        start_of_week_balance = base_balance - self.circuit.weekly_pnl
-        if max_weekly_dd > 0 and start_of_week_balance > 0:
+        if max_weekly_dd > 0 and base_balance > 0:
             open_risk = getattr(self.circuit, "get_open_risk", lambda: 0.0)()
-            max_weekly_loss_dollars = start_of_week_balance * (max_weekly_dd / 100.0)
+            max_weekly_loss_dollars = base_balance * (max_weekly_dd / 100.0)
             already_lost_weekly = -self.circuit.weekly_pnl + open_risk
             remaining_weekly_risk = max_weekly_loss_dollars - already_lost_weekly
             
@@ -360,7 +358,10 @@ class RiskEngine:
         """Update circuit breaker state after a position closes (unused in backtest)."""
         self.circuit.position_closed(group_id, pnl, current_time)
 
-    def on_backtest_position_closed(self, group_id: str, pnl: float, current_time: datetime | None = None):
+    def on_backtest_position_closed(self, group_id: str, pnl: float, current_time: datetime | None = None, symbol: str = "", lots: float = 0.0):
         """Feed closed trade PnL directly into Circuit Breaker during backtesting."""
         if hasattr(self.circuit, "record_backtest_close"):
             self.circuit.record_backtest_close(group_id, pnl, current_time)
+            
+        if hasattr(self, "prop_firm_validator") and self.prop_firm_validator:
+            self.prop_firm_validator.record_trade_closed(symbol, lots, pnl)
