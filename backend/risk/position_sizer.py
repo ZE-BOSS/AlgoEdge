@@ -229,7 +229,7 @@ def calculate_lot_size(
     # or obscure broker where vpum is actually ~70,000 to ~120,000, using 100,000 might be
     # safe or might be very risky depending on the pair.
     # We enforce a strict refusal to trade cross-rate pairs or indices if they hit DEFAULT.
-    _SAFE_DEFAULTS = {"EURUSD", "GBPUSD", "USDJPY"}
+    _SAFE_DEFAULTS = {"EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"}
     if source == "DEFAULT":
         if symbol.upper() not in _SAFE_DEFAULTS:
             logger.error(f"[SIZER] {symbol}: No MT5 data and no profile. Refusing to size. source=DEFAULT")

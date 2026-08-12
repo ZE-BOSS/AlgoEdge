@@ -140,12 +140,48 @@ class RiskEngine:
         # Both live and backtest use MT5 data when available → InstrumentProfile fallback.
         # This matches how _calc_pnl() works (MT5 first via get_symbol_info).
 
-        requested_risk_dollars = base_balance * (self.risk_pct / 100.0) * size_modifier
-        # max_risk_hard_cap_pct: user-configurable safety cap from PropFirmParams.
-        # Passed through the risk_config dict, defaults to 3.0 if not set.
+        # Predictive Drawdown Guard - Dynamic Scaling
+        max_daily_dd = self.circuit.max_daily_drawdown_pct
+        max_weekly_dd = self.circuit.max_weekly_drawdown_pct
+        
+        start_of_day_balance = account_balance - self.circuit.daily_pnl
+        if max_daily_dd > 0 and start_of_day_balance > 0:
+            open_risk = getattr(self.circuit, "get_open_risk", lambda: 0.0)()
+            max_loss_dollars = start_of_day_balance * (max_daily_dd / 100.0)
+            already_lost_dollars = -self.circuit.daily_pnl + open_risk
+            remaining_daily_risk = max_loss_dollars - already_lost_dollars
+            
+            if remaining_daily_risk <= 0:
+                logger.warning(json.dumps({"event": "risk_rejected", "reason": "daily_drawdown_exhausted"}))
+                return False, f"Daily drawdown limit of {max_daily_dd}% is fully exhausted.", []
+            
+            if remaining_daily_risk < requested_risk_dollars:
+                logger.info(f"Scaling down risk from ${requested_risk_dollars:.2f} to ${remaining_daily_risk:.2f} to honor {max_daily_dd}% daily drawdown.")
+                requested_risk_dollars = remaining_daily_risk
+                
+        start_of_week_balance = account_balance - self.circuit.weekly_pnl
+        if max_weekly_dd > 0 and start_of_week_balance > 0:
+            open_risk = getattr(self.circuit, "get_open_risk", lambda: 0.0)()
+            max_weekly_loss_dollars = start_of_week_balance * (max_weekly_dd / 100.0)
+            already_lost_weekly = -self.circuit.weekly_pnl + open_risk
+            remaining_weekly_risk = max_weekly_loss_dollars - already_lost_weekly
+            
+            if remaining_weekly_risk <= 0:
+                logger.warning(json.dumps({"event": "risk_rejected", "reason": "weekly_drawdown_exhausted"}))
+                return False, f"Weekly drawdown limit of {max_weekly_dd}% is fully exhausted.", []
+                
+            if remaining_weekly_risk < requested_risk_dollars:
+                logger.info(f"Scaling down risk from ${requested_risk_dollars:.2f} to ${remaining_weekly_risk:.2f} to honor {max_weekly_dd}% weekly drawdown.")
+                requested_risk_dollars = remaining_weekly_risk
+
+        # Calculate lot size based on (potentially scaled down) requested_risk_dollars
         max_risk_hard_cap_pct_val = self.config.get("max_risk_hard_cap_pct", 3.0)
+        
+        # Determine the effective risk percentage for the sizing function
+        effective_risk_pct = (requested_risk_dollars / base_balance) * 100.0
+        
         total_lots = calculate_lot_size(
-            base_balance, self.risk_pct * size_modifier, entry, sl, symbol,
+            base_balance, effective_risk_pct, entry, sl, symbol,
             max_risk_hard_cap_pct=max_risk_hard_cap_pct_val,
         )
 
@@ -165,8 +201,6 @@ class RiskEngine:
             self.prop_firm_validator.validate_trade(symbol, total_lots)  # logs warnings only
 
         # 4. Multi-Position Splits (TP1/TP2/TP3)
-        # Cap = configured risk × 1.05 (5% rounding tolerance).
-        # Previously used base_balance × 0.02 (hardcoded 2%) — now user-driven.
         max_risk_cap_dollars = requested_risk_dollars * 1.05
         liquidity_target = signal_data.get("liquidity_target")
         strategy_id = signal_data.get("metadata", {}).get("strategy_id", "UNKNOWN")
@@ -178,45 +212,8 @@ class RiskEngine:
         if not tp_levels:
             return False, "No valid TP levels calculated", []
 
-        # Compute ACTUAL total risk from the real TP volumes (after lot_min enforcement + scaling).
-        # This is what will really be on the line — use it for all reporting.
         actual_total_lots = sum(tp.volume for tp in tp_levels)
         actual_risk_dollars = calculate_risk_dollars(actual_total_lots, entry, sl, symbol)
-
-        # Predictive Drawdown Guard
-        max_daily_dd = self.circuit.max_daily_drawdown_pct
-        max_weekly_dd = self.circuit.max_weekly_drawdown_pct
-        
-        start_of_day_balance = account_balance - self.circuit.daily_pnl
-        if max_daily_dd > 0 and start_of_day_balance > 0:
-            # Subtract open risk from projected PnL to account for floating drawdown
-            open_risk = getattr(self.circuit, "get_open_risk", lambda: 0.0)()
-            projected_daily_pnl = self.circuit.daily_pnl - open_risk - actual_risk_dollars
-            if projected_daily_pnl < 0:
-                projected_dd_pct = (-projected_daily_pnl / start_of_day_balance) * 100
-                if projected_dd_pct > max_daily_dd:
-                    logger.warning(json.dumps({
-                        "event": "risk_rejected",
-                        "reason": "projected_daily_drawdown_exceeded",
-                        "projected_dd": round(projected_dd_pct, 2),
-                        "limit": max_daily_dd
-                    }))
-                    return False, f"Risking ${actual_risk_dollars:.2f} (with ${open_risk:.2f} open risk) would exceed {max_daily_dd}% daily drawdown limit (projected {projected_dd_pct:.2f}%)", []
-                    
-        start_of_week_balance = account_balance - self.circuit.weekly_pnl
-        if max_weekly_dd > 0 and start_of_week_balance > 0:
-            open_risk = getattr(self.circuit, "get_open_risk", lambda: 0.0)()
-            projected_weekly_pnl = self.circuit.weekly_pnl - open_risk - actual_risk_dollars
-            if projected_weekly_pnl < 0:
-                projected_dd_pct = (-projected_weekly_pnl / start_of_week_balance) * 100
-                if projected_dd_pct > max_weekly_dd:
-                    logger.warning(json.dumps({
-                        "event": "risk_rejected",
-                        "reason": "projected_weekly_drawdown_exceeded",
-                        "projected_dd": round(projected_dd_pct, 2),
-                        "limit": max_weekly_dd
-                    }))
-                    return False, f"Risking ${actual_risk_dollars:.2f} (with ${open_risk:.2f} open risk) would exceed {max_weekly_dd}% weekly drawdown limit (projected {projected_dd_pct:.2f}%)", []
 
         # Soft warn if there is any residual overshoot vs. the pre-split calculation.
         # (Should be near-zero after multi_tp's cap enforcement, but log it for full auditability.)

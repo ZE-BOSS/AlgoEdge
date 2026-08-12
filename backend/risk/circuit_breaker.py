@@ -73,10 +73,13 @@ class CircuitBreaker:
 
         # 1. M15 Cooldown Check
         if self.last_trade_closed_m15_time is not None and current_time is not None:
-            current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
-            current_m15 = (int(current_epoch) // 900) * 900
-            if current_m15 <= self.last_trade_closed_m15_time:
-                return False, "M15 Cooldown Active: Waiting for current M15 candle to close"
+            try:
+                current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
+                current_m15 = (int(current_epoch) // 900) * 900
+                if current_m15 <= self.last_trade_closed_m15_time:
+                    return False, "M15 Cooldown Active: Waiting for current M15 candle to close"
+            except (ValueError, TypeError):
+                pass
 
         # 2. Max daily trades
         if self.max_daily_trades > 0 and self.daily_trades_count >= self.max_daily_trades:
@@ -86,8 +89,6 @@ class CircuitBreaker:
 
         # 3. Max open positions (total across symbols)
         total_open = sum(self.open_positions_by_symbol.values())
-        # Fallback to active groups if there's a discrepancy (e.g., symbol-less groups)
-        total_open = max(total_open, len(self.active_groups))
         if total_open >= self.max_concurrent_positions:
             return False, f"Max open positions reached ({total_open}/{self.max_concurrent_positions})"
 
@@ -229,8 +230,11 @@ class CircuitBreaker:
         self._record_trade_result(group_pnl, group_pnl >= 0)
         
         if current_time is not None:
-            current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
-            self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
+            try:
+                current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
+                self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
+            except (ValueError, TypeError):
+                pass
             
         if group_id in self.active_groups:
             sym = self.active_groups[group_id].get("symbol", "")
