@@ -140,6 +140,8 @@ class RiskEngine:
         # Both live and backtest use MT5 data when available → InstrumentProfile fallback.
         # This matches how _calc_pnl() works (MT5 first via get_symbol_info).
 
+        requested_risk_dollars = base_balance * (self.risk_pct / 100.0) * size_modifier
+
         # Predictive Drawdown Guard - Dynamic Scaling
         max_daily_dd = self.circuit.max_daily_drawdown_pct
         max_weekly_dd = self.circuit.max_weekly_drawdown_pct
