@@ -555,10 +555,9 @@ class BacktestEngine:
                             self.invalid_signals += 1
                             continue
 
-                        # FIX 1 (Lookahead bias): entry price is the OPEN of the current bar
                         # (which is the bar AFTER the signal was generated — guaranteed by the
                         # sig_time >= current_timestamp guard above). This eliminates same-bar fill.
-                        bar_open_price = float(bar.get("open", current_price))
+                        bar_open_price = float(open_p)
                         position = self._create_position(sig, tp, current_time, bar_open_price, group_id, balance)
                         self.open_positions.append(position)
                         logger.debug(f"[ENGINE]   Position opened: TP{tp.level} @ {bar_open_price:.5f} (bar open) | vol={tp.volume:.4f}")
@@ -597,8 +596,8 @@ class BacktestEngine:
             self.equity_curve.append(balance + post_close_pnl)
 
         # Close any remaining open positions at last price
-        last_price = candles.iloc[-1]["close"] if len(candles) > 0 else 0
-        last_time = candles.iloc[-1].get("time", len(candles) - 1) if len(candles) > 0 else 0
+        last_price = closes_arr[-1] if len(closes_arr) > 0 else 0
+        last_time = time_arr[-1] if len(time_arr) > 0 else 0
         for pos in self.open_positions[:]:
             pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], last_price, pos["volume"], pos.get("symbol", ""))
             pos["exit_price"] = last_price
