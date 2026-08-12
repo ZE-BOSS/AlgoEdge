@@ -43,11 +43,13 @@ class VWAPParams:
     """
 
     # ── Stop Loss ────────────────────────────────────────────────────────
-    sl_points: float = 40.0
+    sl_points: float = 80.0
     """
     Fixed SL in price points (instrument-specific).
-    Default 40pt: with TP1=1R this matches the source's actual 40pt TP target.
-    Adjustable from frontend. For non-NQ instruments, treated as an ATR-equivalent.
+    Default 80pt per original strategy specification (vwap_strategy_implementation_plan.md).
+    With TP1 at 1R, this gives TP1=80pt; wider than 40pt to survive spread and slippage.
+    Adjustable from frontend (Backtester strategy params or live Settings). For non-NQ
+    instruments where fixed points don't apply, sl_atr_multiplier takes over instead.
     """
 
     sl_atr_multiplier: float = 1.0

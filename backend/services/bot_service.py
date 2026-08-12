@@ -272,7 +272,26 @@ class BotService:
         except Exception as e:
             logger.error(f"Recovery error: {e}")
 
+        # ── Reconcile CircuitBreaker open_positions_by_symbol with actual MT5 state ──
+        # After a restart, cb_state.json may have stale open-position counts for symbols that
+        # were closed while the bot was offline (manual close, SL hit during downtime, etc.).
+        # Query MT5 for truly-open positions and correct the CB before the scan loop starts.
+        try:
+            import MetaTrader5 as mt5
+            if mt5.terminal_info() and self.circuit_breaker:
+                live_positions = mt5.positions_get()
+                open_symbols = [p.symbol for p in live_positions] if live_positions else []
+                self.circuit_breaker.reconcile_from_mt5(open_symbols)
+                self._log_event(
+                    f"CB reconciled with MT5: {len(open_symbols)} open position(s) — "
+                    + (", ".join(set(open_symbols)) if open_symbols else "none"),
+                    "INFO", "BOT"
+                )
+        except Exception as e:
+            logger.error(f"CB MT5 reconciliation error: {e}")
+
         return {"running": True, "message": "Bot started successfully", "symbols": self.symbols}
+
 
     async def stop(self) -> dict[str, Any]:
         """Stop the bot scanning loop."""
@@ -665,7 +684,7 @@ class BotService:
                                     approved, reason, tp_levels = self.risk_engine.evaluate_signal(
                                         signal_data,
                                         account_balance,
-                                        current_time=None,
+                                        current_time=datetime.now(timezone.utc),  # explicit time
                                         initial_balance=getattr(config.prop_firm, "initial_balance", 10000.0) if hasattr(config, "prop_firm") else 10000.0
                                     )
 

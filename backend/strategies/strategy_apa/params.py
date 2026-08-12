@@ -57,6 +57,15 @@ class APAParams:
     sl_buffer_atr: float = 0.05
     """Extra room beyond the wick stop, in ATR multiples. Range: 0–0.15."""
 
+    sl_buffer_atr_mult: float = 0.0
+    """
+    Additional SL buffer expressed as a multiple of ATR(14), added ON TOP of the
+    structural SL distance after the signal is generated.
+    0.0 = disabled (no extra buffer). Example: 0.5 widens the SL by 0.5 × ATR.
+    Use to account for spread, slippage, and news wicks in live trading.
+    Configurable from the Settings panel (live) and Backtester strategy params section.
+    """
+
     invalidation_zone_source: str = "right_shoulder"
     """
     Which candle bodies define the retest Invalidation Zone.

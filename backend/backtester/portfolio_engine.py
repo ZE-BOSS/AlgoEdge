@@ -50,17 +50,23 @@ class PortfolioBacktestEngine:
             "approved": 0
         }
         self.run_logs = []
+        # Simulation cost params
+        self._slippage_pips = float(risk_config.get("slippage_pips", 0.0))
+        self._commission_per_lot = float(risk_config.get("commission_per_lot", 0.0))
+        self._spread_pips = float(risk_config.get("spread_pips", 0.0))
+        # Wick simulation flag
+        self._simulate_wicks = bool(risk_config.get("simulate_wicks", True))
 
     def _calc_pnl(self, direction: str, entry: float, exit_price: float, volume: float, symbol: str) -> float:
         """
-        Calculate P&L using the same data source chain as position sizing:
-        MT5 live data (when connected) → InstrumentProfile → Standard defaults.
-        Matches engine.py _calc_pnl exactly.
+        Calculate P&L with simulation costs applied.
+        Matches engine.py _calc_pnl exactly (slippage, spread, commission deducted).
         """
         info = get_symbol_info(symbol)
         tick_value = info.get("tick_value", 1.0)
         tick_size  = info.get("tick_size",  0.00001)
         source     = info.get("source", "UNKNOWN")
+        pip_size   = get_pip_size(symbol)
 
         if source == "DEFAULT":
             logger.warning(f"[_calc_pnl] {symbol}: PnL computed with DEFAULT fallback — may be incorrect!")
@@ -69,10 +75,31 @@ class PortfolioBacktestEngine:
             logger.warning(f"[_calc_pnl] {symbol}: tick_size or tick_value is zero — returning 0 PnL.")
             return 0.0
 
-        price_diff = exit_price - entry
         value_per_unit_move = tick_value / tick_size
+
+        # Apply slippage: shift effective entry against the trade direction
+        if self._slippage_pips > 0 and pip_size > 0:
+            slippage_price = self._slippage_pips * pip_size
+            if _is_buy(direction):
+                entry = entry + slippage_price  # BUY fills higher (worse)
+            else:
+                entry = entry - slippage_price  # SELL fills lower (worse)
+
+        price_diff = exit_price - entry
         raw_pnl = price_diff * value_per_unit_move * volume
-        return raw_pnl if direction == "BUY" else -raw_pnl
+        if not _is_buy(direction):
+            raw_pnl = -raw_pnl
+
+        # Deduct spread cost (pip cost of crossing bid/ask at entry)
+        if self._spread_pips > 0 and pip_size > 0:
+            spread_cost = self._spread_pips * pip_size * value_per_unit_move * volume
+            raw_pnl -= spread_cost
+
+        # Deduct round-turn commission
+        if self._commission_per_lot > 0:
+            raw_pnl -= self._commission_per_lot * volume
+
+        return raw_pnl
 
     def run(
         self,
@@ -232,13 +259,31 @@ class PortfolioBacktestEngine:
                     sl_hit = high >= pos["stop_loss"]
                     tp_hit = low <= pos["take_profit"]
                     
+                # Wick simulation — resolve ambiguous same-bar SL+TP hit
+                # Mirrors engine.py logic exactly.
                 if sl_hit and tp_hit:
-                    dist_to_sl = abs(pos["stop_loss"] - bar.get("open", current_price))
-                    dist_to_tp = abs(pos["take_profit"] - bar.get("open", current_price))
-                    if dist_to_sl <= dist_to_tp:
-                        tp_hit = False
+                    if self._simulate_wicks:
+                        open_p = bar.get("open", current_price)
+                        if pos["direction"] == "BUY":
+                            sl_shadow = open_p - low
+                            tp_shadow = high - open_p
+                        else:
+                            sl_shadow = high - open_p
+                            tp_shadow = open_p - low
+                        dist_to_sl = abs(pos["stop_loss"] - open_p)
+                        dist_to_tp = abs(pos["take_profit"] - open_p)
+                        sl_wins = (sl_shadow >= tp_shadow) or (dist_to_sl <= dist_to_tp)
+                        if sl_wins:
+                            tp_hit = False
+                        else:
+                            sl_hit = False
                     else:
-                        sl_hit = False
+                        dist_to_sl = abs(pos["stop_loss"] - bar.get("open", current_price))
+                        dist_to_tp = abs(pos["take_profit"] - bar.get("open", current_price))
+                        if dist_to_sl <= dist_to_tp:
+                            tp_hit = False
+                        else:
+                            sl_hit = False
 
                 # Update MAE/MFE using this bar's high/low BEFORE the exit checks below,
                 # so the excursion on the closing bar itself is captured — see engine.py
@@ -335,16 +380,36 @@ class PortfolioBacktestEngine:
 
                 balance += pos.get("pnl", 0)
                 pos["balance_after"] = balance
-                self.risk_engine.on_position_closed(pos.get("group_id", "unknown"), pos.get("pnl", 0), current_time)
+
+                # ── Group-level PnL accumulation (mirrors single-symbol engine.py pattern) ──
+                # Only call on_backtest_position_closed when the last TP leg for a group closes.
+                # (e.g., when a multi-TP position is still active). This avoids false
+                # CB trips and ghost open-position counts.
+                group_id_closed = pos.get("group_id", "unknown")
+                remaining_legs = sum(
+                    1 for p in self.open_positions
+                    if p.get("group_id") == group_id_closed
+                    and p not in positions_to_remove
+                    and p != pos
+                )
+                if remaining_legs == 0:
+                    group_pnl = sum(
+                        p.get("pnl", 0) for p in self.trades
+                        if p.get("group_id") == group_id_closed
+                    ) + pos.get("pnl", 0)
+                    if hasattr(self.risk_engine, "on_backtest_position_closed"):
+                        self.risk_engine.on_backtest_position_closed(group_id_closed, group_pnl, current_time)
+
                 self.trades.append(pos)
                 positions_to_remove.append(pos)
-                
+
                 self.run_logs.append({
                     "time": _epoch_to_iso(current_time),
                     "level": "INFO",
                     "category": "BACKTEST_LOG",
                     "message": f"Closed {pos['direction']} {sym} {pos.get('exit_reason')} | PnL: ${pos.get('pnl', 0):.2f}"
                 })
+
                 
             for p in positions_to_remove:
                 if p in self.open_positions:

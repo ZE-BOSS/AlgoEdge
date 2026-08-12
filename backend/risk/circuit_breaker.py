@@ -20,6 +20,11 @@ logger = get_logger(__name__)
 CB_STATE_FILE = "backend/data/cb_state.json"
 
 
+def _utc_now_str() -> str:
+    """ISO timestamp string for the current UTC time. Used to tag group open times."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 class CircuitBreaker:
     """
     Portfolio-level risk guards that pause trading when limits are hit.
@@ -125,15 +130,30 @@ class CircuitBreaker:
         return True, "OK"
 
     def position_opened(self, group_id: str, sub_trade_count: int, symbol: str = "", initial_risk_dollars: float = 0.0):
-        """Track a new position opening."""
+        """
+        Track a new signal group opening.
+
+        Increments open_positions_by_symbol[symbol] by 1 per SIGNAL GROUP,
+        regardless of how many TP legs (sub_trade_count) are placed. This ensures
+        max_concurrent_positions and max_positions_per_symbol correctly gate on
+        concurrent signals, not individual TP legs. A user setting max_concurrent=3
+        expects 3 active signals, not 3 TP legs.
+
+        daily_trades_count is incremented here (on group open), not on close.
+        This is intentional: the limit is conservative — it prevents opening the Nth
+        signal even if previous groups have already closed (groups-opened semantics).
+        """
         self.daily_trades_count += 1
         self.active_groups[group_id] = {
-            "pnl": 0.0, 
-            "sub_trades": sub_trade_count, 
+            "pnl": 0.0,
+            "sub_trades": sub_trade_count,
             "symbol": symbol,
-            "initial_risk": initial_risk_dollars
+            "initial_risk": initial_risk_dollars,
+            # Store open timestamp so daily reset can detect cross-day stale groups
+            "opened_at": _utc_now_str(),
         }
         if symbol:
+            # Increment by 1 per group, not by sub_trade_count
             self.open_positions_by_symbol[symbol] = self.open_positions_by_symbol.get(symbol, 0) + 1
         self.save_state()
 
@@ -285,6 +305,36 @@ class CircuitBreaker:
         self.weekly_pnl += pnl
         self.save_state()
 
+    def reconcile_from_mt5(self, open_symbols: list[str]):
+        """
+        Reconcile open_positions_by_symbol against actual MT5 state.
+
+        Called on bot startup after querying MT5 for currently open positions.
+        Resets open_positions_by_symbol to match reality, clearing any stale counts
+        from cb_state.json that were left over from trades closed while the bot
+        was offline (e.g. manual MT5 close, SL hit during downtime).
+
+        Args:
+            open_symbols: List of symbol strings for positions currently open in MT5.
+                          Duplicates are counted (e.g. ['EURUSD', 'EURUSD'] = 2 open on EURUSD).
+        """
+        fresh_counts: dict[str, int] = {}
+        for sym in open_symbols:
+            fresh_counts[sym] = fresh_counts.get(sym, 0) + 1
+
+        stale = self.open_positions_by_symbol
+        self.open_positions_by_symbol = fresh_counts
+
+        if stale != fresh_counts:
+            logger.info(
+                f"[CB] reconcile_from_mt5: open positions corrected. "
+                f"Was={stale} → Now={fresh_counts}"
+            )
+        else:
+            logger.info(f"[CB] reconcile_from_mt5: state consistent — {fresh_counts}")
+
+        self.save_state()
+
     def manual_resume(self):
         """User manually re-enables trading after a streak pause. Resets ALL state."""
         self.is_paused = False
@@ -331,8 +381,21 @@ class CircuitBreaker:
             self.daily_pnl = 0.0
             self.daily_trades_count = 0
             self.last_reset_day = today
+            # Purge fully-closed groups that survived from previous days.
+            # A group with sub_trades <= 0 is done — it should not continue to count
+            # against open_positions_by_symbol, but can linger in active_groups if the
+            # final position_closed() call was missed (e.g. MT5 closed it externally).
+            stale_gids = [gid for gid, g in self.active_groups.items() if g.get("sub_trades", 1) <= 0]
+            for gid in stale_gids:
+                sym = self.active_groups[gid].get("symbol", "")
+                if sym and sym in self.open_positions_by_symbol:
+                    self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
+                    if self.open_positions_by_symbol[sym] == 0:
+                        del self.open_positions_by_symbol[sym]
+                del self.active_groups[gid]
+            if stale_gids:
+                logger.info(f"[CB] Daily reset: purged {len(stale_gids)} stale groups: {stale_gids}")
             # Auto-resume daily pauses only — weekly streak is preserved intentionally.
-            # (manual_resume() was previously called here, which wiped weekly_consecutive_losses.)
             if self.is_paused and "daily" in self.pause_reason.lower():
                 self._daily_resume()
 

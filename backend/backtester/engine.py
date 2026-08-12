@@ -132,6 +132,12 @@ class BacktestEngine:
             "approved": 0
         }
         self.run_logs = []
+        # Simulation cost params (read from risk_config; default 0 = no cost)
+        self._slippage_pips = float(risk_config.get("slippage_pips", 0.0))
+        self._commission_per_lot = float(risk_config.get("commission_per_lot", 0.0))
+        self._spread_pips = float(risk_config.get("spread_pips", 0.0))
+        # Wick simulation: use OHLC shadow-weighted path model for same-bar SL+TP resolution
+        self._simulate_wicks = bool(risk_config.get("simulate_wicks", True))
 
     def run(
         self,
@@ -280,14 +286,34 @@ class BacktestEngine:
                     sl_hit = high >= pos["stop_loss"]
                     tp_hit = low <= pos["take_profit"]
                     
-                # C9: Look-ahead bias handling
+                # Resolve ambiguous same-bar SL+TP hit using OHLC shadow-weighted path model.
+                # If both SL and TP were touched in the same bar, use shadow (wick) lengths
+                # and distance from open to determine which was most likely hit first.
+                # Longer SL-side shadow = SL assumed first (conservative).
                 if sl_hit and tp_hit:
-                    dist_to_sl = abs(pos["stop_loss"] - bar.get("open", current_price))
-                    dist_to_tp = abs(pos["take_profit"] - bar.get("open", current_price))
-                    if dist_to_sl <= dist_to_tp:
-                        tp_hit = False
+                    if self._simulate_wicks:
+                        open_p = bar.get("open", current_price)
+                        if pos["direction"] == "BUY":
+                            sl_shadow = open_p - low   # downward shadow towards SL
+                            tp_shadow = high - open_p  # upward shadow towards TP
+                        else:
+                            sl_shadow = high - open_p  # upward shadow towards SL
+                            tp_shadow = open_p - low   # downward shadow towards TP
+                        dist_to_sl = abs(pos["stop_loss"] - open_p)
+                        dist_to_tp = abs(pos["take_profit"] - open_p)
+                        sl_wins = (sl_shadow >= tp_shadow) or (dist_to_sl <= dist_to_tp)
+                        if sl_wins:
+                            tp_hit = False
+                        else:
+                            sl_hit = False
                     else:
-                        sl_hit = False
+                        # Fallback: distance-from-open tie-breaker
+                        dist_to_sl = abs(pos["stop_loss"] - bar.get("open", current_price))
+                        dist_to_tp = abs(pos["take_profit"] - bar.get("open", current_price))
+                        if dist_to_sl <= dist_to_tp:
+                            tp_hit = False
+                        else:
+                            sl_hit = False
 
                 # Update MAE/MFE using this bar's high/low BEFORE the exit checks below,
                 # so the excursion on the closing bar itself is captured — previously
@@ -677,17 +703,21 @@ class BacktestEngine:
     def _calc_pnl(self, direction: str, entry: float, exit_price: float, volume: float, symbol: str) -> float:
         """
         Calculate P&L using the same data source chain as position sizing:
-        MT5 live data (when connected) → InstrumentProfile → Standard defaults.
+        MT5 live data (when connected) -> InstrumentProfile -> Standard defaults.
 
-        This ensures that backtesting PnL is always computed with the same
-        tick_value / tick_size as the lot sizing, preventing sizing-vs-PnL drift.
-        Formula: pnl = (price_diff / tick_size) * tick_value * volume
+        Applies simulation costs when configured:
+          - slippage_pips: shifts effective entry price against the trade direction
+          - spread_pips: pip cost of crossing bid/ask at entry (deducted from PnL)
+          - commission_per_lot: round-turn broker commission (deducted from PnL)
+
+        Formula: pnl = (price_diff / tick_size) * tick_value * volume - costs
         """
         from backend.risk.position_sizer import get_symbol_info
         info = get_symbol_info(symbol)
         tick_value = info.get("tick_value", 1.0)
         tick_size  = info.get("tick_size",  0.00001)
         source     = info.get("source", "UNKNOWN")
+        pip_size   = get_pip_size(symbol)
 
         if source == "DEFAULT":
             logger.warning(f"[_calc_pnl] {symbol}: PnL computed with DEFAULT fallback — may be incorrect!")
@@ -696,7 +726,28 @@ class BacktestEngine:
             logger.warning(f"[_calc_pnl] {symbol}: tick_size or tick_value is zero — returning 0 PnL.")
             return 0.0
 
-        price_diff = exit_price - entry
         value_per_unit_move = tick_value / tick_size
+
+        # Apply slippage: shift effective entry against the trade direction
+        if self._slippage_pips > 0 and pip_size > 0:
+            slippage_price = self._slippage_pips * pip_size
+            if _is_buy(direction):
+                entry = entry + slippage_price  # BUY fills higher (worse)
+            else:
+                entry = entry - slippage_price  # SELL fills lower (worse)
+
+        price_diff = exit_price - entry
         raw_pnl = price_diff * value_per_unit_move * volume
-        return raw_pnl if direction == "BUY" else -raw_pnl
+        if not _is_buy(direction):
+            raw_pnl = -raw_pnl
+
+        # Deduct spread cost (pip cost of crossing bid/ask at entry)
+        if self._spread_pips > 0 and pip_size > 0:
+            spread_cost = self._spread_pips * pip_size * value_per_unit_move * volume
+            raw_pnl -= spread_cost
+
+        # Deduct round-turn commission
+        if self._commission_per_lot > 0:
+            raw_pnl -= self._commission_per_lot * volume
+
+        return raw_pnl

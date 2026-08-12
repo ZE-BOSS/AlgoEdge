@@ -84,6 +84,12 @@ class BacktestRequest(BaseModel):
     # ── Multi-Strategy Filters ──
     session_filter_enabled: bool = True
     manual_bias_overrides: dict[str, Any] = {}
+    # ── Simulation Costs (BUG-8) — auto-populated from MT5 when connected ──
+    slippage_pips: float = 0.0       # Entry/exit slippage per trade in pips
+    commission_per_lot: float = 0.0  # Round-turn commission in account currency per lot
+    spread_pips: float = 0.0         # Fixed spread cost applied at entry in pips
+    # ── Wick Simulation (BUG-9) ──
+    simulate_wicks: bool = True      # Use OHLC shadow-weighted model for ambiguous SL/TP bars
 
 class SaveBacktestRequest(BaseModel):
     backtest_data: dict[str, Any]
@@ -109,8 +115,8 @@ class PortfolioBacktestRequest(BaseModel):
 
     risk_per_trade_pct: float = 1.0
     min_rr: float = 3.0
-    max_daily_consecutive_losses: int = 3
-    max_weekly_consecutive_losses: int = 5
+    max_daily_drawdown_pct: float = 3.0
+    max_weekly_drawdown_pct: float = 6.0
     max_concurrent_positions: int = 5
     max_positions_per_symbol: int = 1
     max_daily_trades: int = 10
@@ -138,6 +144,12 @@ class PortfolioBacktestRequest(BaseModel):
     # ── Risk Safety Cap ──
     max_risk_hard_cap_pct: float = 3.0  # Absolute safety cap from PropFirmParams
     session_filter_enabled: bool = True
+    # ── Simulation Costs (BUG-8) — auto-populated from MT5 when connected ──
+    slippage_pips: float = 0.0       # Entry/exit slippage per trade in pips
+    commission_per_lot: float = 0.0  # Round-turn commission in account currency per lot
+    spread_pips: float = 0.0         # Fixed spread cost applied at entry in pips
+    # ── Wick Simulation (BUG-9) ──
+    simulate_wicks: bool = True      # Use OHLC shadow-weighted model for ambiguous SL/TP bars
 
 
 @router.get("/backtest_status")
@@ -324,6 +336,10 @@ async def run_backtest_endpoint(
                 for k, v in req.strategy_params.items():
                     if hasattr(config.vwap, k):
                         setattr(config.vwap, k, v)
+                # Sync VWAP's internal daily trade cap with the CB limit,
+                # unless the user explicitly provided one in strategy_params.
+                if "max_trades_per_day" not in req.strategy_params and req.max_daily_trades is not None:
+                    config.vwap.max_trades_per_day = req.max_daily_trades
             elif req.strategy_id == "DriftJumpAlpha_v1":
                 for k, v in req.strategy_params.items():
                     if hasattr(config.drift_jump_alpha, k):
@@ -533,6 +549,11 @@ async def run_backtest_endpoint(
                 "manual_bias_overrides": req.manual_bias_overrides,
                 "prop_firm": req.prop_firm,
                 "max_risk_hard_cap_pct": req.max_risk_hard_cap_pct,
+                # Simulation costs and wick simulation
+                "slippage_pips": req.slippage_pips,
+                "commission_per_lot": req.commission_per_lot,
+                "spread_pips": req.spread_pips,
+                "simulate_wicks": req.simulate_wicks,
                 **req.risk_config,
             }
 
@@ -770,6 +791,11 @@ async def run_portfolio_backtest_endpoint(
                 "max_weekly_profit": req.max_weekly_profit,
                 "prop_firm": req.prop_firm,
                 "max_risk_hard_cap_pct": req.max_risk_hard_cap_pct,
+                # Simulation costs and wick simulation
+                "slippage_pips": req.slippage_pips,
+                "commission_per_lot": req.commission_per_lot,
+                "spread_pips": req.spread_pips,
+                "simulate_wicks": req.simulate_wicks,
             }
 
 
@@ -814,6 +840,10 @@ async def run_portfolio_backtest_endpoint(
                         setattr(config.bias_ifvg, k, v)
                     elif strat_id == "NYOpenRetest_v1" and hasattr(config.ny_open_retest, k):
                         setattr(config.ny_open_retest, k, v)
+                # Sync VWAP's internal daily trade cap with the CB limit,
+                # unless the user explicitly provided one in strategy_params.
+                if strat_id == "VWAP_v1" and "max_trades_per_day" not in sym_cfg.strategy_params:
+                    config.vwap.max_trades_per_day = req.max_daily_trades
 
                 config.instrument_settings = [InstrumentSettings(symbol=sym, strategy_id=strat_id)]
                 if strat_id == "SMC_v1":

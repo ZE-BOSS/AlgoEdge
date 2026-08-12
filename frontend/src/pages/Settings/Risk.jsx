@@ -53,7 +53,20 @@ export default function RiskSettings() {
       account_size: 10000.0,
       initial_balance: 10000.0,
       max_lot_sizes: {}
-    }
+    },
+    // FEAT-1: Live strategy params
+    vwap: {
+      sl_points: 80.0,
+      max_trades_per_day: 5,
+    },
+    crt: {
+      min_sl_pips: 15.0,
+      sl_atr_mult: 1.0,
+      target_r_multiple: 1.5,
+    },
+    apa: {
+      sl_buffer_atr_mult: 0.0,
+    },
   });
 
   // Load current config from backend
@@ -76,6 +89,10 @@ export default function RiskSettings() {
         // Additional top-level mapping
         prop_firm: cfg.prop_firm || prev.prop_firm,
         compounding_enabled: cfg.compounding?.compounding_enabled ?? prev.compounding_enabled,
+        // Strategy sub-configs (FEAT-1)
+        vwap: { ...prev.vwap, ...(cfg.vwap || {}) },
+        crt:  { ...prev.crt,  ...(cfg.crt  || {}) },
+        apa:  { ...prev.apa,  ...(cfg.apa  || {}) },
       }));
     }
   }, [remoteConfig]);
@@ -92,11 +109,15 @@ export default function RiskSettings() {
   const update = (key, val) => setConfig({ ...config, [key]: val });
 
   const handleSave = () => {
-    const { prop_firm, compounding_enabled, ...riskParams } = config;
+    const { prop_firm, compounding_enabled, vwap, crt, apa, ...riskParams } = config;
     mutation.mutate({
       risk: riskParams,
       prop_firm: prop_firm,
-      compounding: { compounding_enabled }
+      compounding: { compounding_enabled },
+      // Strategy sub-configs (FEAT-1)
+      vwap,
+      crt,
+      apa,
     });
   };
 
@@ -383,6 +404,84 @@ export default function RiskSettings() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* FEAT-1: Strategy-Specific Parameters (live trading) */}
+      <div className="card">
+        <div className="card-header"><span className="card-title">⚙ Strategy Parameters</span></div>
+        <div style={{ display: 'grid', gap: 20 }}>
+
+          {/* VWAP */}
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)', marginBottom: 8 }}>VWAP Strategy</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label>SL Points (Fixed)</label>
+                <input type="number" step="1" min="10" value={config.vwap?.sl_points ?? 80}
+                  onChange={e => update('vwap', { ...config.vwap, sl_points: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Fixed stop-loss distance in broker points for the VWAP strategy. Applies to live trading when VWAP is active. Default: 80 points.
+                </div>
+              </div>
+              <div>
+                <label>Max Trades / Day</label>
+                <input type="number" step="1" min="1" value={config.vwap?.max_trades_per_day ?? 5}
+                  onChange={e => update('vwap', { ...config.vwap, max_trades_per_day: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Maximum signals the VWAP engine will generate per day (independent of, but also bounded by, the global Max Daily Trades circuit breaker above).
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* CRT */}
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--yellow)', marginBottom: 8 }}>CRT Strategy — Stop-Loss Floors</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <div>
+                <label>Min SL Pips (Hard Floor)</label>
+                <input type="number" step="0.5" min="0" value={config.crt?.min_sl_pips ?? 15}
+                  onChange={e => update('crt', { ...config.crt, min_sl_pips: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Hard minimum SL distance in pips. Prevents tiny CRT candles from producing unrealistically tight stops. Set 0 to disable. Default: 15 pips.
+                </div>
+              </div>
+              <div>
+                <label>SL ATR Multiplier</label>
+                <input type="number" step="0.1" min="0" value={config.crt?.sl_atr_mult ?? 1.0}
+                  onChange={e => update('crt', { ...config.crt, sl_atr_mult: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  SL must be at least N × ATR(14). Whichever is larger (ATR floor or Pips floor) wins. Set 0 to disable ATR floor. Default: 1.0×.
+                </div>
+              </div>
+              <div>
+                <label>Target R-Multiple</label>
+                <input type="number" step="0.1" min="0.5" value={config.crt?.target_r_multiple ?? 1.5}
+                  onChange={e => update('crt', { ...config.crt, target_r_multiple: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Minimum reward-to-risk ratio for CRT setups. TP is extended to maintain this R-multiple when the SL floor is applied. Default: 1.5R.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* APA/SMC SL Buffer */}
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--green)', marginBottom: 8 }}>APA / SMC Strategy — SL Buffer</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+              <div>
+                <label>SL Buffer (% of ATR)</label>
+                <input type="number" step="0.05" min="0" max="2" value={config.apa?.sl_buffer_atr_mult ?? 0}
+                  onChange={e => update('apa', { ...config.apa, sl_buffer_atr_mult: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Extra cushion added beyond the structure extreme for the SL, expressed as a multiple of the 14-period ATR.
+                  E.g., 0.1 = 10% of ATR added as buffer. Prevents stops being clipped by micro wicks. Default: 0 (off).
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
       </div>
 
       <button className="btn btn-primary" style={{ justifySelf: 'start' }} onClick={handleSave} disabled={mutation.isPending}>

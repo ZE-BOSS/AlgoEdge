@@ -1112,6 +1112,9 @@ export default function Backtester() {
       entry_confirmation_tf: 'M5', target_rr: 1.0, require_unfilled_htf_fvg: true,
       stop_method: 'swing_high_low', target_rr_range_min: 1.0, target_rr_range_max: 3.0, max_trades_per_day: 2,
       range_window_start: '08:00', range_window_end: '08:15', earliest_valid_break_time: '09:30', session_end: '11:00', stop_buffer_points: 5.0, fixed_target_points: 15.0, dynamic_target_override: true,
+      // Simulation Costs (BUG-8/BUG-9)
+      slippage_pips: 0.0, commission_per_lot: 0.0, spread_pips: 0.0, simulate_wicks: true,
+      vwap_sl_points: 80.0,
     };
   });
 
@@ -1274,7 +1277,7 @@ export default function Backtester() {
           vwap_anchor_minutes: form.vwap_anchor_minutes || 15,
           momentum_lookback_bars: form.momentum_lookback_bars || 4,
           momentum_threshold_pct: form.momentum_threshold_pct || 0.1,
-          sl_points: form.sl_points || 40.0
+          sl_points: form.sl_points || 80.0  // BUG-5 fix: default 80 (was 40)
         };
       } else if (form.strategy_id === 'DriftJumpAlpha_v1') {
         payload.strategy_params = {
@@ -1326,6 +1329,12 @@ export default function Backtester() {
           dynamic_target_override: form.dynamic_target_override
         };
       }
+
+      // Add simulation costs to every backtest payload (BUG-8/BUG-9)
+      payload.slippage_pips = form.slippage_pips ?? 0.0;
+      payload.commission_per_lot = form.commission_per_lot ?? 0.0;
+      payload.spread_pips = form.spread_pips ?? 0.0;
+      payload.simulate_wicks = form.simulate_wicks ?? true;
 
       return runBacktest(payload);
     },
@@ -1535,6 +1544,18 @@ export default function Backtester() {
                 </div>
               </div>
             )}
+            {form.strategy_id === 'VWAP_v1' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
+                <div><label style={{ fontSize: '0.7rem' }}>VWAP Anchor (min)</label><input type="number" value={form.vwap_anchor_minutes ?? 15} onChange={e => u('vwap_anchor_minutes', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Momentum Lookback</label><input type="number" value={form.momentum_lookback_bars ?? 4} onChange={e => u('momentum_lookback_bars', +e.target.value)} /></div>
+                <div><label style={{ fontSize: '0.7rem' }}>Momentum Threshold (%)</label><input type="number" step="0.01" value={form.momentum_threshold_pct ?? 0.1} onChange={e => u('momentum_threshold_pct', +e.target.value)} /></div>
+                <div>
+                  <label style={{ fontSize: '0.7rem' }}>SL Points</label>
+                  <input type="number" step="1" min="10" value={form.sl_points ?? 80} onChange={e => u('sl_points', +e.target.value)} />
+                  <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Fixed SL distance in price points (default: 80)</div>
+                </div>
+              </div>
+            )}
             {form.strategy_id === 'CRT_v1' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                 <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><select value={form.htf_timeframe} onChange={e => u('htf_timeframe', e.target.value)}>{['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
@@ -1641,6 +1662,41 @@ export default function Backtester() {
               <div><label style={{ fontSize: '0.7rem' }}>Fixed Trail Pips</label><input type="number" value={form.trail_pips} onChange={e => u('trail_pips', +e.target.value)} /></div>
             </div>
           </div>)}
+
+          {/* ── FEAT-2: Simulation Costs Section ── */}
+          <details style={{ background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)', padding: '10px 14px' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, color: 'var(--yellow)', userSelect: 'none' }}>
+              ⚙ Simulation Costs & Realism
+            </summary>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 12 }}>
+              <div>
+                <label style={{ fontSize: '0.7rem' }}>Slippage (pips)</label>
+                <input type="number" step="0.1" min="0" value={form.slippage_pips ?? 0} onChange={e => u('slippage_pips', +e.target.value)} />
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Extra pips added to entry price against the trade direction (simulates broker fill slippage). 1–3 pips typical for Forex.</div>
+              </div>
+              <div>
+                <label style={{ fontSize: '0.7rem' }}>Commission / Lot (account currency)</label>
+                <input type="number" step="0.5" min="0" value={form.commission_per_lot ?? 0} onChange={e => u('commission_per_lot', +e.target.value)} />
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Round-turn commission per lot deducted from PnL. Typical: $3.50–$7.00/lot for ECN brokers.</div>
+              </div>
+              <div>
+                <label style={{ fontSize: '0.7rem' }}>Spread (pips)</label>
+                <input type="number" step="0.1" min="0" value={form.spread_pips ?? 0} onChange={e => u('spread_pips', +e.target.value)} />
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Fixed bid/ask spread cost deducted at entry. Typical: 0.5–2 pips Forex, wider on synthetics/metals.</div>
+              </div>
+              <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderTop: '1px solid var(--border-subtle)' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.75rem', flex: '0 0 auto' }}>
+                  <input type="checkbox" checked={form.simulate_wicks ?? true} onChange={e => u('simulate_wicks', e.target.checked)} style={{ width: 14, height: 14 }} />
+                  Wick Simulation
+                </label>
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>
+                  When enabled, uses an OHLC shadow-weighted model to resolve bars where both SL and TP are wicked in the same candle.
+                  The SL-side wick depth and distance from open are used to conservatively assign which was hit first.
+                  Recommended ON for synthetics (V75, Boom/Crash) with tight SLs.
+                </div>
+              </div>
+            </div>
+          </details>
 
           <div style={{ display: 'flex', gap: 8 }}>
             {!isRunning ? (
