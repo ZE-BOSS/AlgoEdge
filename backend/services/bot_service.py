@@ -379,8 +379,36 @@ class BotService:
                 from backend.risk.prop_firm_validator import PropFirmValidator
                 from backend.strategies.registry import get_strategy
 
-                if not self.circuit_breaker:
-                    self.circuit_breaker = CircuitBreaker(config.risk.to_dict() if hasattr(config.risk, 'to_dict') else config.risk.__dict__)
+                # Bug 11 fix: rebuild CircuitBreaker when key risk settings change.
+                # Previously initialized once (`if not self.circuit_breaker`) and
+                # never updated, so max_daily_trades / max_concurrent_positions
+                # changes made in the frontend had no effect on a running bot.
+                risk_dict = config.risk.to_dict() if hasattr(config.risk, 'to_dict') else vars(config.risk)
+                _cb_fp = (
+                    risk_dict.get("max_daily_trades"),
+                    risk_dict.get("max_concurrent_positions"),
+                    risk_dict.get("max_daily_drawdown_pct"),
+                    risk_dict.get("max_weekly_drawdown_pct"),
+                    risk_dict.get("max_positions_per_symbol"),
+                )
+                if self.circuit_breaker is None or getattr(self, "_cb_fp", None) != _cb_fp:
+                    # Preserve live state when only non-limit settings change
+                    old_cb = self.circuit_breaker
+                    self.circuit_breaker = CircuitBreaker(risk_dict)
+                    if old_cb is not None:
+                        # Carry over live state counters so open positions aren't lost
+                        self.circuit_breaker.daily_trades_count = old_cb.daily_trades_count
+                        self.circuit_breaker.daily_pnl = old_cb.daily_pnl
+                        self.circuit_breaker.weekly_pnl = old_cb.weekly_pnl
+                        self.circuit_breaker.open_positions_by_symbol = old_cb.open_positions_by_symbol
+                        self.circuit_breaker.active_groups = old_cb.active_groups
+                        self.circuit_breaker.is_paused = old_cb.is_paused
+                        self.circuit_breaker.pause_reason = old_cb.pause_reason
+                        self.circuit_breaker.last_reset_day = old_cb.last_reset_day
+                        self.circuit_breaker.last_reset_week = old_cb.last_reset_week
+                        self.circuit_breaker._day_start_balance = old_cb._day_start_balance
+                    self._cb_fp = _cb_fp
+                    logger.info("[BOT] CircuitBreaker rebuilt with updated risk config.")
                 if not getattr(self, "prop_firm_validator", None):
                     self.prop_firm_validator = PropFirmValidator(getattr(config, "prop_firm", None) or config)
                 else:
@@ -511,7 +539,12 @@ class BotService:
                                 sig_time = signal.metadata.get('timestamp') if isinstance(getattr(signal, 'metadata', None), dict) else getattr(signal, 'timestamp', None)
                                 if not sig_time and hasattr(signal, 'chart_data') and signal.chart_data:
                                     sig_time = signal.chart_data[-1].get('time')
-                                if sig_time and sig_time == self._last_signal_time.get(symbol):
+                                # Build a setup fingerprint from (entry, SL, direction).
+                                # Using chart_data[-1]['time'] alone would make all scans
+                                # within the same 5-min candle share the same cooldown key,
+                                # silently dropping every re-scan after the first one.
+                                _sig_fp = (round(signal.entry_price, 5), round(signal.stop_loss, 5), signal.direction)
+                                if _sig_fp == self._last_signal_time.get(symbol):
                                     continue
                                 
                                 # Do NOT update self._last_signal_time here. Wait until we know if it was EXECUTED or REJECTED.
@@ -535,6 +568,7 @@ class BotService:
                                     reason_str = "; ".join(reasons)
                                     for reason in reasons:
                                         self._log_event(f"[REJECTED] {reason}", "SIGNAL", "SIGNAL")
+                                    self._last_signal_time[symbol] = _sig_fp  # Prevent re-evaluation on next scan
                                     await self._save_signal_state(signal, "SKIPPED", reason_str)
                                     continue
 
@@ -685,7 +719,16 @@ class BotService:
                                         signal_data,
                                         account_balance,
                                         current_time=datetime.now(timezone.utc),  # explicit time
-                                        initial_balance=getattr(config.prop_firm, "initial_balance", 10000.0) if hasattr(config, "prop_firm") else 10000.0
+                                        # Bug 12 fix: use actual account_balance as initial_balance
+                                        # for personal accounts.  The old code always read
+                                        # prop_firm.initial_balance (defaults to $10,000) even
+                                        # when account_mode == 'personal', causing lot sizes to
+                                        # be calculated against $10k instead of the real $25k.
+                                        initial_balance=(
+                                            getattr(config.prop_firm, "initial_balance", account_balance)
+                                            if getattr(getattr(config, "prop_firm", None), "account_mode", "personal") == "prop_firm"
+                                            else account_balance
+                                        )
                                     )
 
                                     if approved:
@@ -746,7 +789,8 @@ class BotService:
                                                             "WARN", "TRADE"
                                                         )
                                                         if attempt < max_retries - 1:
-                                                            mt5.initialize() # Try re-init MT5
+                                                            if not mt5.terminal_info():
+                                                                mt5.initialize()
                                                             await asyncio.sleep(0.5)
                                                         else:
                                                             detail = f"TP{tp.level} ({tp.volume}L): {err_msg}"
@@ -763,7 +807,8 @@ class BotService:
                                                         "WARN", "TRADE"
                                                     )
                                                     if attempt < max_retries - 1:
-                                                        mt5.initialize()
+                                                        if not mt5.terminal_info():
+                                                            mt5.initialize()
                                                         await asyncio.sleep(0.5)
                                                     else:
                                                         detail = f"TP{tp.level} ({tp.volume}L): {str(order_err)[:80]}"
@@ -780,8 +825,7 @@ class BotService:
                                             self._log_event(f"All orders failed. Rolled back risk state for {group_id}.", "WARN", "RISK")
                                             # Build detailed failure reason for Telegram (includes MT5 error codes)
                                             fail_reason = "MT5 execution failed: " + " | ".join(tp_failure_details) if tp_failure_details else "MT5 execution failed for all TP levels"
-                                            if sig_time:
-                                                self._last_signal_time[symbol] = sig_time  # Prevent same signal from re-firing
+                                            self._last_signal_time[symbol] = _sig_fp  # Prevent same signal from re-firing
                                             await self._save_signal_state(signal, "FAILED", fail_reason, tp_levels=tp_levels)
                                             had_execution_failure = True
                                         elif len(db_positions) < len(tp_levels):
@@ -789,8 +833,7 @@ class BotService:
                                     
                                         if db_positions and self.user_id:
                                             sig_id = await self._save_signal_state(signal, "EXECUTED", tp_levels=db_positions)
-                                            if sig_time:
-                                                self._last_signal_time[symbol] = sig_time
+                                            self._last_signal_time[symbol] = _sig_fp
                                             try:
                                                 import json
 
@@ -858,8 +901,7 @@ class BotService:
                                             "WARN", "RISK"
                                         )
                                         await self._save_signal_state(signal, "REJECTED", reason, tp_levels=tp_levels)
-                                        if sig_time:
-                                            self._last_signal_time[symbol] = sig_time
+                                        self._last_signal_time[symbol] = _sig_fp
                                         # Only trigger explicit popup for risk-based rejections, not basic RR rejections to avoid spam
                                         if "Broker minimum lot forces risk" in reason or "Proposed risk" in reason:
                                             asyncio.ensure_future(self._broadcast_notification(
@@ -945,64 +987,74 @@ class BotService:
                     
                     for deal in deals:
                         ticket = deal.get("ticket")
-                        
+                        # Bug 13 fix: deduplicate by position_id (the MT5 parent position)
+                        # not by deal ticket. A 3-TP-leg trade generates 3 separate OUT deals
+                        # — one per TP leg. The old code processed each deal ticket separately,
+                        # triple-counting the drawdown for each trade in the circuit breaker.
+                        pos_id = deal.get("position_id") or ticket
+
+                        # Guard against replaying deals from a previous cycle. The sorted()
+                        # call above ensures ascending time order, so once we see a deal
+                        # older than last_check_time we can skip it. The pos_id check
+                        # handles duplicate entries at the exact boundary second.
+                        if deal["time"] < last_check_time:
+                            continue
+                        if pos_id in processed_deal_tickets:
+                            continue
+                        processed_deal_tickets.add(pos_id)
                         if deal["time"] > last_check_time:
-                            processed_deal_tickets.clear()
                             last_check_time = deal["time"]
+
+                        net_profit = deal["profit"] + deal["commission"] + deal["swap"]
+                        await profit_tracker.add_profit(net_profit)
                             
-                        if deal["time"] >= last_check_time and ticket not in processed_deal_tickets:
-                            processed_deal_tickets.add(ticket)
-                            net_profit = deal["profit"] + deal["commission"] + deal["swap"]
-                            await profit_tracker.add_profit(net_profit)
-                            
-                            self._log_event(
-                                f"Trade closed: {deal['symbol']} | P&L: ${net_profit:.2f}",
-                                "INFO", "TRADE"
+                        self._log_event(
+                            f"Trade closed: {deal['symbol']} | P&L: ${net_profit:.2f}",
+                            "INFO", "TRADE"
+                        )
+                        asyncio.ensure_future(self._broadcast_notification(
+                            "Trade Closed",
+                            f"{deal['symbol']} closed for ${net_profit:.2f}",
+                            "success" if net_profit >= 0 else "error"
+                        ))
+                        
+                        # Telegram notification for closed trade
+                        try:
+                            from backend.services.telegram import telegram_service
+                            emoji = "✅" if net_profit >= 0 else "❌"
+                            sym = telegram_service.escape_markdown(deal['symbol'])
+                            pnl_str = telegram_service.escape_markdown(f"{net_profit:+.2f}")
+                            tg_msg = (
+                                f"{emoji} *Trade Closed*\n"
+                                f"Symbol: {sym}\n"
+                                f"P&L: ${pnl_str}\n"
+                                f"Commission: ${deal.get('commission', 0):.2f} | Swap: ${deal.get('swap', 0):.2f}"
                             )
-                            asyncio.ensure_future(self._broadcast_notification(
-                                "Trade Closed",
-                                f"{deal['symbol']} closed for ${net_profit:.2f}",
-                                "success" if net_profit >= 0 else "error"
-                            ))
-                            
-                            # Telegram notification for closed trade
-                            try:
-                                from backend.services.telegram import telegram_service
-                                emoji = "✅" if net_profit >= 0 else "❌"
-                                sym = telegram_service.escape_markdown(deal['symbol'])
-                                pnl_str = telegram_service.escape_markdown(f"{net_profit:+.2f}")
-                                tg_msg = (
-                                    f"{emoji} *Trade Closed*\n"
-                                    f"Symbol: {sym}\n"
-                                    f"P&L: ${pnl_str}\n"
-                                    f"Commission: ${deal.get('commission', 0):.2f} | Swap: ${deal.get('swap', 0):.2f}"
-                                )
-                                asyncio.ensure_future(telegram_service.send_message(tg_msg))
-                            except Exception as tg_err:
-                                logger.error(f"Failed to send trade-close Telegram: {tg_err}")
-                            
-                            # Update circuit breaker state
-                            if self.circuit_breaker:
-                                pos_id = deal.get("position_id")
-                                symbol = deal.get("symbol", "UNKNOWN")
-                                close_time = datetime.fromtimestamp(deal["time"], timezone.utc) if deal.get("time") else None
-                                # record_external_close() handles the post-restart case where
-                                # active_groups is empty (position_closed() would be a no-op).
-                                # group_id == symbol by design (one active signal group per symbol).
-                                self.circuit_breaker.record_external_close(symbol, net_profit, close_time)
-                            if getattr(self, "prop_firm_validator", None):
-                                self.prop_firm_validator.record_trade_closed(deal.get("symbol", "UNKNOWN"), deal.get("volume", 0.0), net_profit)
-                                
-                            try:
-                                os.makedirs(os.path.dirname(state_file), exist_ok=True)
-                                with open(state_file, "w") as f:
-                                    json.dump({
-                                        "last_check_time": last_check_time,
-                                        "processed_deal_tickets": list(processed_deal_tickets)
-                                    }, f)
-                            except Exception as e:
-                                logger.error(f"Failed to save bot sync state: {e}")
-                            
+                            asyncio.ensure_future(telegram_service.send_message(tg_msg))
+                        except Exception as tg_err:
+                            logger.error(f"Failed to send trade-close Telegram: {tg_err}")
+                        
+                        # Update circuit breaker state
+                        if self.circuit_breaker:
+                            cb_symbol = deal.get("symbol", "UNKNOWN")
+                            close_time = datetime.fromtimestamp(deal["time"], timezone.utc) if deal.get("time") else None
+                            # record_external_close() handles the post-restart case where
+                            # active_groups is empty (position_closed() would be a no-op).
+                            # group_id == symbol by design (one active signal group per symbol).
+                            self.circuit_breaker.record_external_close(cb_symbol, net_profit, close_time)
+                        if getattr(self, "prop_firm_validator", None):
+                            self.prop_firm_validator.record_trade_closed(deal.get("symbol", "UNKNOWN"), deal.get("volume", 0.0), net_profit)
+                        
+                        try:
+                            os.makedirs(os.path.dirname(state_file), exist_ok=True)
+                            with open(state_file, "w") as f:
+                                json.dump({
+                                    "last_check_time": last_check_time,
+                                    "processed_deal_tickets": list(processed_deal_tickets)
+                                }, f)
+                        except Exception as e:
+                            logger.error(f"Failed to save bot sync state: {e}")
+                        
             except asyncio.CancelledError:
                 break
             except Exception as e:

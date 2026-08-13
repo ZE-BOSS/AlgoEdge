@@ -51,9 +51,20 @@ class CircuitBreaker:
         self.open_positions_by_symbol: dict[str, int] = {}
         self.is_paused = False
         self.pause_reason = ""
-        self.last_reset_day = datetime.now(timezone.utc).date()
-        self.last_reset_week = datetime.now(timezone.utc).isocalendar()[1]
         self.last_trade_closed_m15_time: int | None = None
+        # Bug 4: Track the balance at day-start for correct daily drawdown % denominator.
+        self._day_start_balance: float = 0.0
+
+        # Bug 2: In backtest mode, initialize to None so the first bar's date
+        # drives the reset — not today's real-world date. Without this, every
+        # historical bar's date != today, resetting daily_trades_count to 0
+        # on every single candle and making max_daily_trades completely ineffective.
+        if is_backtest:
+            self.last_reset_day = None
+            self.last_reset_week = None
+        else:
+            self.last_reset_day = datetime.now(timezone.utc).date()
+            self.last_reset_week = datetime.now(timezone.utc).isocalendar()[1]
 
         # Track active grouped trades (signal)
         self.active_groups = {}  # group_id -> {"pnl": 0.0, "sub_trades": 0}
@@ -93,8 +104,14 @@ class CircuitBreaker:
             return False, f"Max open positions reached ({total_open}/{self.max_concurrent_positions})"
 
         # 4. Daily Drawdown Percentage
-        if self.max_daily_drawdown_pct > 0 and self.daily_pnl < 0 and account_balance > 0:
-            daily_dd_pct = (-self.daily_pnl / account_balance) * 100
+        # Bug 4 fix: Use the day-start balance as the denominator, not the
+        # current account balance.  A fixed-capital drawdown limit (e.g. 3% of
+        # $25,000 = $750) must not shrink as the account grows — otherwise
+        # $750 loss on a $100k account only shows 0.75% drawdown.
+        if self._day_start_balance <= 0:
+            self._day_start_balance = account_balance
+        if self.max_daily_drawdown_pct > 0 and self.daily_pnl < 0 and self._day_start_balance > 0:
+            daily_dd_pct = (-self.daily_pnl / self._day_start_balance) * 100
             if daily_dd_pct >= self.max_daily_drawdown_pct:
                 self.is_paused = True
                 self.pause_reason = f"Daily drawdown limit reached: {daily_dd_pct:.2f}% >= {self.max_daily_drawdown_pct}%"
@@ -181,11 +198,13 @@ class CircuitBreaker:
                 group_pnl = self.active_groups[group_id]["pnl"]
                 self._record_trade_result(group_pnl, group_pnl >= 0)
                 
-                # Set M15 cooldown
-                if current_time is not None:
+                # Set M15 cooldown (live only — Bug 9: in backtest mode this
+                # would persist across symbols and block cross-symbol entries
+                # on the same or next M15 candle, which is incorrect behaviour).
+                if not self.is_backtest and current_time is not None:
                     current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
                     self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
-                
+
                 sym = self.active_groups[group_id].get("symbol", "")
                 del self.active_groups[group_id]
                 if sym and sym in self.open_positions_by_symbol:
@@ -227,7 +246,8 @@ class CircuitBreaker:
         """Used by backtester to finalize a group's total PnL at once, triggering drawdown checks."""
         self._record_trade_result(group_pnl, group_pnl >= 0)
         
-        if current_time is not None:
+        # Bug 9: skip M15 cooldown in backtest — see position_closed() comment above.
+        if not self.is_backtest and current_time is not None:
             try:
                 current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
                 self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
@@ -381,10 +401,14 @@ class CircuitBreaker:
         else:
             today, _ = self._parse_timestamp_date(now)
                 
-        if today != self.last_reset_day:
+        # Bug 2 fix: None sentinel means first bar → always trigger reset to set last_reset_day.
+        if self.last_reset_day is None or today != self.last_reset_day:
             self.daily_pnl = 0.0
             self.daily_trades_count = 0
             self.last_reset_day = today
+            # Bug 4 fix: reset the day-start balance anchor so the new day's
+            # first check_all() captures the opening balance correctly.
+            self._day_start_balance = 0.0
             # Purge fully-closed groups that survived from previous days.
             # A group with sub_trades <= 0 is done — it should not continue to count
             # against open_positions_by_symbol, but can linger in active_groups if the
@@ -410,8 +434,9 @@ class CircuitBreaker:
             current_week = now.isocalendar()[1]
         else:
             _, current_week = self._parse_timestamp_date(now)
-                
-        if current_week != self.last_reset_week:
+
+        # Bug 2 fix: None sentinel means first bar — always trigger to set last_reset_week.
+        if self.last_reset_week is None or current_week != self.last_reset_week:
             self.weekly_pnl = 0.0
             self.last_reset_week = current_week
             if "Weekly" in self.pause_reason:

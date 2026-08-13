@@ -34,7 +34,7 @@ async def sync_mt5_history(user: User, db: AsyncSession, hours_back: int = 72) -
         logger.error("MT5 Sync aborted: MetaTrader5 package not installed")
         return {"status": "error", "reason": "MetaTrader5 not installed"}
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     
     # Check if we are already connected to the correct account
     acc_info = await loop.run_in_executor(None, mt5.account_info)

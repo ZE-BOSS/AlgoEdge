@@ -325,18 +325,12 @@ class PositionManager:
                                     if trade.exit_reason is None:
                                         trade.exit_reason = "CLIENT"
                                     
-                                    # Update chart data
-                                    try:
-
-                                        from backend.mt5.data_fetcher import DataFetcher
-                                        candles = await DataFetcher.get_historical_data(trade.symbol, "M5", 100)
-                                        if not candles.empty:
-                                            cd_df = candles.copy()
-                                            if "time" not in cd_df.columns and cd_df.index.name == "time":
-                                                cd_df = cd_df.reset_index()
-                                            trade.chart_data = cd_df.to_json(orient="records")
-                                    except Exception as chart_err:
-                                        logger.warning(f"Failed to fetch exit chart data: {chart_err}")
+                                    # Chart data was attached at signal creation time and does not
+                                    # need to be refreshed on every close. Fetching M5 candles
+                                    # here was a blocking MT5 network call on every trade close
+                                    # inside the 20-second management loop (Bug 14), adding
+                                    # latency and potential timeouts. Removed.
+                                    pass
 
                         # Send Telegram notification for the closed position (inside deals branch so net_profit is defined)
                         if pos.mt5_ticket not in self._notified_closes:

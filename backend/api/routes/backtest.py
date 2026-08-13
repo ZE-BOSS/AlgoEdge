@@ -509,6 +509,9 @@ async def run_backtest_endpoint(
                             "confluence_score": sig.confluence_score,
                             "score_breakdown": sig.metadata.get("score_breakdown", {}),
                             "metadata": sig.metadata,
+                            # Carry confirmations list so engine.py's _create_position()
+                            # populates the Entry Confirmations panel in the frontend.
+                            "confirmations": sig.metadata.get("confirmations", []),
                         }
                         sigs.append(sig_dict)
                 return sigs
@@ -1056,7 +1059,7 @@ async def run_portfolio_backtest_endpoint(
                 "trades": results.get("trades", []),
                 "grouped_trades": results.get("grouped_trades", []),
                 "rejection_funnel": results.get("rejection_funnel", {}),
-                "run_logs": portfolio_run_logs[-100:],  # Only keep last 100, same cap as single-symbol runs
+                "run_logs": (portfolio_run_logs + results.get("run_logs", []))[-100:],  # Merge strategy + engine logs; keep last 100
                 "report": {
                     "win_rate": getattr(report, 'win_rate', 0) if report else results.get("win_rate", 0),
                     "profit_factor": getattr(report, 'profit_factor', 0) if report else results.get("profit_factor", 0),

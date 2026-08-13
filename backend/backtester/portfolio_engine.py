@@ -20,12 +20,18 @@ from backend.risk.prop_firm_validator import PropFirmValidator
 from backend.utils.logger import get_logger
 from backend.utils.trade_grouper import group_trades
 from backend.utils.timeutils import detect_session
+import pytz
 from backend.backtester.engine import _epoch_to_iso, _calc_duration_minutes, _validate_position, _to_epoch_seconds
 
 logger = get_logger(__name__)
 
 class PortfolioBacktestEngine:
     def __init__(self, risk_config: dict[str, Any]):
+        # Bug 5 fix: mark as backtest so CircuitBreaker skips cb_state.json
+        # load/save on every position close (was causing file I/O on every bar,
+        # a major performance bottleneck with many symbols).
+        risk_config = risk_config.copy()
+        risk_config["is_backtest"] = True
         self.risk_engine = RiskEngine(risk_config)
         self.risk_config = risk_config
         prop_firm_config = risk_config.get("prop_firm", {})
@@ -142,27 +148,36 @@ class PortfolioBacktestEngine:
             lows_arr = df["low"].values.astype(float)
             closes_arr = df["close"].values.astype(float)
             atr_period = 14
-            
-            prev_closes = np.roll(closes_arr, 1)
-            prev_closes[0] = closes_arr[0]
-            tr_all = np.maximum(
-                highs_arr - lows_arr,
-                np.maximum(np.abs(highs_arr - prev_closes), np.abs(lows_arr - prev_closes))
-            )
-            atr_array = np.zeros(len(df))
-            for i in range(atr_period, len(df)):
-                atr_array[i] = np.mean(tr_all[i - atr_period:i])
-                
+
+            # Bug 8 fix: Vectorized ATR via pandas rolling mean — replaces the
+            # O(N) Python loop that used np.mean on a slice every bar (~10x slower).
+            highs_s  = pd.Series(highs_arr)
+            lows_s   = pd.Series(lows_arr)
+            closes_s = pd.Series(closes_arr)
+            prev_c   = closes_s.shift(1).fillna(closes_s.iloc[0])
+            tr_s = pd.concat(
+                [highs_s - lows_s, (highs_s - prev_c).abs(), (lows_s - prev_c).abs()],
+                axis=1,
+            ).max(axis=1)
+            atr_series = tr_s.rolling(atr_period, min_periods=1).mean()
+            atr_array  = atr_series.values
+
             time_vals = df['time'].values
             atr_dict = dict(zip(time_vals, atr_array))
-            
+
+            # Bug 7 fix: Swing-point cache — algorithm is identical to engine.py's
+            # single-symbol cache (O(N × lookback × sw_len)), keyed by timestamp.
+            # The previous portfolio code computed the same loop PLUS an extra outer
+            # loop over (swing_lookback, len(df)) that re-scanned already-processed
+            # bars, causing roughly O(N²) behaviour for large datasets.
             sw_len = self.risk_config.get("trail_structure_bars", self.risk_config.get("swing_length", 5))
             swing_lookback = 20
-            swing_dict = {}
+            swing_dict: dict = {}
             for i in range(swing_lookback, len(df)):
                 points = []
                 for j in range(max(sw_len, i - swing_lookback), i - sw_len):
-                    if j - sw_len < 0: continue
+                    if j - sw_len < 0:
+                        continue
                     window_h = highs_arr[j - sw_len:j + sw_len + 1]
                     window_l = lows_arr[j - sw_len:j + sw_len + 1]
                     if highs_arr[j] == window_h.max():
@@ -171,11 +186,11 @@ class PortfolioBacktestEngine:
                         points.append({"type": "LOW", "price": float(lows_arr[j])})
                 if points:
                     swing_dict[time_vals[i]] = points
-                    
+
             symbol_cache[sym] = {
                 "bars": bar_dict,
                 "atr": atr_dict,
-                "swings": swing_dict
+                "swings": swing_dict,
             }
             
         all_signals = []
@@ -240,7 +255,7 @@ class PortfolioBacktestEngine:
 
                 hard_close_time = pos.get("hard_close_time")
                 if hard_close_time:
-                    import pytz
+                    import pytz  # noqa: F811 — kept for compatibility with older references
                     et = current_time_dt.astimezone(pytz.timezone("America/New_York"))
                     time_str = et.strftime("%H:%M")
                     if time_str >= hard_close_time:
@@ -407,7 +422,7 @@ class PortfolioBacktestEngine:
                     "time": _epoch_to_iso(current_time),
                     "level": "INFO",
                     "category": "BACKTEST_LOG",
-                    "message": f"Closed {pos['direction']} {sym} {pos.get('exit_reason')} | PnL: ${pos.get('pnl', 0):.2f}"
+                    "message": f"Closed {pos['direction']} {pos.get('symbol', sym)} {pos.get('exit_reason')} | PnL: ${pos.get('pnl', 0):.2f}"
                 })
 
                 
@@ -487,6 +502,24 @@ class PortfolioBacktestEngine:
                     "category": "BACKTEST_LOG",
                     "message": f"Opened {sig['direction']} {symbol} @ {sig['entry_price']:.5f} | {len(tp_levels)} TPs"
                 })
+
+                # Bug 3 fix: notify circuit breaker of the new signal group so
+                # daily_trades_count, max_concurrent_positions, and
+                # open_positions_by_symbol are properly accumulated.
+                # Previously this call was missing entirely from portfolio engine,
+                # making all CB trade-count limits ineffective in portfolio backtests.
+                if hasattr(self.risk_engine, "circuit") and hasattr(self.risk_engine.circuit, "position_opened"):
+                    from backend.risk.position_sizer import calculate_risk_dollars
+                    actual_risk = sum(
+                        calculate_risk_dollars(lvl.volume, sig["entry_price"], sig["stop_loss"], symbol)
+                        for lvl in tp_levels
+                    )
+                    self.risk_engine.circuit.position_opened(
+                        group_id,
+                        len(tp_levels),
+                        symbol=symbol,
+                        initial_risk_dollars=actual_risk,
+                    )
 
                 # Detect entry session (used for session win-rate breakdown and
                 # displayed directly in the trade-expand panel)

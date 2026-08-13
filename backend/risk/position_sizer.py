@@ -160,6 +160,7 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
 
     # ── 1.5. Cached MT5 Data ──────────────────────────────────────────────────
     if symbol in _MT5_SYMBOL_CACHE:
+        _symbol_info_cache[cache_key] = (now, _MT5_SYMBOL_CACHE[symbol])
         return _MT5_SYMBOL_CACHE[symbol]
 
     # ── 2. InstrumentProfile Fallback ─────────────────────────────────────────
@@ -191,6 +192,8 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
         "tick_size": 0.00001,
         "source": "DEFAULT",
     }
+    _symbol_info_cache[cache_key] = (now, res)
+    return res
 
 
 def calculate_lot_size(
