@@ -227,7 +227,27 @@ class PortfolioBacktestEngine:
             # 2. Process open positions
             closed_this_bar = []
             tp1_hit_groups = set()
-            
+
+            # Pre-pass: determine which groups will have TP1 close THIS bar so
+            # that siblings (TP2/TP3) can defer their own SL/TP check to the
+            # next bar. Without this, a TP2 position can be evaluated and closed
+            # at its original SL/TP price on the SAME bar TP1 closes — BEFORE
+            # the tp1_hit_groups BE block (lines below) has moved the SL to
+            # entry+buffer. The result was TP2/TP3 showing full-TP profit (or
+            # full-SL loss) instead of the near-zero BE_SL exit expected.
+            _tp1_closing_this_bar: set = set()
+            for _p in self.open_positions:
+                if _p.get("tp_level") != 1:
+                    continue
+                _sym = _p.get("symbol")
+                if _sym not in symbol_cache or current_time not in symbol_cache[_sym]["bars"]:
+                    continue
+                _bar = symbol_cache[_sym]["bars"][current_time]
+                if _p["direction"] == "BUY" and _bar["high"] >= _p["take_profit"]:
+                    _tp1_closing_this_bar.add(_p.get("group_id"))
+                elif _p["direction"] != "BUY" and _bar["low"] <= _p["take_profit"]:
+                    _tp1_closing_this_bar.add(_p.get("group_id"))
+
             for pos in self.open_positions[:]:
                 sym = pos.get("symbol")
                 if sym not in symbol_cache or current_time not in symbol_cache[sym]["bars"]:
@@ -264,6 +284,24 @@ class PortfolioBacktestEngine:
                         pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym)
                         closed_this_bar.append(pos)
                         continue
+
+                # Skip SL/TP evaluation for TP2/TP3 siblings whose TP1 leg
+                # closes on THIS SAME BAR. Their BE stop has not been applied
+                # yet (that happens in the tp1_hit_groups block after this loop).
+                # Evaluating them now would close them at the wrong price.
+                # They will be re-evaluated on the next bar with BE stop in place.
+                if pos.get("tp_level", 1) != 1 and pos.get("group_id") in _tp1_closing_this_bar:
+                    # Still update MAE/MFE and trailing-stop state for this bar.
+                    pip_size = get_pip_size(sym)
+                    if pos["direction"] == "BUY":
+                        adverse = pos["entry_price"] - low
+                        favorable = high - pos["entry_price"]
+                    else:
+                        adverse = high - pos["entry_price"]
+                        favorable = pos["entry_price"] - low
+                    pos["mae_pips"] = max(pos.get("mae_pips", 0), adverse / pip_size if pip_size else 0)
+                    pos["mfe_pips"] = max(pos.get("mfe_pips", 0), favorable / pip_size if pip_size else 0)
+                    continue  # Defer SL/TP to next bar
 
                 sl_hit = False
                 tp_hit = False

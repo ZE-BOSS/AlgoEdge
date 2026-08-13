@@ -205,12 +205,15 @@ export function computePeriodStats(trades, initialBalance = 10000, accountInitia
   
   const isWin = [];
   const isLoss = [];
+  const uniqueGroups = new Set();
 
   // Assuming trades are already sorted by entry_time chronologically
   for (const t of trades) {
     const tpnl = t.pnl || 0;
     pnl += tpnl;
     
+    uniqueGroups.add(t.group_id || `${t._source_symbol}-${t.entry_time}`);
+
     // Track wins/losses
     if (tpnl > 0) {
       wins++;
@@ -278,6 +281,7 @@ export function computePeriodStats(trades, initialBalance = 10000, accountInitia
 
   return {
     totalTrades: trades.length,
+    totalGroups: uniqueGroups.size,
     wins,
     losses,
     winRate,

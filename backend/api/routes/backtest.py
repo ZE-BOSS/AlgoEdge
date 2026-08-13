@@ -119,7 +119,7 @@ class PortfolioBacktestRequest(BaseModel):
     max_weekly_drawdown_pct: float = 6.0
     max_concurrent_positions: int = 5
     max_positions_per_symbol: int = 1
-    max_daily_trades: int = 10
+    max_daily_trades: int = 5
     target_profit_enabled: bool = False
     max_daily_profit: float = 500.0
     max_weekly_profit: float = 2000.0

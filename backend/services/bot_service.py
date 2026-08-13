@@ -649,6 +649,7 @@ class BotService:
                                         "tp_count": config.risk.tp_count,
                                         "tp_splits": config.risk.tp_splits,
                                         "multi_position_mode": True,
+                                        "compounding_enabled": getattr(config.risk, "compounding_enabled", False),
                                         "max_daily_drawdown_pct": config.risk.max_daily_drawdown_pct,
                                         "max_weekly_drawdown_pct": config.risk.max_weekly_drawdown_pct,
                                         "max_daily_trades": config.risk.max_daily_trades,
@@ -665,14 +666,31 @@ class BotService:
                                         "target_profit_enabled": config.risk.target_profit_enabled,
                                         "max_daily_profit": config.risk.max_daily_profit,
                                         "max_weekly_profit": config.risk.max_weekly_profit,
+                                        # Break-even settings
                                         "be_trigger_rr": config.risk.be_trigger_rr,
                                         "be_buffer_pips": config.risk.be_buffer_pips,
                                         "be_buffer_atr_mult": config.risk.be_buffer_atr_mult,
+                                        # Trailing stop settings — all previously missing, causing
+                                        # TrailingManager to silently use its hardcoded defaults
+                                        # regardless of what the user configured in the Settings panel.
+                                        "trail_method_tp1": getattr(config.risk, "trail_method_tp1", "NONE"),
                                         "trail_method_tp2": config.risk.trail_method_tp2,
                                         "trail_method_tp3": config.risk.trail_method_tp3,
                                         "trail_method_tp4": config.risk.trail_method_tp4,
                                         "trail_method_tp5": config.risk.trail_method_tp5,
+                                        "atr_trail_multiplier": getattr(config.risk, "atr_trail_multiplier", 1.5),
+                                        "atr_trail_multiplier_tp1": getattr(config.risk, "atr_trail_multiplier_tp1", 1.5),
+                                        "atr_trail_multiplier_tp2": getattr(config.risk, "atr_trail_multiplier_tp2", 1.5),
+                                        "atr_trail_multiplier_tp3": getattr(config.risk, "atr_trail_multiplier_tp3", 1.5),
+                                        "atr_trail_multiplier_tp4": getattr(config.risk, "atr_trail_multiplier_tp4", 1.5),
+                                        "atr_trail_multiplier_tp5": getattr(config.risk, "atr_trail_multiplier_tp5", 1.5),
+                                        "trail_pips": getattr(config.risk, "trail_pips", 15.0),
+                                        "trail_pct": getattr(config.risk, "trail_pct", 0.5),
+                                        "trail_activation_rr": getattr(config.risk, "trail_activation_rr", 1.0),
+                                        "trail_step_pips": getattr(config.risk, "trail_step_pips", 5.0),
+                                        "trail_structure_bars": getattr(config.risk, "trail_structure_bars", 3),
                                     }
+
 
                                     # Cache RiskEngine across scan cycles — only rebuild when key settings change.
                                     # MultiTPManager/BreakevenManager/TrailingManager are expensive to construct;

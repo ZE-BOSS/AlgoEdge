@@ -586,7 +586,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
 
       return {
         period: group.label,
-        tradeCount: group.trades.length,
+        tradeCount: stats.totalGroups,
         startBal, endBal,
         pnl: stats.pnl,
         winRate: stats.winRate,
@@ -1048,14 +1048,20 @@ export default function Backtester() {
         prop_firm: form.prop_firm,
         max_risk_hard_cap_pct: form.prop_firm?.max_risk_hard_cap_pct ?? 3.0,
 
-        max_concurrent_positions: form.max_concurrent_positions * portfolioSymbols.length,
+        max_concurrent_positions: form.max_concurrent_positions,
         max_daily_drawdown_pct: form.max_daily_drawdown_pct,
         max_weekly_drawdown_pct: form.max_weekly_drawdown_pct,
         max_positions_per_symbol: form.max_positions_per_symbol || 1,
-        max_daily_trades: (form.max_daily_trades || 5) * portfolioSymbols.length,
+        max_daily_trades: form.max_daily_trades || 5,
         target_profit_enabled: form.target_profit_enabled,
         max_daily_profit: form.max_daily_profit,
         max_weekly_profit: form.max_weekly_profit,
+        // Simulation costs — must match single-symbol call so portfolio and
+        // single results are comparable when the same settings are used.
+        slippage_pips: form.slippage_pips ?? 0.0,
+        commission_per_lot: form.commission_per_lot ?? 0.0,
+        spread_pips: form.spread_pips ?? 0.0,
+        simulate_wicks: form.simulate_wicks ?? true,
       });
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['backtests'] }),
