@@ -307,32 +307,6 @@ export default function StrategySettings() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-header"><span className="card-title">Filters</span></div>
-        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.smc?.session_filter_enabled ?? true} onChange={e => updateNested('smc', 'session_filter_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
-            Session Filter (London/NY Kill Zones only)
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.smc?.news_filter_enabled ?? true} onChange={e => updateNested('smc', 'news_filter_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
-            News Filter (block ±30min HIGH impact)
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.smc?.enforce_htf_pd ?? true} onChange={e => updateNested('smc', 'enforce_htf_pd', e.target.checked)} style={{ width: 16, height: 16 }} />
-            Enforce HTF Premium/Discount
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.smc?.enforce_fvg_displacement ?? false} onChange={e => updateNested('smc', 'enforce_fvg_displacement', e.target.checked)} style={{ width: 16, height: 16 }} />
-            Enforce FVG Displacement
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.smc?.enforce_asian_range_sweep ?? false} onChange={e => updateNested('smc', 'enforce_asian_range_sweep', e.target.checked)} style={{ width: 16, height: 16 }} />
-            Enforce Asian Range Sweep
-          </label>
-        </div>
-      </div>
-
       <button className="btn btn-primary" style={{ justifySelf: 'start' }} onClick={handleSave} disabled={mutation.isPending}>
         {mutation.isPending ? <Loader2 size={14} className="spin" /> : saved ? <Check size={14} /> : <Save size={14} />}
         {mutation.isPending ? 'Saving...' : saved ? 'Saved!' : 'Save Strategy Configuration'}

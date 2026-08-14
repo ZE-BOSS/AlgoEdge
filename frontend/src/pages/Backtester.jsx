@@ -56,9 +56,6 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
         <div><label style={{ fontSize: '0.7rem' }}>Max Spread (pips)</label><input type="number" step="0.1" value={smc.max_spread_pips} onChange={e => updateSmc('max_spread_pips', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Manual HTF Bias</label><select value={form.manual_bias || 'NONE'} onChange={e => u('manual_bias', e.target.value)}><option value="NONE">Auto</option><option value="BULLISH">Bullish Only</option><option value="BEARISH">Bearish Only</option></select></div>
         <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, marginTop: 8 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={smc.enforce_htf_pd} onChange={e => updateSmc('enforce_htf_pd', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce HTF P/D</label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={smc.enforce_fvg_displacement} onChange={e => updateSmc('enforce_fvg_displacement', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce FVG Displacement</label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={smc.enforce_asian_range_sweep} onChange={e => updateSmc('enforce_asian_range_sweep', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce Asian Range Sweep</label>
         </div>
       </div>
     );
@@ -1323,9 +1320,10 @@ export default function Backtester() {
         ...Object.fromEntries(Object.entries(c.risk || {}).filter(([k]) => k in prev)),
         max_risk_hard_cap_pct: c.risk?.max_risk_hard_cap_pct ?? prev.max_risk_hard_cap_pct,
         prop_firm: c.prop_firm || prev.prop_firm,
-        smc: c.smc || prev.smc,
+        smc: c.apa || prev.smc,
         drift_jump_alpha: c.drift_jump_alpha || prev.drift_jump_alpha,
         crt: c.crt || prev.crt,
+        vwap: c.vwap || prev.vwap,
         compounding_enabled: c.compounding?.compounding_enabled ?? prev.compounding_enabled,
         session_filter_enabled: c.smc?.session_filter_enabled ?? prev.session_filter_enabled,
         news_filter_enabled: c.smc?.news_filter_enabled ?? prev.news_filter_enabled,
@@ -1633,14 +1631,11 @@ export default function Backtester() {
             <div><label>Candles (if no dates)</label><input type="number" value={form.candle_count} onChange={e => setForm({ ...form, candle_count: +e.target.value })} min={100} max={50000} /></div>
             <div><label>Balance ($)</label><input type="number" value={form.initial_balance} onChange={e => setForm({ ...form, initial_balance: +e.target.value })} /></div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
             <div><label>Risk %</label><input type="number" step="0.1" value={form.risk_per_trade_pct} onChange={e => setForm({ ...form, risk_per_trade_pct: +e.target.value })} /></div>
+            <div><label>Hard Cap %</label><input type="number" step="0.1" value={form.max_risk_hard_cap_pct} onChange={e => setForm({ ...form, max_risk_hard_cap_pct: +e.target.value })} /></div>
             <div><label>Min R:R</label><input type="number" step="0.5" value={form.min_rr} onChange={e => setForm({ ...form, min_rr: +e.target.value })} /></div>
             <div><label>TP Count</label><select value={form.tp_count} onChange={e => setForm({ ...form, tp_count: +e.target.value })}>{[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n} TP{n > 1 ? 's' : ''}</option>)}</select></div>
-          </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flex: 1 }}><input type="checkbox" checked={form.session_filter_enabled} onChange={e => u('session_filter_enabled', e.target.checked)} style={{ width: 14, height: 14 }} /> Session Filter</label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flex: 1 }}><input type="checkbox" checked={form.news_filter_enabled} onChange={e => u('news_filter_enabled', e.target.checked)} style={{ width: 14, height: 14 }} /> News Filter</label>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1690,17 +1685,6 @@ export default function Backtester() {
                 <StrategyParamsEditor strategyId={strat} form={form} setForm={setForm} u={u} />
               </div>
             ))}
-
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>━ Hard Filters (Optimization)</div>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={form.enforce_htf_pd} onChange={e => u('enforce_htf_pd', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce HTF P/D Arrays</label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={form.enforce_fvg_displacement} onChange={e => u('enforce_fvg_displacement', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce FVG Displacement</label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={form.enforce_asian_range_sweep} onChange={e => u('enforce_asian_range_sweep', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce Asian Range Sweep</label>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <div><label style={{ fontSize: '0.7rem' }}>Asian Range Start (Hour)</label><input type="number" value={form.asian_range_start_hour ?? 18} onChange={e => u('asian_range_start_hour', +e.target.value)} /></div>
-              <div><label style={{ fontSize: '0.7rem' }}>Asian Range End (Hour)</label><input type="number" value={form.asian_range_end_hour ?? 0} onChange={e => u('asian_range_end_hour', +e.target.value)} /></div>
-            </div>
 
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--yellow)' }}>━ Circuit Breakers</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
