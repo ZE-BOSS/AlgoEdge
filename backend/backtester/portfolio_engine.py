@@ -39,6 +39,10 @@ class PortfolioBacktestEngine:
             prop_firm_config = prop_firm_config.copy()
             prop_firm_config["is_backtesting"] = True
         else:
+            # Bug 14 fix: Deep copy the dataclass object so we don't leak backtest
+            # state (is_backtesting=True) into the live bot's config.
+            import copy
+            prop_firm_config = copy.deepcopy(prop_firm_config)
             setattr(prop_firm_config, "is_backtesting", True)
             
         self.prop_firm_validator = PropFirmValidator(prop_firm_config)
@@ -354,7 +358,7 @@ class PortfolioBacktestEngine:
 
                 if sl_hit:
                     pos["exit_price"] = pos["stop_loss"]
-                    pos["exit_reason"] = "BE_SL" if pos.get("be_applied") else "SL"
+                    pos["exit_reason"] = "TRAIL_SL" if pos.get("trail_applied") else ("BE_SL" if pos.get("be_applied") else "SL")
                     pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym)
                     closed_this_bar.append(pos)
                     continue

@@ -33,7 +33,6 @@ class RiskParams:
     kelly_fraction: float = 0.25
     kelly_lookback_trades: int = 50
     multi_position_mode: bool = True
-    compounding_enabled: bool = False
     sl_buffer_pips: float = 5.0
 
     # TP structure
@@ -220,27 +219,12 @@ class UserConfig:
         return config
 
 
-@dataclass
-class _CompoundingParamsStub:
-    """
-    Minimal stub kept for backward compatibility when deserializing stored
-    UserConfigV2 objects that contain a 'compounding' key. Compounding is
-    no longer an active feature — AlgoEdge uses fixed % risk per trade.
-    """
-    enabled: bool = False
-    starting_balance: float = 0.0
-    # Absorb any other keys silently
-
-# Public alias so existing references (e.g. bot_service hasattr guards) still work
-CompoundingParams = _CompoundingParamsStub
-
 
 @dataclass 
 class UserConfigV2(UserConfig):
     """
     Extended UserConfig with instrument settings and multi-strategy support.
     """
-    compounding: CompoundingParams = None
     instrument_settings: list[InstrumentSettings] = None
     drift_jump_alpha: DriftJumpAlphaParams = field(default_factory=DriftJumpAlphaParams)
     crt: CRTParams = field(default_factory=CRTParams)
@@ -254,7 +238,6 @@ class UserConfigV2(UserConfig):
     @classmethod
     def from_dict(cls, data: dict) -> "UserConfigV2":
         risk_data = data.pop("risk", {})
-        compounding_data = data.pop("compounding", None)
         instrument_data = data.pop("instrument_settings", None)
         drift_jump_alpha_data = data.pop("drift_jump_alpha", {})
         crt_data = data.pop("crt", {})
@@ -285,11 +268,7 @@ class UserConfigV2(UserConfig):
         config.vwap = VWAPParams(**filter_kwargs(VWAPParams, vwap_data))
         config.prop_firm = PropFirmParams(**filter_kwargs(PropFirmParams, prop_firm_data))
         
-        if compounding_data:
-            config.compounding = CompoundingParams(**filter_kwargs(CompoundingParams, compounding_data))
-        else:
-            config.compounding = CompoundingParams()
-            
+
         if instrument_data:
             config.instrument_settings = [InstrumentSettings(**filter_kwargs(InstrumentSettings, i)) for i in instrument_data]
         else:
@@ -298,8 +277,6 @@ class UserConfigV2(UserConfig):
         return config
 
     def __post_init__(self):
-        if self.compounding is None:
-            self.compounding = CompoundingParams()
         if self.instrument_settings is None:
             self.instrument_settings = []
         if self.drift_jump_alpha is None:
@@ -320,13 +297,6 @@ class UserConfigV2(UserConfig):
             self.prop_firm = PropFirmParams()
 
     def get_risk_amount(self, account_balance: float, state=None) -> float:
-        if self.compounding.enabled:
-            engine = self.compounding.build_engine()
-            return engine.get_risk_amount(account_balance, state)
-        else:
-            return account_balance * (self.risk.risk_per_trade_pct / 100)
-
-    def is_compounding_active(self) -> bool:
-        return self.compounding.enabled
+        return account_balance * (self.risk.risk_per_trade_pct / 100)
 
 DEFAULT_USER_CONFIG = UserConfigV2()

@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api.deps import get_current_user
 from backend.api.routes.bot import get_bot_status
 from backend.api.routes.broker import get_broker_status
-from backend.api.routes.compounding import get_compounding_state
 from backend.api.routes.config import get_user_config
 from backend.api.routes.stats import get_user_stats
 from backend.api.routes.trades import get_open_positions
@@ -51,11 +50,7 @@ async def get_dashboard(
     except Exception:
         positions_data = []
         
-    try:
-        compounding_data = await get_compounding_state(current_user, db)
-    except Exception:
-        compounding_data = {}
-        
+
     try:
         broker_data = await get_broker_status(current_user, db)
     except Exception:
@@ -116,7 +111,6 @@ async def get_dashboard(
         "stats": stats_data,
         "config": config_data,
         "positions": positions_data,
-        "compounding": compounding_data,
         "broker": broker_data,
         "bot": bot_result,
         "prop_firm_status": pf_state,

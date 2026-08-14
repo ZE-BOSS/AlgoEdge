@@ -318,37 +318,6 @@ class BacktestTrade(Base):
     backtest_run = relationship("BacktestRun", back_populates="trades")
 
 
-# ── Compounding State ────────────────────────────────────────────────────────
-
-class CompoundingStateModel(Base):
-    __tablename__ = "compounding_state"
-    user_id = Column(String(36), primary_key=True)
-    current_step = Column(Integer, default=1)
-    risk_amount = Column(Float, default=20.0)
-    entry_balance = Column(Float, default=0.0)
-    consecutive_wins = Column(Integer, default=0)
-    consecutive_losses = Column(Integer, default=0)
-    total_wins_at_level = Column(Integer, default=0)
-    total_losses_at_level = Column(Integer, default=0)
-    last_step_change_reason = Column(String(30), default="INIT")
-    last_step_change_balance = Column(Float, default=0.0)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
-class CompoundingEvent(Base):
-    __tablename__ = "compounding_events"
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    user_id = Column(String(36), nullable=False, index=True)
-    event_type = Column(String(40), nullable=False)  # ADVANCE, DOWNGRADE_THRESHOLD, etc.
-    from_step = Column(Integer)
-    to_step = Column(Integer)
-    from_risk = Column(Float)
-    to_risk = Column(Float)
-    balance_at_event = Column(Float)
-    trade_id = Column(String(36))
-    created_at = Column(DateTime, server_default=func.now())
-
-
 # ── LLM Analyses ─────────────────────────────────────────────────────────────
 
 class LLMAnalysis(Base):

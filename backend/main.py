@@ -20,7 +20,6 @@ from backend.api.routes import (
     bot,
     broker,
     charts,
-    compounding,
     config,
     dashboard,
     llm,
@@ -132,6 +131,9 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
+from backend.utils.global_error_handler import setup_global_error_handler
+setup_global_error_handler()
+
 app = FastAPI(
     title="AlgoEdge Trading Bot API",
     version="1.0.0",
@@ -163,7 +165,6 @@ app.include_router(admin.router)
 app.include_router(backtest.router)
 app.include_router(config.router)
 app.include_router(charts.router)
-app.include_router(compounding.router)
 app.include_router(llm.router)
 app.include_router(push.router)
 app.include_router(signals.router)

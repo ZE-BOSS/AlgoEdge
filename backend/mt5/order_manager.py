@@ -77,6 +77,27 @@ class OrderManager:
         volume = max(sym_info.volume_min, min(volume, sym_info.volume_max))
         volume = round(volume, 8)  # Clean float artifacts
         
+        # Pre-execution validation to give clear error messages for stale signals (Invalid stops)
+        stoplevel = sym_info.trade_stops_level * sym_info.point
+        if direction.upper() in ("BUY", "BULLISH"):
+            if sl > 0 and sl >= tick.bid - stoplevel:
+                err_msg = f"Stale Signal (Slippage): SL ({sl}) is already hit or too close to current Bid ({tick.bid}). Stoplevel: {stoplevel}"
+                logger.warning(err_msg)
+                return {"success": False, "error": err_msg}
+            if tp > 0 and tp <= tick.bid + stoplevel:
+                err_msg = f"Stale Signal (Slippage): TP ({tp}) is already hit or too close to current Bid ({tick.bid}). Stoplevel: {stoplevel}"
+                logger.warning(err_msg)
+                return {"success": False, "error": err_msg}
+        else:
+            if sl > 0 and sl <= tick.ask + stoplevel:
+                err_msg = f"Stale Signal (Slippage): SL ({sl}) is already hit or too close to current Ask ({tick.ask}). Stoplevel: {stoplevel}"
+                logger.warning(err_msg)
+                return {"success": False, "error": err_msg}
+            if tp > 0 and tp >= tick.ask - stoplevel:
+                err_msg = f"Stale Signal (Slippage): TP ({tp}) is already hit or too close to current Ask ({tick.ask}). Stoplevel: {stoplevel}"
+                logger.warning(err_msg)
+                return {"success": False, "error": err_msg}
+        
         filling_type = mt5.ORDER_FILLING_FOK if (sym_info.filling_mode & 1) else mt5.ORDER_FILLING_IOC
         
         request = {
@@ -105,8 +126,11 @@ class OrderManager:
             return {"success": False, "error": "MT5 returned None"}
             
         if result.retcode != mt5.TRADE_RETCODE_DONE:
-            logger.error(f"Order failed: {result.retcode} - {result.comment}")
-            return {"success": False, "error": result.comment}
+            err = result.comment
+            if result.retcode == 10016:
+                err = f"Invalid stops | SL: {sl}, TP: {tp} | Ask: {tick.ask}, Bid: {tick.bid} | Stoplevel: {sym_info.trade_stops_level}"
+            logger.error(f"Order failed: {result.retcode} - {err}")
+            return {"success": False, "error": err}
             
         return {"success": True, "ticket": result.order}
 
@@ -240,10 +264,10 @@ class OrderManager:
         if not mt5:
             return []
             
-        from datetime import datetime
+        from datetime import datetime, timedelta
         
         loop = asyncio.get_running_loop()
-        now = datetime.now()
+        now = datetime.now() + timedelta(days=1)
         start_dt = datetime.fromtimestamp(last_check_time)
         
         deals = await loop.run_in_executor(

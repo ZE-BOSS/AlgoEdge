@@ -226,21 +226,24 @@ class CircuitBreaker:
 
     def record_external_close(self, symbol: str, pnl: float, current_time: datetime | None = None):
         """
-        Record a trade close from the MT5 sync loop WITHOUT requiring an active_groups entry.
-        Fixes the bug where position_closed() was a no-op after a bot restart because
-        active_groups was wiped. Called from BotService._trade_sync_loop.
+        Record a trade close from the MT5 sync loop.
+        If the symbol is in active_groups, delegates to position_closed to decrement sub_trades
+        and clean up memory. If not (e.g. post-restart), forcefully decrements the symbol count.
         """
-        self._record_trade_result(pnl, pnl >= 0)
-        # Decrement symbol count if tracked
-        if symbol in self.open_positions_by_symbol:
-            self.open_positions_by_symbol[symbol] = max(0, self.open_positions_by_symbol[symbol] - 1)
-            if self.open_positions_by_symbol[symbol] == 0:
-                del self.open_positions_by_symbol[symbol]
-        # Set M15 cooldown
-        if current_time is not None:
-            current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
-            self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
-        self.save_state()
+        if symbol in self.active_groups:
+            self.position_closed(group_id=symbol, pnl=pnl, current_time=current_time)
+        else:
+            self._record_trade_result(pnl, pnl >= 0)
+            # Decrement symbol count if tracked
+            if symbol in self.open_positions_by_symbol:
+                self.open_positions_by_symbol[symbol] = max(0, self.open_positions_by_symbol[symbol] - 1)
+                if self.open_positions_by_symbol[symbol] == 0:
+                    del self.open_positions_by_symbol[symbol]
+            # Set M15 cooldown
+            if current_time is not None:
+                current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
+                self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
+            self.save_state()
 
     def record_backtest_close(self, group_id: str, group_pnl: float, current_time: datetime | None = None):
         """Used by backtester to finalize a group's total PnL at once, triggering drawdown checks."""

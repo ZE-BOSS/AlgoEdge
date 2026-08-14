@@ -649,7 +649,7 @@ class BotService:
                                         "tp_count": config.risk.tp_count,
                                         "tp_splits": config.risk.tp_splits,
                                         "multi_position_mode": True,
-                                        "compounding_enabled": getattr(config.risk, "compounding_enabled", False),
+
                                         "max_daily_drawdown_pct": config.risk.max_daily_drawdown_pct,
                                         "max_weekly_drawdown_pct": config.risk.max_weekly_drawdown_pct,
                                         "max_daily_trades": config.risk.max_daily_trades,
@@ -698,7 +698,7 @@ class BotService:
                                     _rf = (
                                         risk_config["risk_per_trade_pct"],
                                         risk_config.get("tp_count", 3),
-                                        risk_config.get("compounding_enabled", False),
+
                                         risk_config.get("min_rr", 3.0),
                                     )
                                     if self.risk_engine is None or self._risk_engine_fp != _rf:

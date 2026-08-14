@@ -379,7 +379,7 @@ class BacktestEngine:
 
                 if sl_hit:
                     pos["exit_price"] = pos["stop_loss"]
-                    pos["exit_reason"] = "BE_SL" if pos.get("be_applied") else "SL"
+                    pos["exit_reason"] = "TRAIL_SL" if pos.get("trail_applied") else ("BE_SL" if pos.get("be_applied") else "SL")
                     pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
                     closed_this_bar.append(pos)
                     continue
