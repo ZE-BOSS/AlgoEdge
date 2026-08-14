@@ -660,9 +660,9 @@ class BotService:
                                             "max_lot_sizes": getattr(config.prop_firm, "max_lot_sizes", {}),
                                             "initial_balance": getattr(config.prop_firm, "initial_balance", 10000.0)
                                         },
-                                        # max_risk_hard_cap_pct: user-configurable absolute safety cap from PropFirmParams.
+                                        # max_risk_hard_cap_pct: user-configurable absolute safety cap from RiskParams.
                                         # Active for ALL account modes (personal and prop_firm).
-                                        "max_risk_hard_cap_pct": getattr(config.prop_firm, "max_risk_hard_cap_pct", 3.0),
+                                        "max_risk_hard_cap_pct": getattr(config.risk, "max_risk_hard_cap_pct", 3.0),
                                         "target_profit_enabled": config.risk.target_profit_enabled,
                                         "max_daily_profit": config.risk.max_daily_profit,
                                         "max_weekly_profit": config.risk.max_weekly_profit,

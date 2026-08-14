@@ -28,6 +28,7 @@ class RiskParams:
     """
     # Core sizing
     risk_per_trade_pct: float = 1.0
+    max_risk_hard_cap_pct: float = 3.0       # Absolute position sizer safety net
     min_rr: float = 3.0
     sizing_method: Literal["fixed_pct", "kelly"] = "fixed_pct"
     kelly_fraction: float = 0.25
@@ -165,8 +166,6 @@ class PropFirmParams:
     max_daily_loss_pct: float = 5.0          # Daily equity drawdown limit (%)
     max_total_drawdown_pct: float = 10.0     # Overall drawdown from peak/initial (%)
     drawdown_uses_equity: bool = True        # True = floating equity; False = closed balance only
-    # Absolute risk cap — applied by position sizer regardless of account_mode
-    max_risk_hard_cap_pct: float = 3.0       # Max single-trade risk as % of balance (safety net)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

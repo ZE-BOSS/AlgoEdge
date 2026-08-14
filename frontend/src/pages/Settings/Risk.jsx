@@ -91,8 +91,8 @@ export default function RiskSettings() {
         compounding_enabled: cfg.compounding?.compounding_enabled ?? prev.compounding_enabled,
         // Strategy sub-configs (FEAT-1)
         vwap: { ...prev.vwap, ...(cfg.vwap || {}) },
-        crt:  { ...prev.crt,  ...(cfg.crt  || {}) },
-        apa:  { ...prev.apa,  ...(cfg.apa  || {}) },
+        crt: { ...prev.crt, ...(cfg.crt || {}) },
+        apa: { ...prev.apa, ...(cfg.apa || {}) },
       }));
     }
   }, [remoteConfig]);

@@ -534,7 +534,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       sorted.forEach(t => {
         if (startBal === null) startBal = t.balance_before;
         endBal = t.balance_after;
-        
+
         const dStr = (t.entry_time_iso || '').split('T')[0];
         if ((result.prop_firm_breach_days || []).includes(dStr)) isBreached = true;
       });
