@@ -108,6 +108,20 @@ export default function RiskSettings() {
 
   const update = (key, val) => setConfig({ ...config, [key]: val });
 
+  const riskWarnings = [];
+  if (config.risk_per_trade_pct > config.max_risk_hard_cap_pct) riskWarnings.push(`Risk Per Trade (${config.risk_per_trade_pct}%) > Max Risk Hard Cap (${config.max_risk_hard_cap_pct}%)`);
+  if (config.risk_per_trade_pct > config.max_daily_drawdown_pct) riskWarnings.push(`Risk Per Trade (${config.risk_per_trade_pct}%) > Max Daily Drawdown (${config.max_daily_drawdown_pct}%)`);
+  if (config.risk_per_trade_pct > config.max_weekly_drawdown_pct) riskWarnings.push(`Risk Per Trade (${config.risk_per_trade_pct}%) > Max Weekly Drawdown (${config.max_weekly_drawdown_pct}%)`);
+  if (config.max_daily_drawdown_pct > config.max_weekly_drawdown_pct) riskWarnings.push(`Max Daily Drawdown (${config.max_daily_drawdown_pct}%) > Max Weekly Drawdown (${config.max_weekly_drawdown_pct}%)`);
+  if (config.max_risk_hard_cap_pct > config.max_daily_drawdown_pct) riskWarnings.push(`Max Risk Hard Cap (${config.max_risk_hard_cap_pct}%) > Max Daily Drawdown (${config.max_daily_drawdown_pct}%)`);
+  if (config.max_risk_hard_cap_pct > config.max_weekly_drawdown_pct) riskWarnings.push(`Max Risk Hard Cap (${config.max_risk_hard_cap_pct}%) > Max Weekly Drawdown (${config.max_weekly_drawdown_pct}%)`);
+  if (config.prop_firm?.account_mode === 'prop_firm') {
+    if (config.risk_per_trade_pct > (config.prop_firm?.max_total_drawdown_pct ?? 10.0)) riskWarnings.push(`Risk Per Trade (${config.risk_per_trade_pct}%) > Prop Firm Max Total Drawdown (${config.prop_firm?.max_total_drawdown_pct ?? 10.0}%)`);
+    if (config.risk_per_trade_pct > (config.prop_firm?.max_daily_loss_pct ?? 5.0)) riskWarnings.push(`Risk Per Trade (${config.risk_per_trade_pct}%) > Prop Firm Max Daily Loss (${config.prop_firm?.max_daily_loss_pct ?? 5.0}%)`);
+    if (config.max_weekly_drawdown_pct > (config.prop_firm?.max_total_drawdown_pct ?? 10.0)) riskWarnings.push(`Max Weekly Drawdown (${config.max_weekly_drawdown_pct}%) > Prop Firm Max Total Drawdown (${config.prop_firm?.max_total_drawdown_pct ?? 10.0}%)`);
+    if (config.max_daily_drawdown_pct > (config.prop_firm?.max_daily_loss_pct ?? 5.0)) riskWarnings.push(`Max Daily Drawdown (${config.max_daily_drawdown_pct}%) > Prop Firm Max Daily Loss (${config.prop_firm?.max_daily_loss_pct ?? 5.0}%)`);
+  }
+
   const handleSave = () => {
     const { prop_firm, compounding_enabled, vwap, crt, apa, ...riskParams } = config;
     mutation.mutate({
@@ -125,8 +139,17 @@ export default function RiskSettings() {
     <div style={{ display: 'grid', gap: 20, maxWidth: 800 }}>
       <div className="card">
         <div className="card-header"><span className="card-title"><Shield size={14} /> Position Sizing</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        {riskWarnings.length > 0 && (
+          <div style={{ marginBottom: 16, padding: 12, background: 'var(--bg-warning)', border: '1px solid var(--yellow)', borderRadius: 'var(--radius-xs)', color: 'var(--yellow)', fontSize: '0.85rem' }}>
+            <strong style={{ display: 'block', marginBottom: 6 }}>⚠️ Risk Parameter Mismatches Detected:</strong>
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              {riskWarnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          </div>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <div><label>Risk Per Trade (%)</label><input type="number" step="0.1" value={config.risk_per_trade_pct} onChange={e => update('risk_per_trade_pct', +e.target.value)} /></div>
+          <div><label>Max Risk Hard Cap (%)</label><input type="number" step="0.1" value={config.max_risk_hard_cap_pct} onChange={e => update('max_risk_hard_cap_pct', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute position sizer safety net</div></div>
           <div><label>Minimum R:R</label><input type="number" step="0.5" value={config.min_rr} onChange={e => update('min_rr', +e.target.value)} /></div>
         </div>
       </div>
@@ -272,25 +295,6 @@ export default function RiskSettings() {
             <input type="checkbox" checked={config.prop_firm?.account_mode === 'prop_firm'} onChange={e => update('prop_firm', { ...config.prop_firm, account_mode: e.target.checked ? 'prop_firm' : 'personal' })} style={{ width: 16, height: 16 }} />
             Enable Prop Firm Rules (BloomFunded strict rules)
           </label>
-        </div>
-        {/* max_risk_hard_cap_pct: applies to ALL account modes — it is the absolute safety cap on
-            the position sizer and is stored in prop_firm config but always active. */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 12, padding: '10px 12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border-subtle)' }}>
-          <div>
-            <label>Max Risk Hard Cap (% of balance)</label>
-            <input type="number" step="0.1" min="0.5" max="10"
-              value={config.prop_firm?.max_risk_hard_cap_pct ?? 3.0}
-              onChange={e => update('prop_firm', { ...config.prop_firm, max_risk_hard_cap_pct: +e.target.value })} />
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginTop: 2 }}>
-              Absolute position sizer cap — overrides lot sizing. Active for ALL account modes. Reset to 3.0 to restore default.
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 4 }}>
-            <button type="button" className="btn btn-secondary" style={{ fontSize: '0.78rem', padding: '5px 12px' }}
-              onClick={() => update('prop_firm', { ...config.prop_firm, max_risk_hard_cap_pct: 3.0 })}>
-              Reset Cap to Default (3%)
-            </button>
-          </div>
         </div>
 
         {config.prop_firm?.account_mode === 'prop_firm' && (
