@@ -1691,7 +1691,7 @@ export default function Backtester() {
               </div>
             ))}
 
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>"? Hard Filters (Optimization)</div> fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>━ Hard Filters (Optimization)</div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>━ Hard Filters (Optimization)</div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={form.enforce_htf_pd} onChange={e => u('enforce_htf_pd', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce HTF P/D Arrays</label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={form.enforce_fvg_displacement} onChange={e => u('enforce_fvg_displacement', e.target.checked)} style={{ width: 14, height: 14 }} /> Enforce FVG Displacement</label>

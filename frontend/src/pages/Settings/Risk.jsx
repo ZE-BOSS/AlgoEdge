@@ -12,6 +12,7 @@ export default function RiskSettings() {
 
   const [config, setConfig] = useState({
     risk_per_trade_pct: 1.0,
+    max_risk_hard_cap_pct: 3.0,
     max_daily_drawdown_pct: 3.0,
     max_weekly_drawdown_pct: 6.0,
     max_daily_trades: 5,
