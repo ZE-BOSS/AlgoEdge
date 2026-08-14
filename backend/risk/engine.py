@@ -68,7 +68,10 @@ class RiskEngine:
 
         base_balance = initial_balance if initial_balance is not None else account_balance
 
-        cb_ok, cb_reason = self.circuit.check_symbol(symbol)
+        # Extract timeframe from signal metadata if available, else default to M15.
+        timeframe = signal_data.get("metadata", {}).get("timeframe", "M15")
+
+        cb_ok, cb_reason = self.circuit.check_symbol(symbol, timeframe, current_time)
         if not cb_ok:
             logger.warning(json.dumps({
                 "event": "risk_rejected",

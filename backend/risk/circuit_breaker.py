@@ -24,6 +24,18 @@ def _utc_now_str() -> str:
     """ISO timestamp string for the current UTC time. Used to tag group open times."""
     return datetime.now(timezone.utc).isoformat()
 
+def _timeframe_to_seconds(tf: str) -> int:
+    """Convert timeframe string like 'M5' to seconds."""
+    tf = tf.upper()
+    if tf == "M1": return 60
+    if tf == "M5": return 300
+    if tf == "M15": return 900
+    if tf == "M30": return 1800
+    if tf == "H1": return 3600
+    if tf == "H4": return 14400
+    if tf == "D1": return 86400
+    return 900 # default to M15 if unknown
+
 
 class CircuitBreaker:
     """
@@ -51,7 +63,7 @@ class CircuitBreaker:
         self.open_positions_by_symbol: dict[str, int] = {}
         self.is_paused = False
         self.pause_reason = ""
-        self.last_trade_closed_m15_time: int | None = None
+        self.last_trade_closed_time: dict[str, int] = {}
         # Bug 4: Track the balance at day-start for correct daily drawdown % denominator.
         self._day_start_balance: float = 0.0
 
@@ -82,17 +94,7 @@ class CircuitBreaker:
         if self.is_paused:
             return False, self.pause_reason
 
-        # 1. M15 Cooldown Check
-        if self.last_trade_closed_m15_time is not None and current_time is not None:
-            try:
-                current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
-                current_m15 = (int(current_epoch) // 900) * 900
-                if current_m15 <= self.last_trade_closed_m15_time:
-                    return False, "M15 Cooldown Active: Waiting for current M15 candle to close"
-            except (ValueError, TypeError):
-                pass
-
-        # 2. Max daily trades
+        # 1. Max daily trades
         if self.max_daily_trades > 0 and self.daily_trades_count >= self.max_daily_trades:
             self.is_paused = True
             self.pause_reason = f"Daily max trades limit reached ({self.daily_trades_count}/{self.max_daily_trades})"
@@ -143,10 +145,26 @@ class CircuitBreaker:
         """Calculate the total initial risk dollars of all currently active groups."""
         return sum(g.get("initial_risk", 0.0) for g in self.active_groups.values())
 
-    def check_symbol(self, symbol: str) -> tuple[bool, str]:
+    def check_symbol(self, symbol: str, timeframe: str = "M15", current_time: datetime | None = None) -> tuple[bool, str]:
         """Check if a new position can be opened on the given symbol.
-        Enforces one active signal group per symbol at a time.
+        Enforces one active signal group per symbol at a time, and a timeframe-aware cooldown.
         """
+        # 1. Timeframe Cooldown Check
+        if symbol in self.last_trade_closed_time and current_time is not None:
+            try:
+                tf_seconds = _timeframe_to_seconds(timeframe)
+                current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
+                
+                # Floor both to the candle boundary to see if we are in the same candle
+                current_candle = (int(current_epoch) // tf_seconds) * tf_seconds
+                closed_candle = (self.last_trade_closed_time[symbol] // tf_seconds) * tf_seconds
+                
+                if current_candle <= closed_candle:
+                    return False, f"{timeframe} Cooldown Active: Waiting for current {timeframe} candle to close"
+            except (ValueError, TypeError):
+                pass
+
+        # 2. Max positions check
         sym_open = self.open_positions_by_symbol.get(symbol, 0)
         if sym_open >= self.max_positions_per_symbol:
             return False, f"Max positions reached for {symbol} ({sym_open}/{self.max_positions_per_symbol})"
@@ -197,15 +215,12 @@ class CircuitBreaker:
             if self.active_groups[group_id]["sub_trades"] <= 0:
                 group_pnl = self.active_groups[group_id]["pnl"]
                 self._record_trade_result(group_pnl, group_pnl >= 0)
-                
-                # Set M15 cooldown (live only — Bug 9: in backtest mode this
-                # would persist across symbols and block cross-symbol entries
-                # on the same or next M15 candle, which is incorrect behaviour).
-                if not self.is_backtest and current_time is not None:
-                    current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
-                    self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
-
+                # Set per-symbol cooldown (live only)
                 sym = self.active_groups[group_id].get("symbol", "")
+                if not self.is_backtest and current_time is not None and sym:
+                    current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
+                    self.last_trade_closed_time[sym] = int(current_epoch)
+
                 del self.active_groups[group_id]
                 if sym and sym in self.open_positions_by_symbol:
                     self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
@@ -239,26 +254,27 @@ class CircuitBreaker:
                 self.open_positions_by_symbol[symbol] = max(0, self.open_positions_by_symbol[symbol] - 1)
                 if self.open_positions_by_symbol[symbol] == 0:
                     del self.open_positions_by_symbol[symbol]
-            # Set M15 cooldown
+            # Set per-symbol cooldown
             if current_time is not None:
                 current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
-                self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
+                self.last_trade_closed_time[symbol] = int(current_epoch)
             self.save_state()
 
     def record_backtest_close(self, group_id: str, group_pnl: float, current_time: datetime | None = None):
         """Used by backtester to finalize a group's total PnL at once, triggering drawdown checks."""
         self._record_trade_result(group_pnl, group_pnl >= 0)
         
-        # Bug 9: skip M15 cooldown in backtest — see position_closed() comment above.
-        if not self.is_backtest and current_time is not None:
+        sym = self.active_groups[group_id].get("symbol", "") if group_id in self.active_groups else ""
+        
+        # Bug 9: skip cooldown in backtest — see position_closed() comment above.
+        if not self.is_backtest and current_time is not None and sym:
             try:
                 current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
-                self.last_trade_closed_m15_time = (int(current_epoch) // 900) * 900
+                self.last_trade_closed_time[sym] = int(current_epoch)
             except (ValueError, TypeError):
                 pass
             
         if group_id in self.active_groups:
-            sym = self.active_groups[group_id].get("symbol", "")
             del self.active_groups[group_id]
             if sym and sym in self.open_positions_by_symbol:
                 self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
@@ -277,6 +293,7 @@ class CircuitBreaker:
                 "daily_pnl": self.daily_pnl,
                 "weekly_pnl": self.weekly_pnl,
                 "open_positions_by_symbol": self.open_positions_by_symbol,
+                "last_trade_closed_time": self.last_trade_closed_time,
                 "is_paused": self.is_paused,
                 "pause_reason": self.pause_reason,
                 "last_reset_day": str(self.last_reset_day),
@@ -313,6 +330,7 @@ class CircuitBreaker:
                 self.daily_trades_count = data.get("daily_trades_count", 0)
                 self.daily_pnl = data.get("daily_pnl", 0.0)
                 self.open_positions_by_symbol = data.get("open_positions_by_symbol", {})
+                self.last_trade_closed_time = data.get("last_trade_closed_time", {})
                 # Only restore paused state for weekly-level pauses (daily pauses clear each day)
                 if not is_new_day:
                     saved_pause = data.get("is_paused", False)
@@ -366,7 +384,7 @@ class CircuitBreaker:
         """User manually re-enables trading after a streak pause. Resets ALL state."""
         self.is_paused = False
         self.pause_reason = ""
-        self.last_trade_closed_m15_time = None
+        self.last_trade_closed_time = {}
         self.save_state()
         logger.info("Circuit breaker manually resumed by user")
 
@@ -380,7 +398,7 @@ class CircuitBreaker:
         """
         self.is_paused = False
         self.pause_reason = ""
-        self.last_trade_closed_m15_time = None
+        self.last_trade_closed_time = {}
         logger.info("Circuit breaker auto-resumed for new trading day (weekly streak preserved)")
 
     def _parse_timestamp_date(self, ts) -> tuple[datetime.date, int]:
