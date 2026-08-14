@@ -44,7 +44,7 @@ def setup_global_error_handler():
                 from backend.services.bot_service import bot_service
                 
                 # Log to frontend activity log
-                bot_service._log_event(f"SYSTEM ERROR: {msg_text}", category="ERROR")
+                bot_service._log_event(f"SYSTEM ERROR: {msg_text}", level="ERROR", category="SYSTEM")
                 
                 # Check rate limiting per exact message
                 import time
