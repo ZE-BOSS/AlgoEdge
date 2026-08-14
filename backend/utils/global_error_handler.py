@@ -28,8 +28,10 @@ def setup_global_error_handler():
             func = record["function"]
             line = record["line"]
 
-            # Prevent infinite loops if telegram itself errors
+            # Prevent infinite loops if telegram or logger itself errors
             if "telegram" in module.lower():
+                return
+            if "bot_service" in module.lower() and func == "_log_event":
                 return
                 
             formatted_msg = f"🚨 *SYSTEM ERROR* 🚨\n\n*Module:* `{module}:{func}:{line}`\n*Level:* `{record['level'].name}`\n\n*Message:*\n```\n{msg_text}\n```"
