@@ -1312,24 +1312,22 @@ export default function Backtester() {
   // Load defaults from user's live config (only on first load if no saved config)
   const { data: userCfg } = useQuery({ queryKey: ['config'], queryFn: () => getConfig().then(r => r.data), enabled: status === 'ONLINE' && isAuth });
   useEffect(() => {
-    if (userCfg?.config && !configLoaded && !localStorage.getItem(STORAGE_KEY)) {
-      const c = userCfg.config;
-      setForm(prev => ({
-        ...prev,
-        ...Object.fromEntries(Object.entries(c).filter(([k]) => k in prev)),
-        ...Object.fromEntries(Object.entries(c.risk || {}).filter(([k]) => k in prev)),
-        max_risk_hard_cap_pct: c.risk?.max_risk_hard_cap_pct ?? prev.max_risk_hard_cap_pct,
-        prop_firm: c.prop_firm || prev.prop_firm,
-        smc: c.apa || prev.smc,
-        drift_jump_alpha: c.drift_jump_alpha || prev.drift_jump_alpha,
-        crt: c.crt || prev.crt,
-        vwap: c.vwap || prev.vwap,
-        compounding_enabled: c.compounding?.compounding_enabled ?? prev.compounding_enabled,
-        session_filter_enabled: c.smc?.session_filter_enabled ?? prev.session_filter_enabled,
-        news_filter_enabled: c.smc?.news_filter_enabled ?? prev.news_filter_enabled,
-      }));
-    }
-    if (userCfg) setConfigLoaded(true);
+      if (userCfg?.config && !configLoaded) {
+        const c = userCfg.config;
+        setForm(prev => {
+          const merged = { ...prev };
+          merged.max_risk_hard_cap_pct = prev.max_risk_hard_cap_pct ?? c.risk?.max_risk_hard_cap_pct ?? 3.0;
+          merged.prop_firm = { ...(c.prop_firm || {}), ...(prev.prop_firm || {}) };
+          merged.smc = { ...(c.apa || {}), ...(prev.smc || {}) };
+          merged.drift_jump_alpha = { ...(c.drift_jump_alpha || {}), ...(prev.drift_jump_alpha || {}) };
+          merged.crt = { ...(c.crt || {}), ...(prev.crt || {}) };
+          merged.vwap = { ...(c.vwap || {}), ...(prev.vwap || {}) };
+          merged.compounding_enabled = prev.compounding_enabled ?? c.compounding?.compounding_enabled;
+          
+          return merged;
+        });
+      }
+      if (userCfg) setConfigLoaded(true);
   }, [userCfg, configLoaded]);
 
   useEffect(() => {
@@ -1556,7 +1554,7 @@ export default function Backtester() {
     <div className="grid-2">
       <div className="card">
         <div className="card-header" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: "100%" }}>
             <dv><span className="card-title">Configuration</span></dv>
             <div style={{ display: 'flex', gap: 4, background: 'var(--bg-tertiary)', padding: 4, borderRadius: 'var(--radius-sm)' }}>
               <button className={`btn btn-sm ${activeTab === 'single' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('single')}>Single</button>
