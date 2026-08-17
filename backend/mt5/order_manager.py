@@ -172,22 +172,53 @@ class OrderManager:
         if not position:
             return False
             
-        sym_info = mt5.symbol_info(position[0].symbol)
+        pos = position[0]
+        sym_info = mt5.symbol_info(pos.symbol)
         digits = sym_info.digits if sym_info else 5
         tick_size = sym_info.trade_tick_size if sym_info else 0.0
+        point = sym_info.point if sym_info else 0.00001
+        
+        # Ensure SL respects minimum distance (stops level or spread)
+        stops_level = sym_info.trade_stops_level if sym_info else 0
+        spread = sym_info.spread if sym_info else 0
+        min_distance = max(stops_level, spread, 2) * point
+        
+        tick = mt5.symbol_info_tick(pos.symbol)
+        if tick:
+            is_buy = pos.type == mt5.POSITION_TYPE_BUY
+            if is_buy:
+                max_sl = tick.bid - min_distance
+                if new_sl > max_sl:
+                    logger.warning(f"Adjusting new_sl {new_sl} to max valid SL {max_sl} for BUY ticket {ticket}")
+                    new_sl = max_sl
+            else:
+                min_sl = tick.ask + min_distance
+                if new_sl < min_sl:
+                    logger.warning(f"Adjusting new_sl {new_sl} to min valid SL {min_sl} for SELL ticket {ticket}")
+                    new_sl = min_sl
+                    
+        # Skip if new_sl is not better than current SL
+        if pos.sl != 0.0:
+            is_buy = pos.type == mt5.POSITION_TYPE_BUY
+            if (is_buy and new_sl <= pos.sl) or (not is_buy and new_sl >= pos.sl):
+                logger.info(f"Skipping SL modification for {ticket}: adjusted SL {new_sl} is not better than current SL {pos.sl}")
+                return True
         
         if tick_size > 0:
             rounded_sl = round(round(new_sl / tick_size) * tick_size, digits)
         else:
             rounded_sl = round(new_sl, digits)
+            
+        if rounded_sl == pos.sl:
+            return True
         
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "position": ticket,
-            "symbol": position[0].symbol,
+            "symbol": pos.symbol,
             "sl": rounded_sl,
-            "tp": position[0].tp,
-            "magic": position[0].magic
+            "tp": pos.tp,
+            "magic": pos.magic
         }
         
         result = await loop.run_in_executor(
