@@ -41,6 +41,8 @@ export function useWebSocket() {
   const { setWsConnected, status } = useConnectionStore();
   const user = useAuthStore((s) => s.user);
   const token = useAuthStore((s) => s.token);
+  const logout = useAuthStore((s) => s.logout);
+  const refreshToken = useAuthStore((s) => s.refreshToken);
 
   const connect = useCallback(() => {
     if (status !== 'ONLINE' || !user?.id || !token) return;
@@ -58,9 +60,25 @@ export function useWebSocket() {
       retryRef.current = 1000; // Reset backoff
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       setWsConnected(false);
       wsRef.current = null;
+
+      // Auth failure codes: 4001 (invalid token), 4003 (forbidden), 1008 (policy violation)
+      // HTTP 403 manifests as close code 1006 (abnormal) or the server sends 4001/4003
+      const isAuthError = [4001, 4003, 1008].includes(event.code);
+      const isAbnormalWithReason = event.code === 1006 && event.reason?.includes('403');
+
+      if (isAuthError || isAbnormalWithReason) {
+        // Try refresh once; if unavailable or fails, logout
+        if (typeof refreshToken === 'function') {
+          refreshToken().catch(() => logout());
+        } else {
+          logout();
+        }
+        return; // Don't schedule reconnect with stale token
+      }
+
       // Exponential backoff reconnect: 1s → 2s → 4s → 8s → 30s cap
       const delay = Math.min(retryRef.current, 30000);
       retryRef.current = delay * 2;
@@ -75,7 +93,7 @@ export function useWebSocket() {
         window.dispatchEvent(new CustomEvent('ws-message', { detail: data }));
       } catch {}
     };
-  }, [status, user?.id, token, setWsConnected]);
+  }, [status, user?.id, token, setWsConnected, logout, refreshToken]);
 
   useEffect(() => {
     connect();

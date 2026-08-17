@@ -90,7 +90,7 @@ async def websocket_handler(websocket: WebSocket, user_id: str, token: str = Non
     """
     if not token:
         logger.warning(f"WebSocket connection rejected: Missing token for user {user_id}")
-        await websocket.close(code=1008)
+        await websocket.close(code=4001, reason="Missing token")
         return
 
     from jose import JWTError, jwt
@@ -102,11 +102,11 @@ async def websocket_handler(websocket: WebSocket, user_id: str, token: str = Non
         token_user_id = payload.get("sub")
         if token_user_id != user_id:
             logger.warning(f"WebSocket connection rejected: Token mismatch for user {user_id}")
-            await websocket.close(code=1008)
+            await websocket.close(code=4001, reason="Token mismatch")
             return
     except JWTError:
-        logger.warning(f"WebSocket connection rejected: Invalid token for user {user_id}")
-        await websocket.close(code=1008)
+        logger.warning(f"WebSocket connection rejected: Invalid/expired token for user {user_id}")
+        await websocket.close(code=4001, reason="Token expired")
         return
 
     await manager.connect(websocket, user_id)

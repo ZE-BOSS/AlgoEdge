@@ -224,10 +224,20 @@ class VWAPEngine(BaseStrategy):
 
             entry = latest["open"]
             atr = calculate_atr(candles)
+
+            # sl_points is the primary SL distance (user-configured, e.g. 170 for USDCHF).
+            # sl_atr_multiplier acts as a FLOOR — if ATR suggests a wider SL, use that instead.
+            # This fixes the bug where sl_atr_multiplier (default 1.0) always won,
+            # making sl_points dead code (avg SL was 3.9 pips instead of configured 17 pips).
+            sl_dist = self.params.sl_points
             if self.params.sl_atr_multiplier > 0:
-                sl_dist = atr * self.params.sl_atr_multiplier
-            else:
-                sl_dist = self.params.sl_points
+                atr_sl = atr * self.params.sl_atr_multiplier
+                if atr_sl > sl_dist:
+                    sl_dist = atr_sl
+                    logger.debug(
+                        f"[{symbol}] ATR floor widened SL: sl_points={self.params.sl_points:.1f} "
+                        f"→ ATR×{self.params.sl_atr_multiplier}={atr_sl:.5f}"
+                    )
 
             if direction == "BUY":
                 sl = entry - sl_dist

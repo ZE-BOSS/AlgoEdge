@@ -52,11 +52,25 @@ async def start_bot(
         user_config = result.scalar_one_or_none()
         if user_config:
             config_data = json.loads(user_config.config_json) if user_config.config_json else {}
-            symbols = config_data.get("watched_symbols", config_data.get("symbols", []))
+            # Strategy.jsx saves instrument_settings (primary) or legacy symbols/watched_symbols
+            instrument_settings = config_data.get("instrument_settings", [])
+            if instrument_settings:
+                # Only include symbols that have enabled=True
+                symbols = [s["symbol"] for s in instrument_settings if s.get("enabled", True)]
+            else:
+                # Legacy fallbacks
+                symbols = config_data.get("symbols", config_data.get("watched_symbols", []))
 
-    # Fall back to defaults if still empty
+    # Block start if no symbols configured — never fall back to a hardcoded list
     if not symbols:
-        symbols = ["XAUUSD", "XAGUSD", "XPTUSD", "EURUSD", "GBPUSD", "USOIL", "ETHUSD", "GBPJPY"]
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "No active symbols configured. Please go to Settings → Strategy and enable at least one symbol.",
+                "missing_brokers": [],
+                "symbols": [],
+            }
+        )
 
     # 2. Validate broker connectivity for selected symbols
     missing_brokers = []

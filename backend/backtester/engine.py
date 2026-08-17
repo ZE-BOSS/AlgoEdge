@@ -336,8 +336,9 @@ class BacktestEngine:
                 # Resolve ambiguous same-bar SL+TP hit using OHLC shadow-weighted path model.
                 # If both SL and TP were touched in the same bar, use shadow lengths and
                 # distance from open to determine which was most likely hit first.
-                # Longer SL-side shadow = SL assumed first (conservative).
+                # Both conditions must agree for SL to win (balanced heuristic).
                 if sl_hit and tp_hit:
+                    pos["same_bar_ambiguous"] = True  # Tag for reporting
                     if self._simulate_wicks:
                         if pos["direction"] == "BUY":
                             sl_shadow = open_p - low   # downward shadow towards SL
@@ -347,7 +348,8 @@ class BacktestEngine:
                             tp_shadow = open_p - low   # downward shadow towards TP
                         dist_to_sl = abs(pos["stop_loss"] - open_p)
                         dist_to_tp = abs(pos["take_profit"] - open_p)
-                        sl_wins = (sl_shadow >= tp_shadow) or (dist_to_sl <= dist_to_tp)
+                        # Balanced: SL wins only if BOTH shadow AND distance favor it
+                        sl_wins = (sl_shadow >= tp_shadow) and (dist_to_sl <= dist_to_tp)
                         if sl_wins:
                             tp_hit = False
                         else:

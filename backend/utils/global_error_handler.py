@@ -48,13 +48,31 @@ def setup_global_error_handler():
                 # Log to frontend activity log
                 bot_service._log_event(f"SYSTEM ERROR: {msg_text}", level="ERROR", category="SYSTEM")
                 
-                # Check rate limiting per exact message
+                # Rate limiting — known infrastructure issues get 1 hour suppression
                 import time
                 now = time.time()
+                _INFRA_PATTERNS = (
+                    "not found in mt5",
+                    "data fetch failed",
+                    "symbol not found",
+                    "mt5 is offline",
+                    "backtest cancelled",
+                    "portfolio backtest cancelled",
+                    "modify sl failed",
+                    "failed to modify sl",
+                    "invalid stops",
+                )
+                is_infra = any(p in msg_text.lower() for p in _INFRA_PATTERNS)
+                rate_limit_secs = 3600 if is_infra else 60
+
                 if msg_text in _telegram_rate_limit:
-                    if now - _telegram_rate_limit[msg_text] < 60:
-                        return # Skip duplicate within 60s
+                    if now - _telegram_rate_limit[msg_text] < rate_limit_secs:
+                        return # Skip duplicate within window
                 _telegram_rate_limit[msg_text] = now
+
+                # Demote known infra warnings to ⚠️ instead of 🚨 SYSTEM ERROR
+                if is_infra:
+                    formatted_msg = f"⚠️ *Infrastructure Warning*\n\n*Module:* `{module}:{func}:{line}`\n\n*Message:*\n```\n{msg_text}\n```"
                 
                 try:
                     loop = asyncio.get_running_loop()

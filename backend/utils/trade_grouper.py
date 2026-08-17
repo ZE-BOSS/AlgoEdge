@@ -145,6 +145,79 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
         except Exception:
             g["exit_session"] = "UNKNOWN"
 
+        # ── TP Prices & RR Metrics ──────────────────────────────────────
+        # Extract TP prices from sub-trades keyed by tp_level
+        entry_p = g.get("entry_price", 0)
+        sl_p = g.get("stop_loss", 0)
+        is_buy = g.get("direction", "").upper() in ("BUY", "BULLISH")
+        risk_dist = abs(entry_p - sl_p) if (entry_p and sl_p) else 0
+
+        for st in sub_trades:
+            lvl = st.get("tp_level", 0)
+            tp_price = st.get("take_profit", 0)
+            if lvl and tp_price and 1 <= lvl <= 5:
+                g[f"tp{lvl}_price"] = tp_price
+
+        # Ensure tp1-tp5 keys always exist (null if not set)
+        for i in range(1, 6):
+            g.setdefault(f"tp{i}_price", None)
+
+        # Compute per-sub-trade RR and find highest TP hit
+        highest_tp_hit = 0
+        sub_rrs = []
+        for st in sub_trades:
+            exit_p = st.get("exit_price", 0)
+            exit_reason = st.get("exit_reason", "")
+            vol = st.get("volume", 0)
+
+            # Calculate realized RR for this sub-trade
+            if risk_dist > 0 and exit_p and entry_p:
+                if is_buy:
+                    sub_rr = (exit_p - entry_p) / risk_dist
+                else:
+                    sub_rr = (entry_p - exit_p) / risk_dist
+                sub_rrs.append((sub_rr, vol))
+            else:
+                sub_rrs.append((0.0, vol))
+
+            # Track highest TP level that actually triggered
+            lvl = st.get("tp_level", 0)
+            if lvl and exit_reason and "TP" in exit_reason.upper():
+                highest_tp_hit = max(highest_tp_hit, lvl)
+
+        g["tp_level_hit"] = highest_tp_hit if highest_tp_hit > 0 else None
+
+        # Volume-weighted realized RR across all sub-trades
+        total_vol = sum(v for _, v in sub_rrs) or 1
+        g["realized_rr"] = round(sum(rr * v for rr, v in sub_rrs) / total_vol, 3)
+        g["max_rr_achieved"] = round(max((rr for rr, _ in sub_rrs), default=0), 3)
+
+        # Planned RR: based on the highest TP target
+        if risk_dist > 0:
+            tp_prices = [g[f"tp{i}_price"] for i in range(1, 6) if g.get(f"tp{i}_price")]
+            if tp_prices:
+                best_tp = max(tp_prices) if is_buy else min(tp_prices)
+                if is_buy:
+                    g["planned_rr"] = round((best_tp - entry_p) / risk_dist, 3)
+                else:
+                    g["planned_rr"] = round((entry_p - best_tp) / risk_dist, 3)
+            else:
+                g["planned_rr"] = None
+        else:
+            g["planned_rr"] = None
+
+        # PnL in R-multiples: net_pnl divided by risk_amount
+        # risk_amount = volume × risk_dist × pip_value (approximate using first sub-trade's volume)
+        if risk_dist > 0 and sub_trades:
+            first_vol = sub_trades[0].get("volume", 0)
+            if first_vol > 0:
+                # Approximate: pnl_r = realized_rr (already volume-weighted)
+                g["pnl_r"] = g["realized_rr"]
+            else:
+                g["pnl_r"] = None
+        else:
+            g["pnl_r"] = None
+
         # ── Extract Chart Data and SMC Zones ──
         # Resolve the right candle set for THIS group's symbol. For a
         # single-symbol backtest `candles` is already the one DataFrame we

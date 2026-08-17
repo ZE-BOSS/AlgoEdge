@@ -50,10 +50,22 @@ export default function RiskSettings() {
 
     prop_firm: {
       account_mode: 'personal',
+      firm_name: '',
       challenge_type: 'none',
       account_size: 10000.0,
       initial_balance: 10000.0,
-      max_lot_sizes: {}
+      drawdown_type: 'trailing',
+      max_daily_loss_pct: 5.0,
+      max_total_drawdown_pct: 10.0,
+      drawdown_uses_equity: true,
+      overnight_holding_allowed: true,
+      weekend_holding_allowed: true,
+      news_trading_allowed: true,
+      news_blackout_before_min: 15,
+      news_blackout_after_min: 45,
+      max_lot_sizes: {},
+      profit_target_pct: 0.0,
+      min_trading_days: 0,
     },
     // FEAT-1: Live strategy params
     vwap: {
@@ -290,59 +302,118 @@ export default function RiskSettings() {
       </div>
 
       <div className="card">
-        <div className="card-header"><span className="card-title">Prop Firm Settings</span></div>
+        <div className="card-header"><span className="card-title">Prop Firm / Broker Settings</span></div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
             <input type="checkbox" checked={config.prop_firm?.account_mode === 'prop_firm'} onChange={e => update('prop_firm', { ...config.prop_firm, account_mode: e.target.checked ? 'prop_firm' : 'personal' })} style={{ width: 16, height: 16 }} />
-            Enable Prop Firm Rules (BloomFunded strict rules)
+            Enable Prop Firm Rules
           </label>
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Activates hard circuit breakers for challenge/funded account rules</span>
         </div>
 
         {config.prop_firm?.account_mode === 'prop_firm' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
-            <div>
-              <label>Challenge Type</label>
-              <select value={config.prop_firm.challenge_type} onChange={e => update('prop_firm', { ...config.prop_firm, challenge_type: e.target.value })}>
-                <option value="none">None / Funded</option>
-                <option value="1-step">1-Step / Flex (Trailing DD)</option>
-                <option value="2-step">2-Step (Static DD)</option>
-              </select>
-            </div>
-            <div>
-              <label>Account Size</label>
-              <input type="number" step="1000" value={config.prop_firm.account_size} onChange={e => update('prop_firm', { ...config.prop_firm, account_size: +e.target.value })} />
-            </div>
-            <div>
-              <label>Initial Balance (DD Baseline)</label>
-              <input type="number" step="1000" value={config.prop_firm.initial_balance} onChange={e => update('prop_firm', { ...config.prop_firm, initial_balance: +e.target.value })} />
-            </div>
-            <div>
-              <label>Max Daily Drawdown — Hard Block (%)</label>
-              <input type="number" step="0.1" min="0.1" max="20"
-                value={config.prop_firm.max_daily_loss_pct ?? (config.prop_firm.challenge_type === '1-step' ? 4.0 : 5.0)}
-                onChange={e => update('prop_firm', { ...config.prop_firm, max_daily_loss_pct: +e.target.value })} />
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>When breached, no new signals until manually reset</span>
-            </div>
-            <div>
-              <label>Max Overall Drawdown — Hard Block (%)</label>
-              <input type="number" step="0.1" min="0.1" max="50"
-                value={config.prop_firm.max_total_drawdown_pct ?? (config.prop_firm.challenge_type === '1-step' ? 6.0 : 10.0)}
-                onChange={e => update('prop_firm', { ...config.prop_firm, max_total_drawdown_pct: +e.target.value })} />
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>From peak/initial balance</span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <label>Drawdown Uses Floating Equity</label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400, cursor: 'pointer' }}>
-                <input type="checkbox"
-                  checked={config.prop_firm.drawdown_uses_equity ?? true}
-                  onChange={e => update('prop_firm', { ...config.prop_firm, drawdown_uses_equity: e.target.checked })} />
-                <span style={{ fontSize: '0.8rem' }}>
-                  {(config.prop_firm.drawdown_uses_equity ?? true) ? '✅ Balance + unrealized P&L' : '⚠️ Closed balance only'}
-                </span>
-              </label>
+          <div style={{ display: 'grid', gap: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
+            {/* Row 1: Identity */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
+              <div>
+                <label>Firm Name</label>
+                <input type="text" placeholder="e.g. FundedNext, FIVR, Exness" value={config.prop_firm.firm_name ?? ''} onChange={e => update('prop_firm', { ...config.prop_firm, firm_name: e.target.value })} />
+              </div>
+              <div>
+                <label>Challenge Type</label>
+                <input type="text" placeholder="e.g. 1-step, 2-step, express, funded" value={config.prop_firm.challenge_type ?? 'none'} onChange={e => update('prop_firm', { ...config.prop_firm, challenge_type: e.target.value })} />
+              </div>
+              <div>
+                <label>Account Size</label>
+                <input type="number" step="1000" value={config.prop_firm.account_size} onChange={e => update('prop_firm', { ...config.prop_firm, account_size: +e.target.value })} />
+              </div>
+              <div>
+                <label>Initial Balance (DD Baseline)</label>
+                <input type="number" step="1000" value={config.prop_firm.initial_balance} onChange={e => update('prop_firm', { ...config.prop_firm, initial_balance: +e.target.value })} />
+              </div>
             </div>
 
-            <div style={{ gridColumn: '1 / -1', marginTop: '4px' }}>
+            {/* Row 2: Drawdown rules */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
+              <div>
+                <label>Drawdown Type</label>
+                <select value={config.prop_firm.drawdown_type ?? 'trailing'} onChange={e => update('prop_firm', { ...config.prop_firm, drawdown_type: e.target.value })}>
+                  <option value="trailing">Trailing (from high-water mark)</option>
+                  <option value="static">Static (from initial balance)</option>
+                </select>
+              </div>
+              <div>
+                <label>Max Daily Loss (%)</label>
+                <input type="number" step="0.1" min="0.1" max="20"
+                  value={config.prop_firm.max_daily_loss_pct ?? 5.0}
+                  onChange={e => update('prop_firm', { ...config.prop_firm, max_daily_loss_pct: +e.target.value })} />
+              </div>
+              <div>
+                <label>Max Overall Drawdown (%)</label>
+                <input type="number" step="0.1" min="0.1" max="50"
+                  value={config.prop_firm.max_total_drawdown_pct ?? 10.0}
+                  onChange={e => update('prop_firm', { ...config.prop_firm, max_total_drawdown_pct: +e.target.value })} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <label>Drawdown Uses Equity</label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400, cursor: 'pointer' }}>
+                  <input type="checkbox"
+                    checked={config.prop_firm.drawdown_uses_equity ?? true}
+                    onChange={e => update('prop_firm', { ...config.prop_firm, drawdown_uses_equity: e.target.checked })} />
+                  <span style={{ fontSize: '0.8rem' }}>
+                    {(config.prop_firm.drawdown_uses_equity ?? true) ? '✅ Balance + unrealized P&L' : '⚠️ Closed balance only'}
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* Row 3: Trading rules */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 12, padding: '8px 0', borderTop: '1px solid var(--border-subtle)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400, cursor: 'pointer', fontSize: '0.8rem' }}>
+                <input type="checkbox" checked={config.prop_firm.overnight_holding_allowed ?? true}
+                  onChange={e => update('prop_firm', { ...config.prop_firm, overnight_holding_allowed: e.target.checked })} />
+                Overnight Holding
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400, cursor: 'pointer', fontSize: '0.8rem' }}>
+                <input type="checkbox" checked={config.prop_firm.weekend_holding_allowed ?? true}
+                  onChange={e => update('prop_firm', { ...config.prop_firm, weekend_holding_allowed: e.target.checked })} />
+                Weekend Holding
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400, cursor: 'pointer', fontSize: '0.8rem' }}>
+                <input type="checkbox" checked={config.prop_firm.news_trading_allowed ?? true}
+                  onChange={e => update('prop_firm', { ...config.prop_firm, news_trading_allowed: e.target.checked })} />
+                News Trading
+              </label>
+              <div>
+                <label style={{ fontSize: '0.7rem' }}>Blackout Before (min)</label>
+                <input type="number" min="0" max="120" value={config.prop_firm.news_blackout_before_min ?? 15}
+                  onChange={e => update('prop_firm', { ...config.prop_firm, news_blackout_before_min: +e.target.value })} />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.7rem' }}>Blackout After (min)</label>
+                <input type="number" min="0" max="120" value={config.prop_firm.news_blackout_after_min ?? 45}
+                  onChange={e => update('prop_firm', { ...config.prop_firm, news_blackout_after_min: +e.target.value })} />
+              </div>
+            </div>
+
+            {/* Row 4: Challenge pass conditions */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: '8px 0', borderTop: '1px solid var(--border-subtle)' }}>
+              <div>
+                <label>Profit Target (%)</label>
+                <input type="number" step="0.5" min="0" value={config.prop_firm.profit_target_pct ?? 0}
+                  onChange={e => update('prop_firm', { ...config.prop_firm, profit_target_pct: +e.target.value })} />
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Challenge pass target. Set 0 for funded/personal accounts.</div>
+              </div>
+              <div>
+                <label>Min Trading Days</label>
+                <input type="number" step="1" min="0" value={config.prop_firm.min_trading_days ?? 0}
+                  onChange={e => update('prop_firm', { ...config.prop_firm, min_trading_days: +e.target.value })} />
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Minimum days with at least 1 trade. Set 0 if no requirement.</div>
+              </div>
+            </div>
+
+            {/* Max Lot Sizes per Asset */}
+            <div style={{ padding: '8px 0', borderTop: '1px solid var(--border-subtle)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <label style={{ margin: 0 }}>Max Lot Sizes per Asset</label>
                 <button type="button" className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => {
@@ -380,8 +451,9 @@ export default function RiskSettings() {
                 )}
               </div>
             </div>
-            {/* Reset breach button — visible only when prop firm is in breached state */}
-            <div style={{ gridColumn: '1 / -1', marginTop: 8, display: 'flex', gap: 12, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--border-subtle)' }}>
+
+            {/* Reset buttons */}
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--border-subtle)' }}>
               <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '6px 14px', borderColor: 'var(--yellow)', color: 'var(--yellow)' }}
                 onClick={async () => {
                   try {

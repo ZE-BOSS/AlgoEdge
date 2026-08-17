@@ -251,12 +251,44 @@ class APAEngine(BaseStrategy):
                 if sl is None:
                     return None
 
+                # ── Validate SL is on the correct side of entry ──
+                # SELL: SL must be above entry (price rises = loss)
+                # BUY:  SL must be below entry (price falls = loss)
+                if direction == "SELL" and sl <= entry:
+                    state["status"] = "AWAIT_PATTERN"
+                    state["pattern"] = None
+                    self.log_event(
+                        f"[{symbol}] SELL SL ({sl:.5f}) <= entry ({entry:.5f}) — "
+                        f"SL on wrong side, pattern invalidated.",
+                        category="APA",
+                    )
+                    return None
+                if direction == "BUY" and sl >= entry:
+                    state["status"] = "AWAIT_PATTERN"
+                    state["pattern"] = None
+                    self.log_event(
+                        f"[{symbol}] BUY SL ({sl:.5f}) >= entry ({entry:.5f}) — "
+                        f"SL on wrong side, pattern invalidated.",
+                        category="APA",
+                    )
+                    return None
+
                 # TP: use risk engine's RR grid (SL distance × RR)
                 sl_distance = abs(entry - sl)
                 if direction == "SELL":
                     tp = entry - sl_distance  # TP1 = 1R
                 else:
                     tp = entry + sl_distance  # TP1 = 1R
+
+                # Final sanity: SL and TP must not be equal
+                if abs(tp - sl) < 1e-10:
+                    state["status"] = "AWAIT_PATTERN"
+                    state["pattern"] = None
+                    self.log_event(
+                        f"[{symbol}] SL ({sl:.5f}) == TP ({tp:.5f}) — degenerate, resetting.",
+                        category="APA",
+                    )
+                    return None
 
                 # Reset state machine for next setup
                 state["status"] = "AWAIT_PATTERN"

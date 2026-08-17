@@ -81,22 +81,34 @@ class OrderManager:
         stoplevel = sym_info.trade_stops_level * sym_info.point
         if direction.upper() in ("BUY", "BULLISH"):
             if sl > 0 and sl >= tick.bid - stoplevel:
-                err_msg = f"Stale Signal (Slippage): SL ({sl}) is already hit or too close to current Bid ({tick.bid}). Stoplevel: {stoplevel}"
+                err_msg = (
+                    f"Stale Signal (Slippage): SL ({sl}) is already hit or too close to current Bid ({tick.bid}). "
+                    f"Stoplevel: {round(stoplevel, sym_info.digits)}"
+                )
                 logger.warning(err_msg)
-                return {"success": False, "error": err_msg}
+                return {"success": False, "error": err_msg, "stale": True}
             if tp > 0 and tp <= tick.bid + stoplevel:
-                err_msg = f"Stale Signal (Slippage): TP ({tp}) is already hit or too close to current Bid ({tick.bid}). Stoplevel: {stoplevel}"
+                err_msg = (
+                    f"Stale Signal (Slippage): TP ({tp}) is already hit or too close to current Bid ({tick.bid}). "
+                    f"Stoplevel: {round(stoplevel, sym_info.digits)}"
+                )
                 logger.warning(err_msg)
-                return {"success": False, "error": err_msg}
+                return {"success": False, "error": err_msg, "stale": True}
         else:
             if sl > 0 and sl <= tick.ask + stoplevel:
-                err_msg = f"Stale Signal (Slippage): SL ({sl}) is already hit or too close to current Ask ({tick.ask}). Stoplevel: {stoplevel}"
+                err_msg = (
+                    f"Stale Signal (Slippage): SL ({sl}) is already hit or too close to current Ask ({tick.ask}). "
+                    f"Stoplevel: {round(stoplevel, sym_info.digits)}"
+                )
                 logger.warning(err_msg)
-                return {"success": False, "error": err_msg}
+                return {"success": False, "error": err_msg, "stale": True}
             if tp > 0 and tp >= tick.ask - stoplevel:
-                err_msg = f"Stale Signal (Slippage): TP ({tp}) is already hit or too close to current Ask ({tick.ask}). Stoplevel: {stoplevel}"
+                err_msg = (
+                    f"Stale Signal (Slippage): TP ({tp}) is already hit or too close to current Ask ({tick.ask}). "
+                    f"Stoplevel: {round(stoplevel, sym_info.digits)}"
+                )
                 logger.warning(err_msg)
-                return {"success": False, "error": err_msg}
+                return {"success": False, "error": err_msg, "stale": True}
         
         filling_type = mt5.ORDER_FILLING_FOK if (sym_info.filling_mode & 1) else mt5.ORDER_FILLING_IOC
         
@@ -172,37 +184,83 @@ class OrderManager:
         if not position:
             return False
             
-        sym_info = mt5.symbol_info(position[0].symbol)
+        pos = position[0]
+        sym_info = mt5.symbol_info(pos.symbol)
         digits = sym_info.digits if sym_info else 5
         tick_size = sym_info.trade_tick_size if sym_info else 0.0
+        point = sym_info.point if sym_info else 0.00001
         
+        # Ensure SL respects minimum distance (stops level or spread)
+        stops_level = sym_info.trade_stops_level if sym_info else 0
+        spread = sym_info.spread if sym_info else 0
+        min_distance = max(stops_level, spread, 2) * point
+
+        tick = mt5.symbol_info_tick(pos.symbol)
+        if tick:
+            is_buy = pos.type == mt5.POSITION_TYPE_BUY
+            if is_buy:
+                max_sl = tick.bid - min_distance
+                if new_sl > max_sl:
+                    logger.info(
+                        f"SL {new_sl:.5f} too close to bid {tick.bid:.5f} "
+                        f"(stops_level={stops_level}, min_distance={min_distance:.5f}) "
+                        f"for BUY {ticket} — adjusting to {max_sl:.5f}"
+                    )
+                    new_sl = max_sl
+            else:
+                min_sl = tick.ask + min_distance
+                if new_sl < min_sl:
+                    logger.info(
+                        f"SL {new_sl:.5f} too close to ask {tick.ask:.5f} "
+                        f"(stops_level={stops_level}, min_distance={min_distance:.5f}) "
+                        f"for SELL {ticket} — adjusting to {min_sl:.5f}"
+                    )
+                    new_sl = min_sl
+
+        # Skip if new_sl is not better than current SL
+        if pos.sl != 0.0:
+            is_buy = pos.type == mt5.POSITION_TYPE_BUY
+            if (is_buy and new_sl <= pos.sl) or (not is_buy and new_sl >= pos.sl):
+                logger.info(f"Skipping SL modification for {ticket}: adjusted SL {new_sl} is not better than current SL {pos.sl}")
+                return True
+
         if tick_size > 0:
             rounded_sl = round(round(new_sl / tick_size) * tick_size, digits)
         else:
             rounded_sl = round(new_sl, digits)
-        
+
+        if rounded_sl == pos.sl:
+            return True
+
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "position": ticket,
-            "symbol": position[0].symbol,
+            "symbol": pos.symbol,
             "sl": rounded_sl,
-            "tp": position[0].tp,
-            "magic": position[0].magic
+            "tp": pos.tp,
+            "magic": pos.magic
         }
-        
+
         result = await loop.run_in_executor(
-            _executor, 
+            _executor,
             lambda: mt5.order_send(request)
         )
-        
+
         if result is None:
             logger.error("Modify SL failed: MT5 returned None")
             return False
-            
+
         if result.retcode != mt5.TRADE_RETCODE_DONE:
-            logger.error(f"Modify SL failed: {result.comment}")
+            # "Invalid stops" = price moved too fast, SL now too close — not a system error
+            if "invalid stops" in (result.comment or "").lower():
+                logger.info(
+                    f"SL modify skipped for {ticket}: {result.comment} "
+                    f"(requested={rounded_sl:.5f}, current_sl={pos.sl:.5f}) — price not far enough from entry yet"
+                )
+                return True  # Not an error — will retry next tick
+            logger.error(f"Modify SL failed: {result.comment} (ticket={ticket}, sl={rounded_sl})")
             return False
-            
+
         return True
 
     @staticmethod

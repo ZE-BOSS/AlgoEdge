@@ -208,7 +208,7 @@ class BotService:
         if self.running:
             return {"running": True, "message": "Bot is already running"}
 
-        self.symbols = symbols or ["XAUUSD", "XAGUSD", "XPTUSD", "EURUSD", "GBPUSD", "USOIL", "ETHUSD", "GBPJPY"]
+        self.symbols = symbols or []
         self.scan_interval = scan_interval
         self.running = True
         self.total_signals_today = 0
@@ -802,6 +802,16 @@ class BotService:
                                                         break  # Success! Break the retry loop for this TP
                                                     else:
                                                         err_msg = result.get('error', 'unknown')
+                                                        is_stale = result.get('stale', False)
+                                                        if is_stale:
+                                                            # Price moved past SL — signal is genuinely stale, no point retrying
+                                                            detail = f"TP{tp.level} ({tp.volume}L): {err_msg}"
+                                                            tp_failure_details.append(detail)
+                                                            self._log_event(
+                                                                f"Signal stale at execution (price moved): TP{tp.level} skipped",
+                                                                "INFO", "TRADE"
+                                                            )
+                                                            break  # Break retry loop immediately — retrying won't help
                                                         self._log_event(
                                                             f"Order failed (Attempt {attempt+1}/{max_retries}): TP{tp.level} — {err_msg}",
                                                             "WARN", "TRADE"
@@ -837,14 +847,21 @@ class BotService:
                                                                 f"Order placement error for {signal.symbol}: {str(order_err)[:100]}",
                                                                 "error"
                                                         ))
-                                    
+
                                         if not db_positions:
                                             self.circuit_breaker.rollback_position(group_id)
-                                            self._log_event(f"All orders failed. Rolled back risk state for {group_id}.", "WARN", "RISK")
-                                            # Build detailed failure reason for Telegram (includes MT5 error codes)
-                                            fail_reason = "MT5 execution failed: " + " | ".join(tp_failure_details) if tp_failure_details else "MT5 execution failed for all TP levels"
-                                            self._last_signal_time[symbol] = _sig_fp  # Prevent same signal from re-firing
-                                            await self._save_signal_state(signal, "FAILED", fail_reason, tp_levels=tp_levels)
+                                            # Detect if ALL failures were due to stale signal
+                                            all_stale = tp_failure_details and all("Stale Signal" in d for d in tp_failure_details)
+                                            if all_stale:
+                                                self._log_event(f"Signal skipped (stale): price moved past SL before execution for {symbol}", "INFO", "TRADE")
+                                                self._last_signal_time[symbol] = _sig_fp
+                                                await self._save_signal_state(signal, "SKIPPED", "Stale signal — price moved past SL before execution", tp_levels=tp_levels)
+                                            else:
+                                                self._log_event(f"All orders failed. Rolled back risk state for {group_id}.", "WARN", "RISK")
+                                                # Build detailed failure reason for Telegram (includes MT5 error codes)
+                                                fail_reason = "MT5 execution failed: " + " | ".join(tp_failure_details) if tp_failure_details else "MT5 execution failed for all TP levels"
+                                                self._last_signal_time[symbol] = _sig_fp  # Prevent same signal from re-firing
+                                                await self._save_signal_state(signal, "FAILED", fail_reason, tp_levels=tp_levels)
                                             had_execution_failure = True
                                         elif len(db_positions) < len(tp_levels):
                                             self.circuit_breaker.active_groups[group_id]["sub_trades"] = len(db_positions)

@@ -54,8 +54,9 @@ class VWAPParams:
 
     sl_atr_multiplier: float = 1.0
     """
-    Used on non-index instruments where fixed points don't apply.
-    Set to 0 to always use sl_points directly.
+    ATR-based SL floor. When > 0, SL distance = max(sl_points, ATR × this value).
+    ATR can only WIDEN the SL beyond sl_points, never narrow it.
+    Set to 0 to use pure fixed-point SL from sl_points with no ATR floor.
     """
 
     # ── Session Rules ─────────────────────────────────────────────────────

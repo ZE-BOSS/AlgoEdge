@@ -710,7 +710,9 @@ class PositionManager:
         try:
             success = await OrderManager.modify_sl(ticket, new_sl)
             if not success:
-                logger.error(f"Failed to modify SL for {ticket} to {new_sl}")
+                # Downgrade to warning — SL modify failures are usually transient
+                # ("Invalid stops" = price hasn't moved far enough yet, retried next tick)
+                logger.warning(f"Failed to modify SL for {ticket} to {new_sl} — will retry next tick")
                 return False
             return True
         except Exception as e:

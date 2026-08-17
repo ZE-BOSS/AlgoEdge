@@ -34,7 +34,7 @@ class RiskParams:
     kelly_fraction: float = 0.25
     kelly_lookback_trades: int = 50
     multi_position_mode: bool = True
-    sl_buffer_pips: float = 5.0
+    sl_buffer_pips: float = 5.0  # DEPRECATED: now per-strategy (APAParams.sl_buffer_atr, NYOpenRetestParams.stop_buffer_points). Kept for DB compat.
 
     # TP structure
     tp_levels: int = 5
@@ -52,10 +52,10 @@ class RiskParams:
     be_offset_pips: float = 2.0  # legacy alias kept for db compat
     be_buffer_atr_mult: float = 0.0
 
-    # Circuit breakers — trade-count-based (always active)
+    # Circuit breakers — portfolio-level (always active)
     max_daily_drawdown_pct: float = 3.0
     max_weekly_drawdown_pct: float = 6.0
-    max_daily_trades: int = 5
+    max_daily_trades: int = 5  # DEPRECATED: now per-strategy (VWAPParams.max_trades_per_day, etc.). Kept as fallback.
     max_concurrent_positions: int = 3
     max_positions_per_symbol: int = 1
 
@@ -83,7 +83,7 @@ class RiskParams:
     trailing_stop_activation_rr: float = 2.0  # legacy alias
     trailing_step_pips: float = 5.0           # legacy alias
 
-    # Legacy field — kept for db compat
+    # DEPRECATED: moved to PropFirmParams.max_daily_loss_pct. Kept for db compat.
     max_daily_loss_pct: float = 5.0
 
 
@@ -151,21 +151,37 @@ class InstrumentSettings:
 @dataclass
 class PropFirmParams:
     """
-    Prop Firm (e.g. BloomFunded) challenge parameters.
-    Drawdown fields here are HARD CIRCUIT BREAKERS when account_mode = 'prop_firm'.
-    max_risk_hard_cap_pct is an absolute safety cap on the position sizer —
-    active for ALL modes (personal and prop_firm).
-    All fields are user-configurable and resettable from the Settings UI.
+    Prop Firm / Broker account configuration.
+    Manually configured per firm (FundedNext, FIVR, FundedPeace, Exness, FBS, etc.).
+    Drawdown fields are HARD CIRCUIT BREAKERS when account_mode = 'prop_firm'.
+    max_risk_hard_cap_pct is in RiskParams — active for ALL modes.
+    All fields are user-configurable from the Settings UI.
     """
     account_mode: Literal["personal", "prop_firm"] = "personal"
-    challenge_type: Literal["none", "1-step", "2-step", "flex"] = "none"
+    firm_name: str = ""                    # e.g. "FundedNext", "FIVR", "Exness"
+    challenge_type: str = "none"           # Free text: "1-step", "2-step", "express", etc.
     account_size: float = 10000.0
     initial_balance: float = 10000.0
-    max_lot_sizes: dict[str, float] = field(default_factory=dict)
-    # Drawdown hard blocks (active when account_mode = 'prop_firm')
-    max_daily_loss_pct: float = 5.0          # Daily equity drawdown limit (%)
+
+    # Drawdown configuration
+    drawdown_type: Literal["static", "trailing"] = "trailing"
+    max_daily_loss_pct: float = 5.0          # Daily drawdown limit (%)
     max_total_drawdown_pct: float = 10.0     # Overall drawdown from peak/initial (%)
-    drawdown_uses_equity: bool = True        # True = floating equity; False = closed balance only
+    drawdown_uses_equity: bool = True        # True = floating equity; False = closed balance
+
+    # Trading rules
+    overnight_holding_allowed: bool = True
+    weekend_holding_allowed: bool = True
+    news_trading_allowed: bool = True
+    news_blackout_before_min: int = 15       # Minutes before high-impact event
+    news_blackout_after_min: int = 45        # Minutes after high-impact event
+
+    # Lot caps (per-symbol overrides)
+    max_lot_sizes: dict[str, float] = field(default_factory=dict)
+
+    # Challenge pass conditions
+    profit_target_pct: float = 0.0           # 0 = no target (personal accounts)
+    min_trading_days: int = 0                # 0 = no minimum
 
 
 # ─────────────────────────────────────────────────────────────────────────────

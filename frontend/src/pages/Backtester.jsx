@@ -95,11 +95,12 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
     );
   }
   if (strategyId === 'VWAP_v1') return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 8 }}>
       <div><label style={{ fontSize: '0.7rem' }}>VWAP Anchor (min)</label><input type="number" value={form.vwap_anchor_minutes ?? 15} onChange={e => u('vwap_anchor_minutes', +e.target.value)} /></div>
       <div><label style={{ fontSize: '0.7rem' }}>Momentum Lookback</label><input type="number" value={form.momentum_lookback_bars ?? 4} onChange={e => u('momentum_lookback_bars', +e.target.value)} /></div>
       <div><label style={{ fontSize: '0.7rem' }}>Momentum Threshold (%)</label><input type="number" step="0.01" value={form.momentum_threshold_pct ?? 0.1} onChange={e => u('momentum_threshold_pct', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>SL Points</label><input type="number" step="1" min="10" value={form.sl_points ?? 80} onChange={e => u('sl_points', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>SL Points</label><input type="number" step="1" min="10" value={form.sl_points ?? 80} onChange={e => u('sl_points', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Primary SL distance in points (e.g. 170 for USDCHF = 17 pips)</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>SL ATR Multiplier</label><input type="number" step="0.1" min="0" value={form.vwap_sl_atr_multiplier ?? 0} onChange={e => u('vwap_sl_atr_multiplier', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>ATR floor: SL = max(SL Points, ATR × this). Set 0 for pure fixed SL.</div></div>
     </div>
   );
   if (strategyId === 'HTFFVGFlip_v1') return (
@@ -1412,7 +1413,8 @@ export default function Backtester() {
           vwap_anchor_minutes: form.vwap_anchor_minutes || 15,
           momentum_lookback_bars: form.momentum_lookback_bars || 4,
           momentum_threshold_pct: form.momentum_threshold_pct || 0.1,
-          sl_points: form.sl_points || 80.0  // BUG-5 fix: default 80 (was 40)
+          sl_points: form.sl_points || 80.0,
+          sl_atr_multiplier: form.vwap_sl_atr_multiplier ?? 0,
         };
       } else if (form.strategy_id === 'DriftJumpAlpha_v1') {
         payload.strategy_params = {
@@ -1727,7 +1729,28 @@ export default function Backtester() {
             <summary style={{ cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, color: 'var(--yellow)', userSelect: 'none' }}>
               ⚙ Simulation Costs & Realism
             </summary>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, marginBottom: 6 }}>
+              <button type="button" style={{ fontSize: '0.7rem', padding: '4px 10px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius-xs)', cursor: 'pointer' }}
+                onClick={async () => {
+                  const sym = form.symbol || 'EURUSD';
+                  try {
+                    const token = localStorage.getItem('token');
+                    const res = await fetch(`/api/mt5_test/symbol-costs/${sym}`, { headers: { Authorization: `Bearer ${token}` } });
+                    const data = await res.json();
+                    if (data.success) {
+                      setForm(prev => ({ ...prev,
+                        spread_pips: data.spread_pips || prev.spread_pips,
+                        commission_per_lot: data.commission || prev.commission_per_lot,
+                        _broker_spread_info: `${sym}: ${data.spread_pips} pips spread | ${data.commission || 0} commission/lot | Stops level: ${data.stops_level} pts`
+                      }));
+                    }
+                  } catch (e) { console.warn('Failed to fetch symbol costs:', e); }
+                }}>
+                📡 Auto-fill from Broker ({form.symbol || 'EURUSD'})
+              </button>
+              {form._broker_spread_info && <span style={{ fontSize: '0.6rem', color: 'var(--green)' }}>{form._broker_spread_info}</span>}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 6 }}>
               <div>
                 <label style={{ fontSize: '0.7rem' }}>Slippage (pips)</label>
                 <input type="number" step="0.1" min="0" value={form.slippage_pips ?? 0} onChange={e => u('slippage_pips', +e.target.value)} />
