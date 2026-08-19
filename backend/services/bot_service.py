@@ -424,11 +424,13 @@ class BotService:
                     from backend.risk.news_filter import NewsFilter
                     self.news_filter = NewsFilter(
                         enabled=False,
-                        block_window_minutes=30
+                        blackout_before_minutes=15,
+                        blackout_after_minutes=30,
                     )
                 else:
                     self.news_filter.enabled = False
-                    self.news_filter.block_window = timedelta(minutes=30)
+                    self.news_filter.blackout_before = timedelta(minutes=15)
+                    self.news_filter.blackout_after = timedelta(minutes=30)
                 
                 if self.news_filter.enabled:
                     await self.news_filter.refresh_calendar()
@@ -623,7 +625,7 @@ class BotService:
                                 # ensures no order is ever placed during a news window, regardless of
                                 # whether the strategy checks context["news_blocked"] or not.
                                 if hasattr(self, 'news_filter') and self.news_filter.enabled and self.news_filter.is_blocked(signal.symbol):
-                                    _block_mins = int(self.news_filter.block_window.total_seconds() // 60) if hasattr(self.news_filter, 'block_window') else 30
+                                    _block_mins = int(self.news_filter.blackout_before.total_seconds() // 60) if hasattr(self.news_filter, 'blackout_before') else 30
                                     _news_msg = f"News filter: high-impact event within {_block_mins}min window"
                                     self._log_event(f"[REJECTED] {_news_msg} — {signal.symbol}", "SIGNAL", "RISK")
                                     await self._save_signal_state(signal, "SKIPPED", _news_msg)
