@@ -186,6 +186,8 @@ class OrderManager:
             
         pos = position[0]
         sym_info = mt5.symbol_info(pos.symbol)
+        pos = position[0]
+        sym_info = mt5.symbol_info(pos.symbol)
         digits = sym_info.digits if sym_info else 5
         tick_size = sym_info.trade_tick_size if sym_info else 0.0
         point = sym_info.point if sym_info else 0.00001
@@ -236,7 +238,10 @@ class OrderManager:
             "action": mt5.TRADE_ACTION_SLTP,
             "position": ticket,
             "symbol": pos.symbol,
+            "symbol": pos.symbol,
             "sl": rounded_sl,
+            "tp": pos.tp,
+            "magic": pos.magic
             "tp": pos.tp,
             "magic": pos.magic
         }
