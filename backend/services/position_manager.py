@@ -340,7 +340,7 @@ class PositionManager:
 
                                 from backend.services.telegram import telegram_service
                                 emoji = "✅" if net_profit >= 0 else "❌"
-                                reason_str = reason if 'reason' in dir() else "CLOSED"
+                                reason_str = reason if 'reason' in locals() else "CLOSED"
                                 if reason_str == "SL": reason_str = "Stop Loss Hit"
                                 elif reason_str == "TRAIL": reason_str = "Trailing Stop Hit"
                                 elif reason_str.startswith("TP"): reason_str = "Take Profit Hit"
@@ -495,7 +495,7 @@ class PositionManager:
                                     pos.stop_loss = new_sl
                                     pos.be_applied = True
                                     logger.info(f"Moved SL to Breakeven: {live_pos.ticket} -> {new_sl}")
-                                continue
+                                continue  # Skip trailing SL this tick — BE was attempted (success or fail)
 
                 # --- 2. TRAILING SL LOGIC ---
                 tp_level = getattr(pos, 'tp_level', 1) if pos else 1

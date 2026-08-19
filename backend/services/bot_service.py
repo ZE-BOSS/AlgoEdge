@@ -849,7 +849,8 @@ class BotService:
                                                         ))
 
                                         if not db_positions:
-                                            self.circuit_breaker.rollback_position(group_id)
+                                            if self.circuit_breaker:
+                                                self.circuit_breaker.rollback_position(group_id)
                                             # Detect if ALL failures were due to stale signal
                                             all_stale = tp_failure_details and all("Stale Signal" in d for d in tp_failure_details)
                                             if all_stale:

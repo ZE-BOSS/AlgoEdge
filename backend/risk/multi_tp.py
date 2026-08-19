@@ -156,12 +156,6 @@ class MultiTPManager:
         # Ensure every requested sub-position has at least lot_min.
         # This overrides volume collapse, potentially slightly increasing risk for very small accounts
         # but guarantees the requested number of TP levels are entered.
-        splits = self.tp_splits[:active_count]
-        total_split = sum(splits)
-        if total_split == 0:
-            splits = [100 // active_count] * active_count
-            total_split = sum(splits)
-        
         max_lot_allowed = self.prop_firm_config.get("max_lot_sizes", {}).get(symbol, float('inf'))
         volumes = []
         for i in range(active_count):

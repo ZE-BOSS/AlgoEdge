@@ -90,9 +90,11 @@ class APAEngine(BaseStrategy):
                 "status": "AWAIT_PATTERN",
                 "pattern": None,
                 "direction": None,
-                "invalid_zone_top": None,
-                "invalid_zone_bottom": None,
-                "fvg_created": False,
+                "invalidation_zone_top": None,
+                "invalidation_zone_bottom": None,
+                "sl_level": None,
+                "invalidation_head": None,
+                "bos_confirmed": False,
                 "last_trade_date": current_date
             })
             self.log_event(f"[{symbol}] State reset for new trading day.", category="APA")

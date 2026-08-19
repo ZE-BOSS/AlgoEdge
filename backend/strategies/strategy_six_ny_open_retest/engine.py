@@ -100,13 +100,18 @@ class NYOpenRetestEngine(BaseStrategy):
                     
                 if triggered:
                     entry = state["range_mid"]
+                    breakout_extreme = state.get("breakout_extreme")
+                    if breakout_extreme is None:
+                        # Safety guard: state is incomplete, skip this bar
+                        return None
                     
                     # Convert points to price delta
                     pip_size = get_pip_size(symbol)
                     buffer = self.params.stop_buffer_points * pip_size
                     target = self.params.fixed_target_points * pip_size
                     
-                    stop_loss = state["breakout_extreme"] - buffer if state["bias"] == "BUY" else state["breakout_extreme"] + buffer
+                    stop_loss = breakout_extreme - buffer if state["bias"] == "BUY" else breakout_extreme + buffer
+
                     take_profit = entry + target if state["bias"] == "BUY" else entry - target
                     
                     if getattr(self.params, 'dynamic_target_override', True):
