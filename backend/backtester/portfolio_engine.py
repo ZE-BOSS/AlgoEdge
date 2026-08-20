@@ -21,7 +21,14 @@ from backend.utils.logger import get_logger
 from backend.utils.trade_grouper import group_trades
 from backend.utils.timeutils import detect_session
 import pytz
-from backend.backtester.engine import _epoch_to_iso, _calc_duration_minutes, _validate_position, _to_epoch_seconds
+from backend.backtester.engine import (
+    _epoch_to_iso,
+    _calc_duration_minutes,
+    _validate_position,
+    _to_epoch_seconds,
+    _resolve_sl_tp_hit,
+    _gap_adjusted_fill_price,
+)
 
 logger = get_logger(__name__)
 
@@ -247,9 +254,15 @@ class PortfolioBacktestEngine:
                 if _sym not in symbol_cache or current_time not in symbol_cache[_sym]["bars"]:
                     continue
                 _bar = symbol_cache[_sym]["bars"][current_time]
-                if _p["direction"] == "BUY" and _bar["high"] >= _p["take_profit"]:
-                    _tp1_closing_this_bar.add(_p.get("group_id"))
-                elif _p["direction"] != "BUY" and _bar["low"] <= _p["take_profit"]:
+                _open_p_pp = _bar.get("open", _bar["close"])
+                # Item 3.7: reuse the same ambiguity-resolved tp_hit determination
+                # as the real close logic below (shared helper — also matches
+                # engine.py's single-symbol pre-pass).
+                _sl_hit_pp, _tp_hit_pp = _resolve_sl_tp_hit(
+                    _p["direction"], _open_p_pp, _bar["high"], _bar["low"],
+                    _p["stop_loss"], _p["take_profit"], self._simulate_wicks,
+                )
+                if _tp_hit_pp:
                     _tp1_closing_this_bar.add(_p.get("group_id"))
 
             for pos in self.open_positions[:]:
@@ -261,7 +274,8 @@ class PortfolioBacktestEngine:
                 current_price = bar["close"]
                 high = bar["high"]
                 low = bar["low"]
-                
+                open_p = bar.get("open", current_price)
+
                 if pos["direction"] == "BUY":
                     pos["highest_price"] = max(pos.get("highest_price", pos["entry_price"]), high)
                 else:
@@ -307,40 +321,19 @@ class PortfolioBacktestEngine:
                     pos["mfe_pips"] = max(pos.get("mfe_pips", 0), favorable / pip_size if pip_size else 0)
                     continue  # Defer SL/TP to next bar
 
-                sl_hit = False
-                tp_hit = False
-                if pos["direction"] == "BUY":
-                    sl_hit = low <= pos["stop_loss"]
-                    tp_hit = high >= pos["take_profit"]
-                else:
-                    sl_hit = high >= pos["stop_loss"]
-                    tp_hit = low <= pos["take_profit"]
-                    
-                # Wick simulation — resolve ambiguous same-bar SL+TP hit
-                # Mirrors engine.py logic exactly.
-                if sl_hit and tp_hit:
-                    if self._simulate_wicks:
-                        open_p = bar.get("open", current_price)
-                        if pos["direction"] == "BUY":
-                            sl_shadow = open_p - low
-                            tp_shadow = high - open_p
-                        else:
-                            sl_shadow = high - open_p
-                            tp_shadow = open_p - low
-                        dist_to_sl = abs(pos["stop_loss"] - open_p)
-                        dist_to_tp = abs(pos["take_profit"] - open_p)
-                        sl_wins = (sl_shadow >= tp_shadow) or (dist_to_sl <= dist_to_tp)
-                        if sl_wins:
-                            tp_hit = False
-                        else:
-                            sl_hit = False
-                    else:
-                        dist_to_sl = abs(pos["stop_loss"] - bar.get("open", current_price))
-                        dist_to_tp = abs(pos["take_profit"] - bar.get("open", current_price))
-                        if dist_to_sl <= dist_to_tp:
-                            tp_hit = False
-                        else:
-                            sl_hit = False
+                # Resolve SL/TP hits and same-bar ambiguity via the shared helper
+                # (items 3.2/3.3/3.7 — identical logic used by engine.py and the
+                # TP1 pre-pass above, so both backtest engines behave identically
+                # on ambiguous bars and default to the conservative SL-favoring
+                # resolution).
+                _raw_sl_hit = (low <= pos["stop_loss"]) if pos["direction"] == "BUY" else (high >= pos["stop_loss"])
+                _raw_tp_hit = (high >= pos["take_profit"]) if pos["direction"] == "BUY" else (low <= pos["take_profit"])
+                if _raw_sl_hit and _raw_tp_hit:
+                    pos["same_bar_ambiguous"] = True  # Tag for reporting
+                sl_hit, tp_hit = _resolve_sl_tp_hit(
+                    pos["direction"], open_p, high, low,
+                    pos["stop_loss"], pos["take_profit"], self._simulate_wicks,
+                )
 
                 # Update MAE/MFE using this bar's high/low BEFORE the exit checks below,
                 # so the excursion on the closing bar itself is captured — see engine.py
@@ -357,13 +350,25 @@ class PortfolioBacktestEngine:
                 pos["mfe_pips"] = max(pos.get("mfe_pips", 0), favorable / pip_size if pip_size else 0)
 
                 if sl_hit:
-                    pos["exit_price"] = pos["stop_loss"]
+                    # Item 3.4: fill at the gapped open (± slippage) instead of a
+                    # perfect SL fill when the bar's open already gapped past SL.
+                    _sl_gapped = (open_p <= pos["stop_loss"]) if pos["direction"] == "BUY" else (open_p >= pos["stop_loss"])
+                    if _sl_gapped:
+                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["stop_loss"], sym, self._slippage_pips)
+                        pos["gap_fill"] = True
+                    else:
+                        pos["exit_price"] = pos["stop_loss"]
                     pos["exit_reason"] = "TRAIL_SL" if pos.get("trail_applied") else ("BE_SL" if pos.get("be_applied") else "SL")
                     pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym)
                     closed_this_bar.append(pos)
                     continue
                 elif tp_hit:
-                    pos["exit_price"] = pos["take_profit"]
+                    _tp_gapped = (open_p >= pos["take_profit"]) if pos["direction"] == "BUY" else (open_p <= pos["take_profit"])
+                    if _tp_gapped:
+                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["take_profit"], sym, self._slippage_pips)
+                        pos["gap_fill"] = True
+                    else:
+                        pos["exit_price"] = pos["take_profit"]
                     pos["exit_reason"] = f"TP{pos.get('tp_level', 1)}"
                     pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym)
                     closed_this_bar.append(pos)
@@ -454,8 +459,18 @@ class PortfolioBacktestEngine:
                         p.get("pnl", 0) for p in self.trades
                         if p.get("group_id") == group_id_closed
                     ) + pos.get("pnl", 0)
+                    # Item 3.6: pass symbol/lots too (matches engine.py's 5-arg call)
+                    # so open_positions_by_symbol/open_lots_by_symbol actually
+                    # decrement for the real symbol in portfolio backtests.
+                    group_lots = sum(
+                        p.get("volume", 0.0) for p in self.trades
+                        if p.get("group_id") == group_id_closed
+                    ) + pos.get("volume", 0.0)
                     if hasattr(self.risk_engine, "on_backtest_position_closed"):
-                        self.risk_engine.on_backtest_position_closed(group_id_closed, group_pnl, current_time)
+                        self.risk_engine.on_backtest_position_closed(
+                            group_id_closed, group_pnl, current_time,
+                            pos.get("symbol", ""), group_lots,
+                        )
 
                 self.trades.append(pos)
                 positions_to_remove.append(pos)
@@ -538,6 +553,18 @@ class PortfolioBacktestEngine:
                     continue
 
                 self.rejection_funnel["approved"] += 1
+
+                # Item 3.1: the stored/fill entry_price must always be the
+                # realistic next-bar-open price for this symbol's bar at
+                # current_time, never the strategy's theoretical signal
+                # entry_price unconditionally — sig["entry_price"] is kept only
+                # as a reference/logging value below (confirmations, risk-dollar
+                # sizing distance, run_logs), not as the fill price.
+                _bar_for_fill = symbol_cache.get(symbol, {}).get("bars", {}).get(current_time)
+                bar_open_price = (
+                    _bar_for_fill["open"] if _bar_for_fill and "open" in _bar_for_fill else sig["entry_price"]
+                )
+
                 self.run_logs.append({
                     "time": _epoch_to_iso(sig_time),
                     "level": "INFO",
@@ -590,7 +617,8 @@ class PortfolioBacktestEngine:
                         f"Direction: {sig.get('direction', 'UNKNOWN')}",
                         f"Symbol: {symbol}",
                         f"Strategy: {strategy_id}",
-                        f"Entry Price: {sig['entry_price']:.5f}",
+                        f"Entry Price: {bar_open_price:.5f}",
+                        f"Signal Entry Price (reference): {sig['entry_price']:.5f}",
                         f"Stop Loss: {sig['stop_loss']:.5f}",
                         f"Take Profit (TP{lvl.level}): {lvl.tp_price:.5f}",
                         f"RR Multiplier: 1:{lvl.rr_multiplier:.1f}",
@@ -612,7 +640,7 @@ class PortfolioBacktestEngine:
                         "entry_time": sig_time,
                         "entry_time_iso": _epoch_to_iso(sig_time),
                         "entry_session": entry_session,
-                        "entry_price": sig["entry_price"],
+                        "entry_price": bar_open_price,
                         "stop_loss": sig["stop_loss"],
                         "take_profit": lvl.tp_price,
                         "volume": lvl.volume,
@@ -630,19 +658,28 @@ class PortfolioBacktestEngine:
                         "entry_confirmations": entry_confirmations,
                         "entry_snapshot_b64": sig.get("metadata", {}).get("entry_snapshot_b64", ""),
                         "original_signal": sig,
-                        "_last_known_close": sig["entry_price"]
+                        "_last_known_close": bar_open_price
                     }
                     self.open_positions.append(new_pos)
 
-        # Record equity once per timestamp — mirrors engine.py's single-symbol
-        # equivalent. Previously equity_curve was only ever initialized to
-        # [balance] and never appended to again in this loop, so it stayed at
-        # length 1 for the whole run. The frontend's Equity Curve chart only
-        # renders when equity_curve.length > 1, so it was silently hidden for
-        # every portfolio backtest regardless of how many trades ran.
-        # Record floating equity once per timestamp.
-        # Previously equity_curve was only ever [balance] at start and nothing else.
-        self.equity_curve.append(balance + open_pnl)
+            # Item 3.5: record floating equity once per timestamp, INSIDE the
+            # `for current_time in global_timeline:` loop. Previously this
+            # append call sat at the same indentation as the loop header
+            # itself (a sibling, not a child), so it executed exactly once
+            # after the entire loop finished — equity_curve stayed at length
+            # ~2 for the whole run regardless of trade count, and the
+            # frontend's Equity Curve chart (which only renders when
+            # equity_curve.length > 1) was effectively hidden for every
+            # portfolio backtest. Recompute floating PnL from the
+            # post-close/post-open open_positions state for this bar,
+            # mirroring engine.py's post_close_pnl pattern.
+            post_close_pnl = 0.0
+            for _pos in self.open_positions:
+                _last_close = _pos.get("_last_known_close", _pos["entry_price"])
+                post_close_pnl += self._calc_pnl(
+                    _pos["direction"], _pos["entry_price"], _last_close, _pos["volume"], _pos.get("symbol")
+                )
+            self.equity_curve.append(balance + post_close_pnl)
 
         # 4. Force close remaining positions at end of backtest
         if self.open_positions:

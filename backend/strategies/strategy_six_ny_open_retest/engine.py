@@ -3,6 +3,7 @@ import pytz
 
 from backend.core.config_schema import UserConfigV2
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
+from backend.strategies.core.swing_structure import calculate_atr
 from backend.strategies.registry import register_strategy
 from backend.risk.position_sizer import get_pip_size
 from backend.utils.logger import get_logger
@@ -60,11 +61,13 @@ class NYOpenRetestEngine(BaseStrategy):
         # 1. Mark the Range on M15
         if timeframe == "M15":
             if state["status"] == "MARK_RANGE":
-                # Only accumulate candles that fall inside [range_window_start, range_window_end]
-                if self.params.range_window_start <= time_str <= self.params.range_window_end:
+                # Only accumulate candles that fall inside [range_window_start, range_window_end)
+                # — exclusive upper bound so exactly one M15 candle (e.g. 08:00-08:14:59) is
+                # captured, not two (an inclusive end would also absorb the 08:15 candle).
+                if self.params.range_window_start <= time_str < self.params.range_window_end:
                     state["range_high"] = max(state["range_high"], latest["high"]) if state["range_high"] else latest["high"]
                     state["range_low"] = min(state["range_low"], latest["low"]) if state["range_low"] else latest["low"]
-                elif time_str > self.params.range_window_end and state["range_high"] is not None:
+                elif time_str >= self.params.range_window_end and state["range_high"] is not None:
                     state["range_mid"] = (state["range_high"] + state["range_low"]) / 2.0
                     state["status"] = "AWAIT_BREAK"
                     self.log_event(f"[{symbol}] NY Open Range marked: {state['range_high']} - {state['range_low']} (Mid: {state['range_mid']})", category="NY_OPEN")
@@ -109,8 +112,27 @@ class NYOpenRetestEngine(BaseStrategy):
                     pip_size = get_pip_size(symbol)
                     buffer = self.params.stop_buffer_points * pip_size
                     target = self.params.fixed_target_points * pip_size
-                    
-                    stop_loss = breakout_extreme - buffer if state["bias"] == "BUY" else breakout_extreme + buffer
+
+                    # breakout_extreme is captured near the breakout swing (close to
+                    # range_high/low), while entry is range_mid — breakout_extreme can end up
+                    # closer to entry than the buffer itself, putting the naive SL on the wrong
+                    # side of entry (e.g. above entry on a BUY). Anchor off whichever of
+                    # breakout_extreme/entry is further out, so the SL is always at least
+                    # `buffer` away from entry on the correct side.
+                    if state["bias"] == "BUY":
+                        stop_loss = min(breakout_extreme, entry) - buffer
+                    else:
+                        stop_loss = max(breakout_extreme, entry) + buffer
+
+                    # sl_buffer_atr_mult widens the structural SL further by a multiple of
+                    # ATR(14), on top of the fixed-points buffer above (0.0 = disabled).
+                    if getattr(self.params, "sl_buffer_atr_mult", 0.0):
+                        atr = calculate_atr(candles, 14)
+                        atr_buffer = self.params.sl_buffer_atr_mult * atr
+                        if state["bias"] == "BUY":
+                            stop_loss -= atr_buffer
+                        else:
+                            stop_loss += atr_buffer
 
                     take_profit = entry + target if state["bias"] == "BUY" else entry - target
                     

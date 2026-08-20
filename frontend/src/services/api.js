@@ -64,6 +64,29 @@ const processQueue = (error, token = null) => {
   failedQueue = [];
 };
 
+// Standalone refresh call, reused by the 401 response interceptor below and
+// by useAuthStore's `refreshToken` action (called from the WebSocket
+// auth-failure handler in hooks/useBackendConnection.js). Stores the new
+// tokens on success; clears auth and rethrows on failure so callers can
+// decide how to react (e.g. force logout).
+export const performTokenRefresh = async () => {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    clearAuth();
+    throw new Error('No refresh token available');
+  }
+  try {
+    const { data } = await axios.post(`${api.defaults.baseURL}/auth/refresh`, {
+      refresh_token: refreshToken,
+    });
+    storeAuth(data.access_token, data.refresh_token, getStoredUser());
+    return data.access_token;
+  } catch (err) {
+    clearAuth();
+    throw err;
+  }
+};
+
 api.interceptors.response.use(
   (res) => {
     if (!isSilentUrl(res.config?.url) && useLoadingStore) useLoadingStore.getState().stopLoading();
@@ -96,12 +119,9 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const { data } = await axios.post(`${api.defaults.baseURL}/auth/refresh`, {
-          refresh_token: refreshToken,
-        });
-        storeAuth(data.access_token, data.refresh_token, getStoredUser());
-        processQueue(null, data.access_token);
-        originalRequest.headers['Authorization'] = `Bearer ${data.access_token}`;
+        const accessToken = await performTokenRefresh();
+        processQueue(null, accessToken);
+        originalRequest.headers['Authorization'] = `Bearer ${accessToken}`;
         return api(originalRequest);
       } catch (refreshErr) {
         processQueue(refreshErr, null);
@@ -209,6 +229,7 @@ export const testMt5Breakeven = (data) => api.post('/mt5_test/breakeven', data);
 export const testMt5Trail = (data) => api.post('/mt5_test/trail', data);
 export const getBotStatus = () => api.get('/bot/status');
 export const getBotLogs = (limit = 50) => api.get('/bot/logs', { params: { limit } });
+export const getSymbolCosts = (symbol) => api.get(`/mt5_test/symbol-costs/${symbol}`);
 
 // ── Broker Configuration ────────────────────────────────────────────────────
 

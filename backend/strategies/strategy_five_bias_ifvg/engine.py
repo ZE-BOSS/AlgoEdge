@@ -4,6 +4,7 @@ import pytz
 from backend.core.config_schema import UserConfigV2
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
 from backend.strategies.core.fvg import FVGDetector
+from backend.strategies.core.swing_structure import calculate_atr
 from backend.strategies.registry import register_strategy
 from backend.utils.logger import get_logger
 
@@ -34,22 +35,73 @@ class BiasIFVGEngine(BaseStrategy):
                 "m5_swing_point": None,
                 "manipulation_leg_start": None,
                 "trades_today": 0,
+                "wins_today": 0,
+                "losses_today": 0,
                 "extra_levels": []
             }
             self.htf_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
             self.m15_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
             self.m5_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.05)
 
+    def notify_outcome(self, symbol: str, group_id: str, is_win: bool, pnl: float) -> None:
+        """
+        Called by the backtester/live engine after a full trade group closes.
+        Tracks wins_today/losses_today so the spec's mandatory day-stop rule
+        (stop after 1 win; after 1 loss only take a 2nd trade if it's A+; stop
+        after 2 losses regardless) can be enforced by _can_trade_today().
+        """
+        self._init_state(symbol)
+        state = self.state[symbol]
+        if is_win:
+            state["wins_today"] = state.get("wins_today", 0) + 1
+            self.log_event(
+                f"[{symbol}] BiasIFVG win recorded. Day-stop rule: no more trades today.",
+                category="BIAS_IFVG",
+            )
+        else:
+            state["losses_today"] = state.get("losses_today", 0) + 1
+            self.log_event(
+                f"[{symbol}] BiasIFVG loss recorded. losses_today={state['losses_today']}",
+                category="BIAS_IFVG",
+            )
+
+    def _can_trade_today(self, state: dict, candidate_confluence: int | None = None) -> bool:
+        """
+        Spec day-stop rule: stop for the day after 1 win; after 1 loss, only take a
+        2nd trade if it's a clearly A+ setup at a new key level; stop entirely after
+        2 losses regardless.
+        """
+        wins = state.get("wins_today", 0)
+        losses = state.get("losses_today", 0)
+        if wins >= 1:
+            return False
+        if losses >= 2:
+            return False
+        if losses == 1:
+            threshold = getattr(self.params, "a_plus_confluence_threshold", 85)
+            if candidate_confluence is None or candidate_confluence < threshold:
+                return False
+        return True
+
     def _detect_cisd_and_rejections(self, candles: pd.DataFrame, bias: str) -> list:
         if len(candles) < 5 or bias is None:
             return []
-        
+
         levels = []
-        latest = candles.iloc[-2]  # Check the most recently completed candle
+        # `candles` passed into on_bar already has the unclosed bar stripped
+        # upstream, so iloc[-1] IS the most recently completed candle — using
+        # iloc[-2] here evaluated the pattern one bar late.
+        latest = candles.iloc[-1]
         body_size = abs(latest["close"] - latest["open"])
         total_size = latest["high"] - latest["low"]
-        
-        if total_size > 0:
+
+        min_body = 0.0
+        min_body_atr_mult = getattr(self.params, "rejection_min_body_atr_mult", 0.0)
+        if min_body_atr_mult > 0:
+            atr = calculate_atr(candles)
+            min_body = min_body_atr_mult * atr
+
+        if total_size > 0 and body_size >= min_body:
             if bias == "BUY":
                 lower_wick = min(latest["close"], latest["open"]) - latest["low"]
                 if lower_wick > body_size * 2:
@@ -57,7 +109,7 @@ class BiasIFVGEngine(BaseStrategy):
                         "type": "BULLISH_REJECTION",
                         "top": min(latest["close"], latest["open"]),
                         "bottom": latest["low"],
-                        "time": candles.index[-2]
+                        "time": candles.index[-1]
                     })
             elif bias == "SELL":
                 upper_wick = latest["high"] - max(latest["close"], latest["open"])
@@ -66,34 +118,47 @@ class BiasIFVGEngine(BaseStrategy):
                         "type": "BEARISH_REJECTION",
                         "top": latest["high"],
                         "bottom": max(latest["close"], latest["open"]),
-                        "time": candles.index[-2]
+                        "time": candles.index[-1]
                     })
-                    
-        # Simple CISD
+
+        # CISD: a variable-length run (>= 2, uncapped) of same-direction-close
+        # candles immediately preceding the reversal candle, per spec's "run of
+        # down/up-close candles" language — not hardcoded to exactly 2 candles.
+        # Scan backward from the candle before the reversal candle (`latest`)
+        # while candles keep closing in the run direction.
         if len(candles) >= 4:
-            c1, c2, c3 = candles.iloc[-4], candles.iloc[-3], candles.iloc[-2]
-            if bias == "BUY":
-                if c1["close"] < c1["open"] and c2["close"] < c2["open"]:
-                    cisd_line = c1["open"]
-                    if c3["close"] > cisd_line:
-                        buffer = (c3["close"] - cisd_line) * 0.1
-                        levels.append({
-                            "type": "BULLISH_CISD",
-                            "top": cisd_line + buffer,
-                            "bottom": cisd_line - buffer,
-                            "time": candles.index[-2]
-                        })
-            elif bias == "SELL":
-                if c1["close"] > c1["open"] and c2["close"] > c2["open"]:
-                    cisd_line = c1["open"]
-                    if c3["close"] < cisd_line:
-                        buffer = (cisd_line - c3["close"]) * 0.1
-                        levels.append({
-                            "type": "BEARISH_CISD",
-                            "top": cisd_line + buffer,
-                            "bottom": cisd_line - buffer,
-                            "time": candles.index[-2]
-                        })
+            reversal = latest
+            run_is_down_close = bias == "BUY"
+            run = []
+            i = len(candles) - 2  # candle immediately before the reversal candle
+            while i >= 0:
+                c = candles.iloc[i]
+                is_run_candle = (c["close"] < c["open"]) if run_is_down_close else (c["close"] > c["open"])
+                if not is_run_candle:
+                    break
+                run.append(c)
+                i -= 1
+
+            if len(run) >= 2:
+                # run[-1] is the oldest candle in the run — its open is the run's
+                # "opening price" per spec, i.e. the CISD line.
+                cisd_line = run[-1]["open"]
+                if bias == "BUY" and reversal["close"] > cisd_line:
+                    buffer = (reversal["close"] - cisd_line) * 0.1
+                    levels.append({
+                        "type": "BULLISH_CISD",
+                        "top": cisd_line + buffer,
+                        "bottom": cisd_line - buffer,
+                        "time": candles.index[-1]
+                    })
+                elif bias == "SELL" and reversal["close"] < cisd_line:
+                    buffer = (cisd_line - reversal["close"]) * 0.1
+                    levels.append({
+                        "type": "BEARISH_CISD",
+                        "top": cisd_line + buffer,
+                        "bottom": cisd_line - buffer,
+                        "time": candles.index[-1]
+                    })
         return levels
 
     def _is_within_session(self, current_time: pd.Timestamp) -> bool:
@@ -131,6 +196,8 @@ class BiasIFVGEngine(BaseStrategy):
                 "m5_swing_point": None,
                 "manipulation_leg_start": None,
                 "trades_today": 0,
+                "wins_today": 0,
+                "losses_today": 0,
                 "extra_levels": []
             }
             state = self.state[symbol]
@@ -179,8 +246,12 @@ class BiasIFVGEngine(BaseStrategy):
             if state["status"] in ["AWAIT_IFVG_SETUP", "AWAIT_IFVG_CLOSE"]:
                 m5_fvgs = self.m5_detectors[symbol].update(candles)
                 
-            # Check for M15 Tap (Real-time detection using M5 candle)
-            if state["status"] in ["AWAIT_KEY_LEVEL", "AWAIT_IFVG_SETUP"]:
+            # Check for M15 Tap (Real-time detection using M5 candle).
+            # Only run while still searching for the key level itself — running this
+            # while already AWAIT_IFVG_SETUP kept re-firing on every bar price dwells
+            # near the zone, repeatedly pushing manipulation_leg_start forward and
+            # starving the subsequent IFVG search of ever finding a qualifying gap.
+            if state["status"] == "AWAIT_KEY_LEVEL":
                 # Check FVGs
                 m15_fvgs = self.m15_detectors[symbol].active_fvgs
                 for fvg in reversed(m15_fvgs):
@@ -213,7 +284,12 @@ class BiasIFVGEngine(BaseStrategy):
                             self.log_event(f"[{symbol}] M15 {lvl['type']} tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                             break
             
-            # Look for an opposing M5 FVG that forms DURING the reaction
+            # Look for an opposing M5 FVG that forms DURING the reaction.
+            # NOTE (unresolved product ambiguity — intentionally left as-is): this
+            # searches for gaps forming AFTER the key-level tap. The spec's
+            # "manipulation leg" language can also be read as describing the leg that
+            # APPROACHED the level (i.e. before the tap). Re-aligning either the doc's
+            # wording or this scan direction needs a product decision; not changed here.
             if state["status"] == "AWAIT_IFVG_SETUP":
                 for fvg in reversed(m5_fvgs):
                     fvg_time = fvg.get("index", pd.Timestamp.min)
@@ -238,7 +314,13 @@ class BiasIFVGEngine(BaseStrategy):
                     
                 if state["trades_today"] >= self.params.max_trades_per_day:
                     return None
-                    
+                # Spec's mandatory day-stop rule (stop after 1 win; after 1 loss only
+                # take a 2nd trade if it's A+; stop after 2 losses regardless).
+                # confluence_score is currently a fixed 85 (see TradeSignal below);
+                # checked against a_plus_confluence_threshold as the "A+" gate.
+                if not self._can_trade_today(state, candidate_confluence=85):
+                    return None
+
                 fvg = state["m5_fvg_to_invert"]
                 triggered = False
                 

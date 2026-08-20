@@ -4,6 +4,7 @@ import pytz
 from backend.core.config_schema import UserConfigV2
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
 from backend.strategies.core.fvg import FVGDetector
+from backend.strategies.core.market_structure import MarketStructureDetector
 from backend.strategies.registry import register_strategy
 from backend.utils.logger import get_logger
 
@@ -22,8 +23,9 @@ class HTFFVGFlipEngine(BaseStrategy):
         self.state = {}
         self.htf_detectors = {}
         self.m5_detectors = {}
+        self.ms_detectors = {}
         self.last_trade_date = {}
-        
+
     def _init_state(self, symbol: str):
         if symbol not in self.state:
             self.state[symbol] = {
@@ -35,6 +37,9 @@ class HTFFVGFlipEngine(BaseStrategy):
             }
             self.htf_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.2)
             self.m5_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
+            # Used to derive HTF trend context so we only act on FVG taps that are
+            # counter to the recent trend (spec requirement — see on_bar step 2).
+            self.ms_detectors[symbol] = MarketStructureDetector(swing_length=5, min_bos_count=1)
 
     def _is_within_session(self, current_time: pd.Timestamp) -> bool:
         if not self.params.session_filter_enabled:
@@ -81,6 +86,7 @@ class HTFFVGFlipEngine(BaseStrategy):
         # Process HTF (Keep trackers updated)
         if timeframe == self.params.htf_timeframe:
             self.htf_detectors[symbol].update(candles)
+            self.ms_detectors[symbol].update(candles)
 
         # Process LTF Confirmation
         elif timeframe == self.params.entry_confirmation_tf:
@@ -93,20 +99,36 @@ class HTFFVGFlipEngine(BaseStrategy):
             # 2. Check for HTF Tap (Real-time detection using M5 candle)
             if state["status"] == "AWAIT_HTF_TAP":
                 htf_fvgs = self.htf_detectors[symbol].active_fvgs
+                # Spec requires the tapped FVG be counter to the recent HTF trend:
+                # a BULLISH FVG (expected to bounce price up) only qualifies as
+                # counter-trend support when the HTF trend is BEARISH, and a BEARISH
+                # FVG only qualifies as counter-trend resistance when the HTF trend is
+                # BULLISH. With no confirmed trend (NEUTRAL) there's nothing to be
+                # "counter" to, so taps are held back until a trend resolves.
+                htf_trend = self.ms_detectors[symbol].get_bias()
+                require_unfilled = getattr(self.params, "require_unfilled_htf_fvg", True)
                 for fvg in htf_fvgs:
-                    # Bullish FVG tap -> expect bounce up (BUY bias)
+                    if require_unfilled and fvg.get("tapped"):
+                        continue
+                    # Bullish FVG tap -> expect bounce up (BUY bias); counter-trend only if HTF trend is BEARISH
                     if fvg["type"] == "BULLISH" and fvg["bottom"] <= latest["low"] <= fvg["top"]:
+                        if htf_trend != "BEARISH":
+                            continue
+                        fvg["tapped"] = True
                         state["status"] = "AWAIT_INVERSION_FVG"
                         state["bias"] = "BUY"
                         state["tap_time"] = current_time
-                        self.log_event(f"[{symbol}] HTF Bullish FVG tapped by M5. Bias: BUY", category="FVG_FLIP")
+                        self.log_event(f"[{symbol}] HTF Bullish FVG tapped by M5 (counter-trend vs BEARISH). Bias: BUY", category="FVG_FLIP")
                         break
-                    # Bearish FVG tap -> expect bounce down (SELL bias)
+                    # Bearish FVG tap -> expect bounce down (SELL bias); counter-trend only if HTF trend is BULLISH
                     elif fvg["type"] == "BEARISH" and fvg["bottom"] <= latest["high"] <= fvg["top"]:
+                        if htf_trend != "BULLISH":
+                            continue
+                        fvg["tapped"] = True
                         state["status"] = "AWAIT_INVERSION_FVG"
                         state["bias"] = "SELL"
                         state["tap_time"] = current_time
-                        self.log_event(f"[{symbol}] HTF Bearish FVG tapped by M5. Bias: SELL", category="FVG_FLIP")
+                        self.log_event(f"[{symbol}] HTF Bearish FVG tapped by M5 (counter-trend vs BULLISH). Bias: SELL", category="FVG_FLIP")
                         break
 
             # 3. Look for a new LTF FVG in the OPPOSING direction (to be inverted)
@@ -156,12 +178,16 @@ class HTFFVGFlipEngine(BaseStrategy):
                 elif state["bias"] == "SELL" and latest["close"] < fvg["bottom"]:
                     triggered = True
 
-                # Invalidate if price breaks the swing extreme before inversion
-                if state["bias"] == "BUY" and latest["close"] < state.get("m5_swing_point", 0):
+                # Invalidate if price breaks the swing extreme before inversion.
+                # Uses the candle WICK (low/high), not the close — a wick-only pierce
+                # through the recorded swing point already invalidates the level even
+                # without a full-body close beyond it, since the eventual SL sits on
+                # that level and a wick breach means it's already been run through.
+                if state["bias"] == "BUY" and latest["low"] < state.get("m5_swing_point", 0):
                     state["status"] = "AWAIT_HTF_TAP"
                     self.log_event(f"[{symbol}] Inversion setup failed (Swing low broken).", category="FVG_FLIP")
                     return None
-                elif state["bias"] == "SELL" and latest["close"] > state.get("m5_swing_point", float('inf')):
+                elif state["bias"] == "SELL" and latest["high"] > state.get("m5_swing_point", float('inf')):
                     state["status"] = "AWAIT_HTF_TAP"
                     self.log_event(f"[{symbol}] Inversion setup failed (Swing high broken).", category="FVG_FLIP")
                     return None

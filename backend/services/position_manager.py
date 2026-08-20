@@ -290,9 +290,27 @@ class PositionManager:
                     # Position is closed in MT5, but OPEN in DB
                     deals = mt5.history_deals_get(position=pos.mt5_ticket)
                     if deals:
-                        exit_deal = deals[-1]
-                        net_profit = exit_deal.profit + getattr(exit_deal, 'commission', 0.0) + getattr(exit_deal, 'swap', 0.0) + getattr(exit_deal, 'fee', 0.0)
-                        
+                        # Item 3.8: sum ALL OUT/INOUT deals for this position instead
+                        # of only the most recent one (deals[-1]) — a position closed
+                        # in 2+ parts (partial close, then final close) has multiple
+                        # OUT deals, and using only the last one dropped the realized
+                        # PnL from every earlier partial close. Matches the correct
+                        # pattern already used elsewhere in this file (see the
+                        # HISTORICAL GHOST SYNC and partial-close-detection blocks
+                        # above/below).
+                        out_deals = [d for d in deals if d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT)]
+                        if out_deals:
+                            exit_deal = max(out_deals, key=lambda d: d.time)  # most recent, for exit price/reason
+                            net_profit = sum(
+                                d.profit + getattr(d, 'commission', 0.0) + getattr(d, 'swap', 0.0) + getattr(d, 'fee', 0.0)
+                                for d in out_deals
+                            )
+                        else:
+                            # No OUT-type deal found (unexpected) — fall back to the
+                            # last deal for exit price/reason only.
+                            exit_deal = deals[-1]
+                            net_profit = exit_deal.profit + getattr(exit_deal, 'commission', 0.0) + getattr(exit_deal, 'swap', 0.0) + getattr(exit_deal, 'fee', 0.0)
+
                         if pos.status != "CLOSED" or pos.pnl != net_profit:
                             pos.status = "CLOSED"
                             pos.pnl = net_profit
@@ -448,11 +466,23 @@ class PositionManager:
                 
                 pip_size_val = get_pip_size(symbol)
 
+                # --- VWAP mandatory ET hard-close (spec: no VWAP position may run past its configured cutoff) ---
+                if await self._check_vwap_hard_close(pos, live_pos, session, config):
+                    continue
+
                 # --- 1. BREAKEVEN LOGIC ---
                 if hasattr(risk, 'be_trigger_rr') and risk.be_trigger_rr > 0 and not pos.be_applied:
                     pips_in_profit = (current_price - entry_price) / pip_size_val if is_buy else (entry_price - current_price) / pip_size_val
-                    
-                    original_sl = pos.stop_loss
+
+                    # Phase-5 fix: use the TRUE original SL from the parent Trade as
+                    # the risk basis, not pos.stop_loss (which may have already been
+                    # modified by a prior BE/trailing move) — matches the adjacent
+                    # trailing-stop code's pattern below.
+                    original_sl = 0.0
+                    tq_be = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
+                    pt_be = tq_be.scalars().first()
+                    if pt_be:
+                        original_sl = pt_be.stop_loss
                     if original_sl == 0.0:
                         risk_pips = 20.0 # fallback
                     else:
@@ -704,6 +734,56 @@ class PositionManager:
             return None
 
         return None
+
+    async def _check_vwap_hard_close(self, pos, live_pos, session, config) -> bool:
+        """
+        VWAP strategy mandatory ET hard-close (spec: strategy_vwap must not carry a
+        position past its configured `hard_close` ET cutoff, e.g. 15:55, to avoid
+        overnight gap risk). This was previously enforced only in the backtester
+        (backtester/engine.py's hard_close_time check on signal metadata) — live
+        positions ran unmanaged through the cutoff.
+
+        There is no per-position metadata store for live trades (Trade/TradePosition
+        have no metadata column), so this reads the hard-close time from the user's
+        current VWAP config instead — the same value strategy_vwap/engine.py stamps
+        into signal metadata (`self.params.hard_close`) — and identifies VWAP
+        positions via the parent Trade's strategy_id. Force-closes via
+        OrderManager.close_position, the same mechanism used for manual/API closes.
+
+        Returns True if the position was force-closed this tick (caller should skip
+        further management of it, since it's no longer open).
+        """
+        try:
+            from backend.data.models import Trade
+
+            vwap_params = getattr(config, "vwap", None)
+            hard_close_str = getattr(vwap_params, "hard_close", None) if vwap_params else None
+            if not hard_close_str:
+                return False
+
+            trade = await session.get(Trade, pos.parent_trade_id)
+            if not trade or trade.strategy_id != "VWAP_v1":
+                return False
+
+            import pytz
+            now_et = datetime.utcnow().replace(tzinfo=pytz.UTC).astimezone(pytz.timezone("America/New_York"))
+            time_str = now_et.strftime("%H:%M")
+            if time_str < hard_close_str:
+                return False
+
+            from backend.mt5.order_manager import OrderManager
+            success = await OrderManager.close_position(live_pos.ticket)
+            if success:
+                logger.info(
+                    f"[VWAP] Mandatory hard-close enforced: ticket {live_pos.ticket} "
+                    f"({live_pos.symbol}) flattened at {time_str} ET (cutoff {hard_close_str})"
+                )
+            else:
+                logger.warning(f"[VWAP] Hard-close attempt failed for ticket {live_pos.ticket} — will retry next tick")
+            return success
+        except Exception as e:
+            logger.error(f"Error enforcing VWAP hard close for ticket {getattr(live_pos, 'ticket', '?')}: {e}")
+            return False
 
     async def _modify_sl(self, ticket: int, symbol: str, new_sl: float) -> bool:
         from backend.mt5.order_manager import OrderManager

@@ -6,7 +6,8 @@ PostgreSQL backend hosted on Railway.
 Source: TradingBot_MasterPlan-2.md Section 5 — Database Schema
 """
 
-import random
+import itertools
+import threading
 import time
 
 from sqlalchemy import (
@@ -32,9 +33,24 @@ class Base(DeclarativeBase):
     pass
 
 
+_id_lock = threading.Lock()
+_id_seq = itertools.count()
+
+
 def generate_id():
-    """Generates a pseudo-random integer ID."""
-    return int(time.time() * 1000) * 100 + random.randint(0, 99)
+    """Generates a unique integer ID: millisecond timestamp + a process-local sequence.
+
+    Previously used a millisecond timestamp plus a random 2-digit suffix
+    (`random.randint(0, 99)`), which collided whenever multiple rows were created within
+    the same millisecond — e.g. the 3 TP-leg trade_positions rows for one signal, built
+    back-to-back in a loop — causing UNIQUE constraint failures on bulk insert. A
+    monotonically-increasing sequence guarantees uniqueness for calls within one process,
+    regardless of how many happen in the same millisecond (wrapped mod 1000, which is far
+    above any realistic per-millisecond insert rate for this app).
+    """
+    with _id_lock:
+        seq = next(_id_seq) % 1000
+    return int(time.time() * 1000) * 1000 + seq
 
 
 # ── OHLCV History ────────────────────────────────────────────────────────────

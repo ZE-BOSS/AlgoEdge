@@ -8,7 +8,7 @@ Implements Continuous Drift (Setup A) + Discrete Jump (Setup B) logic for Crash 
 Uses simplified empirical gap counting.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import numpy as np
@@ -85,6 +85,15 @@ class DriftJumpAlphaEngine(BaseStrategy):
         self.post_jump_regime_reset = False
         self.history_scanned = False
 
+        # ── Spec §1 risk guardrails (per-instance, mirroring strategy_vwap's local
+        # trades_today/losses_today pattern — this engine already keeps state as
+        # un-namespaced instance attributes since one instance is created per symbol) ──
+        self.trades_today = 0
+        self.daily_risk_used_pct = 0.0
+        self.last_reset_date = None
+        self.consecutive_losses = 0
+        self.cooldown_until: datetime | None = None
+
     def log_event(self, message: str, level: str = "INFO", category: str = "DJA"):
         """Intercept logs and send to bot_service."""
         from datetime import timezone
@@ -141,6 +150,27 @@ class DriftJumpAlphaEngine(BaseStrategy):
             return SPEC_DEFAULTS['trailing_atr_multiple_high_vol']
         return SPEC_DEFAULTS['trailing_atr_multiple_low_vol']
 
+    def notify_outcome(self, symbol: str, group_id: str, is_win: bool, pnl: float) -> None:
+        """
+        Called by the backtester/live engine after a full trade group closes.
+        Tracks consecutive losses so spec §1's max_consecutive_losses /
+        cooldown_after_max_losses_hours guardrails can be enforced in on_bar.
+        """
+        if is_win:
+            self.consecutive_losses = 0
+            return
+
+        self.consecutive_losses = getattr(self, 'consecutive_losses', 0) + 1
+        max_losses = getattr(self.params, 'max_consecutive_losses', 4) if self.params else 4
+        if self.consecutive_losses >= max_losses:
+            cooldown_hours = getattr(self.params, 'cooldown_after_max_losses_hours', 12) if self.params else 12
+            self.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=cooldown_hours)
+            self.log_event(
+                f"[{symbol}] Max consecutive losses ({self.consecutive_losses}) reached. "
+                f"Cooldown until {self.cooldown_until.isoformat()}",
+                "WARN",
+            )
+
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         """
         DriftJumpAlpha Setup A (Drift) + Setup B (Jump Entry) evaluation.
@@ -159,6 +189,33 @@ class DriftJumpAlphaEngine(BaseStrategy):
 
         current_bar = candles.iloc[-1]
         self.log_event(f"[{symbol}] Evaluating new {timeframe} bar: close={current_bar['close']}")
+
+        # ── Spec §1 risk guardrails ─────────────────────────────────────────
+        # Daily reset (trades_today / daily_risk_used_pct)
+        bar_date = candles.index[-1].date()
+        if self.last_reset_date != bar_date:
+            self.trades_today = 0
+            self.daily_risk_used_pct = 0.0
+            self.last_reset_date = bar_date
+
+        # Cooldown after max_consecutive_losses (set by notify_outcome)
+        if self.cooldown_until is not None:
+            now_utc = datetime.now(timezone.utc)
+            if now_utc < self.cooldown_until:
+                self.log_event(f"[{symbol}] In post-loss cooldown until {self.cooldown_until.isoformat()}.")
+                return None
+            self.cooldown_until = None
+
+        max_trades_per_day = getattr(self.params, 'max_trades_per_day', 6) if self.params else 6
+        if self.trades_today >= max_trades_per_day:
+            self.log_event(f"[{symbol}] max_trades_per_day ({max_trades_per_day}) reached. Blocking entries.")
+            return None
+
+        max_daily_risk_pct = getattr(self.params, 'max_daily_risk_pct', 4.0) if self.params else 4.0
+        risk_per_trade_pct = getattr(getattr(self.config, 'risk', None), 'risk_per_trade_pct', 1.0)
+        if self.daily_risk_used_pct + risk_per_trade_pct > max_daily_risk_pct:
+            self.log_event(f"[{symbol}] max_daily_risk_pct ({max_daily_risk_pct}%) would be exceeded. Blocking entries.")
+            return None
 
         # Load UI Params
         fast_period = self.params.drift_ema_fast if getattr(self, 'params', None) else 20
@@ -180,7 +237,10 @@ class DriftJumpAlphaEngine(BaseStrategy):
         current_bar = df.iloc[-1]
         atr_val = current_bar['atr']
         adx_val = current_bar['adx']
-        avg_atr = df['atr'].mean()
+        # Rolling window baseline, not an unbounded all-time mean — an all-time mean
+        # degenerates into a near-fixed threshold once enough history accumulates,
+        # rather than reacting to CURRENT volatility as the "adaptive" trail intends.
+        avg_atr = df['atr'].tail(300).mean()
         
         if pd.isna(atr_val) or atr_val <= 0:
             return None
@@ -242,12 +302,26 @@ class DriftJumpAlphaEngine(BaseStrategy):
                     entry_price = float(current_bar['close'])
                     highs = [s for s in swings if s["type"] == "HIGH" and float(s["price"]) > entry_price]
                     buffer = 0.2 * atr_val
-                    sl = float(highs[-1]["price"]) + buffer if highs else entry_price + (atr_val * 1.5)
-                    
+                    # Fallback SL (no valid swing structure): spec's buffer_atr_multiple
+                    # for Setup B is 0.2 — intentionally tighter than Setup A's adaptive
+                    # 1.5x/2.5x multiple. Reusing Setup A's width here undermined both
+                    # the RRR calc and the lot-ceiling sizing rationale for Setup B.
+                    sl = float(highs[-1]["price"]) + buffer if highs else entry_price + (atr_val * 0.2)
+
                     risk = abs(entry_price - sl)
                     min_reward = risk * 1.5
                     tp = entry_price - max(atr_val * 3, min_reward)
-                    
+
+                    reward = abs(entry_price - tp)
+                    rrr = reward / risk if risk > 0 else 0.0
+                    min_rrr = getattr(self.params, 'min_rrr_to_accept_trade', 1.5) if self.params else 1.5
+                    if rrr < min_rrr:
+                        self.log_event(f"[{symbol}] Setup B RRR {rrr:.2f} < min_rrr_to_accept_trade {min_rrr}. Discarding signal.")
+                        return None
+
+                    self.trades_today += 1
+                    self.daily_risk_used_pct += risk_per_trade_pct
+
                     return TradeSignal(
                         strategy_id="DriftJumpAlpha_v1",
                         symbol=symbol,
@@ -282,12 +356,20 @@ class DriftJumpAlphaEngine(BaseStrategy):
         
         regime_active = current_bar['ema_fast'] > current_bar['ema_slow'] and ema_sep > min_sep
         
-        if pd.notna(adx_val) and adx_val < min_adx:
+        # NaN ADX means zero net directional movement (+DI == -DI) — the exact
+        # "insufficient trend strength" case this filter exists to reject. The old
+        # `pd.notna(adx_val) and ...` check let NaN silently bypass the filter
+        # instead of blocking on it.
+        if not pd.notna(adx_val) or adx_val < min_adx:
             self.log_event(f"ADX {adx_val:.1f} < {min_adx}. Drift Regime ignored due to weak trend.")
             regime_active = False
-            
+
         if not regime_active:
-            self.post_jump_regime_reset = False
+            # Do NOT clear post_jump_regime_reset here — this branch fires on
+            # essentially every bar right after a jump (regime is typically inactive
+            # post-jump), which previously reset the flag before its own confirmation
+            # condition (close >= ema_fast, below) ever got a chance to fire. The flag
+            # is only cleared once that confirmation is satisfied.
             self.log_event("Drift Regime UP inactive.")
             return None
             
@@ -340,7 +422,17 @@ class DriftJumpAlphaEngine(BaseStrategy):
         recovery_dist = recovery_pips * pip_size
         
         tp = entry_price + max(atr_dist * 5, min_reward, recovery_dist)
-        
+
+        reward = abs(tp - entry_price)
+        rrr = reward / risk if risk > 0 else 0.0
+        min_rrr = getattr(self.params, 'min_rrr_to_accept_trade', 1.5) if self.params else 1.5
+        if rrr < min_rrr:
+            self.log_event(f"[{symbol}] Setup A RRR {rrr:.2f} < min_rrr_to_accept_trade {min_rrr}. Discarding signal.")
+            return None
+
+        self.trades_today += 1
+        self.daily_risk_used_pct += risk_per_trade_pct
+
         sig = TradeSignal(
             strategy_id="DriftJumpAlpha_v1",
             symbol=symbol,

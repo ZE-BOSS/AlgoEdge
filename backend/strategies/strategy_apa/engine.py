@@ -79,25 +79,39 @@ class APAEngine(BaseStrategy):
         self._init_state(symbol)
         state = self.state[symbol]
 
-        # Reset daily state on calendar day change to clear stale setups
+        # Reset daily state on calendar day change to clear stale setups.
+        # Gated: don't wipe a pattern that has already reached AWAIT_RETEST/
+        # AWAIT_CONFIRMATION with a confirmed BOS (a committed, in-flight setup),
+        # and don't reset at all for continuously-traded synthetic symbols, where
+        # a UTC-midnight boundary isn't a meaningful session break.
         current_time_dt = candles.index[-1]
         if isinstance(current_time_dt, (int, float)):
              current_time_dt = pd.to_datetime(current_time_dt, unit='s', utc=True)
         current_date = pd.Timestamp(current_time_dt, tz='UTC').date()
 
         if state.get("last_trade_date") != current_date:
-            state.update({
-                "status": "AWAIT_PATTERN",
-                "pattern": None,
-                "direction": None,
-                "invalidation_zone_top": None,
-                "invalidation_zone_bottom": None,
-                "sl_level": None,
-                "invalidation_head": None,
-                "bos_confirmed": False,
-                "last_trade_date": current_date
-            })
-            self.log_event(f"[{symbol}] State reset for new trading day.", category="APA")
+            is_synthetic = any(prefix in symbol for prefix in _SYNTHETIC_PREFIXES)
+            in_progress_committed = (
+                state.get("bos_confirmed")
+                and state.get("status") in ("AWAIT_RETEST", "AWAIT_CONFIRMATION")
+            )
+            if is_synthetic or in_progress_committed:
+                # Track the date so we don't re-evaluate this branch every bar,
+                # but leave the rest of the state untouched.
+                state["last_trade_date"] = current_date
+            else:
+                state.update({
+                    "status": "AWAIT_PATTERN",
+                    "pattern": None,
+                    "direction": None,
+                    "invalidation_zone_top": None,
+                    "invalidation_zone_bottom": None,
+                    "sl_level": None,
+                    "invalidation_head": None,
+                    "bos_confirmed": False,
+                    "last_trade_date": current_date
+                })
+                self.log_event(f"[{symbol}] State reset for new trading day.", category="APA")
 
         if len(candles) < (self.params.major_fractal_m * 2 + 5):
             return None
@@ -161,22 +175,35 @@ class APAEngine(BaseStrategy):
                         state["pattern"] = None
                         return None
 
-                    # Draw Invalidation Zone from Right Shoulder candle bodies
+                    # Draw Invalidation Zone from Right Shoulder candle body, or from
+                    # both shoulders' bodies when invalidation_zone_source == "both".
                     rs = pattern["right_shoulder"]
-                    iz_source_idx = rs["index"]
-                    rs_bar = candles.loc[iz_source_idx] if iz_source_idx in candles.index else None
-                    if rs_bar is not None:
-                        iz_top = max(rs_bar["open"], rs_bar["close"])
-                        iz_bottom = min(rs_bar["open"], rs_bar["close"])
-                    else:
-                        iz_top = rs["body_high"]
-                        iz_bottom = rs["body_low"]
+                    iz_shoulders = [rs]
+                    if self.params.invalidation_zone_source == "both":
+                        iz_shoulders.append(pattern["left_shoulder"])
+
+                    iz_tops, iz_bottoms = [], []
+                    for shoulder in iz_shoulders:
+                        s_bar = candles.loc[shoulder["index"]] if shoulder["index"] in candles.index else None
+                        if s_bar is not None:
+                            iz_tops.append(max(s_bar["open"], s_bar["close"]))
+                            iz_bottoms.append(min(s_bar["open"], s_bar["close"]))
+                        else:
+                            iz_tops.append(shoulder["body_high"])
+                            iz_bottoms.append(shoulder["body_low"])
+
+                    iz_top = max(iz_tops)
+                    iz_bottom = min(iz_bottoms)
 
                     state["invalidation_zone_top"] = iz_top
                     state["invalidation_zone_bottom"] = iz_bottom
 
-                    # SL = wick extreme of right shoulder + buffer
-                    buffer = self.params.sl_buffer_atr * atr
+                    # SL = wick extreme of right shoulder + buffer. sl_buffer_atr_mult
+                    # widens this further, additive on top of sl_buffer_atr (both are
+                    # ATR multiples applied to the same wick reference — see params.py
+                    # docstrings, sl_buffer_atr_mult is explicitly "added ON TOP of the
+                    # structural SL distance").
+                    buffer = (self.params.sl_buffer_atr + self.params.sl_buffer_atr_mult) * atr
                     head = pattern["head"]
                     tight = abs(head["price"] - rs["price"]) < self.params.tight_level_threshold_atr * atr
 

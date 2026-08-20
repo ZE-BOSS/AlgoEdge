@@ -100,6 +100,76 @@ def _validate_position(direction: str, entry_price: float, stop_loss: float, tak
     return True, ""
 
 
+def _resolve_sl_tp_hit(
+    direction: str,
+    open_p: float,
+    high: float,
+    low: float,
+    stop_loss: float,
+    take_profit: float,
+    simulate_wicks: bool = True,
+) -> tuple:
+    """
+    Determine whether a position's SL and/or TP was touched on this bar, and
+    resolve same-bar SL+TP ambiguity via the OHLC shadow-weighted path model.
+
+    Conservative worst-case bias (item 3.3): SL wins the tie-break if EITHER
+    the shadow-length heuristic OR the distance-from-open heuristic favors it
+    (not requiring both to agree). This is shared by the main close-evaluation
+    loop AND the TP1 pre-pass (item 3.7) so both use the identical resolved
+    result instead of two independently-drifting implementations.
+    """
+    if _is_buy(direction):
+        sl_hit = low <= stop_loss
+        tp_hit = high >= take_profit
+    else:
+        sl_hit = high >= stop_loss
+        tp_hit = low <= take_profit
+
+    if sl_hit and tp_hit:
+        if simulate_wicks:
+            if _is_buy(direction):
+                sl_shadow = open_p - low    # downward shadow towards SL
+                tp_shadow = high - open_p   # upward shadow towards TP
+            else:
+                sl_shadow = high - open_p   # upward shadow towards SL
+                tp_shadow = open_p - low    # downward shadow towards TP
+            dist_to_sl = abs(stop_loss - open_p)
+            dist_to_tp = abs(take_profit - open_p)
+            # Item 3.3: SL wins if EITHER heuristic favors it (conservative).
+            sl_wins = (sl_shadow >= tp_shadow) or (dist_to_sl <= dist_to_tp)
+        else:
+            # Fallback: distance-from-open tie-breaker only.
+            dist_to_sl = abs(stop_loss - open_p)
+            dist_to_tp = abs(take_profit - open_p)
+            sl_wins = dist_to_sl <= dist_to_tp
+        if sl_wins:
+            tp_hit = False
+        else:
+            sl_hit = False
+
+    return sl_hit, tp_hit
+
+
+def _gap_adjusted_fill_price(direction: str, open_p: float, level: float, symbol: str, slippage_pips: float) -> float:
+    """
+    Item 3.4: if a bar's open has already gapped past an SL/TP level before the
+    level itself would be "hit" within the bar, a real fill cannot occur at the
+    untouched level price — the realistic fill is the bar's open price,
+    optionally shifted further against the trader by the configured slippage
+    (mirrors how slippage is already applied to entries in _calc_pnl).
+    """
+    price = open_p
+    pip_size = get_pip_size(symbol)
+    if slippage_pips > 0 and pip_size > 0:
+        slip = slippage_pips * pip_size
+        if _is_buy(direction):
+            price -= slip  # closing a BUY: worse = lower fill
+        else:
+            price += slip  # closing a SELL: worse = higher fill
+    return price
+
+
 class BacktestEngine:
     """
     Backtesting engine that uses the identical RiskEngine as live trading.
@@ -262,9 +332,15 @@ class BacktestEngine:
             for _p in self.open_positions:
                 if _p.get("tp_level") != 1:
                     continue
-                if _p["direction"] == "BUY" and high >= _p["take_profit"]:
-                    _tp1_closing_this_bar.add(_p.get("group_id"))
-                elif _p["direction"] != "BUY" and low <= _p["take_profit"]:
+                # Item 3.7: reuse the same ambiguity-resolved tp_hit determination
+                # as the real close logic below, instead of a naive TP-touch-only
+                # check that ignores whether the same bar's SL also fired and
+                # which side the tie-break would actually pick.
+                _sl_hit_pp, _tp_hit_pp = _resolve_sl_tp_hit(
+                    _p["direction"], open_p, high, low,
+                    _p["stop_loss"], _p["take_profit"], self._simulate_wicks,
+                )
+                if _tp_hit_pp:
                     _tp1_closing_this_bar.add(_p.get("group_id"))
 
             for pos in self.open_positions[:]:
@@ -323,45 +399,17 @@ class BacktestEngine:
                     pos["mfe_pips"] = max(pos.get("mfe_pips", 0), favorable / pip_size if pip_size else 0)
                     continue  # Defer SL/TP to next bar
 
-                # Check SL and TP hits
-                sl_hit = False
-                tp_hit = False
-                if pos["direction"] == "BUY":
-                    sl_hit = low <= pos["stop_loss"]
-                    tp_hit = high >= pos["take_profit"]
-                else:
-                    sl_hit = high >= pos["stop_loss"]
-                    tp_hit = low <= pos["take_profit"]
-                    
-                # Resolve ambiguous same-bar SL+TP hit using OHLC shadow-weighted path model.
-                # If both SL and TP were touched in the same bar, use shadow lengths and
-                # distance from open to determine which was most likely hit first.
-                # Both conditions must agree for SL to win (balanced heuristic).
-                if sl_hit and tp_hit:
+                # Check SL and TP hits, resolving same-bar ambiguity via the
+                # shared helper (items 3.2/3.3/3.7 — identical logic reused by
+                # the TP1 pre-pass above, and matches portfolio_engine.py).
+                _raw_sl_hit = (low <= pos["stop_loss"]) if pos["direction"] == "BUY" else (high >= pos["stop_loss"])
+                _raw_tp_hit = (high >= pos["take_profit"]) if pos["direction"] == "BUY" else (low <= pos["take_profit"])
+                if _raw_sl_hit and _raw_tp_hit:
                     pos["same_bar_ambiguous"] = True  # Tag for reporting
-                    if self._simulate_wicks:
-                        if pos["direction"] == "BUY":
-                            sl_shadow = open_p - low   # downward shadow towards SL
-                            tp_shadow = high - open_p  # upward shadow towards TP
-                        else:
-                            sl_shadow = high - open_p  # upward shadow towards SL
-                            tp_shadow = open_p - low   # downward shadow towards TP
-                        dist_to_sl = abs(pos["stop_loss"] - open_p)
-                        dist_to_tp = abs(pos["take_profit"] - open_p)
-                        # Balanced: SL wins only if BOTH shadow AND distance favor it
-                        sl_wins = (sl_shadow >= tp_shadow) and (dist_to_sl <= dist_to_tp)
-                        if sl_wins:
-                            tp_hit = False
-                        else:
-                            sl_hit = False
-                    else:
-                        # Fallback: distance-from-open tie-breaker
-                        dist_to_sl = abs(pos["stop_loss"] - open_p)
-                        dist_to_tp = abs(pos["take_profit"] - open_p)
-                        if dist_to_sl <= dist_to_tp:
-                            tp_hit = False
-                        else:
-                            sl_hit = False
+                sl_hit, tp_hit = _resolve_sl_tp_hit(
+                    pos["direction"], open_p, high, low,
+                    pos["stop_loss"], pos["take_profit"], self._simulate_wicks,
+                )
 
                 # Update MAE/MFE using this bar's high/low BEFORE the exit checks below,
                 # so the excursion on the closing bar itself is captured — previously
@@ -380,13 +428,26 @@ class BacktestEngine:
                 pos["mfe_pips"] = max(pos.get("mfe_pips", 0), favorable / pip_size if pip_size else 0)
 
                 if sl_hit:
-                    pos["exit_price"] = pos["stop_loss"]
+                    # Item 3.4: if the bar's open already gapped past the SL level,
+                    # a perfect fill at the exact SL price is unrealistic — fill at
+                    # the gapped open price (± slippage) instead.
+                    _sl_gapped = (open_p <= pos["stop_loss"]) if pos["direction"] == "BUY" else (open_p >= pos["stop_loss"])
+                    if _sl_gapped:
+                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["stop_loss"], pos.get("symbol", ""), self._slippage_pips)
+                        pos["gap_fill"] = True
+                    else:
+                        pos["exit_price"] = pos["stop_loss"]
                     pos["exit_reason"] = "TRAIL_SL" if pos.get("trail_applied") else ("BE_SL" if pos.get("be_applied") else "SL")
                     pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
                     closed_this_bar.append(pos)
                     continue
                 elif tp_hit:
-                    pos["exit_price"] = pos["take_profit"]
+                    _tp_gapped = (open_p >= pos["take_profit"]) if pos["direction"] == "BUY" else (open_p <= pos["take_profit"])
+                    if _tp_gapped:
+                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["take_profit"], pos.get("symbol", ""), self._slippage_pips)
+                        pos["gap_fill"] = True
+                    else:
+                        pos["exit_price"] = pos["take_profit"]
                     pos["exit_reason"] = f"TP{pos.get('tp_level', 1)}"
                     pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
                     closed_this_bar.append(pos)
@@ -694,7 +755,12 @@ class BacktestEngine:
         balance: float,
     ) -> dict[str, Any]:
         """Create a position dict with entry confirmations and group_id."""
-        entry_price = sig.get("entry_price", current_price)
+        # Item 3.1: the stored/fill entry_price must always be the realistic
+        # next-bar-open price (`current_price` here is `bar_open_price` from
+        # the caller), never the strategy's theoretical signal entry_price —
+        # that value is preserved only in `original_signal`/logging below for
+        # reference, not used as the fill price.
+        entry_price = current_price
 
         # Detect entry session
         try:
@@ -707,6 +773,7 @@ class BacktestEngine:
         entry_confirmations = [
             f"Direction: {sig.get('direction', 'UNKNOWN')}",
             f"Entry Price: {entry_price:.5f}",
+            f"Signal Entry Price (reference): {sig.get('entry_price', entry_price):.5f}",
             f"Stop Loss: {sig.get('stop_loss', 0):.5f}",
             f"Take Profit (TP{tp.level}): {tp.tp_price:.5f}",
             f"RR Multiplier: 1:{tp.rr_multiplier:.1f}",

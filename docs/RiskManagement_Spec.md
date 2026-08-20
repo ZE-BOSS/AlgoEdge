@@ -439,19 +439,33 @@ If weekly_pnl reaches -(max_weekly_loss_pct × account_balance):
   → Resume Monday 00:01 GMT
 ```
 
-### 6.3 Consecutive Loss Streaks (Daily/Weekly)
+### 6.3 Daily/Weekly Drawdown Limits (Percentage-Based)
+
+Per a deliberate design decision, daily/weekly risk is controlled by **percentage
+drawdown limits**, not trade-count-based consecutive-loss streaks. This is implemented
+in `backend/risk/circuit_breaker.py` (`CircuitBreaker.check_all()`), config fields
+`max_daily_drawdown_pct` / `max_weekly_drawdown_pct`:
 
 ```
-If daily_consecutive_losses >= max_daily_consecutive_losses (default: 5):
-  → PAUSE strategy for the rest of the day
-  → Notification: "Daily consecutive loss limit reached"
-  → Auto-resumes at 00:00 GMT
+Daily:
+  daily_dd_pct = (-daily_pnl / day_start_balance) × 100
+  If daily_dd_pct >= max_daily_drawdown_pct (default: 3.0%):
+    → PAUSE strategy for the rest of the day
+    → Notification: "Daily drawdown limit reached: X% >= max_daily_drawdown_pct%"
+    → Auto-resumes at 00:00 GMT (daily-only pauses; weekly state is preserved)
 
-If weekly_consecutive_losses >= max_weekly_consecutive_losses (default: 15):
-  → PAUSE strategy for the rest of the week
-  → Notification: "Weekly consecutive loss limit reached"
-  → Auto-resumes Monday at 00:00 GMT
+Weekly:
+  weekly_dd_pct = (-weekly_pnl / week_start_balance) × 100
+  If weekly_dd_pct >= max_weekly_drawdown_pct (default: 6.0%):
+    → PAUSE strategy for the rest of the week
+    → Notification: "Weekly drawdown limit reached: X% >= max_weekly_drawdown_pct%"
+    → Auto-resumes Monday
 ```
+
+Both percentages are anchored to a snapshot balance taken at the start of the
+day/week (`_day_start_balance` / `_week_start_balance`) — not the live, constantly
+moving account balance — so the % figure doesn't distort non-linearly as PnL
+accumulates through the period.
 
 ### 6.4 Correlation Guard
 
@@ -469,8 +483,8 @@ If two open positions are on highly correlated pairs:
 | `risk_per_trade_pct` | 1.0% | 0.25–3.0% | Risk per single trade |
 | `max_daily_loss_pct` | 5.0% | 1–10% | Daily circuit breaker |
 | `max_weekly_loss_pct` | 10.0% | 3–20% | Weekly circuit breaker |
-| `max_daily_consecutive_losses` | 5 | 3–10 | Daily streak breaker |
-| `max_weekly_consecutive_losses`| 15| 5–30 | Weekly streak breaker |
+| `max_daily_drawdown_pct` | 3.0% | 1–10% | Daily % drawdown breaker (see §6.3) |
+| `max_weekly_drawdown_pct` | 6.0% | 3–20% | Weekly % drawdown breaker (see §6.3) |
 | `max_concurrent_positions` | 3 | 1–10 | Max open trades |
 | `max_correlated_risk_pct` | 4.0% | 1–8% | Max on correlated pairs |
 | `min_rr` | 3.0 | 3.0–10.0 | Minimum RR to trade |

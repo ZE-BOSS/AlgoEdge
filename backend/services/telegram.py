@@ -58,13 +58,12 @@ class TelegramService:
                 logger.error(f"Failed to send Telegram message to {cid}: {e}")
 
         try:
-            import ssl
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            connector = aiohttp.TCPConnector(ssl=ssl_context)
-            
-            async with aiohttp.ClientSession(connector=connector) as session:
+            # Item 3.10: use aiohttp's default verified TLS (certificate +
+            # hostname verification) — the previous custom SSL context disabled
+            # both (check_hostname=False, verify_mode=CERT_NONE), letting any
+            # MITM-capable network position intercept/spoof api.telegram.org
+            # traffic, including exfiltrating the bot token.
+            async with aiohttp.ClientSession() as session:
                 tasks = [_send(session, cid) for cid in chat_ids]
                 await asyncio.gather(*tasks)
         except Exception as e:

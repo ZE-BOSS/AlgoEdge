@@ -32,6 +32,7 @@ class MarketStructureDetector:
         self.consecutive_bos = 0
         self.trend_confirmed = False
         self._last_bos_level: float | None = None  # Price of last BOS break
+        self._last_bos_index: int | None = None  # bar_idx of the swing used for the last BOS/ChoCH break (dedup key)
 
     def update(self, candles: pd.DataFrame) -> dict[str, Any]:
         """
@@ -123,9 +124,12 @@ class MarketStructureDetector:
                 f"SL: {prev_sl}->{curr_sl} (HL:{hl}, LL:{ll})"
             )
 
-            # Decoupled Break checks: A break happens when the price closes above the previous swing high or below the previous swing low.
+            # Decoupled Break checks: A break happens when the price closes above the most
+            # recent confirmed swing high (curr_sh) or below the most recent confirmed swing
+            # low (curr_sl) — NOT the older prev_sh/prev_sl, which would compare against a
+            # stale swing point one step behind the actual most-recent structure.
             # Check upside break (BULLISH intent)
-            if latest_close > prev_sh:
+            if latest_close > curr_sh:
                 if self.trend != "BULLISH":
                     # ChoCH: trend reversal — validate with full body close
                     # ChoCH requires close above 2+ previous swing highs
@@ -135,26 +139,31 @@ class MarketStructureDetector:
                         self.consecutive_bos = 1  # First BOS of new trend
                         self.trend_confirmed = False
                         self._last_bos_level = curr_sh
+                        self._last_bos_index = high_swings[-1]["bar_idx"]
                         self.trend = "BULLISH"
-                        logger.info(f"ChoCH fired: BULLISH | Broken level: {prev_sh} | BOS count: 1")
+                        logger.info(f"ChoCH fired: BULLISH | Broken level: {curr_sh} | BOS count: 1")
                 else:
-                    # BOS validation: must close above the previous swing high
-                    if self._last_bos_level != prev_sh:
+                    # BOS validation: must close above the most recent swing high, and this
+                    # must be a genuinely new swing — dedupe by bar-index identity rather than
+                    # float price equality (two distinct swings can share a price by coincidence,
+                    # and float equality can also fail to catch a re-fire of the same swing).
+                    if self._last_bos_index != high_swings[-1]["bar_idx"]:
                         last_bos = "BULLISH"
                         self.consecutive_bos += 1
-                        self._last_bos_level = prev_sh
+                        self._last_bos_level = curr_sh
+                        self._last_bos_index = high_swings[-1]["bar_idx"]
                         if self.consecutive_bos >= self.min_bos_count:
                             self.trend_confirmed = True
                         self.bos_history.append({
                             "direction": "BULLISH",
-                            "price": prev_sh,
+                            "price": curr_sh,
                             "index": high_swings[-1]["index"],
                             "count": self.consecutive_bos,
                         })
-                        logger.info(f"BOS fired: BULLISH | Broken level: {prev_sh} | BOS count: {self.consecutive_bos} | Trend Confirmed: {self.trend_confirmed}")
+                        logger.info(f"BOS fired: BULLISH | Broken level: {curr_sh} | BOS count: {self.consecutive_bos} | Trend Confirmed: {self.trend_confirmed}")
 
             # Check downside break (BEARISH intent)
-            elif latest_close < prev_sl:
+            elif latest_close < curr_sl:
                 if self.trend != "BEARISH":
                     # ChoCH: trend reversal — validate with full body close
                     broken_count = sum(1 for s in low_swings[-3:] if latest_close < s["price"])
@@ -163,23 +172,26 @@ class MarketStructureDetector:
                         self.consecutive_bos = 1
                         self.trend_confirmed = False
                         self._last_bos_level = curr_sl
+                        self._last_bos_index = low_swings[-1]["bar_idx"]
                         self.trend = "BEARISH"
-                        logger.info(f"ChoCH fired: BEARISH | Broken level: {prev_sl} | BOS count: 1")
+                        logger.info(f"ChoCH fired: BEARISH | Broken level: {curr_sl} | BOS count: 1")
                 else:
-                    # BOS validation: must close below the previous swing low
-                    if self._last_bos_level != prev_sl:
+                    # BOS validation: must close below the most recent swing low, deduped by
+                    # bar-index identity (see comment in the BULLISH branch above).
+                    if self._last_bos_index != low_swings[-1]["bar_idx"]:
                         last_bos = "BEARISH"
                         self.consecutive_bos += 1
-                        self._last_bos_level = prev_sl
+                        self._last_bos_level = curr_sl
+                        self._last_bos_index = low_swings[-1]["bar_idx"]
                         if self.consecutive_bos >= self.min_bos_count:
                             self.trend_confirmed = True
                         self.bos_history.append({
                             "direction": "BEARISH",
-                            "price": prev_sl,
+                            "price": curr_sl,
                             "index": low_swings[-1]["index"],
                             "count": self.consecutive_bos,
                         })
-                        logger.info(f"BOS fired: BEARISH | Broken level: {prev_sl} | BOS count: {self.consecutive_bos} | Trend Confirmed: {self.trend_confirmed}")
+                        logger.info(f"BOS fired: BEARISH | Broken level: {curr_sl} | BOS count: {self.consecutive_bos} | Trend Confirmed: {self.trend_confirmed}")
 
 
         return self._result(last_bos, last_choch)

@@ -95,6 +95,7 @@ class RiskParams:
 class DriftJumpAlphaParams:
     """
     Tunable parameters for the Drift & Jump Alpha engine.
+    Source: docs/DriftJumpAlpha_Strategy_Spec_v2.md
     """
     drift_ema_fast: int = 20
     drift_ema_slow: int = 50
@@ -103,6 +104,29 @@ class DriftJumpAlphaParams:
     trade_jumps_enabled: bool = False
     control_test_passed: bool = False
     aggregate_max_lots_per_symbol: float = 6.0
+
+    # ── Previously dead config (referenced via getattr(..., 0) in engine.py but
+    # never defined here, so UI-submitted values were silently dropped by the
+    # backtest route's hasattr() filter before ever reaching the dataclass) ──
+    spike_threshold_pips: float = 0.0
+    """
+    Jump-detection threshold in pips (via get_pip_size()). 0 = disabled, falls back
+    to the engine's ATR-based jump threshold (4x ATR) instead.
+    """
+    recovery_target_pips: float = 0.0
+    """
+    Minimum post-drift recovery distance (in pips) folded into Setup A's take-profit
+    floor. 0 = disabled, TP floor uses only the ATR/RR-based targets.
+    """
+
+    # ── Spec §1 risk guardrails (previously unimplemented as trading gates —
+    # the generic circuit breaker enforces portfolio-level caps, but not these
+    # strategy-specific values). Defaults per spec §1's risk_management block. ──
+    max_trades_per_day: int = 6
+    max_daily_risk_pct: float = 4.0
+    max_consecutive_losses: int = 4
+    cooldown_after_max_losses_hours: int = 12
+    min_rrr_to_accept_trade: float = 1.5
 
 
 @dataclass

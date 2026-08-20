@@ -2,11 +2,16 @@ import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from '
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap, LayoutDashboard, PlusCircle, MinusCircle } from 'lucide-react';
-import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart } from '../services/api';
+import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts } from '../services/api';
 import TradeChart from '../components/TradeChart';
 import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
 import * as summaryEngine from '../utils/summaryEngine';
+
+// Below this many trades, win-rate/expectancy stats are not statistically
+// meaningful (e.g. a 1-trade "100% win rate" result). Used to show a
+// low-confidence warning banner on backtest results.
+const LOW_SAMPLE_TRADE_THRESHOLD = 20;
 
 const SYMBOLS = [
   'XAUUSD', 'Gold', 'XAU', 'XAGUSD', 'Silver', 'XAG', 'XPTUSD', 'Platinum', 'XPT',
@@ -37,8 +42,11 @@ const SYMBOLS = [
 ];
 
 const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
-  const smc = form.smc || {};
-  const updateSmc = (k, v) => setForm({ ...form, smc: { ...smc, [k]: v } });
+  // Note: this state slice is specifically APA (Advanced Price Action)
+  // strategy parameters — historically misnamed "smc" after Smart Money
+  // Concepts, but it has nothing to do with a separate SMC strategy.
+  const apa = form.apa || {};
+  const updateApa = (k, v) => setForm({ ...form, apa: { ...apa, [k]: v } });
   const dja = form.drift_jump_alpha || {};
   const updateDja = (k, v) => setForm({ ...form, drift_jump_alpha: { ...dja, [k]: v } });
   const crt = form.crt || {};
@@ -47,13 +55,15 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
   if (strategyId === 'APA_v1') {
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-        <div><label style={{ fontSize: '0.7rem' }}>Confluence Threshold</label><input type="number" value={smc.confluence_threshold} onChange={e => updateSmc('confluence_threshold', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>HTF Swing Length</label><input type="number" value={smc.swing_length_htf} onChange={e => updateSmc('swing_length_htf', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>LTF Swing Length</label><input type="number" value={smc.swing_length_ltf} onChange={e => updateSmc('swing_length_ltf', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>OB Impulse Ratio</label><input type="number" step="0.1" value={smc.ob_impulse_ratio} onChange={e => updateSmc('ob_impulse_ratio', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>FVG Min Gap (pips)</label><input type="number" step="0.5" value={smc.fvg_min_gap_pips} onChange={e => updateSmc('fvg_min_gap_pips', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Sweep Min Pips</label><input type="number" step="0.5" value={smc.liq_sweep_min_pips} onChange={e => updateSmc('liq_sweep_min_pips', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Max Spread (pips)</label><input type="number" step="0.1" value={smc.max_spread_pips} onChange={e => updateSmc('max_spread_pips', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Confluence Threshold</label><input type="number" value={apa.confluence_threshold} onChange={e => updateApa('confluence_threshold', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>HTF Swing Length</label><input type="number" value={apa.swing_length_htf} onChange={e => updateApa('swing_length_htf', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>LTF Swing Length</label><input type="number" value={apa.swing_length_ltf} onChange={e => updateApa('swing_length_ltf', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>OB Impulse Ratio</label><input type="number" step="0.1" value={apa.ob_impulse_ratio} onChange={e => updateApa('ob_impulse_ratio', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>FVG Min Gap (pips)</label><input type="number" step="0.5" value={apa.fvg_min_gap_pips} onChange={e => updateApa('fvg_min_gap_pips', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Sweep Min Pips</label><input type="number" step="0.5" value={apa.liq_sweep_min_pips} onChange={e => updateApa('liq_sweep_min_pips', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Max Spread (pips)</label><input type="number" step="0.1" value={apa.max_spread_pips} onChange={e => updateApa('max_spread_pips', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Minor Fractal (M)</label><input type="number" value={apa.minor_fractal_m} onChange={e => updateApa('minor_fractal_m', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Major Fractal (M)</label><input type="number" value={apa.major_fractal_m} onChange={e => updateApa('major_fractal_m', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Manual HTF Bias</label><select value={form.manual_bias || 'NONE'} onChange={e => u('manual_bias', e.target.value)}><option value="NONE">Auto</option><option value="BULLISH">Bullish Only</option><option value="BEARISH">Bearish Only</option></select></div>
         <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, marginTop: 8 }}>
         </div>
@@ -733,6 +743,18 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         )}
       </div>
     </div>
+    {filteredStats.tradeCount > 0 && filteredStats.tradeCount < LOW_SAMPLE_TRADE_THRESHOLD && (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '10px 14px',
+        background: 'rgba(234, 179, 8, 0.12)', border: '1px solid var(--yellow)', borderRadius: 'var(--radius-sm)',
+      }}>
+        <Shield size={16} color="var(--yellow)" style={{ flexShrink: 0 }} />
+        <span style={{ fontSize: '0.8rem', color: 'var(--yellow)', fontWeight: 600 }}>
+          Low sample size: only {filteredStats.tradeCount} trade{filteredStats.tradeCount === 1 ? '' : 's'} in this result.
+          Win rate and other metrics are not statistically meaningful below ~{LOW_SAMPLE_TRADE_THRESHOLD} trades — treat this run as directional, not representative.
+        </span>
+      </div>
+    )}
     {result.invalid_signals > 0 && <div style={{ fontSize: '0.8rem', color: 'var(--yellow)', marginBottom: 8 }}><Shield size={12} style={{ display: 'inline', marginRight: 4 }} />{result.invalid_signals} signals rejected (invalid SL/TP)</div>}
 
     {result.notes && (
@@ -1027,6 +1049,63 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
 
 const TRAIL_METHODS = [{ v: 'NONE', l: 'None' }, { v: 'ATR_TRAIL', l: 'ATR Trail' }, { v: 'FIXED_PIPS', l: 'Fixed Pips' }, { v: 'STRUCTURE_TRAIL', l: 'Structure Trail' }, { v: 'PCT_TRAIL', l: '% Trail' }];
 
+// Builds the backend strategy_params payload for one portfolio symbol/strategy
+// pairing. Portfolio backtests previously only forwarded tuned params for
+// APA_v1/DriftJumpAlpha_v1/CRT_v1 — any other strategy silently got
+// strategy_params: {} (engine hardcoded defaults) regardless of UI
+// configuration. These field mappings mirror what the single-symbol
+// backtest mutation sends for each strategy, so a portfolio run and a
+// single-symbol run of the same strategy use the same tuned parameters.
+function buildPortfolioStrategyParams(strategyId, form) {
+  switch (strategyId) {
+    case 'APA_v1':
+      return form.apa || {};
+    case 'DriftJumpAlpha_v1':
+      return form.drift_jump_alpha || {};
+    case 'CRT_v1':
+      return form.crt || {};
+    case 'VWAP_v1':
+      return {
+        vwap_anchor_minutes: form.vwap_anchor_minutes || 15,
+        momentum_lookback_bars: form.momentum_lookback_bars || 4,
+        momentum_threshold_pct: form.momentum_threshold_pct || 0.1,
+        sl_points: form.sl_points || 80.0,
+        sl_atr_multiplier: form.vwap_sl_atr_multiplier ?? 0,
+      };
+    case 'HTFFVGFlip_v1':
+      return {
+        htf_timeframe: form.htf_timeframe,
+        entry_confirmation_tf: form.entry_confirmation_tf,
+        target_rr: form.target_rr,
+        require_unfilled_htf_fvg: form.require_unfilled_htf_fvg,
+        session_filter_enabled: form.session_filter_enabled,
+        session_start: form.session_start,
+        session_cutoff: form.session_cutoff,
+      };
+    case 'BiasIFVG_v1':
+      return {
+        stop_method: form.stop_method,
+        target_rr_range_min: form.target_rr_range_min,
+        target_rr_range_max: form.target_rr_range_max,
+        max_trades_per_day: form.max_trades_per_day,
+        session_start: form.session_start,
+        session_cutoff: form.session_cutoff,
+      };
+    case 'NYOpenRetest_v1':
+      return {
+        range_window_start: form.range_window_start,
+        range_window_end: form.range_window_end,
+        earliest_valid_break_time: form.earliest_valid_break_time,
+        session_end: form.session_end,
+        stop_buffer_points: form.stop_buffer_points,
+        fixed_target_points: form.fixed_target_points,
+        dynamic_target_override: form.dynamic_target_override,
+      };
+    default:
+      return {};
+  }
+}
+
 const VirtualizedTradeList = memo(function VirtualizedTradeList({ displayGroups, groupBy, backtestId }) {
   const parentRef = useRef(null);
 
@@ -1126,13 +1205,11 @@ export default function Backtester() {
       setEvents([]);
       setBtError(null);
       return runPortfolioBacktest({
-        symbols: portfolioSymbols.map(s => {
-          let sp = {};
-          if (s.strategy_id === 'APA_v1') sp = form.smc || {};
-          if (s.strategy_id === 'DriftJumpAlpha_v1') sp = form.drift_jump_alpha || {};
-          if (s.strategy_id === 'CRT_v1') sp = form.crt || {};
-          return { symbol: s.symbol, strategy_id: s.strategy_id, strategy_params: sp };
-        }),
+        symbols: portfolioSymbols.map(s => ({
+          symbol: s.symbol,
+          strategy_id: s.strategy_id,
+          strategy_params: buildPortfolioStrategyParams(s.strategy_id, form),
+        })),
         start_date: form.start_date || undefined,
         end_date: form.end_date || undefined,
         candle_count: form.candle_count,
@@ -1198,18 +1275,22 @@ export default function Backtester() {
       symbol: 'XAUUSD', initial_balance: 10000,
       start_date: '', end_date: '', candle_count: 5000,
       max_risk_hard_cap_pct: 3.0,
-      smc: {
+      // APA (Advanced Price Action) strategy parameters — historically
+      // named "smc" after Smart Money Concepts, renamed since this state
+      // is specific to the APA strategy, not a general SMC strategy.
+      apa: {
         confluence_threshold: 60, swing_length_htf: 5, swing_length_ltf: 3, ob_impulse_ratio: 2.0,
         fvg_min_gap_pips: 5.0, liq_sweep_min_pips: 5.0, max_spread_pips: 3.0,
         session_filter_enabled: true, news_filter_enabled: true,
         enforce_htf_pd: true, enforce_fvg_displacement: false, enforce_asian_range_sweep: false,
+        minor_fractal_m: 3, major_fractal_m: 8,
       },
       drift_jump_alpha: {
         spike_lookback_bars: 50, drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20,
         jump_entry_percentile_threshold: 95.0, trade_jumps_enabled: false, control_test_passed: false, aggregate_max_lots_per_symbol: 6.0,
       },
       crt: {
-        htf_timeframe: '1H', ltf_timeframe: 'M1', target_r_multiple: 1.5, max_trades_per_session: 1, session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
+        htf_timeframe: 'H1', ltf_timeframe: 'M1', target_r_multiple: 1.5, max_trades_per_session: 1, session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
       },
       // Keep old fields just in case
       confluence_threshold: 55, swing_length: 5, ob_impulse_ratio: 1.5,
@@ -1319,7 +1400,7 @@ export default function Backtester() {
           const merged = { ...prev };
           merged.max_risk_hard_cap_pct = prev.max_risk_hard_cap_pct ?? c.risk?.max_risk_hard_cap_pct ?? 3.0;
           merged.prop_firm = { ...(c.prop_firm || {}), ...(prev.prop_firm || {}) };
-          merged.smc = { ...(c.apa || {}), ...(prev.smc || {}) };
+          merged.apa = { ...(c.apa || {}), ...(prev.apa || {}) };
           merged.drift_jump_alpha = { ...(c.drift_jump_alpha || {}), ...(prev.drift_jump_alpha || {}) };
           merged.crt = { ...(c.crt || {}), ...(prev.crt || {}) };
           merged.vwap = { ...(c.vwap || {}), ...(prev.vwap || {}) };
@@ -1391,7 +1472,7 @@ export default function Backtester() {
       const validStrats = ['APA_v1', 'VWAP_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'];
       const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'APA_v1';
       let sp = {};
-      if (payload_strategy === 'APA_v1') sp = form.smc || {};
+      if (payload_strategy === 'APA_v1') sp = form.apa || {};
       if (payload_strategy === 'DriftJumpAlpha_v1') sp = form.drift_jump_alpha || {};
       if (payload_strategy === 'CRT_v1') sp = form.crt || {};
 
@@ -1400,41 +1481,24 @@ export default function Backtester() {
         payload.manual_bias_overrides = { [form.symbol]: form.manual_bias };
       }
 
-      if (payload_strategy === 'APA_v1') {
-        payload.strategy_params = {
-          structure_timeframe: form.structure_timeframe || "M15",
-          entry_timeframe: form.entry_timeframe || "M5",
-          minor_fractal_m: form.minor_fractal_m || 3,
-          major_fractal_n: form.major_fractal_n || 5,
-          enforce_strong_choch: form.enforce_strong_choch !== undefined ? form.enforce_strong_choch : true
-        };
-      } else if (form.strategy_id === 'VWAP_v1') {
+      // NOTE: DriftJumpAlpha_v1 and CRT_v1 are deliberately absent from this chain —
+      // their settings panels (updateDja/updateCrt, ~line 49-53) write into nested
+      // form.drift_jump_alpha.*/form.crt.* state, which `sp` above already captures
+      // correctly. This chain previously also had a DriftJumpAlpha_v1/CRT_v1 branch
+      // here that re-read flat top-level fields (form.drift_ema_fast, form.htf_timeframe,
+      // etc.) those panels never write to — silently blanking out both strategies'
+      // configured params after `sp` had already set them correctly, the same class of
+      // bug fixed for APA_v1 (see the `sp` assignments above). VWAP_v1/HTFFVGFlip_v1/
+      // BiasIFVG_v1/NYOpenRetest_v1 genuinely use flat top-level fields in their panels,
+      // so their branches below are correct and this chain is the only place that builds
+      // strategy_params for them.
+      if (form.strategy_id === 'VWAP_v1') {
         payload.strategy_params = {
           vwap_anchor_minutes: form.vwap_anchor_minutes || 15,
           momentum_lookback_bars: form.momentum_lookback_bars || 4,
           momentum_threshold_pct: form.momentum_threshold_pct || 0.1,
           sl_points: form.sl_points || 80.0,
           sl_atr_multiplier: form.vwap_sl_atr_multiplier ?? 0,
-        };
-      } else if (form.strategy_id === 'DriftJumpAlpha_v1') {
-        payload.strategy_params = {
-          drift_ema_fast: form.drift_ema_fast,
-          drift_ema_slow: form.drift_ema_slow,
-          min_adx_to_trade: form.min_adx_to_trade,
-          jump_entry_percentile_threshold: form.jump_entry_percentile_threshold,
-          trade_jumps_enabled: form.trade_jumps_enabled,
-          control_test_passed: form.control_test_passed,
-          aggregate_max_lots_per_symbol: form.aggregate_max_lots_per_symbol
-        };
-      } else if (form.strategy_id === 'CRT_v1') {
-        payload.strategy_params = {
-          htf_timeframe: form.htf_timeframe,
-          ltf_timeframe: form.ltf_timeframe,
-          target_r_multiple: form.target_r_multiple,
-          max_trades_per_session: form.max_trades_per_session,
-          session_start: form.session_start,
-          session_cutoff: form.session_cutoff,
-          bypass_session_synthetics: form.bypass_session_synthetics
         };
       } else if (form.strategy_id === 'HTFFVGFlip_v1') {
         payload.strategy_params = {
@@ -1708,7 +1772,23 @@ export default function Backtester() {
                 <div key={n}><label style={{ fontSize: '0.7rem' }}>TP{n} R:R</label><input type="number" step="0.5" value={form[`tp${n}_rr`]} onChange={e => u(`tp${n}_rr`, +e.target.value)} /></div>
               ))}
             </div>
-            <div><label style={{ fontSize: '0.7rem' }}>TP Volume Split (%)</label><input type="text" value={form.tp_splits} onChange={e => u('tp_splits', e.target.value)} placeholder="30,25,20,15,10" /><div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Comma-separated % per TP (must sum to 100)</div></div>
+            <div>
+              <label style={{ fontSize: '0.7rem' }}>TP Volume Split (%)</label>
+              <input type="text" value={form.tp_splits} onChange={e => u('tp_splits', e.target.value)} placeholder="30,25,20,15,10" />
+              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Comma-separated % per TP (must sum to 100)</div>
+              {(() => {
+                const parts = (form.tp_splits || '').split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+                const sum = parts.reduce((a, b) => a + b, 0);
+                if (parts.length === 0 || Math.abs(sum - 100) > 0.01) {
+                  return (
+                    <div style={{ fontSize: '0.65rem', color: 'var(--yellow)', marginTop: 2 }}>
+                      ⚠ Splits sum to {parts.length === 0 ? '0' : sum.toFixed(1)}% instead of 100%. The backend normalizes this automatically, but double-check your intended split.
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+            </div>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--purple)' }}>━ Break-Even</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div><label style={{ fontSize: '0.7rem' }}>BE Trigger (R)</label><input type="number" step="0.1" value={form.be_trigger_rr} onChange={e => u('be_trigger_rr', +e.target.value)} /></div>
@@ -1717,7 +1797,19 @@ export default function Backtester() {
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--red)' }}>━ Trailing Stops</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {[1, 2, 3, 4, 5].filter(n => n <= form.tp_count).map(n => (
-                <div key={n}><label style={{ fontSize: '0.7rem' }}>TP{n} Trail</label><select value={form[`trail_method_tp${n}`]} onChange={e => u(`trail_method_tp${n}`, e.target.value)}>{TRAIL_METHODS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select></div>
+                <div key={n}>
+                  <label style={{ fontSize: '0.7rem' }}>TP{n} Trail</label>
+                  {n === 1 ? (
+                    // TP1 is never trailed — the backend request models only
+                    // accept trail_method_tp2..tp5, and MultiTPManager hardcodes
+                    // trail_methods[0] to None, so this is not user-configurable.
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '6px 0' }}>
+                      Never trails
+                    </div>
+                  ) : (
+                    <select value={form[`trail_method_tp${n}`]} onChange={e => u(`trail_method_tp${n}`, e.target.value)}>{TRAIL_METHODS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select>
+                  )}
+                </div>
               ))}
               <div><label style={{ fontSize: '0.7rem' }}>ATR Multiplier</label><input type="number" step="0.1" value={form.atr_trail_multiplier} onChange={e => u('atr_trail_multiplier', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Fixed Trail Pips</label><input type="number" value={form.trail_pips} onChange={e => u('trail_pips', +e.target.value)} /></div>
@@ -1734,9 +1826,12 @@ export default function Backtester() {
                 onClick={async () => {
                   const sym = form.symbol || 'EURUSD';
                   try {
-                    const token = localStorage.getItem('token');
-                    const res = await fetch(`/api/mt5_test/symbol-costs/${sym}`, { headers: { Authorization: `Bearer ${token}` } });
-                    const data = await res.json();
+                    // Routed through the shared axios instance (services/api.js)
+                    // rather than a raw fetch() so this picks up the configurable
+                    // backend URL, the correct auth token key, and the
+                    // auto-refresh interceptor instead of always sending
+                    // "Authorization: Bearer null" against a hardcoded /api path.
+                    const { data } = await getSymbolCosts(sym);
                     if (data.success) {
                       setForm(prev => ({ ...prev,
                         spread_pips: data.spread_pips || prev.spread_pips,

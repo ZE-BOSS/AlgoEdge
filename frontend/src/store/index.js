@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getToken, getStoredUser, storeAuth, clearAuth } from '../services/api';
+import { getToken, getStoredUser, storeAuth, clearAuth, performTokenRefresh } from '../services/api';
 
 export const useAuthStore = create((set) => ({
   user: getStoredUser(),
@@ -12,6 +12,16 @@ export const useAuthStore = create((set) => ({
   logout: () => {
     clearAuth();
     set({ user: null, token: null, isAuthenticated: false });
+  },
+  // Reuses the axios-layer refresh logic (services/api.js) so the
+  // WebSocket auth-failure handler (hooks/useBackendConnection.js) can
+  // recover from a stale token without forcing a logout. Updates the
+  // store's `token` so a subsequent WS reconnect uses the fresh one.
+  // Throws on failure — callers should catch and fall back to logout().
+  refreshToken: async () => {
+    const accessToken = await performTokenRefresh();
+    set({ token: accessToken, isAuthenticated: true });
+    return accessToken;
   },
 }));
 
@@ -35,9 +45,7 @@ export const useTradesStore = create((set) => ({
 
 export const useRiskStore = create((set) => ({
   stats: null,
-  circuitBreaker: { paused: false, reason: '' },
   setStats: (stats) => set({ stats }),
-  setCircuitBreaker: (circuitBreaker) => set({ circuitBreaker }),
 }));
 
 export const useNotificationStore = create((set) => ({

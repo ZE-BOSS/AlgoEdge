@@ -1,11 +1,17 @@
 """
 backend/risk/circuit_breaker.py
 
-Portfolio-level risk guards: daily/weekly consecutive loss limits, streak, max positions.
+Portfolio-level risk guards: daily/weekly percentage drawdown limits, max positions,
+max daily trades, and target-profit halts.
 Source: RiskManagement_Spec.md Section 6
 
-Refactored: Replaced percentage-based daily/weekly drawdown with trade-count-based
-consecutive loss limits per user request.
+NOTE: Daily/weekly risk is controlled via percentage drawdown limits
+(max_daily_drawdown_pct / max_weekly_drawdown_pct), not trade-count-based consecutive
+loss limits. An earlier version of this docstring claimed the opposite (that
+percentage-based drawdown had been "replaced" by consecutive-loss limits) — that was
+never actually implemented; this file has only ever enforced % drawdown. Corrected here
+per user confirmation that percentage-based drawdown is the intended design (see
+full_codebase_audit_and_fix_plan.md §2.7).
 """
 
 import json
@@ -40,13 +46,14 @@ def _timeframe_to_seconds(tf: str) -> int:
 class CircuitBreaker:
     """
     Portfolio-level risk guards that pause trading when limits are hit.
-    Uses trade-count-based consecutive loss limits (not percentage drawdown).
+    Uses percentage-based daily/weekly drawdown limits (max_daily_drawdown_pct /
+    max_weekly_drawdown_pct) — not trade-count-based consecutive loss limits.
     Source: RiskManagement_Spec.md Section 6.1–6.5
     """
 
     def __init__(self, config: dict[str, Any], is_backtest: bool = False):
         self.is_backtest = is_backtest
-        # Drawdown percentage limits (replaces consecutive loss limits)
+        # Drawdown percentage limits (the actual mechanism controlling daily/weekly risk)
         self.max_daily_drawdown_pct = config.get("max_daily_drawdown_pct", 3.0)
         self.max_weekly_drawdown_pct = config.get("max_weekly_drawdown_pct", 6.0)
         self.max_concurrent_positions = config.get("max_concurrent_positions", 3)
@@ -66,6 +73,11 @@ class CircuitBreaker:
         self.last_trade_closed_time: dict[str, int] = {}
         # Bug 4: Track the balance at day-start for correct daily drawdown % denominator.
         self._day_start_balance: float = 0.0
+        # §2.6 fix: same anchoring for the weekly check — without this, the weekly %
+        # was computed against the live (self-referential) account_balance, which
+        # balloons non-linearly as losses accumulate instead of using a fixed
+        # week-start denominator.
+        self._week_start_balance: float = 0.0
 
         # Bug 2: In backtest mode, initialize to None so the first bar's date
         # drives the reset — not today's real-world date. Without this, every
@@ -120,8 +132,14 @@ class CircuitBreaker:
                 return False, self.pause_reason
             
         # 5. Weekly Drawdown Percentage
-        if self.max_weekly_drawdown_pct > 0 and self.weekly_pnl < 0 and account_balance > 0:
-            weekly_dd_pct = (-self.weekly_pnl / account_balance) * 100
+        # §2.6 fix: anchor on the week-start balance (like the daily check does with
+        # _day_start_balance), not the live account_balance — the live balance already
+        # reflects weekly_pnl (balance ≈ week_start + weekly_pnl), so dividing by it
+        # made the computed % non-linear and inconsistent with max_weekly_drawdown_pct.
+        if self._week_start_balance <= 0:
+            self._week_start_balance = account_balance
+        if self.max_weekly_drawdown_pct > 0 and self.weekly_pnl < 0 and self._week_start_balance > 0:
+            weekly_dd_pct = (-self.weekly_pnl / self._week_start_balance) * 100
             if weekly_dd_pct >= self.max_weekly_drawdown_pct:
                 self.is_paused = True
                 self.pause_reason = f"Weekly drawdown limit reached: {weekly_dd_pct:.2f}% >= {self.max_weekly_drawdown_pct}%"
@@ -208,10 +226,10 @@ class CircuitBreaker:
             self.active_groups[group_id]["pnl"] += pnl
             self.active_groups[group_id]["sub_trades"] -= 1
             
-            # If all sub-trades for this group are closed, record the group outcome.
-            # DO NOT call _record_trade_result per leg — a TP1 win should not reset
-            # the consecutive-loss streak if TP2/TP3 subsequently stop out at BE.
-            # The circuit breaker tracks SIGNAL (group) outcomes, not individual leg outcomes.
+            # Only record the trade result once ALL sub-trades (TP legs) for this signal
+            # group have closed, using the group's net PnL — not once per leg as each
+            # individual TP fires. The circuit breaker tracks SIGNAL (group) outcomes,
+            # not individual leg outcomes.
             if self.active_groups[group_id]["sub_trades"] <= 0:
                 group_pnl = self.active_groups[group_id]["pnl"]
                 self._record_trade_result(group_pnl, group_pnl >= 0)
@@ -378,6 +396,25 @@ class CircuitBreaker:
         else:
             logger.info(f"[CB] reconcile_from_mt5: state consistent — {fresh_counts}")
 
+        # §2.10 fix: reconcile_from_mt5 previously only repaired open_positions_by_symbol,
+        # leaving active_groups (and the initial_risk it feeds into get_open_risk()) with
+        # no defense against a missed close callback, a mid-callback exception, or a
+        # process restart at the wrong moment — such a stale group would otherwise survive
+        # reconciliation indefinitely. Drop any group whose symbol has zero open positions
+        # in the fresh MT5 snapshot; a group can't legitimately still be active if MT5
+        # reports nothing open for its symbol.
+        stale_group_ids = [
+            gid for gid, g in self.active_groups.items()
+            if g.get("symbol") and fresh_counts.get(g.get("symbol"), 0) <= 0
+        ]
+        for gid in stale_group_ids:
+            logger.warning(
+                f"[CB] reconcile_from_mt5: dropping stale active_groups entry "
+                f"{gid} (symbol={self.active_groups[gid].get('symbol')}) — "
+                f"no matching open position found in MT5 snapshot."
+            )
+            del self.active_groups[gid]
+
         self.save_state()
 
     def manual_resume(self):
@@ -392,14 +429,14 @@ class CircuitBreaker:
     def _daily_resume(self):
         """
         Auto-resume at start of a new trading day.
-        Only resets DAILY state — does NOT touch weekly_consecutive_losses.
-        Calling manual_resume() here was a bug: it cleared the weekly streak counter
-        at midnight every day, making the weekly limit completely ineffective.
+        Only resets DAILY state — does NOT touch weekly_pnl or the weekly drawdown pause.
+        Calling manual_resume() here was a bug: it cleared weekly state at midnight
+        every day, making the weekly drawdown limit completely ineffective.
         """
         self.is_paused = False
         self.pause_reason = ""
         self.last_trade_closed_time = {}
-        logger.info("Circuit breaker auto-resumed for new trading day (weekly streak preserved)")
+        logger.info("Circuit breaker auto-resumed for new trading day (weekly drawdown state preserved)")
 
     def _parse_timestamp_date(self, ts) -> tuple[datetime.date, int]:
         """Safely parse either seconds or milliseconds epoch into date and week."""
@@ -460,6 +497,10 @@ class CircuitBreaker:
         if self.last_reset_week is None or current_week != self.last_reset_week:
             self.weekly_pnl = 0.0
             self.last_reset_week = current_week
+            # §2.6 fix: reset the week-start balance anchor so the new week's first
+            # check_all() captures the opening balance correctly (mirrors
+            # _check_daily_reset's _day_start_balance reset).
+            self._week_start_balance = 0.0
             if "Weekly" in self.pause_reason:
                 self.is_paused = False
                 self.pause_reason = ""

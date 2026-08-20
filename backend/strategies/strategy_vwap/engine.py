@@ -16,6 +16,7 @@ import pytz
 from datetime import date as date_type
 
 from backend.core.config_schema import UserConfigV2
+from backend.risk.position_sizer import get_pip_size
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
 from backend.strategies.core.swing_structure import calculate_atr
 from backend.strategies.registry import register_strategy
@@ -82,11 +83,15 @@ def _calculate_anchored_vwap(candles: pd.DataFrame, anchor_minutes: int) -> pd.S
                 g_vol = vol.loc[group_idx]
                 cum_tp_vol = g_tp_vol.cumsum()
                 cum_vol = g_vol.cumsum()
-                vwap_vals.loc[group_idx] = cum_tp_vol / cum_vol
+                # ffill/bfill WITHIN this session group only — a global ffill across the
+                # whole concatenated series can leak the previous session's final VWAP
+                # value into a NaN bar (e.g. zero-volume bar) at the start of the next
+                # session, misrepresenting the fresh session-anchored VWAP.
+                vwap_vals.loc[group_idx] = (cum_tp_vol / cum_vol).ffill().bfill()
 
             if vwap_vals.isna().all():
                 raise ValueError("All-NaN VWAP — fallback to rolling")
-            return vwap_vals.ffill()
+            return vwap_vals
 
         except Exception:
             pass  # Fall through to rolling fallback
@@ -210,7 +215,11 @@ class VWAPEngine(BaseStrategy):
         # Calculate anchored VWAP
         vwap_series = _calculate_anchored_vwap(candles, self.params.vwap_anchor_minutes)
         vwap_now = vwap_series.iloc[-1]
-        vwap_prev = vwap_series.iloc[-2] if len(vwap_series) > 1 else vwap_now
+        # Slope must compare against the prior 15-min ANCHOR bar, not the adjacent M5
+        # bar — iloc[-2] compared two consecutive M5 bars, which is far noisier than
+        # the spec's 15-min-anchor slope. bar_multiplier (M5-bars-per-anchor-window)
+        # is already computed above for the momentum lookback; reuse it here.
+        vwap_prev = vwap_series.iloc[-(bar_multiplier + 1)] if len(vwap_series) > bar_multiplier else vwap_now
 
         # ── Entry from pending trigger (enter at next bar open after trigger) ──
         if state["pending_entry"] and state["trigger_bar_idx"] is not None:
@@ -225,11 +234,14 @@ class VWAPEngine(BaseStrategy):
             entry = latest["open"]
             atr = calculate_atr(candles)
 
-            # sl_points is the primary SL distance (user-configured, e.g. 170 for USDCHF).
-            # sl_atr_multiplier acts as a FLOOR — if ATR suggests a wider SL, use that instead.
-            # This fixes the bug where sl_atr_multiplier (default 1.0) always won,
-            # making sl_points dead code (avg SL was 3.9 pips instead of configured 17 pips).
-            sl_dist = self.params.sl_points
+            # sl_points is configured in instrument "points" (e.g. 170 for USDCHF), not raw
+            # price units — it must be converted via the symbol's point/pip size before use,
+            # otherwise it's applied as a raw price delta (e.g. entry - 170 on a ~0.8 FX pair
+            # goes negative). sl_atr_multiplier acts as a FLOOR — if ATR suggests a wider SL,
+            # use that instead. This fixes the bug where sl_atr_multiplier (default 1.0) always
+            # won, making sl_points dead code (avg SL was 3.9 pips instead of configured 17 pips).
+            pip_size = get_pip_size(symbol)
+            sl_dist = self.params.sl_points * pip_size
             if self.params.sl_atr_multiplier > 0:
                 atr_sl = atr * self.params.sl_atr_multiplier
                 if atr_sl > sl_dist:
@@ -247,6 +259,10 @@ class VWAPEngine(BaseStrategy):
                 tp = entry - sl_dist
 
             state["trades_today"] += 1
+            # Record the VWAP slope at entry time (vwap_now/vwap_prev computed above,
+            # at the top of this on_bar call) so metadata reflects the real slope
+            # instead of always logging the placeholder 0.0.
+            state["slope"] = float(vwap_now - vwap_prev)
             self.log_event(
                 f"[{symbol}] VWAP {direction} ENTRY @ {entry:.5f} | SL: {sl:.5f} | TP1: {tp:.5f}",
                 category="VWAP",

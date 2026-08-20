@@ -75,6 +75,12 @@ class MultiTPManager:
             config.get("trail_method_tp5", "STRUCTURE_TRAIL"), # TP5
         ]
 
+        # Diagnostic set by calculate_tp_levels() when a risk-cap overshoot survives
+        # scale-down purely because of lot_min flooring (not a bad SL distance).
+        # Callers (engine.py) can read this immediately after calling
+        # calculate_tp_levels() to produce a clearer rejection reason. Reset on every call.
+        self._last_overshoot_reason: str | None = None
+
     def calculate_tp_levels(
         self,
         entry: float,
@@ -94,6 +100,8 @@ class MultiTPManager:
           1. Reducing TP count (drops last TPs first)
           2. Then scaling remaining volumes proportionally
         """
+        self._last_overshoot_reason = None
+
         risk = abs(entry - sl)
         if risk == 0:
             logger.warning("Risk is zero (entry == SL) — cannot calculate TP levels")
@@ -229,8 +237,16 @@ class MultiTPManager:
                 )
                 if actual_total_risk > max_risk_cap_dollars:
                     scale_factor = max_risk_cap_dollars / actual_total_risk
+                    # Track whether lot_min flooring is the reason we can't hit the cap:
+                    # if the mathematically-scaled volume (before flooring) is already
+                    # below the broker's minimum lot, there is no volume that both
+                    # respects lot_min AND stays within the risk cap — this is a
+                    # small-account/SL-distance limitation, not a bad SL distance.
+                    floored_below_min = False
                     for tp in levels:
                         scaled = tp.volume * scale_factor
+                        if scaled < lot_min:
+                            floored_below_min = True
                         scaled = max(lot_min, math.floor(scaled / lot_step) * lot_step)
                         scaled = min(scaled, max_lot_allowed)
                         tp.volume = round(scaled, 4)
@@ -241,6 +257,13 @@ class MultiTPManager:
                         f"[MultiTP] {symbol}: After TP count reduction still over cap. "
                         f"Scaled volumes by {scale_factor:.3f}. Final risk=${final_risk:.2f}"
                     )
+                    # If lot_min flooring is what kept us over cap, surface a distinct,
+                    # actionable reason instead of letting this fall through to the
+                    # generic "post_split_risk_overshoot" rejection in engine.py, which
+                    # otherwise reads as a bad-SL-distance bug rather than an
+                    # account-size limitation.
+                    if floored_below_min and final_risk > max_risk_cap_dollars:
+                        self._last_overshoot_reason = "account_too_small_for_sl_distance"
 
         logger.debug(
             f"TP levels: {len(levels)} | dir={direction} | entry={entry} | "

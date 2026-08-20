@@ -19,6 +19,21 @@ logger = get_logger(__name__)
 
 _executor = ThreadPoolExecutor(max_workers=4)
 
+# MT5 retcodes that indicate a permanent, broker/account-side condition — retrying
+# immediately will not help (the account/symbol needs to be fixed in the MT5 terminal
+# or with the broker). Map each to a human-actionable hint for alerts/logs.
+_PERMANENT_RETCODES: dict[int, str] = {
+    10017: "Trade disabled — check that AutoTrading is enabled in the MT5 terminal and "
+           "that this account/symbol has trading permissions with the broker.",
+    10018: "Market closed for this symbol.",
+    10019: "No money — insufficient margin/funds for this volume.",
+    10027: "AutoTrading is disabled in the MT5 client terminal (toggle it on).",
+    10031: "No connection to the trade server.",
+    10032: "Trading is prohibited for this account (e.g. investor/read-only login).",
+    10033: "Order limit for this account has been reached.",
+    10034: "Volume limit for this account/symbol has been reached.",
+}
+
 
 class OrderManager:
     """Handles execution of orders on MT5."""
@@ -129,21 +144,45 @@ class OrderManager:
         
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            _executor, 
+            _executor,
             lambda: mt5.order_send(request)
         )
-        
+
         if result is None:
             logger.error("Order failed: MT5 returned None (connection lost?)")
             return {"success": False, "error": "MT5 returned None"}
-            
+
+        # Phase-5 fix: fall back to ORDER_FILLING_RETURN once if the broker
+        # rejects our bitmask-selected filling mode as unsupported (retcode
+        # 10030 = TRADE_RETCODE_INVALID_FILL). Kept simple — one retry, no
+        # further fallback chain.
+        if result.retcode == 10030 and filling_type != mt5.ORDER_FILLING_RETURN:
+            logger.warning(
+                f"Order rejected: unsupported filling mode ({filling_type}) for {symbol} — "
+                f"retrying once with ORDER_FILLING_RETURN."
+            )
+            retry_request = dict(request)
+            retry_request["type_filling"] = mt5.ORDER_FILLING_RETURN
+            result = await loop.run_in_executor(
+                _executor,
+                lambda: mt5.order_send(retry_request)
+            )
+            if result is None:
+                logger.error("Order failed: MT5 returned None on filling-mode retry")
+                return {"success": False, "error": "MT5 returned None"}
+
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             err = result.comment
             if result.retcode == 10016:
                 err = f"Invalid stops | SL: {sl}, TP: {tp} | Ask: {tick.ask}, Bid: {tick.bid} | Stoplevel: {sym_info.trade_stops_level}"
+            permanent_hint = _PERMANENT_RETCODES.get(result.retcode)
+            if permanent_hint:
+                err = f"{err} — {permanent_hint}"
+                logger.error(f"Order failed: {result.retcode} - {err}")
+                return {"success": False, "error": err, "permanent": True}
             logger.error(f"Order failed: {result.retcode} - {err}")
             return {"success": False, "error": err}
-            
+
         return {"success": True, "ticket": result.order}
 
     @staticmethod
@@ -279,7 +318,12 @@ class OrderManager:
             
         position = position[0]
         symbol = position.symbol
-        direction = "SELL" if position.type == mt5.ORDER_TYPE_BUY else "BUY" # opposite to close
+        # Phase-5 fix: position.type is a POSITION_TYPE_* value (0=BUY, 1=SELL),
+        # not an ORDER_TYPE_* value — comparing against mt5.ORDER_TYPE_BUY only
+        # "worked" because the two enums happen to share the same integer value
+        # today; fragile to a future MT5 SDK change. Compare against the correct
+        # POSITION_TYPE_BUY constant instead.
+        direction = "SELL" if position.type == mt5.POSITION_TYPE_BUY else "BUY" # opposite to close
         action = mt5.ORDER_TYPE_SELL if direction == "SELL" else mt5.ORDER_TYPE_BUY
         
         tick = await loop.run_in_executor(_executor, lambda: mt5.symbol_info_tick(symbol))

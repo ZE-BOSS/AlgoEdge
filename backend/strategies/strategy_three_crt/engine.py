@@ -34,17 +34,30 @@ class CRTEngine(BaseStrategy):
         super().__init__(config)
         self.params = getattr(config, 'crt', None)
         self.context: dict[str, Any] = {}
-        self.ms_detector = MarketStructureDetector(swing_length=5, min_bos_count=1)
-        
-        # State tracking
-        self.c1: dict[str, float] | None = None
-        self.c2_trigger: dict[str, Any] | None = None
-        self.trades_today = 0
-        self.last_trade_date = None
-        # Live bar-time deduplication: mirrors backtester's prev_time_by_tf guard.
-        # Prevents the 60-second scan loop from re-presenting the same closed HTF
-        # candle and triggering the c2_trigger timeout prematurely.
-        self._last_htf_bar_time: dict[str, Any] = {}
+
+        # Per-setup CRT state, namespaced by symbol (same pattern as
+        # strategy_apa/engine.py's self.state[symbol]). Current call sites only
+        # ever instantiate one CRTEngine per symbol, so this wasn't actively
+        # broken — but keeping state un-namespaced was fragile against that
+        # assumption ever changing, so state for every symbol lives in its own
+        # dict here instead of directly on `self`.
+        self.state: dict[str, dict[str, Any]] = {}
+
+    def _init_state(self, symbol: str) -> dict[str, Any]:
+        if symbol not in self.state:
+            self.state[symbol] = {
+                "ms_detector": MarketStructureDetector(swing_length=5, min_bos_count=1),
+                "c1": None,
+                "c2_trigger": None,
+                "trades_today": 0,
+                "last_trade_date": None,
+                # Live bar-time deduplication: mirrors backtester's prev_time_by_tf
+                # guard. Prevents the 60-second scan loop from re-presenting the
+                # same closed HTF candle and triggering the c2_trigger timeout
+                # prematurely.
+                "last_htf_bar_time": {},
+            }
+        return self.state[symbol]
 
     async def initialize(self):
         logger.info("CRTEngine initialized")
@@ -77,34 +90,36 @@ class CRTEngine(BaseStrategy):
         except:
             return True
 
-    def _get_htf_bias(self) -> str:
+    def _get_htf_bias(self, state: dict[str, Any]) -> str:
         """Use MS detector to get bias on HTF."""
-        return self.ms_detector.get_bias()
+        return state["ms_detector"].get_bias()
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         if not self.is_backtesting:
             self.run_logs = []
-            
+
         if len(candles) < 10:
             return None
+
+        state = self._init_state(symbol)
 
         htf = self.params.htf_timeframe if getattr(self, 'params', None) else SPEC_DEFAULTS['htf_timeframe']
         ltf = self.params.ltf_timeframe if getattr(self, 'params', None) else SPEC_DEFAULTS['ltf_timeframe']
 
         current_bar = candles.iloc[-1]
         dt = current_bar.name if isinstance(current_bar.name, pd.Timestamp) else pd.to_datetime('now')
-        
-        if self.last_trade_date != dt.date():
-            self.trades_today = 0
-            self.last_trade_date = dt.date()
-            self.ms_detector = MarketStructureDetector(swing_length=5, min_bos_count=1)
-            self.c1 = None
-            self.c2_trigger = None
-            
+
+        if state["last_trade_date"] != dt.date():
+            state["trades_today"] = 0
+            state["last_trade_date"] = dt.date()
+            state["ms_detector"] = MarketStructureDetector(swing_length=5, min_bos_count=1)
+            state["c1"] = None
+            state["c2_trigger"] = None
+
         max_trades = self.params.max_trades_per_session if getattr(self, 'params', None) else SPEC_DEFAULTS['max_trades_per_session']
-        if self.trades_today >= max_trades:
+        if state["trades_today"] >= max_trades:
             return None
-            
+
         in_session = self._is_within_session(dt, symbol)
 
         if timeframe == htf:
@@ -113,44 +128,48 @@ class CRTEngine(BaseStrategy):
             # candle for an entire hour.  Guard against this so the c2_trigger
             # timeout only fires when a genuinely NEW H1 candle closes.
             _current_bar_ts = current_bar.name
-            _last_htf_ts = self._last_htf_bar_time.get(htf)
+            _last_htf_ts = state["last_htf_bar_time"].get(htf)
             if _last_htf_ts is not None and _current_bar_ts == _last_htf_ts:
                 return None  # Same H1 bar — preserve c2_trigger, skip HTF logic
-            self._last_htf_bar_time[htf] = _current_bar_ts
+            state["last_htf_bar_time"][htf] = _current_bar_ts
             # ────────────────────────────────────────────────────────────────────
 
             # Update HTF market structure
-            self.ms_detector.update(candles)
-            
+            state["ms_detector"].update(candles)
+
             # Evaluate C1/C2 logic
-            if self.c1 is None:
-                self.c1 = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
-                self.log_event(f"New C1 Candidate set on HTF: High {self.c1['high']}, Low {self.c1['low']}")
+            if state["c1"] is None:
+                state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
+                self.log_event(f"New C1 Candidate set on HTF: High {state['c1']['high']}, Low {state['c1']['low']}")
             else:
-                if self.c2_trigger is not None:
+                if state["c2_trigger"] is not None:
                     # Trigger timeout - invalidate if a new HTF candle closes without LTF trigger firing
                     self.log_event("Trigger timeout - LTF did not fire before next HTF close. Invalidating setup.")
-                    self.c2_trigger = None
-                    self.c1 = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
+                    state["c2_trigger"] = None
+                    state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
                     return None
 
                 # We have a C1, check if this bar is a valid C2
-                c1_high = self.c1["high"]
-                c1_low = self.c1["low"]
+                c1_high = state["c1"]["high"]
+                c1_low = state["c1"]["low"]
                 c2_high = float(current_bar['high'])
                 c2_low = float(current_bar['low'])
                 c2_close = float(current_bar['close'])
-                
+
                 # Check for ambiguous intrabar double sweep
                 if c2_high > c1_high and c2_low < c1_low:
                     self.log_event("Ambiguous C2 (swept both sides of C1). Invalidating and setting new C1.")
-                    self.c1 = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
+                    state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
                     return None
 
-                bias = self._get_htf_bias()
-                
-                if bias == "FLAT":
-                    self.c1 = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
+                bias = self._get_htf_bias(state)
+
+                # MarketStructureDetector.trend only ever produces "NEUTRAL" /
+                # "BULLISH" / "BEARISH" — it never returns "FLAT" — so check
+                # against "NEUTRAL" (a flat/undetermined bias) instead.
+                if bias == "NEUTRAL":
+                    self.log_event("HTF bias is NEUTRAL (no confirmed trend) — skipping C2 evaluation, setting new C1 candidate.")
+                    state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
                     return None
 
                 valid_bullish = (c2_low < c1_low < c2_close < c1_high)
@@ -159,39 +178,39 @@ class CRTEngine(BaseStrategy):
                 if valid_bullish and bias == "BULLISH":
                     if in_session:
                         self.log_event(f"Valid Bullish C2 sweep! HTF Bias: {bias}. Trigger level set to {c2_high}.")
-                        self.c2_trigger = {"direction": "BUY", "level": c2_high, "c1_extreme": c1_high}
+                        state["c2_trigger"] = {"direction": "BUY", "level": c2_high, "c1_extreme": c1_high}
                     else:
                         self.log_event("Valid C2 but out of session. Ignoring.")
-                        self.c1 = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
+                        state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
                 elif valid_bearish and bias == "BEARISH":
                     if in_session:
                         self.log_event(f"Valid Bearish C2 sweep! HTF Bias: {bias}. Trigger level set to {c2_low}.")
-                        self.c2_trigger = {"direction": "SELL", "level": c2_low, "c1_extreme": c1_low}
+                        state["c2_trigger"] = {"direction": "SELL", "level": c2_low, "c1_extreme": c1_low}
                     else:
                         self.log_event("Valid C2 but out of session. Ignoring.")
-                        self.c1 = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
+                        state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
                 else:
                     self.log_event("C2 did not match C1/bias criteria. Setting new C1 candidate.")
-                    self.c1 = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
+                    state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
 
         elif timeframe == ltf:
             # Monitor for trigger
-            if self.c2_trigger is not None:
+            if state["c2_trigger"] is not None:
                 current_price = float(current_bar['close'])
-                direction = self.c2_trigger["direction"]
-                trigger_lvl = self.c2_trigger["level"]
-                tp = self.c2_trigger["c1_extreme"]
-                
+                direction = state["c2_trigger"]["direction"]
+                trigger_lvl = state["c2_trigger"]["level"]
+                tp = state["c2_trigger"]["c1_extreme"]
+
                 triggered = False
                 if (direction == "BUY" and current_price > trigger_lvl) or (direction == "SELL" and current_price < trigger_lvl):
                     triggered = True
-                    
+
                 if triggered:
                     self.log_event(f"CRT LTF Trigger fired! Executing {direction}.")
-                    self.c2_trigger = None # Clear trigger
-                    self.c1 = None
-                    self.trades_today += 1
-                    
+                    state["c2_trigger"] = None # Clear trigger
+                    state["c1"] = None
+                    state["trades_today"] += 1
+
                     target_r = self.params.target_r_multiple if getattr(self, 'params', None) else SPEC_DEFAULTS['target_r_multiple']
                     tp_dist = abs(tp - current_price)
                     # Per spec (CRT_Strategy_Spec.md Section 6): SL is derived backward from TP.
@@ -234,11 +253,17 @@ class CRTEngine(BaseStrategy):
 
                     # If flooring the SL makes the TP distance shorter than 1R, extend TP
                     # so the trade still meets the target_r ratio (keeps the edge intact).
+                    # This replaces the spec-mandated TP (C1's real opposite extreme) with a
+                    # synthetic R-multiple target — flag it via tp_source so downstream
+                    # consumers (backtests/analytics) can tell floor-adjusted signals apart
+                    # from genuine CRT signals instead of this being silent.
+                    tp_source = "c1_extreme"
                     if tp_dist < sl_dist * target_r:
                         if direction == "BUY":
                             tp = current_price + sl_dist * target_r
                         else:
                             tp = current_price - sl_dist * target_r
+                        tp_source = "floored"
                     # ────────────────────────────────────────────────────────────────
 
                     if direction == "BUY":
@@ -259,7 +284,8 @@ class CRTEngine(BaseStrategy):
                         timestamp=candles.index[-1].timestamp(),
                         metadata={
                             "reason": "CRT Setup C1/C2. NY Session.",
-                            "htf": htf
+                            "htf": htf,
+                            "tp_source": tp_source
                         }
                     )
 

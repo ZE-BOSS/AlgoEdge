@@ -754,8 +754,25 @@ class BotService:
                                     if approved:
                                         group_id = signal_data.get("group_id", "unknown")
                                         if self.circuit_breaker:
-                                            self.circuit_breaker.position_opened(group_id, len(tp_levels), symbol=signal.symbol)
-                                            
+                                            # §2.3 fix: live trading never reported open-position risk to the
+                                            # circuit breaker (initial_risk_dollars defaulted to 0.0), so
+                                            # get_open_risk() always returned 0.0 live — the "predictive
+                                            # drawdown guard" in RiskEngine.evaluate_signal was inert outside
+                                            # backtesting. Compute the same actual_risk_dollars the engine
+                                            # already derives internally (sum of post-split TP volumes priced
+                                            # at the signal's entry/SL distance) and pass it through.
+                                            from backend.risk.position_sizer import calculate_risk_dollars
+                                            initial_risk_dollars = calculate_risk_dollars(
+                                                sum(tp.volume for tp in tp_levels),
+                                                signal.entry_price,
+                                                signal.stop_loss,
+                                                signal.symbol,
+                                            )
+                                            self.circuit_breaker.position_opened(
+                                                group_id, len(tp_levels), symbol=signal.symbol,
+                                                initial_risk_dollars=initial_risk_dollars,
+                                            )
+
                                         # Place ALL TP positions at entry (no deferred stacking)
                                         self._log_event(
                                             f"Trade approved: {len(tp_levels)} positions — all at entry",
@@ -805,6 +822,7 @@ class BotService:
                                                     else:
                                                         err_msg = result.get('error', 'unknown')
                                                         is_stale = result.get('stale', False)
+                                                        is_permanent = result.get('permanent', False)
                                                         if is_stale:
                                                             # Price moved past SL — signal is genuinely stale, no point retrying
                                                             detail = f"TP{tp.level} ({tp.volume}L): {err_msg}"
@@ -813,6 +831,21 @@ class BotService:
                                                                 f"Signal stale at execution (price moved): TP{tp.level} skipped",
                                                                 "INFO", "TRADE"
                                                             )
+                                                            break  # Break retry loop immediately — retrying won't help
+                                                        if is_permanent:
+                                                            # Broker/account-side condition (e.g. trade disabled, market
+                                                            # closed, no permission) — retrying won't help, back off now.
+                                                            detail = f"TP{tp.level} ({tp.volume}L): {err_msg}"
+                                                            tp_failure_details.append(detail)
+                                                            self._log_event(
+                                                                f"Broker rejected order permanently, not retrying: TP{tp.level} — {err_msg}",
+                                                                "ERROR", "TRADE"
+                                                            )
+                                                            asyncio.ensure_future(self._broadcast_notification(
+                                                                "MT5 Trading Disabled",
+                                                                f"{signal.symbol} order rejected by broker: {err_msg}",
+                                                                "error"
+                                                            ))
                                                             break  # Break retry loop immediately — retrying won't help
                                                         self._log_event(
                                                             f"Order failed (Attempt {attempt+1}/{max_retries}): TP{tp.level} — {err_msg}",
@@ -898,6 +931,12 @@ class BotService:
                                                         confluence_score=getattr(signal, 'confluence_score', None),
                                                         balance_before=account_balance,
                                                         mt5_ticket=db_positions[0]["ticket"] if db_positions else None,
+                                                        # Was missing entirely — Trade.strategy_id defaults to
+                                                        # "APA_v1" at the model level, so every live trade was
+                                                        # silently mislabeled regardless of which strategy actually
+                                                        # generated it. This broke any strategy_id-based logic
+                                                        # downstream (e.g. VWAP's live hard-close gate).
+                                                        strategy_id=getattr(signal, 'strategy_id', None) or "APA_v1",
                                                     )
                                                     session.add(trade)
                                                     await session.flush()
@@ -1004,14 +1043,27 @@ class BotService:
         state_file = "backend/data/bot_sync_state.json"
         
         last_check_time = datetime.now(timezone.utc).timestamp() - 86400 * 3
-        processed_deal_tickets = set()
-        
+        # Item 3.9 + Phase-5 pruning: keyed by individual deal ticket -> deal
+        # time (not position_id — see loop below for why), so we can bound
+        # growth by dropping entries whose deal time has fallen behind
+        # last_check_time (they can never be re-seen: get_closed_positions_since
+        # queries start at last_check_time, and the `deal["time"] < last_check_time`
+        # guard below already skips anything older before ever consulting this dict).
+        processed_deal_tickets: dict = {}
+
         if os.path.exists(state_file):
             try:
                 with open(state_file, "r") as f:
                     data = json.load(f)
                     last_check_time = data.get("last_check_time", last_check_time)
-                    processed_deal_tickets = set(data.get("processed_deal_tickets", []))
+                    raw_tickets = data.get("processed_deal_tickets", [])
+                    if isinstance(raw_tickets, dict):
+                        processed_deal_tickets = {int(k): v for k, v in raw_tickets.items()}
+                    else:
+                        # Backward compat: older state files stored a flat list
+                        # (previously of position_ids). Seed with last_check_time
+                        # so they still get pruned on the next cycle.
+                        processed_deal_tickets = {int(t): last_check_time for t in raw_tickets}
             except Exception as e:
                 logger.error(f"Failed to load bot sync state: {e}")
         
@@ -1022,30 +1074,48 @@ class BotService:
                 deals = await OrderManager.get_closed_positions_since(last_check_time)
                 if deals:
                     deals.sort(key=lambda x: x["time"])
-                    
+
+                    # Phase-5: consolidate Telegram close-notifications for all
+                    # deals processed in this sync cycle into ONE message instead
+                    # of firing one send per deal — a backlog of closes after
+                    # extended bot downtime could otherwise burst-send enough
+                    # messages to hit Telegram's rate limit and silently drop
+                    # alerts. Grouped by position_id so a position closed in
+                    # multiple parts this cycle shows as a single consolidated
+                    # line instead of N separate ones.
+                    tg_events: dict = {}
+
                     for deal in deals:
                         ticket = deal.get("ticket")
-                        # Bug 13 fix: deduplicate by position_id (the MT5 parent position)
-                        # not by deal ticket. A 3-TP-leg trade generates 3 separate OUT deals
-                        # — one per TP leg. The old code processed each deal ticket separately,
-                        # triple-counting the drawdown for each trade in the circuit breaker.
+                        # Item 3.9 fix: dedupe by the INDIVIDUAL deal ticket, not
+                        # position_id. A position closed in 2+ parts (partial
+                        # close, then final close) generates multiple OUT deals
+                        # sharing one position_id — deduping by position_id alone
+                        # permanently skipped every deal after the first seen for
+                        # that position, losing the PnL from later partial/final
+                        # closes. Deduping by ticket instead still processes each
+                        # of the 3 separate TP-leg positions of one signal exactly
+                        # once each (they have distinct position_ids AND distinct
+                        # deal tickets), so the original triple-counting protection
+                        # is unaffected. `pos_id` is retained only for grouping
+                        # notifications/logs below, not for dedup.
                         pos_id = deal.get("position_id") or ticket
 
                         # Guard against replaying deals from a previous cycle. The sorted()
                         # call above ensures ascending time order, so once we see a deal
-                        # older than last_check_time we can skip it. The pos_id check
+                        # older than last_check_time we can skip it. The ticket check
                         # handles duplicate entries at the exact boundary second.
                         if deal["time"] < last_check_time:
                             continue
-                        if pos_id in processed_deal_tickets:
+                        if ticket in processed_deal_tickets:
                             continue
-                        processed_deal_tickets.add(pos_id)
+                        processed_deal_tickets[ticket] = deal["time"]
                         if deal["time"] > last_check_time:
                             last_check_time = deal["time"]
 
                         net_profit = deal["profit"] + deal["commission"] + deal["swap"]
                         await profit_tracker.add_profit(net_profit)
-                            
+
                         self._log_event(
                             f"Trade closed: {deal['symbol']} | P&L: ${net_profit:.2f}",
                             "INFO", "TRADE"
@@ -1055,23 +1125,19 @@ class BotService:
                             f"{deal['symbol']} closed for ${net_profit:.2f}",
                             "success" if net_profit >= 0 else "error"
                         ))
-                        
-                        # Telegram notification for closed trade
-                        try:
-                            from backend.services.telegram import telegram_service
-                            emoji = "✅" if net_profit >= 0 else "❌"
-                            sym = telegram_service.escape_markdown(deal['symbol'])
-                            pnl_str = telegram_service.escape_markdown(f"{net_profit:+.2f}")
-                            tg_msg = (
-                                f"{emoji} *Trade Closed*\n"
-                                f"Symbol: {sym}\n"
-                                f"P&L: ${pnl_str}\n"
-                                f"Commission: ${deal.get('commission', 0):.2f} | Swap: ${deal.get('swap', 0):.2f}"
-                            )
-                            asyncio.ensure_future(telegram_service.send_message(tg_msg))
-                        except Exception as tg_err:
-                            logger.error(f"Failed to send trade-close Telegram: {tg_err}")
-                        
+
+                        # Accumulate for the consolidated Telegram message sent
+                        # once after this batch, rather than sending per-deal.
+                        grp = tg_events.setdefault(pos_id, {
+                            "symbol": deal.get("symbol", "UNKNOWN"),
+                            "pnl": 0.0,
+                            "commission": 0.0,
+                            "swap": 0.0,
+                        })
+                        grp["pnl"] += net_profit
+                        grp["commission"] += deal.get("commission", 0) or 0
+                        grp["swap"] += deal.get("swap", 0) or 0
+
                         # Update circuit breaker state
                         if self.circuit_breaker:
                             cb_symbol = deal.get("symbol", "UNKNOWN")
@@ -1082,17 +1148,53 @@ class BotService:
                             self.circuit_breaker.record_external_close(cb_symbol, net_profit, close_time)
                         if getattr(self, "prop_firm_validator", None):
                             self.prop_firm_validator.record_trade_closed(deal.get("symbol", "UNKNOWN"), deal.get("volume", 0.0), net_profit)
-                        
+
+                    # Send the consolidated Telegram notification(s) for this cycle.
+                    if tg_events:
                         try:
-                            os.makedirs(os.path.dirname(state_file), exist_ok=True)
-                            with open(state_file, "w") as f:
-                                json.dump({
-                                    "last_check_time": last_check_time,
-                                    "processed_deal_tickets": list(processed_deal_tickets)
-                                }, f)
-                        except Exception as e:
-                            logger.error(f"Failed to save bot sync state: {e}")
-                        
+                            from backend.services.telegram import telegram_service
+                            if len(tg_events) == 1:
+                                ev = next(iter(tg_events.values()))
+                                emoji = "✅" if ev["pnl"] >= 0 else "❌"
+                                sym = telegram_service.escape_markdown(ev["symbol"])
+                                pnl_str = telegram_service.escape_markdown(f"{ev['pnl']:+.2f}")
+                                tg_msg = (
+                                    f"{emoji} *Trade Closed*\n"
+                                    f"Symbol: {sym}\n"
+                                    f"P&L: ${pnl_str}\n"
+                                    f"Commission: ${ev['commission']:.2f} | Swap: ${ev['swap']:.2f}"
+                                )
+                            else:
+                                total_pnl = sum(ev["pnl"] for ev in tg_events.values())
+                                emoji = "✅" if total_pnl >= 0 else "❌"
+                                lines = [f"{emoji} *{len(tg_events)} Trades Closed*"]
+                                for ev in tg_events.values():
+                                    sym = telegram_service.escape_markdown(ev["symbol"])
+                                    lines.append(f"• {sym}: ${ev['pnl']:+.2f}")
+                                lines.append(f"Total P&L: ${total_pnl:+.2f}")
+                                tg_msg = "\n".join(lines)
+                            asyncio.ensure_future(telegram_service.send_message(tg_msg))
+                        except Exception as tg_err:
+                            logger.error(f"Failed to send trade-close Telegram: {tg_err}")
+
+                    # Phase-5 pruning: drop entries that can never be revisited
+                    # again (their deal time has fallen behind last_check_time)
+                    # so this set/state file doesn't grow unbounded over a
+                    # long-running bot.
+                    processed_deal_tickets = {
+                        t: ts for t, ts in processed_deal_tickets.items() if ts >= last_check_time
+                    }
+
+                    try:
+                        os.makedirs(os.path.dirname(state_file), exist_ok=True)
+                        with open(state_file, "w") as f:
+                            json.dump({
+                                "last_check_time": last_check_time,
+                                "processed_deal_tickets": processed_deal_tickets
+                            }, f)
+                    except Exception as e:
+                        logger.error(f"Failed to save bot sync state: {e}")
+
             except asyncio.CancelledError:
                 break
             except Exception as e:

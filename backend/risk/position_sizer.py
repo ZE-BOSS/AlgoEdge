@@ -69,12 +69,22 @@ def get_pip_size(symbol: str) -> float:
 
     symbol_upper = symbol.upper()
     size = None
+    # FIX (2.5): GBPJPY/EURJPY/AUDJPY/CADJPY's InstrumentProfile already defines
+    # point_size=0.01 as a full pip (unlike the pipette convention, e.g. 0.00001,
+    # used for the rest of the FOREX table — see USDJPY's point_size=0.001, which
+    # IS pipette-scale and correctly becomes 0.01 pip after the *10.0 below). Applying
+    # the blanket *10.0 to these 4 already-pip-scale profiles produced a 10x-too-large
+    # pip size (0.1 instead of 0.01), corrupting breakeven/trailing pip-based distances.
+    _JPY_PIP_ALREADY_FULL_PIP = {"GBPJPY", "EURJPY", "AUDJPY", "CADJPY"}
     try:
         from backend.risk.compounding import get_instrument_profile
         profile = get_instrument_profile(symbol)
         if profile and profile.point_size:
             if profile.instrument_type == "FOREX":
-                size = profile.point_size * 10.0
+                if symbol_upper in _JPY_PIP_ALREADY_FULL_PIP:
+                    size = profile.point_size  # already a full pip, do not re-scale
+                else:
+                    size = profile.point_size * 10.0
             elif profile.instrument_type == "COMMODITY" and "XAU" in symbol_upper:
                 size = profile.point_size * 10.0  # Gold standard pip is 10 points
             else:

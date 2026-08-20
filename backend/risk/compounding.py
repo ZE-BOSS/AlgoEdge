@@ -159,9 +159,16 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     "Crash 1000 Index": InstrumentProfile(
         symbol="Crash 1000 Index",
         instrument_type="SYNTHETIC",
-        point_size=0.01,
-        # Verified: ratio = 0.01/0.01 = 1.0 → $1 per 1-unit price move per lot
-        point_value_per_lot=0.01,
+        # Aligned to docs/DriftJumpAlpha_Strategy_Spec_v2.md's documented
+        # pip_size: 0.001 for CRASH1000 (was 0.01 — 10x too large — which fed
+        # directly into get_pip_size() for pip-distance params like
+        # spike_threshold_pips/recovery_target_pips). point_value_per_lot is
+        # scaled down by the same 10x so point_value_per_lot/point_size stays at
+        # the real-trade-verified ratio of 1.0 ($1 per 1-unit price move per
+        # lot) — PnL calc (backtester/engine.py's tick_value/tick_size ratio)
+        # is unaffected by this change.
+        point_size=0.001,
+        point_value_per_lot=0.001,
         lot_min=0.2,
         lot_max=10.0,
         lot_step=0.001,
@@ -273,27 +280,30 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
+    # point_size/point_value_per_lot aligned to spec's 0.001 Crash-index pip size
+    # (was 0.01 — see "Crash 1000 Index" comment above); ratio kept at 1.0 so PnL
+    # calc is unaffected.
     "Crash 300 Index": InstrumentProfile(
         symbol="Crash 300 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=0.01, lot_min=0.5, lot_max=10.0,
+        point_size=0.001, point_value_per_lot=0.001, lot_min=0.5, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
     "Crash 500 Index": InstrumentProfile(
         symbol="Crash 500 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=0.01, lot_min=0.2, lot_max=10.0,
+        point_size=0.001, point_value_per_lot=0.001, lot_min=0.2, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
     "Crash 600 Index": InstrumentProfile(
         symbol="Crash 600 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=0.01, lot_min=0.001, lot_max=10.0,
+        point_size=0.001, point_value_per_lot=0.001, lot_min=0.001, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
     "Crash 900 Index": InstrumentProfile(
         symbol="Crash 900 Index", instrument_type="SYNTHETIC",
-        point_size=0.01, point_value_per_lot=0.01, lot_min=0.001, lot_max=10.0,
+        point_size=0.001, point_value_per_lot=0.001, lot_min=0.001, lot_max=10.0,
         lot_step=0.001, contract_size=1, session_filter=False, news_filter=False,
         trades_24_7=True, swing_length_htf_override=5, ob_impulse_ratio_override=2.5,
     ),
@@ -746,8 +756,11 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         lot_min=0.1, lot_max=1000.0, lot_step=0.1, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "XRPUSD": InstrumentProfile(
+        # FIX (2.4): was lot_max=50.0 == lot_min — a data-entry bug that pinned every
+        # XRPUSD trade to exactly 50 lots regardless of computed risk-based sizing.
+        # Widened to match sibling crypto profiles (SOLUSD/LTCUSD use lot_max=1000).
         symbol="XRPUSD", instrument_type="CRYPTO", point_size=0.0001, point_value_per_lot=0.01,
-        lot_min=50.0, lot_max=50.0, lot_step=10.0, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
+        lot_min=50.0, lot_max=1000.0, lot_step=10.0, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "LTCUSD": InstrumentProfile(
         symbol="LTCUSD", instrument_type="CRYPTO", point_size=0.01, point_value_per_lot=0.01,

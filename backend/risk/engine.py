@@ -17,6 +17,7 @@ from backend.risk.multi_tp import MultiTPManager
 from backend.risk.position_sizer import (
     calculate_lot_size,
     calculate_risk_dollars,
+    get_confluence_scaled_risk,
     get_pip_size,
 )
 from backend.risk.trailing_manager import TrailingManager
@@ -139,11 +140,32 @@ class RiskEngine:
         # Position sizing MUST always use the static `initial_balance` (e.g. $25,000)
         # so that risk size does not balloon as the account grows.
         size_modifier = signal_data.get("metadata", {}).get("size_modifier", 1.0)
-        
+
+        # Confluence-scaled risk (RiskManagement_Spec.md §5.3): scale the effective
+        # risk_pct down when the signal's confluence_score is below the optimal tier,
+        # and reject outright below the minimum-confidence threshold. confluence_score
+        # is a top-level TradeSignal field — check there first (how the backtester's
+        # signal dicts carry it), falling back to metadata for any caller that nests it.
+        confluence_score = signal_data.get("confluence_score")
+        if confluence_score is None:
+            confluence_score = signal_data.get("metadata", {}).get("confluence_score")
+
+        if confluence_score is not None:
+            effective_base_risk_pct = get_confluence_scaled_risk(self.risk_pct, confluence_score)
+            if effective_base_risk_pct <= 0:
+                logger.warning(json.dumps({
+                    "event": "risk_rejected",
+                    "reason": "confluence_score_too_low",
+                    "confluence_score": confluence_score,
+                }))
+                return False, f"Confluence score {confluence_score} below minimum threshold for risk deployment", []
+        else:
+            effective_base_risk_pct = self.risk_pct
+
         # Both live and backtest use MT5 data when available → InstrumentProfile fallback.
         # This matches how _calc_pnl() works (MT5 first via get_symbol_info).
 
-        requested_risk_dollars = base_balance * (self.risk_pct / 100.0) * size_modifier
+        requested_risk_dollars = base_balance * (effective_base_risk_pct / 100.0) * size_modifier
 
         # Predictive Drawdown Guard - Dynamic Scaling
         max_daily_dd = self.circuit.max_daily_drawdown_pct
@@ -199,9 +221,17 @@ class RiskEngine:
             }))
             return False, "Lot size calculation returned 0", []
 
-        # 3.5 Prop Firm lot validation (informational — logs if max_lots per symbol exceeded)
+        # 3.5 Prop Firm lot validation — hard rejects if the aggregate lot cap would be
+        # breached (see PropFirmValidator.validate_trade).
         if hasattr(self, "prop_firm_validator") and self.prop_firm_validator and self.prop_firm_validator.enabled:
-            self.prop_firm_validator.validate_trade(symbol, total_lots)  # logs warnings only
+            pf_lot_ok, pf_lot_reason, _ = self.prop_firm_validator.validate_trade(symbol, total_lots)
+            if not pf_lot_ok:
+                logger.warning(json.dumps({
+                    "event": "risk_rejected",
+                    "reason": "prop_firm_lot_cap_breach",
+                    "details": pf_lot_reason
+                }))
+                return False, pf_lot_reason, []
 
         # 4. Multi-Position Splits (TP1/TP2/TP3)
         max_risk_cap_dollars = requested_risk_dollars * 1.05
@@ -218,9 +248,40 @@ class RiskEngine:
         actual_total_lots = sum(tp.volume for tp in tp_levels)
         actual_risk_dollars = calculate_risk_dollars(actual_total_lots, entry, sl, symbol)
 
-        # Soft warn if there is any residual overshoot vs. the pre-split calculation.
-        # (Should be near-zero after multi_tp's cap enforcement, but log it for full auditability.)
-        if actual_risk_dollars > (requested_risk_dollars * 1.01):
+        # Reject outright if the post-split risk blew past the requested budget by more than a
+        # small tolerance. A previous version of this check only logged a warning and let ANY
+        # overshoot through — including cases where a corrupted SL (e.g. a stop distance many
+        # orders of magnitude too large) produced risk 100-800x the requested budget, which was
+        # then nonsensically approved as "within tolerance".
+        overshoot_pct = (actual_risk_dollars / requested_risk_dollars - 1.0) * 100.0 if requested_risk_dollars > 0 else 0.0
+        if actual_risk_dollars > (requested_risk_dollars * 1.10):
+            # multi_tp.py distinguishes "overshoot survives only because lot_min flooring
+            # can't go any lower" (a small-account/SL-distance limitation) from a
+            # genuinely bad SL distance. Surface the clearer reason when that's the case.
+            floor_overshoot = getattr(self.multi_tp, "_last_overshoot_reason", None) == "account_too_small_for_sl_distance"
+            reason_code = "account_too_small_for_sl_distance" if floor_overshoot else "post_split_risk_overshoot"
+            logger.warning(json.dumps({
+                "event": "risk_rejected",
+                "reason": reason_code,
+                "requested_risk_dollars": round(requested_risk_dollars, 2),
+                "actual_risk_dollars": round(actual_risk_dollars, 2),
+                "overshoot_pct": round(overshoot_pct, 1),
+                "actual_total_lots": actual_total_lots,
+                "balance": account_balance,
+            }))
+            if floor_overshoot:
+                return False, (
+                    f"Account too small for this SL distance on {symbol}: the broker's minimum "
+                    f"lot size alone risks ${actual_risk_dollars:.2f}, exceeding the requested "
+                    f"${requested_risk_dollars:.2f} budget by {overshoot_pct:.0f}% — rejecting "
+                    f"(not a bad SL/TP distance; increase balance/risk% or use a smaller symbol)"
+                ), []
+            return False, (
+                f"Post-split risk ${actual_risk_dollars:.2f} exceeds requested "
+                f"${requested_risk_dollars:.2f} by {overshoot_pct:.0f}% — rejecting "
+                f"(likely a bad SL/TP distance for {symbol})"
+            ), []
+        elif actual_risk_dollars > (requested_risk_dollars * 1.01):
             logger.warning(json.dumps({
                 "event": "risk_warning_post_split_overshoot",
                 "requested_risk_dollars": round(requested_risk_dollars, 2),

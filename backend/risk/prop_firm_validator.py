@@ -211,6 +211,23 @@ class PropFirmValidator:
 
         self.check_drawdown_breaches(equity)
 
+    def _max_dd_floor(self) -> tuple[float, float]:
+        """
+        Returns (max_dd_allowance, max_dd_floor) for the max/total drawdown check.
+
+        For trailing-drawdown challenge types ("1-step"/"flex"), the floor trails the
+        tracked high-water-mark (self.high_water_mark), not the static initial balance —
+        matching how these prop-firm challenges actually enforce trailing drawdown (the
+        floor rises as the account grows above its starting balance). 2-step/static
+        challenges keep the static initial_balance floor.
+        """
+        max_dd_allowance = self.initial_balance * (self.max_total_drawdown_pct / 100.0)
+        if self.challenge_type in ["1-step", "flex"]:
+            max_dd_floor = self.high_water_mark - max_dd_allowance
+        else:
+            max_dd_floor = self.initial_balance - max_dd_allowance
+        return max_dd_allowance, max_dd_floor
+
     def check_drawdown_breaches(self, equity: float):
         if not self.enabled:
             return
@@ -219,8 +236,7 @@ class PropFirmValidator:
         if self.is_breached:
             daily_dd_allowance = self.initial_balance * (self.max_daily_loss_pct / 100.0)
             daily_floor = self.eod_baseline - daily_dd_allowance
-            max_dd_allowance = self.initial_balance * (self.max_total_drawdown_pct / 100.0)
-            max_dd_floor = self.initial_balance - max_dd_allowance
+            max_dd_allowance, max_dd_floor = self._max_dd_floor()
             # Only auto-recover if equity is above both floors
             if equity >= daily_floor and equity >= max_dd_floor:
                 logger.info(f"[PropFirm] Equity recovered to {equity:.2f}. Clearing breach state.")
@@ -256,22 +272,25 @@ class PropFirmValidator:
                 alert_key=f"daily_dd_{self.last_eod_date}"
             )
             return
-        # B. Max Drawdown Check (Always Static from Capital per user spec)
-        max_dd_allowance = self.initial_balance * (self.max_total_drawdown_pct / 100.0)
-        max_dd_floor = self.initial_balance - max_dd_allowance
-        
+        # B. Max Drawdown Check — trailing (high-water-mark anchored) for 1-step/flex
+        # challenge types, static (initial_balance anchored) for 2-step/other types.
+        max_dd_allowance, max_dd_floor = self._max_dd_floor()
+        is_trailing = self.challenge_type in ["1-step", "flex"]
+
         if equity < max_dd_floor:
             self.is_breached = True
+            anchor_label = "High-Water Mark" if is_trailing else "Initial Balance"
+            anchor_value = self.high_water_mark if is_trailing else self.initial_balance
             self.breach_reason = (
-                f"Max Static Drawdown Breach! Equity {equity:.2f} fell below "
-                f"{self.initial_balance:.2f} - {max_dd_allowance:.2f}"
+                f"Max {'Trailing' if is_trailing else 'Static'} Drawdown Breach! Equity {equity:.2f} fell below "
+                f"{anchor_value:.2f} - {max_dd_allowance:.2f}"
             )
             self.save_state()
             logger.error(f"[PROP FIRM] {self.breach_reason}")
             self._telegram_alert(
-                f"🔴 *Prop Firm Alert — Max Static Drawdown Breached*\n"
+                f"🔴 *Prop Firm Alert — Max {'Trailing' if is_trailing else 'Static'} Drawdown Breached*\n"
                 f"Equity: ${equity:.2f}\n"
-                f"Initial Balance: ${self.initial_balance:.2f}\n"
+                f"{anchor_label}: ${anchor_value:.2f}\n"
                 f"Max DD Allowance: ${max_dd_allowance:.2f}\n"
                 f"Floor: ${max_dd_floor:.2f}\n"
                 f"⚠️ Trading continues (monitor only — no signals blocked)",
@@ -332,7 +351,9 @@ class PropFirmValidator:
 
     def validate_trade(self, symbol: str, requested_lots: float) -> tuple:
         """
-        Always approves the trade. Logs and alerts on limit breaches (informational only).
+        Approves the trade unless it would breach the aggregate max-lot-size cap for the
+        symbol, in which case it is hard-rejected (returns False, reason, 0.0). All other
+        checks here (position count, breach state) remain informational/monitor-only.
         """
         if not self.enabled:
             return True, "OK", requested_lots
@@ -356,10 +377,18 @@ class PropFirmValidator:
         max_lot_allowed = self.max_lot_sizes.get(symbol, 999.0)
         current_lots = self.open_lots_by_symbol.get(symbol, 0.0)
         if (current_lots + requested_lots) > max_lot_allowed:
-            logger.warning(
-                f"Max lot size limit reached for {symbol}. "
-                f"Limit: {max_lot_allowed}, Current: {current_lots} (Trade allowed per user request)"
+            reason = (
+                f"Max lot size limit breached for {symbol}. "
+                f"Limit: {max_lot_allowed}, Current open: {current_lots}, Requested: {requested_lots}"
             )
+            logger.error(f"[PROP FIRM] {reason}")
+            self._telegram_alert(
+                f"\U0001f534 *Prop Firm Alert \u2014 Aggregate Lot Cap Breach*\n"
+                f"Symbol: {symbol}\n"
+                f"{reason}",
+                alert_key=f"lot_cap_{symbol}"
+            )
+            return False, reason, 0.0
 
         return True, "OK", requested_lots
 

@@ -45,9 +45,11 @@ class VWAPParams:
     # ── Stop Loss ────────────────────────────────────────────────────────
     sl_points: float = 80.0
     """
-    Fixed SL in price points (instrument-specific).
-    Default 80pt per original strategy specification (vwap_strategy_implementation_plan.md).
-    With TP1 at 1R, this gives TP1=80pt; wider than 40pt to survive spread and slippage.
+    Fixed SL in instrument "points" — converted to a price distance via the symbol's
+    pip/point size (backend.risk.position_sizer.get_pip_size) before use, NOT a raw
+    price delta. Default 80pt per original strategy specification
+    (vwap_strategy_implementation_plan.md). With TP1 at 1R, this gives TP1=80pt; wider
+    than 40pt to survive spread and slippage.
     Adjustable from frontend (Backtester strategy params or live Settings). For non-NQ
     instruments where fixed points don't apply, sl_atr_multiplier takes over instead.
     """

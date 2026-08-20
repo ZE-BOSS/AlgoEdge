@@ -34,7 +34,9 @@ range's midpoint offers a repeatable scalp entry between 9:30–11:00 AM ET.
      entry — e.g., ~5 points beyond `range_low` for a long, ~5 points beyond
      `range_high` for a short (point value is instrument-specific; examples
      in the source use NASDAQ/NQ futures).
-   - Take profit: fixed default of ~15 points in the trade's direction.
+   - Take profit: fixed default of 50 points in the trade's direction
+     (implementation-tuned default; the framework's original worked examples
+     used ~15 points, but the shipped default has since been calibrated to 50).
      Override to the nearest obvious higher-timeframe swing level (e.g., a
      nearby all-time high) if that level is closer than the fixed target —
      avoids holding through likely resistance/support.
@@ -68,7 +70,7 @@ on_new_m5_candle(candle):
             entry = range_mid
             buffer = instrument_point_buffer  # e.g. 5 points on NQ
             stop = range_low - buffer if bias == 'long' else range_high + buffer
-            fixed_target = entry + 15 if bias == 'long' else entry - 15
+            fixed_target = entry + 50 if bias == 'long' else entry - 50  # default fixed_target_points = 50
             nearby_level = nearest_htf_swing_level(bias)
             target = nearby_level if is_closer(nearby_level, fixed_target, bias) else fixed_target
             place_trade(entry, stop, target)
@@ -87,7 +89,8 @@ on_new_m5_candle(candle):
 | `break_confirmation_tf` | 5m | Close-based, not wick-based |
 | `earliest_valid_break_time` | 09:30 ET | Breaks before this are ignored |
 | `stop_buffer_points` | 5 (instrument-specific) | Calibrate per market |
-| `fixed_target_points` | 15 (instrument-specific) | Calibrate per market |
+| `fixed_target_points` | 50 (instrument-specific) | Implementation-tuned default (was ~15 in the original framework examples); calibrate per market |
+| `sl_buffer_atr_mult` | 0.0 (disabled) | Extra ATR(14)-multiple SL buffer, applied on top of `stop_buffer_points` |
 | `dynamic_target_override` | enabled | Use nearer HTF swing level if closer |
 | `session_end` | 11:00 ET | Extend only if AM range was unproductive |
 | `news_filter` | optional | Source recommends de-risking around scheduled news, not necessarily skipping the trade entirely |

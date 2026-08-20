@@ -117,47 +117,49 @@ def detect_hs_pattern(
     highs = [s for s in minor_swings if s["type"] == "HIGH"]
     lows  = [s for s in minor_swings if s["type"] == "LOW"]
 
-    # Need at least 3 highs for Bearish H&S
+    # Need at least 3 highs for Bearish H&S. Only evaluate the single most-recent
+    # triplet — walking backward through older triplets on symmetry-tolerance
+    # failure can lock onto a stale Right Shoulder that isn't the most recent
+    # swing, producing a pattern that no longer reflects current price structure.
     if len(highs) >= 3:
-        for i in range(len(highs) - 3, -1, -1):
-            ls, head, rs = highs[i], highs[i + 1], highs[i + 2]
-            if head["price"] > ls["price"] and head["price"] > rs["price"]:
-                if abs(ls["price"] - rs["price"]) <= tolerance:
-                    # Find neckline: lowest LOW between ls-head and head-rs
-                    lows_between = [
-                        sw for sw in lows
-                        if ls["index"] < sw["index"] < rs["index"]
-                    ]
-                    if lows_between:
-                        neckline = min(lows_between, key=lambda x: x["price"])
-                        return {
-                            "type": "BEARISH",
-                            "left_shoulder": ls,
-                            "head": head,
-                            "right_shoulder": rs,
-                            "neckline": neckline,
-                            "neckline_price": neckline["price"],
-                        }
+        ls, head, rs = highs[-3], highs[-2], highs[-1]
+        if head["price"] > ls["price"] and head["price"] > rs["price"]:
+            if abs(ls["price"] - rs["price"]) <= tolerance:
+                # Find neckline: lowest LOW between ls-head and head-rs
+                lows_between = [
+                    sw for sw in lows
+                    if ls["index"] < sw["index"] < rs["index"]
+                ]
+                if lows_between:
+                    neckline = min(lows_between, key=lambda x: x["price"])
+                    return {
+                        "type": "BEARISH",
+                        "left_shoulder": ls,
+                        "head": head,
+                        "right_shoulder": rs,
+                        "neckline": neckline,
+                        "neckline_price": neckline["price"],
+                    }
 
-    # Need at least 3 lows for Bullish IH&S
+    # Need at least 3 lows for Bullish IH&S. Same most-recent-triplet-only rule
+    # as above applies here.
     if len(lows) >= 3:
-        for i in range(len(lows) - 3, -1, -1):
-            ls, head, rs = lows[i], lows[i + 1], lows[i + 2]
-            if head["price"] < ls["price"] and head["price"] < rs["price"]:
-                if abs(ls["price"] - rs["price"]) <= tolerance:
-                    highs_between = [
-                        sw for sw in highs
-                        if ls["index"] < sw["index"] < rs["index"]
-                    ]
-                    if highs_between:
-                        neckline = max(highs_between, key=lambda x: x["price"])
-                        return {
-                            "type": "BULLISH",
-                            "left_shoulder": ls,
-                            "head": head,
-                            "right_shoulder": rs,
-                            "neckline": neckline,
-                            "neckline_price": neckline["price"],
-                        }
+        ls, head, rs = lows[-3], lows[-2], lows[-1]
+        if head["price"] < ls["price"] and head["price"] < rs["price"]:
+            if abs(ls["price"] - rs["price"]) <= tolerance:
+                highs_between = [
+                    sw for sw in highs
+                    if ls["index"] < sw["index"] < rs["index"]
+                ]
+                if highs_between:
+                    neckline = max(highs_between, key=lambda x: x["price"])
+                    return {
+                        "type": "BULLISH",
+                        "left_shoulder": ls,
+                        "head": head,
+                        "right_shoulder": rs,
+                        "neckline": neckline,
+                        "neckline_price": neckline["price"],
+                    }
 
     return None
