@@ -16,6 +16,7 @@ import pandas as pd
 import pytz
 
 from backend.core.config_schema import UserConfigV2
+from backend.risk.position_sizer import get_pip_size
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
 from backend.strategies.core.swing_structure import (
     calculate_atr,
@@ -58,7 +59,104 @@ class APAEngine(BaseStrategy):
                 "invalidation_head": None,# Price beyond which the thesis is void
                 "bos_confirmed": False,
                 "last_trade_date": None,
+                # ATR on the STRUCTURE timeframe, captured at BOS-confirmation time.
+                # The cost floor is applied at signal-emission time (on the entry
+                # timeframe), but min_sl_atr_mult is documented against the structure
+                # timeframe's ATR — see params.py. Stashing it here keeps the floor
+                # measured against the ATR its default was calibrated for.
+                "structure_atr": None,
             }
+
+    def _sl_floor_distance(self, symbol: str, atr: float, pip_size: float) -> float:
+        """
+        Absolute minimum stop distance in PRICE units (audit §10.8).
+
+            floor = max(min_sl_pips  * pip_size,          # absolute backstop
+                        min_sl_atr_mult * atr,            # volatility-relative backstop
+                        min_sl_spread_mult * spread * pip_size)   # spread-relative (opt-in)
+
+        The spread term is only active if a `min_sl_spread_mult` field exists on
+        APAParams (it currently does not — the term is inert by default and costs
+        nothing). Every lookup uses getattr so a missing field can never crash the
+        engine. Mirrors strategy_vwap/engine.py::_resolve_sl_distance.
+        """
+        floor = 0.0
+
+        min_pips = getattr(self.params, "min_sl_pips", 0.0) or 0.0
+        if min_pips > 0 and pip_size > 0:
+            floor = max(floor, min_pips * pip_size)
+
+        atr_mult = getattr(self.params, "min_sl_atr_mult", 0.0) or 0.0
+        if atr_mult > 0 and atr > 0:
+            floor = max(floor, atr_mult * atr)
+
+        spread_mult = getattr(self.params, "min_sl_spread_mult", 0.0) or 0.0
+        if spread_mult > 0 and pip_size > 0:
+            try:
+                from backend.risk.broker_costs import get_broker_costs
+                spread_pips = get_broker_costs(symbol).get("spread_pips", 0.0) or 0.0
+                if spread_pips > 0:
+                    floor = max(floor, spread_mult * spread_pips * pip_size)
+            except Exception:
+                # Broker costs unavailable (no MT5, module missing) — the absolute
+                # and ATR floors above still apply.
+                pass
+
+        return floor
+
+    def _confluence_score(self, state: dict) -> int:
+        """
+        Genuine 0–100 confluence score (audit §10.6 — this was a hard-coded 90 on
+        every signal, which made `confluence_stats` in every report meaningless).
+
+        Components (sum to 100):
+
+          55  MANDATORY CHAIN — awarded whenever a signal fires at all, because
+              every one of these was verified by the state machine before we got
+              here: H&S pattern with shoulders inside `shoulder_symmetry_tolerance_atr`
+              → body-close BOS through the neckline → neckline confirmed to coincide
+              with a MAJOR fractal swing (not a liquidity sweep) → candle body retest
+              into the Invalidation Zone → Head level never violated → SL verified on
+              the correct side of entry.
+
+          15  SHOULDER SYMMETRY — how far inside the tolerance band the two shoulders
+              actually sat. ≤1/3 of tolerance → 15, ≤2/3 → 8, else 0. A pattern that
+              only just squeaked past the symmetry test is a weaker H&S than one whose
+              shoulders are near-identical.
+
+          15  NECKLINE PRECISION — distance from the neckline to the nearest major
+              fractal swing, as a fraction of ATR. The BOS gate accepts anything within
+              0.5×ATR; ≤0.15×ATR → 15, ≤0.30×ATR → 8, else 0.
+
+          15  STOP QUALITY — 15 when the structural stop was already wider than the
+              cost floor, 0 when the floor had to widen it. A floored stop means the
+              shoulder wick sat inside the spread: the geometry is real but the
+              economics were not, and the trade is now running on a synthetic stop.
+
+        Range in practice: 55 (bare minimum setup, floored stop) → 100.
+        """
+        score = 55
+
+        tol = getattr(self.params, "shoulder_symmetry_tolerance_atr", 0.0) or 0.0
+        gap = state.get("shoulder_symmetry_gap_atr")
+        if gap is not None and tol > 0:
+            ratio = gap / tol
+            if ratio <= 1.0 / 3.0:
+                score += 15
+            elif ratio <= 2.0 / 3.0:
+                score += 8
+
+        precision = state.get("neckline_precision_atr")
+        if precision is not None:
+            if precision <= 0.15:
+                score += 15
+            elif precision <= 0.30:
+                score += 8
+
+        if not state.get("sl_floored"):
+            score += 15
+
+        return max(0, min(100, int(score)))
 
     def _is_within_session(self, current_time: pd.Timestamp) -> bool:
         if not self.params.session_filter_enabled:
@@ -109,6 +207,7 @@ class APAEngine(BaseStrategy):
                     "sl_level": None,
                     "invalidation_head": None,
                     "bos_confirmed": False,
+                    "structure_atr": None,
                     "last_trade_date": current_date
                 })
                 self.log_event(f"[{symbol}] State reset for new trading day.", category="APA")
@@ -218,6 +317,23 @@ class APAEngine(BaseStrategy):
                         state["invalidation_head"] = head["price"]
 
                     state["bos_confirmed"] = True
+                    # Capture the structure-timeframe ATR for the cost floor applied
+                    # at signal-emission time (see _sl_floor_distance / audit §10.8).
+                    state["structure_atr"] = atr
+
+                    # ── Confluence measurements (audit §10.6) ────────────────
+                    # Recorded here because both quantities are only knowable on the
+                    # structure timeframe at BOS time; they are scored at emission.
+                    ls = pattern["left_shoulder"]
+                    if atr > 0:
+                        state["shoulder_symmetry_gap_atr"] = abs(ls["price"] - rs["price"]) / atr
+                        state["neckline_precision_atr"] = min(
+                            abs(mp - neckline) for mp in major_prices
+                        ) / atr
+                    else:
+                        state["shoulder_symmetry_gap_atr"] = None
+                        state["neckline_precision_atr"] = None
+                    state["tight_levels"] = tight
                     state["status"] = "AWAIT_RETEST"
                     self.log_event(
                         f"[{symbol}] BOS confirmed on major level. "
@@ -302,8 +418,33 @@ class APAEngine(BaseStrategy):
                     )
                     return None
 
-                # TP: use risk engine's RR grid (SL distance × RR)
+                # ── Cost floors (audit §10.8) ────────────────────────────────
+                # The structural SL was computed at BOS-confirmation time, but
+                # `entry` is only known now, at the retest. The floor must therefore
+                # be applied HERE — measuring it against the shoulder wick instead of
+                # against the actual entry systematically under-widens, because the
+                # retest entry sits inside the Invalidation Zone (shoulder BODIES)
+                # while the stop sits at the shoulder WICK: the two can be a fraction
+                # of a pip apart. The forensic runs produced a 3.47-pip median stop
+                # and a 0.45-pip minimum on a ~2-pip spread from exactly this gap.
+                pip_size = get_pip_size(symbol) or 0.0001
+                floor_atr = state.get("structure_atr") or atr
+                sl_floor = self._sl_floor_distance(symbol, floor_atr, pip_size)
                 sl_distance = abs(entry - sl)
+                if sl_floor > 0 and sl_distance < sl_floor:
+                    self.log_event(
+                        f"[{symbol}] SL floored: {sl_distance / pip_size:.1f} → "
+                        f"{sl_floor / pip_size:.1f} pips (structural SL {sl:.5f} sat inside "
+                        f"the cost floor).",
+                        category="APA",
+                    )
+                    sl = entry + sl_floor if direction == "SELL" else entry - sl_floor
+                    sl_distance = sl_floor
+                    state["sl_floored"] = True
+                else:
+                    state["sl_floored"] = False
+
+                # TP: use risk engine's RR grid (SL distance × RR)
                 if direction == "SELL":
                     tp = entry - sl_distance  # TP1 = 1R
                 else:
@@ -319,13 +460,16 @@ class APAEngine(BaseStrategy):
                     )
                     return None
 
+                confluence_score = self._confluence_score(state)
+
                 # Reset state machine for next setup
                 state["status"] = "AWAIT_PATTERN"
                 state["pattern"] = None
                 state["bos_confirmed"] = False
 
                 self.log_event(
-                    f"[{symbol}] APA SIGNAL FIRED: {direction} @ {entry:.5f} | SL: {sl:.5f} | TP1: {tp:.5f}",
+                    f"[{symbol}] APA SIGNAL FIRED: {direction} @ {entry:.5f} | SL: {sl:.5f} | "
+                    f"TP1: {tp:.5f} | confluence: {confluence_score}",
                     category="APA",
                 )
 
@@ -338,13 +482,15 @@ class APAEngine(BaseStrategy):
                     entry_price=entry,
                     stop_loss=sl,
                     take_profit=tp,
-                    confluence_score=90,
+                    confluence_score=confluence_score,
                     timestamp=float(latest.get("time", current_time.timestamp())),
                     metadata={
                         "setup": "APA_HS",
                         "pattern_type": pattern["type"],
                         "neckline": pattern["neckline_price"],
                         "invalidation_zone": [iz_bottom, iz_top],
+                        "sl_floored": bool(state.get("sl_floored")),
+                        "sl_pips": round(sl_distance / pip_size, 2),
                     },
                 )
 

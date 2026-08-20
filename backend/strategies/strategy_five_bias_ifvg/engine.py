@@ -2,6 +2,7 @@ import pandas as pd
 import pytz
 
 from backend.core.config_schema import UserConfigV2
+from backend.risk.position_sizer import get_pip_size
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
 from backend.strategies.core.fvg import FVGDetector
 from backend.strategies.core.swing_structure import calculate_atr
@@ -37,7 +38,11 @@ class BiasIFVGEngine(BaseStrategy):
                 "trades_today": 0,
                 "wins_today": 0,
                 "losses_today": 0,
-                "extra_levels": []
+                "extra_levels": [],
+                # Confluence inputs (audit §10.6) — recorded as the state machine
+                # advances, scored at signal-emission time by _confluence_score().
+                "confluent_level_count": 0,
+                "sl_floored": False,
             }
             self.htf_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
             self.m15_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
@@ -161,6 +166,166 @@ class BiasIFVGEngine(BaseStrategy):
                     })
         return levels
 
+    def _sl_floor_distance(self, symbol: str, atr: float, pip_size: float) -> float:
+        """
+        Absolute minimum stop distance in PRICE units (audit §10.4 / §10.8).
+
+            floor = max(min_sl_pips  * pip_size,          # absolute backstop
+                        min_sl_atr_mult * atr,            # volatility-relative backstop
+                        min_sl_spread_mult * spread * pip_size)   # spread-relative (opt-in)
+
+        The spread term is only active if a `min_sl_spread_mult` field exists on
+        BiasIFVGParams (it currently does not — the term is inert by default).
+        Every lookup uses getattr so a missing field can never crash the engine.
+        Mirrors strategy_vwap/engine.py::_resolve_sl_distance.
+        """
+        floor = 0.0
+
+        min_pips = getattr(self.params, "min_sl_pips", 0.0) or 0.0
+        if min_pips > 0 and pip_size > 0:
+            floor = max(floor, min_pips * pip_size)
+
+        atr_mult = getattr(self.params, "min_sl_atr_mult", 0.0) or 0.0
+        if atr_mult > 0 and atr > 0:
+            floor = max(floor, atr_mult * atr)
+
+        spread_mult = getattr(self.params, "min_sl_spread_mult", 0.0) or 0.0
+        if spread_mult > 0 and pip_size > 0:
+            try:
+                from backend.risk.broker_costs import get_broker_costs
+                spread_pips = get_broker_costs(symbol).get("spread_pips", 0.0) or 0.0
+                if spread_pips > 0:
+                    floor = max(floor, spread_mult * spread_pips * pip_size)
+            except Exception:
+                # Broker costs unavailable (no MT5, module missing) — the absolute
+                # and ATR floors above still apply.
+                pass
+
+        return floor
+
+    def _resolve_sl_distance(
+        self, symbol: str, entry: float, swing_point: float, atr: float, pip_size: float
+    ) -> tuple[float, bool]:
+        """
+        Stop distance in PRICE units, per the audit's §10.4 formula:
+
+            sl_dist = max(|entry - m5_swing_point| + sl_buffer_atr_mult * atr, floor)
+            floor   = max(min_sl_pips * pip_size, min_sl_atr_mult * atr)
+
+        Previously the SL was set FLUSH at `m5_swing_point` (engine.py:345). The spec
+        nominates the swing high/low as the stop reference, but a stop placed exactly
+        ON a visible swing is the single most-hunted price on the chart. The floor is
+        especially load-bearing for this strategy: entry is an M5 body-close THROUGH
+        an IFVG, so entry and the swing that formed that IFVG are only a few pips
+        apart by construction, not by accident.
+
+        Returns (sl_dist, floored) — `floored` feeds the confluence score.
+        """
+        structural = abs(entry - swing_point)
+
+        buffer_mult = getattr(self.params, "sl_buffer_atr_mult", 0.0) or 0.0
+        sl_dist = structural + (buffer_mult * atr if atr > 0 else 0.0)
+
+        floor = self._sl_floor_distance(symbol, atr, pip_size)
+        floored = floor > 0 and sl_dist < floor
+        if floored:
+            self.log_event(
+                f"[{symbol}] SL floored: {sl_dist / pip_size:.1f} → {floor / pip_size:.1f} pips "
+                f"(structural swing distance {structural / pip_size:.1f} pips + "
+                f"{buffer_mult:.2f}xATR sat inside the cost floor).",
+                category="BIAS_IFVG",
+            )
+            sl_dist = floor
+
+        return sl_dist, floored
+
+    def _count_confluent_levels(self, symbol: str, state: dict, chosen: dict) -> int:
+        """
+        How many OTHER recorded key levels overlap the tapped level's price band.
+
+        This is the literal meaning of "confluence": two or more independently-derived
+        methods (an M15 FVG, a CISD line, a rejection block) marking the same price.
+        A key level that three methods agree on is a materially better level than one
+        found by a single method, and it is the only quality dimension this strategy
+        genuinely measures more than once.
+        """
+        try:
+            top = float(chosen["top"])
+            bottom = float(chosen["bottom"])
+        except Exception:
+            return 0
+
+        candidates: list = []
+        try:
+            candidates.extend(self.m15_detectors[symbol].active_fvgs or [])
+        except Exception:
+            pass
+        candidates.extend(state.get("extra_levels", []) or [])
+
+        count = 0
+        for lvl in candidates:
+            if lvl is chosen:
+                continue
+            try:
+                l_top = float(lvl["top"])
+                l_bottom = float(lvl["bottom"])
+            except Exception:
+                continue
+            if l_bottom <= top and l_top >= bottom:
+                count += 1
+        return count
+
+    def _confluence_score(self, state: dict, displacement_atr: float | None) -> int:
+        """
+        Genuine 0–100 confluence score (audit §10.6 — this was a hard-coded 85 on
+        every signal, which made the spec's "only a clearly A+ setup may be the 2nd
+        trade after a loss" day-stop rule degenerate: with
+        `a_plus_confluence_threshold` also at 85 the gate read `85 >= 85` and every
+        setup qualified as A+).
+
+        Components (sum to 100):
+
+          50  MANDATORY CHAIN — awarded whenever a signal fires, because the state
+              machine verified all of it to get here: an H4 bias established from an
+              HTF FVG → an M15 key level (FVG, CISD line, or rejection block) tapped
+              by an M5 bar → an opposing M5 FVG formed during the reaction → an M5
+              body closed THROUGH it (the inversion) → the swing extreme was never
+              breached → the bar is inside the 09:30–11:00 ET window → the daily
+              trade cap is not exhausted.
+
+          20  LEVEL CONFLUENCE — 10 points per ADDITIONAL independently-derived key
+              level whose price band overlaps the tapped one, capped at 2 (see
+              _count_confluent_levels). One method marking a price is a level; three
+              marking the same price is a confluence.
+
+          15  DISPLACEMENT — how decisively the inversion candle closed beyond the
+              IFVG boundary, in ATR terms. ≥0.50×ATR → 15, ≥0.25×ATR → 8, else 0.
+
+          15  STOP QUALITY — 15 when the structural stop (swing + ATR buffer) was
+              already wider than the cost floor, 0 when the floor had to widen it.
+              A floored stop means the IFVG swing sat inside the spread.
+
+        Range in practice: 50 → 100. Note that `a_plus_confluence_threshold` is
+        currently 90 — a params-level workaround for this defect that made the A+
+        gate deliberately unsatisfiable. With a real score it is now reachable
+        (requires the mandatory chain plus at least two of the three quality
+        components), so that default is worth revisiting per audit §6.
+        """
+        score = 50
+
+        score += 10 * min(2, int(state.get("confluent_level_count", 0) or 0))
+
+        if displacement_atr is not None:
+            if displacement_atr >= 0.50:
+                score += 15
+            elif displacement_atr >= 0.25:
+                score += 8
+
+        if not state.get("sl_floored"):
+            score += 15
+
+        return max(0, min(100, int(score)))
+
     def _is_within_session(self, current_time: pd.Timestamp) -> bool:
         if current_time.tzinfo is None:
             current_time = current_time.tz_localize('UTC')
@@ -198,7 +363,11 @@ class BiasIFVGEngine(BaseStrategy):
                 "trades_today": 0,
                 "wins_today": 0,
                 "losses_today": 0,
-                "extra_levels": []
+                "extra_levels": [],
+                # Confluence inputs (audit §10.6) — recorded as the state machine
+                # advances, scored at signal-emission time by _confluence_score().
+                "confluent_level_count": 0,
+                "sl_floored": False,
             }
             state = self.state[symbol]
             self.last_trade_date[symbol] = current_date
@@ -259,12 +428,14 @@ class BiasIFVGEngine(BaseStrategy):
                         state["key_level"] = fvg
                         state["status"] = "AWAIT_IFVG_SETUP"
                         state["manipulation_leg_start"] = current_time
+                        state["confluent_level_count"] = self._count_confluent_levels(symbol, state, fvg)
                         self.log_event(f"[{symbol}] M15 Bullish FVG tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                         break
                     elif state["bias"] == "SELL" and fvg["type"] == "BEARISH" and fvg["bottom"] <= latest["high"] <= fvg["top"]:
                         state["key_level"] = fvg
                         state["status"] = "AWAIT_IFVG_SETUP"
                         state["manipulation_leg_start"] = current_time
+                        state["confluent_level_count"] = self._count_confluent_levels(symbol, state, fvg)
                         self.log_event(f"[{symbol}] M15 Bearish FVG tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                         break
 
@@ -275,12 +446,14 @@ class BiasIFVGEngine(BaseStrategy):
                             state["key_level"] = lvl
                             state["status"] = "AWAIT_IFVG_SETUP"
                             state["manipulation_leg_start"] = current_time
+                            state["confluent_level_count"] = self._count_confluent_levels(symbol, state, lvl)
                             self.log_event(f"[{symbol}] M15 {lvl['type']} tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                             break
                         elif state["bias"] == "SELL" and lvl["type"] in ["BEARISH_CISD", "BEARISH_REJECTION"] and lvl["bottom"] <= latest["high"] <= lvl["top"]:
                             state["key_level"] = lvl
                             state["status"] = "AWAIT_IFVG_SETUP"
                             state["manipulation_leg_start"] = current_time
+                            state["confluent_level_count"] = self._count_confluent_levels(symbol, state, lvl)
                             self.log_event(f"[{symbol}] M15 {lvl['type']} tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                             break
             
@@ -314,11 +487,15 @@ class BiasIFVGEngine(BaseStrategy):
                     
                 if state["trades_today"] >= self.params.max_trades_per_day:
                     return None
+
                 # Spec's mandatory day-stop rule (stop after 1 win; after 1 loss only
                 # take a 2nd trade if it's A+; stop after 2 losses regardless).
-                # confluence_score is currently a fixed 85 (see TradeSignal below);
-                # checked against a_plus_confluence_threshold as the "A+" gate.
-                if not self._can_trade_today(state, candidate_confluence=85):
+                # The unconditional halves of that rule are cheap and setup-independent,
+                # so they short-circuit here. The A+ gate itself needs a REAL confluence
+                # score, which is only computable once the trigger has fired and the stop
+                # is known — so it is re-checked, in full, just before the signal is
+                # emitted (audit §10.6).
+                if state.get("wins_today", 0) >= 1 or state.get("losses_today", 0) >= 2:
                     return None
 
                 fvg = state["m5_fvg_to_invert"]
@@ -330,30 +507,82 @@ class BiasIFVGEngine(BaseStrategy):
                 elif state["bias"] == "SELL" and latest["close"] < fvg["bottom"]:
                     triggered = True
                     
-                # Invalidate if price breaks the swing extreme before inversion
-                if state["bias"] == "BUY" and latest["close"] < state.get("m5_swing_point", 0):
+                # Invalidate if price breaks the swing extreme before inversion.
+                # `m5_swing_point` is initialised to None, so `.get(key, default)` does
+                # NOT protect these comparisons — the key exists. Resolve it explicitly
+                # so a None/NaN reference can never raise here (audit §10.5).
+                swing_ref = state.get("m5_swing_point")
+                swing_valid = swing_ref is not None and not pd.isna(swing_ref)
+                if swing_valid and state["bias"] == "BUY" and latest["close"] < swing_ref:
                     state["status"] = "AWAIT_KEY_LEVEL"
                     self.log_event(f"[{symbol}] Bias IFVG setup failed (Swing low broken).", category="BIAS_IFVG")
                     return None
-                elif state["bias"] == "SELL" and latest["close"] > state.get("m5_swing_point", float('inf')):
+                elif swing_valid and state["bias"] == "SELL" and latest["close"] > swing_ref:
                     state["status"] = "AWAIT_KEY_LEVEL"
                     self.log_event(f"[{symbol}] Bias IFVG setup failed (Swing high broken).", category="BIAS_IFVG")
                     return None
 
                 if triggered:
                     entry = latest["close"]
-                    sl = state.get("m5_swing_point", entry * 0.99 if state["bias"]=="BUY" else entry * 1.01)
-                    
+
+                    # ── Missing structural reference = no setup (audit §10.5) ──
+                    # This used to fall back to `entry * 0.99` — a 1%-of-price stop,
+                    # i.e. ~80 pips on USDCHF or ~200 points on NAS100. A missing dict
+                    # key silently swung the stop distance (and therefore the position
+                    # size) by ~80x with no log line. A missing swing reference means
+                    # there is no setup, not a setup with an arbitrary stop.
+                    if not swing_valid:
+                        self.log_event(
+                            f"[{symbol}] IFVG inversion confirmed but m5_swing_point is missing — "
+                            f"no structural stop reference, discarding setup (no signal).",
+                            level="WARN",
+                            category="BIAS_IFVG",
+                        )
+                        state["status"] = "AWAIT_KEY_LEVEL"
+                        return None
+
+                    atr = calculate_atr(candles, 14)
+                    pip_size = get_pip_size(symbol) or 0.0001
+
+                    # Structural stop + sl_buffer_atr_mult cushion + cost floors
+                    # (audit §10.3 / §10.4 — sl_buffer_atr_mult was previously dead
+                    # in this engine: the identifier appeared nowhere in the file).
+                    sl_dist, floored = self._resolve_sl_distance(
+                        symbol, entry, float(swing_ref), atr, pip_size
+                    )
+                    state["sl_floored"] = floored
+
                     # Use configurable RR target (default 2.0)
                     target_rr = getattr(self.params, 'target_rr', 2.0)
                     if state["bias"] == "BUY":
-                        tp = entry + (entry - sl) * target_rr
+                        sl = entry - sl_dist
+                        tp = entry + sl_dist * target_rr
                     else:
-                        tp = entry - (sl - entry) * target_rr
-                        
+                        sl = entry + sl_dist
+                        tp = entry - sl_dist * target_rr
+
+                    # Displacement of the inversion close beyond the IFVG boundary,
+                    # in ATR terms — a confluence input, see _confluence_score().
+                    boundary = fvg["top"] if state["bias"] == "BUY" else fvg["bottom"]
+                    displacement_atr = (abs(entry - boundary) / atr) if atr > 0 else None
+                    confluence_score = self._confluence_score(state, displacement_atr)
+
+                    # Full day-stop rule, now against a REAL confluence score: after
+                    # one loss only a genuinely A+ setup may be the second trade.
+                    if not self._can_trade_today(state, candidate_confluence=confluence_score):
+                        self.log_event(
+                            f"[{symbol}] Setup rejected by day-stop rule: confluence "
+                            f"{confluence_score} < a_plus_confluence_threshold "
+                            f"{getattr(self.params, 'a_plus_confluence_threshold', 85)} "
+                            f"after {state.get('losses_today', 0)} loss(es) today.",
+                            category="BIAS_IFVG",
+                        )
+                        state["status"] = "AWAIT_KEY_LEVEL"
+                        return None
+
                     state["status"] = "AWAIT_KEY_LEVEL"
                     state["trades_today"] += 1
-                    
+
                     return TradeSignal(
                         strategy_id="BiasIFVG_v1",
                         symbol=symbol,
@@ -362,9 +591,16 @@ class BiasIFVGEngine(BaseStrategy):
                         entry_price=entry,
                         stop_loss=sl,
                         take_profit=tp,
-                        confluence_score=85,
+                        confluence_score=confluence_score,
                         timestamp=float(latest.get("time", current_time.timestamp())),
-                        metadata={"setup": "BIAS_IFVG"}
+                        metadata={
+                            "setup": "BIAS_IFVG",
+                            "sl_pips": round(sl_dist / pip_size, 2),
+                            "sl_floored": floored,
+                            "swing_point": float(swing_ref),
+                            "confluent_levels": int(state.get("confluent_level_count", 0) or 0),
+                            "displacement_atr": round(displacement_atr, 3) if displacement_atr is not None else None,
+                        }
                     )
 
         return None

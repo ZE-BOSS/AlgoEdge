@@ -28,11 +28,15 @@ from backend.backtester.engine import (
     _to_epoch_seconds,
     _resolve_sl_tp_hit,
     _gap_adjusted_fill_price,
+    CostModelMixin,
+    validate_at_fill_price,
+    _breakeven_stop,
 )
+from backend.backtester.report import apply_bar_level_drawdown, apply_leg_level_hit_rates
 
 logger = get_logger(__name__)
 
-class PortfolioBacktestEngine:
+class PortfolioBacktestEngine(CostModelMixin):
     def __init__(self, risk_config: dict[str, Any]):
         # Bug 5 fix: mark as backtest so CircuitBreaker skips cb_state.json
         # load/save on every position close (was causing file I/O on every bar,
@@ -63,22 +67,44 @@ class PortfolioBacktestEngine:
             "total_evaluated": 0,
             "strategy_rejections": {},
             "risk_rejections": {},
+            # Task 1 parity with engine.py: signals that cleared every pre-trade
+            # gate but failed re-validation against the ACTUAL FILL price.
+            "fill_rejections": {},
             "errors": 0,
             "approved": 0
         }
         self.run_logs = []
-        # Simulation cost params
-        self._slippage_pips = float(risk_config.get("slippage_pips", 0.0))
-        self._commission_per_lot = float(risk_config.get("commission_per_lot", 0.0))
-        self._spread_pips = float(risk_config.get("spread_pips", 0.0))
+        # ── Simulation costs (Task 2) ──
+        # Resolved lazily PER SYMBOL via CostModelMixin._costs_for(): explicit user
+        # values win, anything unset ("auto"/absent) is sourced from live MT5 or
+        # asset-class broker defaults instead of the old silent 0.0. Per-symbol
+        # resolution matters far more here than in the single-symbol engine, since
+        # a portfolio can mix FX, indices and synthetics with wildly different
+        # spread/commission/swap profiles.
+        self._init_cost_model()
         # Wick simulation flag
         self._simulate_wicks = bool(risk_config.get("simulate_wicks", True))
 
-    def _calc_pnl(self, direction: str, entry: float, exit_price: float, volume: float, symbol: str) -> float:
+    def _calc_pnl(
+        self,
+        direction: str,
+        entry: float,
+        exit_price: float,
+        volume: float,
+        symbol: str,
+        entry_time: Any = None,
+        exit_time: Any = None,
+    ) -> float:
         """
         Calculate P&L with simulation costs applied.
-        Matches engine.py _calc_pnl exactly (slippage, spread, commission deducted).
+        Matches engine.py _calc_pnl exactly (slippage, spread, commission and
+        overnight swap deducted, each resolved per-symbol — see
+        backend.backtester.engine.resolve_effective_costs).
+
+        Swap is only charged when BOTH timestamps are supplied, i.e. on real
+        closes; floating-equity marks pass neither.
         """
+        costs = self._costs_for(symbol)
         info = get_symbol_info(symbol)
         tick_value = info.get("tick_value", 1.0)
         tick_size  = info.get("tick_size",  0.00001)
@@ -95,8 +121,9 @@ class PortfolioBacktestEngine:
         value_per_unit_move = tick_value / tick_size
 
         # Apply slippage: shift effective entry against the trade direction
-        if self._slippage_pips > 0 and pip_size > 0:
-            slippage_price = self._slippage_pips * pip_size
+        slippage_pips = costs["slippage_pips"]
+        if slippage_pips > 0 and pip_size > 0:
+            slippage_price = slippage_pips * pip_size
             if _is_buy(direction):
                 entry = entry + slippage_price  # BUY fills higher (worse)
             else:
@@ -108,13 +135,19 @@ class PortfolioBacktestEngine:
             raw_pnl = -raw_pnl
 
         # Deduct spread cost (pip cost of crossing bid/ask at entry)
-        if self._spread_pips > 0 and pip_size > 0:
-            spread_cost = self._spread_pips * pip_size * value_per_unit_move * volume
+        spread_pips = costs["spread_pips"]
+        if spread_pips > 0 and pip_size > 0:
+            spread_cost = spread_pips * pip_size * value_per_unit_move * volume
             raw_pnl -= spread_cost
 
         # Deduct round-turn commission
-        if self._commission_per_lot > 0:
-            raw_pnl -= self._commission_per_lot * volume
+        commission_per_lot = costs["commission_per_lot"]
+        if commission_per_lot > 0:
+            raw_pnl -= commission_per_lot * volume
+
+        # Task 3: overnight financing (signed, MT5 convention: negative = charge)
+        if entry_time is not None and exit_time is not None:
+            raw_pnl += self._swap_cost(direction, volume, symbol, entry_time, exit_time)
 
         return raw_pnl
 
@@ -138,7 +171,13 @@ class PortfolioBacktestEngine:
         self.prop_firm_validator._alerts_sent = set()
         
         logger.info("[PORTFOLIO] ═══ Starting global portfolio engine ═══")
-        
+
+        # Task 2: resolve and log transaction costs per symbol up-front, so the
+        # run log states which costs were applied and their provenance
+        # (USER / MT5 / ASSET_CLASS_DEFAULT) before any trade is simulated.
+        for _sym in portfolio_data.keys():
+            self._costs_for(_sym)
+
         all_timestamps = set()
         for sym, df in portfolio_data.items():
             if 'time' in df.columns:
@@ -287,19 +326,35 @@ class PortfolioBacktestEngine:
                 if is_crashboom and pos["bars_held"] >= 400:
                     pos["exit_price"] = current_price
                     pos["exit_reason"] = "TIME_LIMIT"
-                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym)
+                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym, pos.get("entry_time"), current_time)
                     closed_this_bar.append(pos)
                     continue
 
+                # Task 4: hard_close_time now actually reaches the position dict
+                # (see the new_pos construction below) — before, it was never copied
+                # out of sig["metadata"], so this lookup always returned None and the
+                # whole session-end rule was dead code in this engine too.
                 hard_close_time = pos.get("hard_close_time")
                 if hard_close_time:
                     import pytz  # noqa: F811 — kept for compatibility with older references
-                    et = current_time_dt.astimezone(pytz.timezone("America/New_York"))
+                    _et_tz = pytz.timezone("America/New_York")
+                    et = current_time_dt.astimezone(_et_tz)
                     time_str = et.strftime("%H:%M")
-                    if time_str >= hard_close_time:
+                    # Also close once the ET calendar date has advanced past entry's:
+                    # a bare "HH:MM >=" compare wraps at ET midnight and would let a
+                    # position run a further ~24h. Mirrors engine.py.
+                    _entry_et_date = pos.get("_entry_et_date")
+                    if _entry_et_date is None:
+                        _entry_secs = _to_epoch_seconds(pos.get("entry_time"))
+                        _entry_et_date = (
+                            datetime.fromtimestamp(_entry_secs, tz=timezone.utc).astimezone(_et_tz).date()
+                            if _entry_secs is not None else et.date()
+                        )
+                        pos["_entry_et_date"] = _entry_et_date
+                    if time_str >= hard_close_time or et.date() > _entry_et_date:
                         pos["exit_price"] = current_price
                         pos["exit_reason"] = "SESSION_END"
-                        pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym)
+                        pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym, pos.get("entry_time"), current_time)
                         closed_this_bar.append(pos)
                         continue
 
@@ -354,23 +409,23 @@ class PortfolioBacktestEngine:
                     # perfect SL fill when the bar's open already gapped past SL.
                     _sl_gapped = (open_p <= pos["stop_loss"]) if pos["direction"] == "BUY" else (open_p >= pos["stop_loss"])
                     if _sl_gapped:
-                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["stop_loss"], sym, self._slippage_pips)
+                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["stop_loss"], sym, self._costs_for(sym)["slippage_pips"])
                         pos["gap_fill"] = True
                     else:
                         pos["exit_price"] = pos["stop_loss"]
                     pos["exit_reason"] = "TRAIL_SL" if pos.get("trail_applied") else ("BE_SL" if pos.get("be_applied") else "SL")
-                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym)
+                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym, pos.get("entry_time"), current_time)
                     closed_this_bar.append(pos)
                     continue
                 elif tp_hit:
                     _tp_gapped = (open_p >= pos["take_profit"]) if pos["direction"] == "BUY" else (open_p <= pos["take_profit"])
                     if _tp_gapped:
-                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["take_profit"], sym, self._slippage_pips)
+                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["take_profit"], sym, self._costs_for(sym)["slippage_pips"])
                         pos["gap_fill"] = True
                     else:
                         pos["exit_price"] = pos["take_profit"]
                     pos["exit_reason"] = f"TP{pos.get('tp_level', 1)}"
-                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym)
+                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym, pos.get("entry_time"), current_time)
                     closed_this_bar.append(pos)
                     if pos.get("tp_level") == 1:
                         tp1_hit_groups.add(pos.get("group_id"))
@@ -396,15 +451,30 @@ class PortfolioBacktestEngine:
             if tp1_hit_groups:
                 for pos in self.open_positions:
                     if pos.get("group_id") in tp1_hit_groups and pos not in closed_this_bar:
-                        pip_size = get_pip_size(pos.get("symbol", ""))
-                        buffer = self.risk_config.get("be_buffer_pips", 2.0) * pip_size
+                        _sym = pos.get("symbol", "")
+                        pip_size = get_pip_size(_sym)
+                        # Market reference for this position's own symbol — the outer
+                        # `current_price` belongs to whichever symbol the bar loop is on,
+                        # which is not necessarily this position's.
+                        _mkt = pos.get("_last_known_close", pos["entry_price"])
+                        _atr = symbol_cache.get(_sym, {}).get("atr", {}).get(current_time, 0.0)
+                        # Clamped BE — see _breakeven_stop() in engine.py for why the clamp
+                        # exists (it prevented a stop being placed beyond the market and
+                        # force-filled as a phantom gap, fabricating ~+1R on every BE exit).
+                        new_sl = _breakeven_stop(
+                            direction=pos["direction"],
+                            entry_price=pos["entry_price"],
+                            current_price=_mkt,
+                            pip_size=pip_size,
+                            atr=_atr,
+                            risk_config=self.risk_config,
+                            spread_pips=self._costs_for(_sym)["spread_pips"],
+                        )
                         if pos["direction"] == "BUY":
-                            new_sl = pos["entry_price"] + buffer
                             if new_sl > pos["stop_loss"]:
                                 pos["stop_loss"] = new_sl
                                 pos["be_applied"] = True
                         else:
-                            new_sl = pos["entry_price"] - buffer
                             if new_sl < pos["stop_loss"]:
                                 pos["stop_loss"] = new_sl
                                 pos["be_applied"] = True
@@ -412,6 +482,9 @@ class PortfolioBacktestEngine:
             positions_to_remove = []
             for pos in closed_this_bar:
                 pos["exit_time"] = current_time
+                # Task 6: leg records kept status="OPEN" even after exit_price/
+                # exit_reason/pnl/exit_time were all populated.
+                pos["status"] = "CLOSED"
                 try:
                     # current_time is drawn from global_timeline, which is
                     # built from df['time'].values (a numpy array) — so each
@@ -565,6 +638,60 @@ class PortfolioBacktestEngine:
                     _bar_for_fill["open"] if _bar_for_fill and "open" in _bar_for_fill else sig["entry_price"]
                 )
 
+                # ── Task 1: re-validate SL/TP against the ACTUAL FILL price ──
+                # Same defect and same fix as engine.py: the risk engine validated
+                # SL-vs-entry using the strategy's theoretical signal entry, but
+                # legs fill at the next bar's open. When that open gaps across the
+                # stop, the position opens with SL on the wrong side, the risk
+                # distance collapses to a fraction of a pip and sizing explodes.
+                # Live trading rejects exactly these (mt5/order_manager.py's
+                # stale-signal guard), so booking them here is a backtest-vs-live
+                # divergence, not conservatism.
+                #
+                # Validated for EVERY leg BEFORE any state is mutated (run log,
+                # circuit-breaker notification, position creation) so a rejected
+                # group is skipped atomically and can never be left half-created.
+                _fill_costs = self._costs_for(symbol)
+                _fill_reject_key = ""
+                _fill_reject_detail = ""
+                for _lvl in tp_levels:
+                    _ok, _key, _detail = validate_at_fill_price(
+                        sig["direction"],
+                        bar_open_price,
+                        sig["stop_loss"],
+                        _lvl.tp_price,
+                        symbol,
+                        stops_level_pips=_fill_costs["stops_level_pips"],
+                        spread_pips=_fill_costs["spread_pips"],
+                    )
+                    if not _ok:
+                        _fill_reject_key, _fill_reject_detail = _key, _detail
+                        break
+
+                if _fill_reject_key:
+                    logger.warning(
+                        f"[PORTFOLIO] ❌ Fill-time rejection ({_fill_reject_key}) {symbol} "
+                        f"signal_entry={sig['entry_price']:.5f} fill={bar_open_price:.5f} "
+                        f"sl={sig['stop_loss']:.5f}: {_fill_reject_detail}"
+                    )
+                    # Undo the optimistic "approved" increment so the funnel balances.
+                    self.rejection_funnel["approved"] -= 1
+                    self.invalid_signals += 1
+                    _fr = self.rejection_funnel.setdefault("fill_rejections", {})
+                    _fr[_fill_reject_key] = _fr.get(_fill_reject_key, 0) + 1
+                    # Also surface in risk_rejections so the existing rejection-funnel
+                    # UI shows it rather than the signal vanishing silently.
+                    self.rejection_funnel["risk_rejections"][_fill_reject_key] = (
+                        self.rejection_funnel["risk_rejections"].get(_fill_reject_key, 0) + 1
+                    )
+                    self.run_logs.append({
+                        "time": _epoch_to_iso(sig_time),
+                        "level": "WARNING",
+                        "category": "BACKTEST_LOG",
+                        "message": f"Rejected at fill ({_fill_reject_key}) {sig['direction']} {symbol}: {_fill_reject_detail}",
+                    })
+                    continue
+
                 self.run_logs.append({
                     "time": _epoch_to_iso(sig_time),
                     "level": "INFO",
@@ -655,6 +782,14 @@ class PortfolioBacktestEngine:
                         "confluence_score": sig.get("confluence_score", 0),
                         "balance_before": balance,
                         "status": "OPEN",
+                        # Task 4: hard_close_time (e.g. VWAP's 15:55 ET flat rule)
+                        # was set by the strategy but never lifted out of
+                        # sig["metadata"] onto the position, so the SESSION_END
+                        # force-close branch above always read None and was dead
+                        # code — positions ran for days past their mandated flat.
+                        # (Storing the whole `metadata` dict is not enough: the
+                        # close check reads pos["hard_close_time"] directly.)
+                        "hard_close_time": sig.get("metadata", {}).get("hard_close_time"),
                         "entry_confirmations": entry_confirmations,
                         "entry_snapshot_b64": sig.get("metadata", {}).get("entry_snapshot_b64", ""),
                         "original_signal": sig,
@@ -695,7 +830,8 @@ class PortfolioBacktestEngine:
                     pos["exit_time"] = global_timeline[-1]
 
                 pos["exit_reason"] = "END_OF_BACKTEST"
-                pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
+                pos["status"] = "CLOSED"  # Task 6
+                pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""), pos.get("entry_time"), pos.get("exit_time"))
                 pos["duration_minutes"] = _calc_duration_minutes(pos.get("entry_time"), pos.get("exit_time"))
                 pos["entry_time_iso"] = _epoch_to_iso(pos.get("entry_time"))
                 pos["exit_time_iso"] = _epoch_to_iso(pos.get("exit_time"))
@@ -728,6 +864,15 @@ class PortfolioBacktestEngine:
         # Attach rejection funnel directly to the RiskReport object (same pattern as engine.py)
         report.rejection_funnel = self.rejection_funnel
 
+        # ── Task 5: TP/SL/BE/TRAIL hit rates from LEG-level exits ──
+        # generate_risk_report only sees grouped trades, whose exit_reason is the
+        # group's terminal reason, so legs that genuinely banked TP1 before the
+        # group closed on BE_SL/SL were never counted.
+        hit_rates = apply_leg_level_hit_rates(report, self.trades, grouped_trades)
+
+        # ── Task 6: drawdown from the BAR-level equity curve ──
+        dd = apply_bar_level_drawdown(report, self.equity_curve, initial_balance)
+
         total_pnl = balance - initial_balance
 
         results = {
@@ -743,10 +888,23 @@ class PortfolioBacktestEngine:
             "report": report,
             "rejection_funnel": self.rejection_funnel,
             "run_logs": self.run_logs,
-            "prop_firm_breach_days": sorted(list(breach_days))
+            "prop_firm_breach_days": sorted(list(breach_days)),
+            # Task 2: per-symbol record of the transaction costs this run assumed
+            # and where each value came from (USER vs MT5 vs asset-class default).
+            "cost_model": self.cost_model,
         }
 
         logger.info(f"[PORTFOLIO] ═══ Global backtest complete ═══")
         logger.info(f"[PORTFOLIO] Final Balance: ${balance:.2f} | Trades: {len(self.trades)}")
+        logger.info(
+            f"[PORTFOLIO] Leg-level hit rates: "
+            f"TP1={hit_rates['tp1_hit_rate'] * 100:.1f}% TP2={hit_rates['tp2_hit_rate'] * 100:.1f}% "
+            f"TP3={hit_rates['tp3_hit_rate'] * 100:.1f}% SL={hit_rates['sl_hit_rate'] * 100:.1f}% "
+            f"BE={hit_rates['be_hit_rate'] * 100:.1f}% TRAIL={hit_rates['trail_hit_rate'] * 100:.1f}% "
+            f"| max_dd={dd['max_drawdown_pct'] * 100:.2f}% (bar-level)"
+        )
+        if self.rejection_funnel.get("fill_rejections"):
+            logger.info(f"[PORTFOLIO] Fill-time rejections: {self.rejection_funnel['fill_rejections']}")
+        logger.info(f"[PORTFOLIO] Cost model applied: {self.cost_model}")
         
         return results

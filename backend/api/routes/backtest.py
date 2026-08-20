@@ -84,10 +84,27 @@ class BacktestRequest(BaseModel):
     # ── Multi-Strategy Filters ──
     session_filter_enabled: bool = True
     manual_bias_overrides: dict[str, Any] = {}
-    # ── Simulation Costs (BUG-8) — auto-populated from MT5 when connected ──
-    slippage_pips: float = 0.0       # Entry/exit slippage per trade in pips
-    commission_per_lot: float = 0.0  # Round-turn commission in account currency per lot
-    spread_pips: float = 0.0         # Fixed spread cost applied at entry in pips
+    # ── Simulation Costs — broker-sourced by default ──
+    # `None` (the default) means "NOT explicitly set by the user": the engine
+    # resolves the value from backend.risk.broker_costs.get_broker_costs(),
+    # which prefers live MT5 symbol data and falls back to asset-class averages.
+    # These were previously `float = 0.0`, which made "unset" indistinguishable
+    # from "deliberately zero" — so EVERY run was silently executed with zero
+    # transaction costs, materially overstating every strategy's edge.
+    # A caller that genuinely wants a costless run passes 0.0 explicitly, and any
+    # previously-saved params_snapshot (which stores literal 0.0) replays
+    # unchanged. The string "auto" is also accepted as an explicit request for
+    # broker-sourced defaults.
+    slippage_pips: float | str | None = None       # Entry/exit slippage per trade in pips
+    commission_per_lot: float | str | None = None  # Round-turn commission in account currency per lot
+    spread_pips: float | str | None = None         # Fixed spread cost applied at entry in pips
+    # Overnight financing per lot per day, signed MT5-style (negative = charge).
+    # Unset -> broker-sourced. Applied per rollover crossed on multi-day holds.
+    swap_long_per_lot_per_day: float | str | None = None
+    swap_short_per_lot_per_day: float | str | None = None
+    # Broker minimum stop distance in pips, used to reject positions whose SL/TP
+    # would be un-placeable at the actual fill price. Unset -> broker-sourced.
+    stops_level_pips: float | str | None = None
     # ── Wick Simulation (BUG-9) ──
     simulate_wicks: bool = True      # Use OHLC shadow-weighted model for ambiguous SL/TP bars
 
@@ -144,10 +161,27 @@ class PortfolioBacktestRequest(BaseModel):
     # ── Risk Safety Cap ──
     max_risk_hard_cap_pct: float = 3.0  # Absolute safety cap from PropFirmParams
     session_filter_enabled: bool = True
-    # ── Simulation Costs (BUG-8) — auto-populated from MT5 when connected ──
-    slippage_pips: float = 0.0       # Entry/exit slippage per trade in pips
-    commission_per_lot: float = 0.0  # Round-turn commission in account currency per lot
-    spread_pips: float = 0.0         # Fixed spread cost applied at entry in pips
+    # ── Simulation Costs — broker-sourced by default ──
+    # `None` (the default) means "NOT explicitly set by the user": the engine
+    # resolves the value from backend.risk.broker_costs.get_broker_costs(),
+    # which prefers live MT5 symbol data and falls back to asset-class averages.
+    # These were previously `float = 0.0`, which made "unset" indistinguishable
+    # from "deliberately zero" — so EVERY run was silently executed with zero
+    # transaction costs, materially overstating every strategy's edge.
+    # A caller that genuinely wants a costless run passes 0.0 explicitly, and any
+    # previously-saved params_snapshot (which stores literal 0.0) replays
+    # unchanged. The string "auto" is also accepted as an explicit request for
+    # broker-sourced defaults.
+    slippage_pips: float | str | None = None       # Entry/exit slippage per trade in pips
+    commission_per_lot: float | str | None = None  # Round-turn commission in account currency per lot
+    spread_pips: float | str | None = None         # Fixed spread cost applied at entry in pips
+    # Overnight financing per lot per day, signed MT5-style (negative = charge).
+    # Unset -> broker-sourced. Applied per rollover crossed on multi-day holds.
+    swap_long_per_lot_per_day: float | str | None = None
+    swap_short_per_lot_per_day: float | str | None = None
+    # Broker minimum stop distance in pips, used to reject positions whose SL/TP
+    # would be un-placeable at the actual fill price. Unset -> broker-sourced.
+    stops_level_pips: float | str | None = None
     # ── Wick Simulation (BUG-9) ──
     simulate_wicks: bool = True      # Use OHLC shadow-weighted model for ambiguous SL/TP bars
 
@@ -551,11 +585,21 @@ async def run_backtest_endpoint(
                 "manual_bias_overrides": req.manual_bias_overrides,
                 "prop_firm": req.prop_firm,
                 "max_risk_hard_cap_pct": req.max_risk_hard_cap_pct,
-                # Simulation costs and wick simulation
+                # Simulation costs and wick simulation.
+                # None values are passed through deliberately: the engine reads
+                # them as "unset" and sources the value from broker data
+                # (live MT5 -> asset-class default). Explicit numbers still win.
                 "slippage_pips": req.slippage_pips,
                 "commission_per_lot": req.commission_per_lot,
                 "spread_pips": req.spread_pips,
+                "swap_long_per_lot_per_day": req.swap_long_per_lot_per_day,
+                "swap_short_per_lot_per_day": req.swap_short_per_lot_per_day,
+                "stops_level_pips": req.stops_level_pips,
                 "simulate_wicks": req.simulate_wicks,
+                # Strategy attribution: signal dicts carry no strategy_id, so the
+                # engine falls back to this when stamping trades (was "UNKNOWN"
+                # on every saved grouped_trade).
+                "strategy_id": req.strategy_id,
                 **req.risk_config,
             }
 
@@ -622,7 +666,16 @@ async def run_backtest_endpoint(
                 "trades": results.get("trades", []),
                 "grouped_trades": results.get("grouped_trades", []),
                 "run_logs": getattr(engine, 'run_logs', [])[-100:],  # Only keep last 100 to prevent UI/Redis freezing
-                "params_snapshot": req.model_dump() if hasattr(req, "model_dump") else req.dict(),
+                # params_snapshot records the REQUEST as submitted. Merge in the
+                # cost model the engine actually resolved, so a saved backtest
+                # records what costs it assumed and where each came from
+                # (USER vs MT5 vs ASSET_CLASS_DEFAULT) — otherwise an "auto"/None
+                # request is unreproducible after the fact.
+                "params_snapshot": {
+                    **(req.model_dump() if hasattr(req, "model_dump") else req.dict()),
+                    "resolved_cost_model": results.get("cost_model", {}),
+                },
+                "cost_model": results.get("cost_model", {}),
                 "report": {
                     "win_rate": report.win_rate if report else 0,
                     "profit_factor": report.profit_factor if report else 0,
@@ -793,10 +846,15 @@ async def run_portfolio_backtest_endpoint(
                 "max_weekly_profit": req.max_weekly_profit,
                 "prop_firm": req.prop_firm,
                 "max_risk_hard_cap_pct": req.max_risk_hard_cap_pct,
-                # Simulation costs and wick simulation
+                # Simulation costs and wick simulation.
+                # None -> engine sources the value from broker data
+                # (live MT5 -> asset-class default). Explicit numbers still win.
                 "slippage_pips": req.slippage_pips,
                 "commission_per_lot": req.commission_per_lot,
                 "spread_pips": req.spread_pips,
+                "swap_long_per_lot_per_day": req.swap_long_per_lot_per_day,
+                "swap_short_per_lot_per_day": req.swap_short_per_lot_per_day,
+                "stops_level_pips": req.stops_level_pips,
                 "simulate_wicks": req.simulate_wicks,
             }
 
@@ -1059,6 +1117,13 @@ async def run_portfolio_backtest_endpoint(
                 "trades": results.get("trades", []),
                 "grouped_trades": results.get("grouped_trades", []),
                 "rejection_funnel": results.get("rejection_funnel", {}),
+                # Per-symbol transaction costs the engine actually applied, with
+                # provenance (USER / MT5 / ASSET_CLASS_DEFAULT) for each field.
+                "cost_model": results.get("cost_model", {}),
+                "params_snapshot": {
+                    **(req.model_dump() if hasattr(req, "model_dump") else req.dict()),
+                    "resolved_cost_model": results.get("cost_model", {}),
+                },
                 "run_logs": (portfolio_run_logs + results.get("run_logs", []))[-100:],  # Merge strategy + engine logs; keep last 100
                 "report": {
                     "win_rate": getattr(report, 'win_rate', 0) if report else results.get("win_rate", 0),

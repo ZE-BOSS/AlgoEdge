@@ -94,6 +94,29 @@ Source specifies a **fixed 80-point stop** on NQ. That number is calibrated to N
 - **On NQ/MNQ (or other prop-firm index CFDs tracking the same underlying):** SL = 80 points, as specified.
 - **On any other instrument:** convert to an ATR-multiple instead of a fixed point value — calibrate k such that k×ATR(15-min) ≈ 80 points under NQ's own volatility at the time this was filmed, then apply that same k elsewhere. This keeps the stop's *relative* size consistent even though the absolute point value won't.
 
+> **RESOLVED 2026-08 — k is calibrated, and the instrument split is now explicit in config.**
+> Three incompatible conventions for `sl_points` were in circulation: the engine's
+> `sl_points × get_pip_size()` (→ **80 pips** on USDCHF, which turned a 10-minute M5 scalp
+> into a ~6.9-**day** hold in the real runs); the frontend hint "170 for USDCHF = 17 pips"
+> (a *pipette* convention the engine does not implement); and this section's ATR rule.
+> **This section wins.** `VWAPParams.sl_method` now defaults to `"auto"`: index CFDs /
+> index futures use `sl_points` (where a "point" is a native unit and `get_pip_size()`
+> correctly returns 1.0), everything else uses the ATR multiple.
+>
+> **k = 3.0, not 1.0.** The old `sl_atr_multiplier` default of 1.0 was an unexamined
+> placeholder — this section never specified 1.0. NQ's ATR(M15) at filming was ≈45 points,
+> giving k ≈ 1.8 **on M15**; but `engine.py` feeds `calculate_atr()` the **M5** entry bars,
+> and M5 ATR is ≈1/1.7 of M15 ATR, so the equivalent M5 k is ≈ **3.0**. Measured against
+> the user's real USDCHF ATR(M5) distances (min 1.64 / p25 2.83 / median 3.40 / p75 4.22 /
+> max 9.21 pips), k=3.0 yields a median stop of **10.2 pips** ≈ 5× the 2.0-pip spread.
+> At the old k=1.0 the median stop was 3.4 pips — under 2× spread, i.e. not a stop.
+>
+> **An ATR multiple alone is insufficient.** Even at k=3.0, the measured ATR minimum gives
+> a 4.9-pip stop, only ~2.5× spread. `min_sl_pips` (8.0 = 4× the USDCHF spread) and
+> `min_sl_spread_mult` (4.0) are the absolute backstop that actually prevents the failure
+> mode in a dead low-volatility session. If the engine is ever changed to feed M15 bars,
+> divide k by ~1.7.
+
 ---
 
 ## 6. Risk Parameter Engine Hand-off — flag before wiring this in
@@ -107,6 +130,15 @@ Source specifies a **fixed 80-point stop** on NQ. That number is calibrated to N
 
 - **Override the grid for this strategy specifically**, using the source's own 40pt/50pt fixed targets, to have any chance of the win rate claim holding. Breaks the "risk engine owns TP" convention, but that convention was built around R-multiple strategies — this one isn't.
 - **Use the standard 1R/3R/5R grid anyway**, but treat the 64–65% win rate as void. You'd be running a structurally different strategy that happens to share the same entry trigger.
+
+> **RESOLVED 2026-08 — option two: the R-grid is used, and the 64–65% win-rate claim is
+> treated as void.** The arithmetic in the paragraph below is decisive on its own: a long
+> target whose expectancy is **negative before costs** cannot be rescued by better cost
+> modelling, so implementing the source's fixed 40pt/50pt targets would be implementing a
+> known-losing exit rule. `VWAPParams.target_rr` is added at **2.0**: with a ~10-pip stop
+> and ~3.0 pips of USDCHF round-trip friction (≈0.30R), a 1R target nets 0.70R against a
+> 1.30R loss → 65% break-even hit rate, i.e. the entire claimed edge with zero margin.
+> At 2R the same trade nets 1.70R against 1.30R → 43% break-even hit rate.
 
 **Back-of-envelope sanity check on the source's own numbers:** at ~64.5% win rate, expectancy on the long side is roughly 0.645×40 − 0.355×80 ≈ **−2.6 points** (slightly negative before costs); shorts come out roughly +3.85 points. Blended, the edge is thin — a few points per trade before spread, commission, and slippage on futures. If the win rate drifts even slightly out-of-sample, the long side alone could go negative. This isn't a backtest, just arithmetic on the numbers as stated — worth keeping in mind regardless of which TP option you pick.
 

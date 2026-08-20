@@ -126,3 +126,51 @@ This stays the only risk figure the strategy calculates.
 | Tight-levels threshold | 0.2×ATR | 0.1–0.4×ATR | Controls when SL switches to cover both Head+Shoulder |
 | SL buffer | 0.05×ATR | 0–0.15×ATR | Extra room beyond the wick stop |
 | Invalidation zone source | Right Shoulder body | Right Shoulder / Left Shoulder / both | Which candle bodies define the retest box |
+| Tight-levels threshold | ~~0.2×ATR~~ **0.35×ATR** | 0.1–0.4×ATR | Raised — see note |
+| `sl_buffer_atr_mult` | **0.5** | 0–1.0 | Added — proportional cost cushion on top of the wick stop |
+| `min_sl_pips` / `min_sl_atr_mult` | **12.0 / 1.0** | — | Added — absolute + volatility-relative stop floors |
+| Session filter | ~~(none)~~ **enabled, 07:00–16:00 UTC** | — | Added — see note |
+
+### 9. Revision note — 2026-08 cost-realism audit
+
+§5's SL formula is correct as *geometry* but has **no cost model behind it**, and that gap
+is load-bearing. The retest entry sits inside the Invalidation Zone, which §6 bounds by
+shoulder **bodies**, while the stop sits at the shoulder **wick** — the two can be a
+fraction of a pip apart. Measured across 11 real USDCHF runs, APA's median stop was
+**3.47 pips with a minimum of 0.45 pips**, against a 1.5–2.5 pip spread: stops routinely
+placed *inside the cost of entry*, hit by bid/ask bounce at the instant of fill. 30% of
+legs exited within a single bar. Consequences:
+
+- **Untradeable sizes.** `risk$ / stop_distance` drove APA to **40 lots on a $25,000
+  account** — $4,000,000 notional, ~160× account leverage; MT5 rejects this with retcode
+  10019 (No money).
+- **Phantom profitability.** APA's realised per-trade expectancy is **−0.367R**. Its
+  positive dollar P&L came entirely from winners being sized 1.63× larger than losers —
+  a mechanical artifact of tight stops producing huge positions, not an edge.
+- **Negative under real costs.** With 2.0 pip spread + 0.4 slippage + $6/lot, APA goes
+  **+$6,283 → −$8,597**.
+
+Three deliberate deviations from this document follow:
+
+1. **Tight-levels threshold 0.2 → 0.35×ATR** (still inside the documented 0.1–0.4 range).
+   The tight-levels branch selects the *Head* wick, which is always further from entry
+   than the Right Shoulder wick — it is the **wider-stop** branch. Raising the threshold
+   biases the engine toward it.
+2. **`sl_buffer_atr_mult` 0.0 → 0.5, plus new `min_sl_pips` / `min_sl_atr_mult` floors.**
+   §5's 0.05×ATR buffer is ~0.35 pips on USDCHF M15 — under a quarter of the spread.
+   0.5×ATR adds ~3–4 pips (the proportional cushion); the 12-pip floor makes the
+   degenerate case impossible (the absolute backstop). 12 pips ≈ 4× the ~3.0-pip
+   round-trip friction, holding cost at ~0.25R instead of ~0.9R.
+   ⚠ `sl_buffer_atr_mult` **is** read by the engine; `min_sl_pips` / `min_sl_atr_mult`
+   are **not yet** and are inert until wired.
+3. **Session filter enabled, 07:00–16:00 UTC.** This document specifies no session filter,
+   but it was demonstrated on a chart, not a 24/5 FX feed. Left off, APA fires through the
+   Asian session where USDCHF spread widens to 3–5 pips and the M15 range collapses to
+   2–3 pips — precisely the regime that produced the sub-spread stops and the single-bar
+   exits. 07:00–16:00 UTC is London open through the London/NY overlap, where USDCHF depth
+   is best; 16:00–20:00 UTC is NY-only flow on a European cross.
+
+Sample-size caveat that applies to all of the above: APA's forensic sample is **43 trades
+on one symbol over 7 months**. That is far too small to infer an edge in either direction —
+these changes are justified by *cost arithmetic*, which is deterministic, not by measured
+performance, which is not.

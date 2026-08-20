@@ -10,9 +10,13 @@ export default function RiskSettings() {
   const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
 
+  // Every default below mirrors the authoritative backend RiskParams dataclass
+  // (backend/core/config_schema.py). This form posts each value explicitly, so
+  // a stale default here silently overrides the backend rather than deferring
+  // to it.
   const [config, setConfig] = useState({
-    risk_per_trade_pct: 1.0,
-    max_risk_hard_cap_pct: 3.0,
+    risk_per_trade_pct: 0.5,
+    max_risk_hard_cap_pct: 2.0,
     max_daily_drawdown_pct: 3.0,
     max_weekly_drawdown_pct: 6.0,
     max_daily_trades: 5,
@@ -22,15 +26,18 @@ export default function RiskSettings() {
     max_daily_profit: 500.0,
     max_weekly_profit: 2000.0,
     min_rr: 3.0,
-    be_trigger_rr: 1.0,
-    be_buffer_pips: 2.0,
+    be_trigger_rr: 1.5,
+    be_buffer_pips: 0.0,
+    be_buffer_atr_mult: 0.10,
+    min_sl_pips: 10.0,
+    max_account_leverage: 30.0,
     tp_count: 3,
-    tp1_rr: 1.0,
+    tp1_rr: 1.5,
     tp2_rr: 3.0,
     tp3_rr: 5.0,
     tp4_rr: 10.0,
     tp5_rr: 15.0,
-    tp_splits: '30,25,20,15,10',
+    tp_splits: '50,30,20',
     trail_method_tp2: 'ATR_TRAIL',
     trail_method_tp3: 'STRUCTURE_TRAIL',
     trail_method_tp4: 'ATR_TRAIL',
@@ -43,7 +50,7 @@ export default function RiskSettings() {
     atr_trail_multiplier_tp5: 1.5,
     trail_pips: 15,
     trail_pct: 0.5,
-    trail_activation_rr: 1.0,
+    trail_activation_rr: 1.5,
     trail_step_pips: 5.0,
     trail_structure_bars: 3,
     compounding_enabled: false,
@@ -69,8 +76,13 @@ export default function RiskSettings() {
     },
     // FEAT-1: Live strategy params
     vwap: {
+      sl_method: 'auto',
       sl_points: 80.0,
-      max_trades_per_day: 5,
+      sl_atr_multiplier: 3.0,
+      min_sl_pips: 8.0,
+      min_sl_spread_mult: 4.0,
+      target_rr: 2.0,
+      max_trades_per_day: 4,
     },
     crt: {
       min_sl_pips: 15.0,
@@ -78,7 +90,9 @@ export default function RiskSettings() {
       target_r_multiple: 1.5,
     },
     apa: {
-      sl_buffer_atr_mult: 0.0,
+      sl_buffer_atr_mult: 0.5,
+      min_sl_pips: 12.0,
+      min_sl_atr_mult: 1.0,
     },
   });
 
@@ -164,6 +178,8 @@ export default function RiskSettings() {
           <div><label>Risk Per Trade (%)</label><input type="number" step="0.1" value={config.risk_per_trade_pct} onChange={e => update('risk_per_trade_pct', +e.target.value)} /></div>
           <div><label>Max Risk Hard Cap (%)</label><input type="number" step="0.1" value={config.max_risk_hard_cap_pct} onChange={e => update('max_risk_hard_cap_pct', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute position sizer safety net</div></div>
           <div><label>Minimum R:R</label><input type="number" step="0.5" value={config.min_rr} onChange={e => update('min_rr', +e.target.value)} /></div>
+          <div><label>Min SL (pips)</label><input type="number" step="0.5" min="0" value={config.min_sl_pips} onChange={e => update('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Global stop floor. Prevents a sub-spread stop sizing into an untradeable position. Set 0 to disable.</div></div>
+          <div><label>Max Account Leverage (×)</label><input type="number" step="1" min="0" value={config.max_account_leverage} onChange={e => update('max_account_leverage', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Caps total notional against equity. Blocks the 100×+ sizes MT5 rejects with retcode 10019. Set 0 to disable.</div></div>
         </div>
       </div>
 
@@ -215,9 +231,10 @@ export default function RiskSettings() {
           {config.tp_count >= 5 && (
             <div><label>TP5 R:R</label><input type="number" step="0.5" value={config.tp5_rr} onChange={e => update('tp5_rr', +e.target.value)} /></div>
           )}
-          <div><label>TP Volume Split</label><input type="text" value={config.tp_splits} onChange={e => update('tp_splits', e.target.value)} placeholder="30,25,20,15,10" /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Comma-separated % per TP level (must sum to 100)</div></div>
+          <div><label>TP Volume Split</label><input type="text" value={config.tp_splits} onChange={e => update('tp_splits', e.target.value)} placeholder="50,30,20" /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Comma-separated % per TP level (must sum to 100)</div></div>
           <div><label>BE Trigger (R)</label><input type="number" step="0.5" value={config.be_trigger_rr} onChange={e => update('be_trigger_rr', +e.target.value)} /></div>
-          <div><label>BE Buffer (pips)</label><input type="number" value={config.be_buffer_pips} onChange={e => update('be_buffer_pips', +e.target.value)} /></div>
+          <div><label>BE Buffer (pips)</label><input type="number" step="0.5" min="0" value={config.be_buffer_pips} onChange={e => update('be_buffer_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Keep at 0. A non-zero pip buffer can put the break-even stop beyond the market, where it fills as fabricated profit. Use the ATR buffer instead.</div></div>
+          <div><label>BE Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={config.be_buffer_atr_mult} onChange={e => update('be_buffer_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Scale-aware break-even cushion, as a multiple of ATR(14). This is the safe way to sit slightly above entry.</div></div>
         </div>
       </div>
 
@@ -491,18 +508,62 @@ export default function RiskSettings() {
           {/* VWAP */}
           <div>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)', marginBottom: 8 }}>VWAP Strategy</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
               <div>
-                <label>SL Points (Fixed)</label>
+                <label>SL Method</label>
+                <select value={config.vwap?.sl_method ?? 'auto'}
+                  onChange={e => update('vwap', { ...config.vwap, sl_method: e.target.value })}>
+                  <option value="auto">Auto (by instrument class)</option>
+                  <option value="fixed_points">Fixed Points</option>
+                  <option value="atr_multiple">ATR Multiple</option>
+                </select>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Auto routes index CFDs and index futures to the fixed-points stop and everything else (FX, metals, crypto, synthetics) to the ATR multiple. Default: auto.
+                </div>
+              </div>
+              <div>
+                <label>SL Points (index only)</label>
                 <input type="number" step="1" min="10" value={config.vwap?.sl_points ?? 80}
                   onChange={e => update('vwap', { ...config.vwap, sl_points: +e.target.value })} />
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Fixed stop-loss distance in broker points for the VWAP strategy. Applies to live trading when VWAP is active. Default: 80 points.
+                  Stop distance in native INDEX points, used only when the resolved SL method is Fixed Points. Not a pipette figure — it does not apply to FX. Default: 80 points.
+                </div>
+              </div>
+              <div>
+                <label>SL ATR Multiplier</label>
+                <input type="number" step="0.1" min="0" value={config.vwap?.sl_atr_multiplier ?? 3.0}
+                  onChange={e => update('vwap', { ...config.vwap, sl_atr_multiplier: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Stop = this × ATR of the M5 entry bars, for every non-index instrument. 0 disables the ATR path. Default: 3.0.
+                </div>
+              </div>
+              <div>
+                <label>Min SL Pips (Floor)</label>
+                <input type="number" step="0.5" min="0" value={config.vwap?.min_sl_pips ?? 8.0}
+                  onChange={e => update('vwap', { ...config.vwap, min_sl_pips: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Absolute stop floor for the low-volatility tail, where 3×ATR alone is only ~2.5× spread. Lower than APA's 12 because VWAP is a scalper with a hard session close. Default: 8 pips.
+                </div>
+              </div>
+              <div>
+                <label>Min SL (× Spread)</label>
+                <input type="number" step="0.5" min="0" value={config.vwap?.min_sl_spread_mult ?? 4.0}
+                  onChange={e => update('vwap', { ...config.vwap, min_sl_spread_mult: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Instrument-neutral form of the floor above: SL must be at least this × the live spread, so it adapts to news-time spread blowouts. Default: 4.0×.
+                </div>
+              </div>
+              <div>
+                <label>Target R:R</label>
+                <input type="number" step="0.1" min="0" value={config.vwap?.target_rr ?? 2.0}
+                  onChange={e => update('vwap', { ...config.vwap, target_rr: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Reward-to-risk multiple applied to the realised stop distance. Default: 2.0R.
                 </div>
               </div>
               <div>
                 <label>Max Trades / Day</label>
-                <input type="number" step="1" min="1" value={config.vwap?.max_trades_per_day ?? 5}
+                <input type="number" step="1" min="1" value={config.vwap?.max_trades_per_day ?? 4}
                   onChange={e => update('vwap', { ...config.vwap, max_trades_per_day: +e.target.value })} />
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
                   Maximum signals the VWAP engine will generate per day (independent of, but also bounded by, the global Max Daily Trades circuit breaker above).
@@ -544,15 +605,30 @@ export default function RiskSettings() {
 
           {/* APA/SMC SL Buffer */}
           <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--green)', marginBottom: 8 }}>APA / SMC Strategy — SL Buffer</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--green)', marginBottom: 8 }}>APA / SMC Strategy — Stop-Loss Floors</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
               <div>
-                <label>SL Buffer (% of ATR)</label>
-                <input type="number" step="0.05" min="0" max="2" value={config.apa?.sl_buffer_atr_mult ?? 0}
+                <label>SL Buffer (× ATR)</label>
+                <input type="number" step="0.05" min="0" max="2" value={config.apa?.sl_buffer_atr_mult ?? 0.5}
                   onChange={e => update('apa', { ...config.apa, sl_buffer_atr_mult: +e.target.value })} />
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Extra cushion added beyond the structure extreme for the SL, expressed as a multiple of the 14-period ATR.
-                  E.g., 0.1 = 10% of ATR added as buffer. Prevents stops being clipped by micro wicks. Default: 0 (off).
+                  Extra cushion added beyond the structure extreme for the SL, as a multiple of ATR(14). At 0.5× a normal structural stop clears round-trip spread by roughly 1.5–2×. Default: 0.5.
+                </div>
+              </div>
+              <div>
+                <label>Min SL Pips (Hard Floor)</label>
+                <input type="number" step="0.5" min="0" value={config.apa?.min_sl_pips ?? 12.0}
+                  onChange={e => update('apa', { ...config.apa, min_sl_pips: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Absolute minimum stop distance. APA's retest entry can sit a fraction of a pip from the shoulder wick; 12 pips is ~4× round-trip friction. Set 0 to disable. Default: 12 pips.
+                </div>
+              </div>
+              <div>
+                <label>Min SL (× ATR)</label>
+                <input type="number" step="0.1" min="0" value={config.apa?.min_sl_atr_mult ?? 1.0}
+                  onChange={e => update('apa', { ...config.apa, min_sl_atr_mult: +e.target.value })} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                  Volatility-relative floor for regimes where 12 pips is itself noise. Whichever floor is larger wins. Set 0 to disable. Default: 1.0×.
                 </div>
               </div>
             </div>

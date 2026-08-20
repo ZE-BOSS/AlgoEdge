@@ -90,7 +90,27 @@ on_new_m5_candle(candle):
 | `earliest_valid_break_time` | 09:30 ET | Breaks before this are ignored |
 | `stop_buffer_points` | 5 (instrument-specific) | Calibrate per market |
 | `fixed_target_points` | 50 (instrument-specific) | Implementation-tuned default (was ~15 in the original framework examples); calibrate per market |
-| `sl_buffer_atr_mult` | 0.0 (disabled) | Extra ATR(14)-multiple SL buffer, applied on top of `stop_buffer_points` |
+| `sl_buffer_atr_mult` | ~~0.0 (disabled)~~ **1.0** | Extra ATR(14)-multiple SL buffer, applied on top of `stop_buffer_points` — see note |
+| `target_mode` | **"rr"** (was implicitly "points") | Added 2026-08 — `"rr"` = target is `target_rr` × realised stop; `"points"` = legacy `fixed_target_points` |
+| `target_rr` | **2.0** | R-multiple target used when `target_mode == "rr"` |
+
+> **Revision note — 2026-08 cost-realism audit.**
+> **`sl_buffer_atr_mult` 0.0 → 1.0.** The structural stop is (range_mid → range extreme) +
+> 5 points. The 08:00–08:15 ET candle on USDCHF is typically 6–10 pips tall, so half-range
+> is 3–5 pips and the whole stop was ~8–10 pips — only ~3–4× the ~2.5-pip all-in cost.
+> Adding 1.0 × ATR(M5) (~3 pips on USDCHF) lifts it to ~11–13 pips, i.e. 4–5× cost. Under
+> realistic costs this strategy went **+$1,752 → −$7,250** in the forensic re-run, and a
+> stop costing ~30% of R was the dominant term. Its measured expectancy was **−0.006R**.
+>
+> **`target_mode` added, defaulting to `"rr"`.** This resolves the third "Open Questions"
+> item above. `fixed_target_points = 50` is retained as the NQ-native ceiling but is badly
+> mis-scaled on FX: 50 pips from `range_mid` inside a 09:30–11:00 window is effectively
+> unreachable on a CHF major whose entire average *daily* range is ~55 pips — in the real
+> runs virtually no trade exited at the fixed target. An R-multiple is the only target
+> formulation simultaneously correct on NQ, USDCHF and XAUUSD.
+> ⚠ `target_mode` / `target_rr` are **not yet read by the engine** (`engine.py:114`
+> computes the points target unconditionally) and are inert until wired.
+> `sl_buffer_atr_mult` *is* correctly read (`engine.py:129-136`).
 | `dynamic_target_override` | enabled | Use nearer HTF swing level if closer |
 | `session_end` | 11:00 ET | Extend only if AM range was unproductive |
 | `news_filter` | optional | Source recommends de-risking around scheduled news, not necessarily skipping the trade entirely |

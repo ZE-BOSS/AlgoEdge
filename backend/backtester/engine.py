@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from backend.analytics.reports import generate_risk_report
+from backend.backtester.report import apply_bar_level_drawdown, apply_leg_level_hit_rates
 from backend.risk.engine import RiskEngine
 from backend.risk.multi_tp import TPLevel, _is_buy
 from backend.risk.position_sizer import get_pip_size, calculate_risk_dollars
@@ -100,6 +101,167 @@ def _validate_position(direction: str, entry_price: float, stop_loss: float, tak
     return True, ""
 
 
+def _breakeven_stop(
+    direction: str,
+    entry_price: float,
+    current_price: float,
+    pip_size: float,
+    atr: float,
+    risk_config: dict,
+    spread_pips: float = 0.0,
+) -> float:
+    """
+    Compute the break-even stop, clamped so it can never sit beyond the market.
+
+    Why the clamp exists (this was a P&L-FABRICATING BUG)
+    -----------------------------------------------------
+    The old code was simply `entry_price +/- be_buffer_pips * pip_size`, with no
+    reference to where price actually was. Whenever
+        be_buffer_pips > be_trigger_rr * stop_pips
+    the resulting "break-even" stop landed ABOVE the market (BUY). On the next bar
+    the gap handler saw `open <= stop_loss`, treated it as a gapped stop, and filled
+    it — booking a PROFIT on what was supposed to be a scratch exit.
+
+    Measured impact on the real runs, before this fix:
+      APA old  — 61/61 BE_SL legs exited at EXACTLY +1.00R; BE P&L $16,167 = 102%
+                 of the entire strategy's reported profit.
+      VWAP old — 429/429 legs at EXACTLY +1.00R; $128,101 = 137% of reported profit.
+    Removing the artifact flips every previously-"profitable" old run negative
+    (APA +15,888 -> -279; VWAP +93,725 -> -34,375). A real break-even stop returns
+    ~0R minus costs and has variance; exiting at exactly +1.00R with zero variance
+    every single time is not a market outcome.
+
+    The bug armed itself precisely when stops were unhealthily tight, i.e. hardest
+    on the strategies whose numbers were least trustworthy.
+
+    Buffer sizing mirrors BreakevenManager.check_breakeven() (breakeven_manager.py:74-78),
+    which correctly takes max(live spread, ATR buffer, pip buffer) rather than pips alone,
+    so the cushion scales with the instrument instead of assuming FX-major pip geometry.
+    """
+    is_buy = _is_buy(direction)
+
+    pip_buffer = float(risk_config.get("be_buffer_pips", 0.0) or 0.0) * pip_size
+    atr_buffer = float(risk_config.get("be_buffer_atr_mult", 0.0) or 0.0) * float(atr or 0.0)
+    spread_buffer = float(spread_pips or 0.0) * pip_size
+    buffer = max(pip_buffer, atr_buffer, spread_buffer, 0.0)
+
+    new_sl = entry_price + buffer if is_buy else entry_price - buffer
+
+    # ── THE GUARD ──
+    # Never let the stop cross the market. Keep it at least one spread (or one pip,
+    # whichever is larger) away on the near side, so it cannot be filled on the very
+    # next bar as a phantom "gap". This is an unconditional clamp — it makes the
+    # fabrication unreachable no matter how be_buffer_pips is configured.
+    #
+    # If price has not yet travelled far enough for even a flat break-even to sit
+    # safely behind the market, the clamp returns a level below entry (BUY). That is
+    # intentional and safe: the caller only adopts the new stop when it is an
+    # improvement on the existing one, so a too-close level is simply ignored.
+    keep_away = max(spread_buffer, pip_size)
+    if is_buy:
+        new_sl = min(new_sl, current_price - keep_away)
+    else:
+        new_sl = max(new_sl, current_price + keep_away)
+
+    return new_sl
+
+
+def validate_at_fill_price(
+    direction: str,
+    fill_price: float,
+    stop_loss: float,
+    take_profit: float,
+    symbol: str,
+    stops_level_pips: float = 0.0,
+    spread_pips: float = 0.0,
+) -> tuple[bool, str, str]:
+    """
+    Re-validate SL/TP against the ACTUAL FILL price (Task 1 — critical).
+
+    Returns (is_valid, rejection_key, detail_message).
+
+    Background
+    ----------
+    The risk engine validates SL-vs-entry using the strategy's *theoretical*
+    signal entry price, but positions fill at the NEXT BAR'S OPEN (realistic,
+    and deliberately kept). Nothing re-checked the geometry once the real fill
+    price was known. When a bar's open gaps across the stop, the position opened
+    with its stop on the WRONG SIDE of entry, `abs(entry - sl)` collapsed to a
+    fraction of a pip, and position sizing exploded inversely.
+
+    Observed: BUY USDCHF, signal entry 0.76806 / SL 0.76798 (valid), actual fill
+    0.76796 -> SL now ABOVE entry, risk distance 0.21 pips, sized 25.38 lots,
+    -11.371R (-$760.66) in one bar. Frequency 8/43 APA groups (18.6%) and
+    3/69 NY Open Retest groups.
+
+    Crucially, LIVE TRADING ALREADY REJECTS THESE — backend/mt5/order_manager.py
+    runs the same pre-execution check and returns {"stale": True} when the SL is
+    already hit or sits inside the broker's stop level. Without this function the
+    backtest books catastrophic losses that live trading structurally cannot
+    incur, i.e. a pure backtest-vs-live divergence in the pessimistic direction.
+
+    Checks (mirroring order_manager.py's stale-signal guard):
+      1. SL strictly below (BUY) / above (SELL) the fill; TP the other side.
+      2. SL distance from fill >= max(broker stops_level, ~2x spread). The 2x
+         spread floor mirrors the sizing guard in the risk layer: a stop closer
+         than the round-trip spread is not a tradeable stop at any size.
+      3. Same minimum distance for TP (the broker enforces stops_level on both).
+    """
+    pip_size = get_pip_size(symbol)
+    is_buy = _is_buy(direction)
+
+    # ── 1. Side check against the real fill ──
+    if is_buy:
+        if stop_loss >= fill_price:
+            return False, "stale_at_fill", (
+                f"BUY SL ({stop_loss:.5f}) is at/above the actual fill ({fill_price:.5f}) — "
+                f"the bar's open gapped across the stop; live would reject this as a stale signal"
+            )
+        if take_profit <= fill_price:
+            return False, "stale_at_fill", (
+                f"BUY TP ({take_profit:.5f}) is at/below the actual fill ({fill_price:.5f}) — "
+                f"target already reached at fill; live would reject this as a stale signal"
+            )
+    else:
+        if stop_loss <= fill_price:
+            return False, "stale_at_fill", (
+                f"SELL SL ({stop_loss:.5f}) is at/below the actual fill ({fill_price:.5f}) — "
+                f"the bar's open gapped across the stop; live would reject this as a stale signal"
+            )
+        if take_profit >= fill_price:
+            return False, "stale_at_fill", (
+                f"SELL TP ({take_profit:.5f}) is at/above the actual fill ({fill_price:.5f}) — "
+                f"target already reached at fill; live would reject this as a stale signal"
+            )
+
+    # ── 2/3. Minimum viable distance ──
+    if pip_size <= 0:
+        return True, "", ""
+
+    min_pips = max(float(stops_level_pips or 0.0), 2.0 * float(spread_pips or 0.0))
+    if min_pips <= 0:
+        return True, "", ""
+
+    min_distance = min_pips * pip_size
+    sl_distance = abs(fill_price - stop_loss)
+    if sl_distance < min_distance:
+        return False, "sub_minimum_stop", (
+            f"SL distance {sl_distance / pip_size:.2f} pips at fill {fill_price:.5f} is below the "
+            f"minimum viable {min_pips:.2f} pips "
+            f"(stops_level={stops_level_pips:.2f}p, 2x spread={2.0 * spread_pips:.2f}p) — "
+            f"live would reject; sizing against this distance would explode lot size"
+        )
+
+    tp_distance = abs(take_profit - fill_price)
+    if tp_distance < min_distance:
+        return False, "sub_minimum_tp", (
+            f"TP distance {tp_distance / pip_size:.2f} pips at fill {fill_price:.5f} is below the "
+            f"broker minimum {min_pips:.2f} pips"
+        )
+
+    return True, "", ""
+
+
 def _resolve_sl_tp_hit(
     direction: str,
     open_p: float,
@@ -151,6 +313,238 @@ def _resolve_sl_tp_hit(
     return sl_hit, tp_hit
 
 
+# ──────────────────────────────────────────────────────────────────────────
+#  Transaction-cost resolution (Task 2)
+# ──────────────────────────────────────────────────────────────────────────
+#
+# The cost machinery (slippage / spread / commission, and now swap) has always
+# been applied correctly in _calc_pnl — the defect was purely that every knob
+# defaulted to 0.0, so every historical run was executed with ZERO transaction
+# costs and therefore overstated every strategy's edge.
+#
+# Resolution order for each cost parameter:
+#   1. An explicit user-supplied numeric value in risk_config  -> ALWAYS wins.
+#   2. Otherwise ("auto", or the key absent/None)              -> broker-sourced
+#      value from backend.risk.broker_costs.get_broker_costs(), which itself
+#      falls back from live MT5 to asset-class averages.
+#   3. Otherwise (broker_costs unavailable)                    -> 0.0, logged.
+#
+# This is a DEFAULT-RESOLUTION change, never an override: a user who explicitly
+# configures 0.0 still gets 0.0, which keeps every previously-saved
+# params_snapshot replaying identically.
+
+# Values that mean "not explicitly configured — source this from the broker".
+_COST_AUTO_TOKENS = {"", "auto", "default", "broker", "mt5", "none"}
+
+_COST_FIELDS = (
+    "slippage_pips",
+    "commission_per_lot",
+    "spread_pips",
+    "swap_long_per_lot_per_day",
+    "swap_short_per_lot_per_day",
+    "stops_level_pips",
+)
+
+_BROKER_COST_FALLBACK = {
+    "spread_pips": 0.0,
+    "commission_per_lot": 0.0,
+    "swap_long_per_lot_per_day": 0.0,
+    "swap_short_per_lot_per_day": 0.0,
+    "slippage_pips": 0.0,
+    "stops_level_pips": 0.0,
+    "source": "UNAVAILABLE",
+}
+
+_BROKER_COST_CACHE: dict[str, dict] = {}
+
+
+def _cost_is_unset(value) -> bool:
+    """True when a risk_config cost entry means 'resolve this from the broker'."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in _COST_AUTO_TOKENS
+    return False
+
+
+def fetch_broker_costs(symbol: str, use_live_mt5: bool = True) -> dict:
+    """
+    Fetch broker cost data for `symbol`, cached per-symbol for the process.
+
+    The import is deliberately LAZY and the call is fully guarded: broker_costs
+    is a newer module and must never be able to break import of the backtest
+    engine (or introduce a circular import through backend.risk.*). If it is
+    missing or raises, every field degrades to 0.0 with source="UNAVAILABLE",
+    which reproduces the old zero-cost behaviour rather than crashing a run.
+    """
+    key = (symbol or "").upper()
+    cached = _BROKER_COST_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    resolved = dict(_BROKER_COST_FALLBACK)
+    try:
+        from backend.risk.broker_costs import get_broker_costs  # lazy: see docstring
+        data = get_broker_costs(symbol, use_live_mt5=use_live_mt5) or {}
+        for field in _BROKER_COST_FALLBACK:
+            if field == "source":
+                continue
+            try:
+                resolved[field] = float(data.get(field, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                resolved[field] = 0.0
+        resolved["source"] = str(data.get("source", "UNKNOWN"))
+    except Exception as e:
+        logger.warning(
+            f"[COSTS] broker_costs unavailable for {symbol!r} ({type(e).__name__}: {e}) — "
+            f"falling back to zero transaction costs for any parameter the user did not set explicitly."
+        )
+
+    _BROKER_COST_CACHE[key] = resolved
+    return resolved
+
+
+def resolve_effective_costs(symbol: str, risk_config: dict[str, Any]) -> dict[str, Any]:
+    """
+    Merge explicit user cost settings over broker-sourced defaults for `symbol`.
+
+    Returns the resolved numeric values plus provenance:
+        {..., "sources": {field: "USER"|"MT5"|"ASSET_CLASS_DEFAULT"|...},
+              "broker_source": str, "symbol": str}
+    """
+    broker = fetch_broker_costs(symbol)
+    broker_source = broker.get("source", "UNAVAILABLE")
+
+    out: dict[str, Any] = {}
+    sources: dict[str, str] = {}
+    for field in _COST_FIELDS:
+        raw = risk_config.get(field, None)
+        if _cost_is_unset(raw):
+            out[field] = float(broker.get(field, 0.0) or 0.0)
+            sources[field] = broker_source
+            continue
+        try:
+            out[field] = float(raw)
+            sources[field] = "USER"
+        except (TypeError, ValueError):
+            out[field] = float(broker.get(field, 0.0) or 0.0)
+            sources[field] = broker_source
+
+    out["sources"] = sources
+    out["broker_source"] = broker_source
+    out["symbol"] = symbol
+    return out
+
+
+class CostModelMixin:
+    """
+    Per-symbol cost resolution + swap/rollover financing, shared by
+    BacktestEngine and PortfolioBacktestEngine so both price trades identically.
+
+    Requires the host class to define `self.risk_config` and to call
+    `self._init_cost_model()` from __init__.
+    """
+
+    def _init_cost_model(self) -> None:
+        self._cost_cache: dict[str, dict[str, Any]] = {}
+        # Snapshot of everything actually used, surfaced in the run results so a
+        # saved backtest records the cost assumptions it was produced under.
+        self.cost_model: dict[str, Any] = {}
+
+    def _costs_for(self, symbol: str) -> dict[str, Any]:
+        """Resolved cost parameters for `symbol` (cached; logged on first use)."""
+        key = (symbol or "").upper()
+        cached = self._cost_cache.get(key)
+        if cached is not None:
+            return cached
+
+        resolved = resolve_effective_costs(symbol, self.risk_config)
+        self._cost_cache[key] = resolved
+        self.cost_model[key or "<default>"] = {
+            k: resolved[k] for k in (*_COST_FIELDS, "sources", "broker_source")
+        }
+        logger.info(
+            f"[COSTS] {symbol or '<none>'} | spread={resolved['spread_pips']:.2f}p "
+            f"slippage={resolved['slippage_pips']:.2f}p "
+            f"commission=${resolved['commission_per_lot']:.2f}/lot "
+            f"swap_long={resolved['swap_long_per_lot_per_day']:.4f}/lot/day "
+            f"swap_short={resolved['swap_short_per_lot_per_day']:.4f}/lot/day "
+            f"stops_level={resolved['stops_level_pips']:.2f}p "
+            f"| broker_source={resolved['broker_source']} | per-field={resolved['sources']}"
+        )
+        return resolved
+
+    def _swap_cost(
+        self,
+        direction: str,
+        volume: float,
+        symbol: str,
+        entry_time: Any,
+        exit_time: Any,
+    ) -> float:
+        """
+        Signed overnight financing for a position held across rollovers (Task 3).
+
+        Returns a value that is ADDED to PnL. `swap_*_per_lot_per_day` follows the
+        MT5 sign convention (negative = a charge, positive = a credit), so the
+        result is `rate * volume * weighted_days`.
+
+        Rollover accounting:
+          - One rollover is charged per calendar-day boundary crossed.
+          - Crossing INTO Thursday is charged 3x — the Wednesday rollover carries
+            the weekend's value date, the standard FX convention.
+          - Crossing into Saturday/Sunday is charged 0x — the market is closed and
+            no rollover occurs.
+
+        SIMPLIFICATION (documented deliberately): the boundary used is UTC
+        midnight rather than the broker's true 17:00 America/New_York rollover
+        instant. Those differ by ~4-5 hours, so a hold that straddles that window
+        can be off by exactly one rollover. Over the multi-day holds this exists
+        to model (median 6.9 days for VWAP) the error is <15%, and using UTC
+        avoids a per-bar timezone conversion in the hot close path.
+        """
+        if not volume:
+            return 0.0
+        costs = self._costs_for(symbol)
+        rate = (
+            costs["swap_long_per_lot_per_day"] if _is_buy(direction)
+            else costs["swap_short_per_lot_per_day"]
+        )
+        if not rate:
+            return 0.0
+
+        start = _to_epoch_seconds(entry_time)
+        end = _to_epoch_seconds(exit_time)
+        if start is None or end is None or end <= start:
+            return 0.0
+
+        day = 86400.0
+        first_boundary = (int(start // day) + 1) * day
+        if first_boundary > end:
+            return 0.0
+
+        weighted_days = 0.0
+        boundary = first_boundary
+        # Cap the walk so a corrupt timestamp can't spin for millions of iterations.
+        max_rollovers = 5000
+        count = 0
+        while boundary <= end and count < max_rollovers:
+            # weekday of the day being rolled INTO (Mon=0 ... Sun=6)
+            weekday = datetime.fromtimestamp(boundary, tz=timezone.utc).weekday()
+            if weekday in (5, 6):        # Sat / Sun — market closed, no rollover
+                pass
+            elif weekday == 3:           # into Thursday — Wednesday triple swap
+                weighted_days += 3.0
+            else:
+                weighted_days += 1.0
+            boundary += day
+            count += 1
+
+        if weighted_days <= 0:
+            return 0.0
+        return rate * volume * weighted_days
+
+
 def _gap_adjusted_fill_price(direction: str, open_p: float, level: float, symbol: str, slippage_pips: float) -> float:
     """
     Item 3.4: if a bar's open has already gapped past an SL/TP level before the
@@ -170,7 +564,7 @@ def _gap_adjusted_fill_price(direction: str, open_p: float, level: float, symbol
     return price
 
 
-class BacktestEngine:
+class BacktestEngine(CostModelMixin):
     """
     Backtesting engine that uses the identical RiskEngine as live trading.
     What you backtest = what runs live.
@@ -200,16 +594,28 @@ class BacktestEngine:
             "total_evaluated": 0,
             "strategy_rejections": {},
             "risk_rejections": {},
+            # Task 1: signals that passed every pre-trade gate but failed
+            # re-validation against the ACTUAL FILL price (next-bar open).
+            # Mirrors live's stale-signal rejection in mt5/order_manager.py.
+            "fill_rejections": {},
             "errors": 0,
             "approved": 0
         }
         self.run_logs = []
-        # Simulation cost params (read from risk_config; default 0 = no cost)
-        self._slippage_pips = float(risk_config.get("slippage_pips", 0.0))
-        self._commission_per_lot = float(risk_config.get("commission_per_lot", 0.0))
-        self._spread_pips = float(risk_config.get("spread_pips", 0.0))
+        # ── Simulation costs (Task 2) ──
+        # Resolved lazily PER SYMBOL via CostModelMixin._costs_for(), so an unset
+        # parameter picks up live-MT5 / asset-class broker data instead of the old
+        # silent 0.0. Explicit user values still win. See resolve_effective_costs().
+        self._init_cost_model()
         # Wick simulation: use OHLC shadow-weighted path model for same-bar SL+TP resolution
         self._simulate_wicks = bool(risk_config.get("simulate_wicks", True))
+        # Strategy attribution for saved trades (Task 6): the sig dicts built by
+        # the API route carry no strategy_id, so fall back to the run config.
+        self._strategy_id = str(
+            risk_config.get("strategy_id")
+            or risk_config.get("strategy_name")
+            or "UNKNOWN"
+        )
 
     def run(
         self,
@@ -229,6 +635,10 @@ class BacktestEngine:
             "total_evaluated": 0,
             "strategy_rejections": {},
             "risk_rejections": {},
+            # Task 1: signals that passed every pre-trade gate but failed
+            # re-validation against the ACTUAL FILL price (next-bar open).
+            # Mirrors live's stale-signal rejection in mt5/order_manager.py.
+            "fill_rejections": {},
             "errors": 0,
             "approved": 0
         }
@@ -236,6 +646,12 @@ class BacktestEngine:
         logger.info("[ENGINE] ═══ Starting backtest engine ═══")
         logger.info(f"[ENGINE] Balance: ${initial_balance} | Signals: {len(signals)} | Candles: {len(candles)}")
         logger.info(f"[ENGINE] Risk config: risk_pct={self.risk_config.get('risk_per_trade_pct')}% | min_rr={self.risk_config.get('min_rr')} | tp_count={self.risk_config.get('tp_count')}")
+
+        # ── Task 2: resolve transaction costs up-front so the run log states, at
+        # the top, which costs were used and where each came from. _costs_for()
+        # caches per symbol and logs on first resolution.
+        for _sym in {s.get("symbol", "") for s in signals} or {""}:
+            self._costs_for(_sym)
 
         # Reset prop firm state for a fresh backtest run
         self.prop_firm_validator.is_breached = False
@@ -365,19 +781,39 @@ class BacktestEngine:
                 if limit_hit:
                     pos["exit_price"] = current_price
                     pos["exit_reason"] = "TIME_LIMIT"
-                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
+                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""), pos.get("entry_time"), current_time)
                     closed_this_bar.append(pos)
                     continue
 
+                # Task 4: hard_close_time now actually reaches the position dict
+                # (see _create_position) — before, this key was never copied out of
+                # sig["metadata"], so the lookup always returned None and this whole
+                # branch was dead code. That is why VWAP positions ran for ~7 days
+                # despite a spec mandating flat by 15:55 ET.
                 hard_close_time = pos.get("hard_close_time")
                 if hard_close_time:
                     import pytz
-                    et = current_time_dt.astimezone(pytz.timezone("America/New_York"))
+                    _et_tz = pytz.timezone("America/New_York")
+                    et = current_time_dt.astimezone(_et_tz)
                     time_str = et.strftime("%H:%M")
-                    if time_str >= hard_close_time:
+                    # A plain `time_str >= hard_close_time` compare is not enough on
+                    # its own: after ET midnight the clock wraps ("02:00" < "15:55"),
+                    # so a position that somehow survived the cutoff bar would run a
+                    # further ~24h. Also force the close once the ET calendar date has
+                    # advanced past the entry's, which is what "flat by end of session"
+                    # actually means.
+                    _entry_et_date = pos.get("_entry_et_date")
+                    if _entry_et_date is None:
+                        _entry_secs = _to_epoch_seconds(pos.get("entry_time"))
+                        _entry_et_date = (
+                            datetime.fromtimestamp(_entry_secs, tz=timezone.utc).astimezone(_et_tz).date()
+                            if _entry_secs is not None else et.date()
+                        )
+                        pos["_entry_et_date"] = _entry_et_date
+                    if time_str >= hard_close_time or et.date() > _entry_et_date:
                         pos["exit_price"] = current_price
                         pos["exit_reason"] = "SESSION_END"
-                        pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
+                        pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""), pos.get("entry_time"), current_time)
                         closed_this_bar.append(pos)
                         continue
 
@@ -433,23 +869,23 @@ class BacktestEngine:
                     # the gapped open price (± slippage) instead.
                     _sl_gapped = (open_p <= pos["stop_loss"]) if pos["direction"] == "BUY" else (open_p >= pos["stop_loss"])
                     if _sl_gapped:
-                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["stop_loss"], pos.get("symbol", ""), self._slippage_pips)
+                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["stop_loss"], pos.get("symbol", ""), self._costs_for(pos.get("symbol", ""))["slippage_pips"])
                         pos["gap_fill"] = True
                     else:
                         pos["exit_price"] = pos["stop_loss"]
                     pos["exit_reason"] = "TRAIL_SL" if pos.get("trail_applied") else ("BE_SL" if pos.get("be_applied") else "SL")
-                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
+                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""), pos.get("entry_time"), current_time)
                     closed_this_bar.append(pos)
                     continue
                 elif tp_hit:
                     _tp_gapped = (open_p >= pos["take_profit"]) if pos["direction"] == "BUY" else (open_p <= pos["take_profit"])
                     if _tp_gapped:
-                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["take_profit"], pos.get("symbol", ""), self._slippage_pips)
+                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["take_profit"], pos.get("symbol", ""), self._costs_for(pos.get("symbol", ""))["slippage_pips"])
                         pos["gap_fill"] = True
                     else:
                         pos["exit_price"] = pos["take_profit"]
                     pos["exit_reason"] = f"TP{pos.get('tp_level', 1)}"
-                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""))
+                    pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""), pos.get("entry_time"), current_time)
                     closed_this_bar.append(pos)
                     if pos.get("tp_level") == 1:
                         tp1_hit_groups.add(pos.get("group_id"))
@@ -474,15 +910,22 @@ class BacktestEngine:
             if tp1_hit_groups:
                 for pos in self.open_positions:
                     if pos.get("group_id") in tp1_hit_groups and pos not in closed_this_bar:
-                        pip_size = get_pip_size(pos.get("symbol", ""))
-                        buffer = self.risk_config.get("be_buffer_pips", 2.0) * pip_size
+                        _sym = pos.get("symbol", "")
+                        pip_size = get_pip_size(_sym)
+                        new_sl = _breakeven_stop(
+                            direction=pos["direction"],
+                            entry_price=pos["entry_price"],
+                            current_price=current_price,
+                            pip_size=pip_size,
+                            atr=current_atr,
+                            risk_config=self.risk_config,
+                            spread_pips=self._costs_for(_sym)["spread_pips"],
+                        )
                         if pos["direction"] == "BUY":
-                            new_sl = pos["entry_price"] + buffer
                             if new_sl > pos["stop_loss"]:
                                 pos["stop_loss"] = new_sl
                                 pos["be_applied"] = True
                         else:
-                            new_sl = pos["entry_price"] - buffer
                             if new_sl < pos["stop_loss"]:
                                 pos["stop_loss"] = new_sl
                                 pos["be_applied"] = True
@@ -492,6 +935,9 @@ class BacktestEngine:
             positions_to_remove = []
             for pos in closed_this_bar:
                 pos["exit_time"] = current_time
+                # Task 6: leg records kept status="OPEN" forever, even once
+                # exit_price/exit_reason/pnl/exit_time were all populated.
+                pos["status"] = "CLOSED"
                 try:
                     # current_time may be a numpy.int64/float64 (e.g. when it
                     # comes from bar['time']). numpy.int64 is NOT an instance
@@ -635,7 +1081,21 @@ class BacktestEngine:
                     self.rejection_funnel["approved"] += 1
                     logger.trace(f"[ENGINE] ✅ Signal APPROVED at bar {i}: {sig.get('direction')} @ {sig.get('entry_price', current_price):.5f} | {len(tp_levels)} TP levels | balance=${balance:.2f}")
 
-                    actual_opened_count = 0
+                    # The fill price for every leg of this group: the OPEN of the
+                    # current bar (which is the bar AFTER the signal was generated —
+                    # guaranteed by the sig_time >= current_timestamp guard above).
+                    # This eliminates same-bar fill.
+                    bar_open_price = float(open_p)
+
+                    # Task 1: legs are staged, not appended directly. _create_position
+                    # re-validates SL/TP against this REAL fill price and returns None
+                    # when the geometry is no longer tradeable. If ANY leg is rejected
+                    # the WHOLE group is skipped, so a group can never be left
+                    # half-created with an inconsistent set of legs (which would also
+                    # corrupt the TP1->break-even sibling logic and the group-complete
+                    # accounting that keys off remaining_legs == 0).
+                    staged_positions: list[dict[str, Any]] = []
+                    group_rejected = False
                     for tp in tp_levels:
                         # Validate before opening
                         is_valid, err = _validate_position(
@@ -649,13 +1109,23 @@ class BacktestEngine:
                             self.invalid_signals += 1
                             continue
 
-                        # (which is the bar AFTER the signal was generated — guaranteed by the
-                        # sig_time >= current_timestamp guard above). This eliminates same-bar fill.
-                        bar_open_price = float(open_p)
                         position = self._create_position(sig, tp, current_time, bar_open_price, group_id, balance)
-                        self.open_positions.append(position)
+                        if position is None:
+                            # Rejection reason already recorded in rejection_funnel.
+                            group_rejected = True
+                            break
+                        staged_positions.append(position)
                         logger.debug(f"[ENGINE]   Position opened: TP{tp.level} @ {bar_open_price:.5f} (bar open) | vol={tp.volume:.4f}")
-                        
+
+                    if group_rejected or not staged_positions:
+                        # Undo the optimistic "approved" increment so the funnel still
+                        # balances (total_evaluated == approved + all rejection buckets).
+                        self.rejection_funnel["approved"] -= 1
+                        self.invalid_signals += 1
+                        continue
+
+                    self.open_positions.extend(staged_positions)
+
                     self.run_logs.append({
                         "time": _epoch_to_iso(current_time),
                         "level": "INFO",
@@ -693,10 +1163,11 @@ class BacktestEngine:
         last_price = closes_arr[-1] if len(closes_arr) > 0 else 0
         last_time = time_arr[-1] if len(time_arr) > 0 else 0
         for pos in self.open_positions[:]:
-            pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], last_price, pos["volume"], pos.get("symbol", ""))
+            pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], last_price, pos["volume"], pos.get("symbol", ""), pos.get("entry_time"), last_time)
             pos["exit_price"] = last_price
             pos["exit_reason"] = "END_OF_DATA"
             pos["exit_time"] = last_time
+            pos["status"] = "CLOSED"  # Task 6
             pos["duration_minutes"] = _calc_duration_minutes(pos.get("entry_time"), last_time)
             pos["entry_time_iso"] = _epoch_to_iso(pos.get("entry_time"))
             pos["exit_time_iso"] = _epoch_to_iso(last_time)
@@ -717,6 +1188,15 @@ class BacktestEngine:
         report = generate_risk_report(grouped_trades, initial_balance=initial_balance)
         report.rejection_funnel = self.rejection_funnel
 
+        # ── Task 5: recompute TP/SL/BE/TRAIL hit rates from LEG-level exits ──
+        # generate_risk_report only sees grouped trades, whose exit_reason is the
+        # group's terminal reason — so a group that banked TP1 and later stopped
+        # its remaining legs at break-even reported no TP1 hit at all.
+        hit_rates = apply_leg_level_hit_rates(report, self.trades, grouped_trades)
+
+        # ── Task 6: drawdown from the BAR-level equity curve ──
+        dd = apply_bar_level_drawdown(report, self.equity_curve, initial_balance)
+
         # ── Engine completion summary ──
         total_pnl = balance - initial_balance
         wins = sum(1 for t in grouped_trades if t.get("pnl", 0) > 0)
@@ -728,6 +1208,16 @@ class BacktestEngine:
             best = max(t.get("pnl", 0) for t in self.trades)
             worst = min(t.get("pnl", 0) for t in self.trades)
             logger.info(f"[ENGINE] Best trade: ${best:.2f} | Worst trade: ${worst:.2f}")
+        logger.info(
+            f"[ENGINE] Leg-level hit rates: "
+            f"TP1={hit_rates['tp1_hit_rate'] * 100:.1f}% TP2={hit_rates['tp2_hit_rate'] * 100:.1f}% "
+            f"TP3={hit_rates['tp3_hit_rate'] * 100:.1f}% SL={hit_rates['sl_hit_rate'] * 100:.1f}% "
+            f"BE={hit_rates['be_hit_rate'] * 100:.1f}% TRAIL={hit_rates['trail_hit_rate'] * 100:.1f}% "
+            f"| max_dd={dd['max_drawdown_pct'] * 100:.2f}% (bar-level)"
+        )
+        if self.rejection_funnel.get("fill_rejections"):
+            logger.info(f"[ENGINE] Fill-time rejections: {self.rejection_funnel['fill_rejections']}")
+        logger.info(f"[ENGINE] Cost model applied: {self.cost_model}")
 
         return {
             "backtest_id": str(uuid.uuid4()),
@@ -743,6 +1233,11 @@ class BacktestEngine:
             "report": report,
             "rejection_funnel": self.rejection_funnel,
             "run_logs": self.run_logs,
+            # Task 2: record exactly which transaction costs this run assumed and
+            # where each value came from, so a saved backtest is reproducible and
+            # auditable ("was this run costed with live MT5 spreads or asset-class
+            # averages, or was it another zero-cost run?").
+            "cost_model": self.cost_model,
         }
 
     def _create_position(
@@ -753,14 +1248,57 @@ class BacktestEngine:
         current_price: float,
         group_id: str,
         balance: float,
-    ) -> dict[str, Any]:
-        """Create a position dict with entry confirmations and group_id."""
+    ) -> dict[str, Any] | None:
+        """
+        Create a position dict with entry confirmations and group_id.
+
+        Returns None when the position must NOT be opened because SL/TP are no
+        longer valid at the actual fill price (Task 1). Callers must treat None
+        as "skip this signal group entirely".
+        """
         # Item 3.1: the stored/fill entry_price must always be the realistic
         # next-bar-open price (`current_price` here is `bar_open_price` from
         # the caller), never the strategy's theoretical signal entry_price —
         # that value is preserved only in `original_signal`/logging below for
         # reference, not used as the fill price.
         entry_price = current_price
+        symbol = sig.get("symbol", "")
+        stop_loss = sig.get("stop_loss", 0)
+
+        # ── Task 1: re-validate SL/TP against the ACTUAL FILL price ──
+        # The risk engine validated these against the strategy's theoretical
+        # signal entry. Now that the real fill (next bar's open) is known, run
+        # the SAME check live's order_manager.py runs before sending an order.
+        costs = self._costs_for(symbol)
+        fill_ok, reject_key, reject_detail = validate_at_fill_price(
+            sig.get("direction", "BUY"),
+            entry_price,
+            stop_loss,
+            tp.tp_price,
+            symbol,
+            stops_level_pips=costs["stops_level_pips"],
+            spread_pips=costs["spread_pips"],
+        )
+        if not fill_ok:
+            logger.warning(
+                f"[ENGINE] ❌ Fill-time rejection ({reject_key}) {symbol} "
+                f"TP{tp.level} signal_entry={sig.get('entry_price', entry_price):.5f} "
+                f"fill={entry_price:.5f} sl={stop_loss:.5f}: {reject_detail}"
+            )
+            funnel = self.rejection_funnel.setdefault("fill_rejections", {})
+            funnel[reject_key] = funnel.get(reject_key, 0) + 1
+            # Also surface in risk_rejections so the existing rejection-funnel UI
+            # shows it rather than the signal vanishing silently.
+            self.rejection_funnel["risk_rejections"][reject_key] = (
+                self.rejection_funnel["risk_rejections"].get(reject_key, 0) + 1
+            )
+            self.run_logs.append({
+                "time": _epoch_to_iso(current_time),
+                "level": "WARNING",
+                "category": "BACKTEST_LOG",
+                "message": f"Rejected at fill ({reject_key}) {sig.get('direction')} {symbol}: {reject_detail}",
+            })
+            return None
 
         # Detect entry session
         try:
@@ -789,10 +1327,31 @@ class BacktestEngine:
             entry_confirmations.append("── Structural Analysis ──")
             entry_confirmations.extend(signal_confirmations)
 
+        # Task 6: strategy attribution. sig dicts built by the API route carry no
+        # strategy_id at all (see backtest.py's generate_signals_simulated), which
+        # is why every saved grouped_trade reported strategy_id="UNKNOWN".
+        # Fall back through signal -> metadata -> run config.
+        strategy_id = (
+            sig.get("strategy_id")
+            or sig.get("strategy_name")
+            or sig.get("metadata", {}).get("strategy_id")
+            or self._strategy_id
+        )
+
+        # Task 4: hard_close_time was set correctly by strategies (e.g. VWAP's
+        # 15:55 ET flat rule) but never copied out of sig["metadata"] into the
+        # position dict — so the force-close branch in run() looked up a key that
+        # was always absent and the entire session-end rule was dead code. That is
+        # why VWAP positions ran for ~7 days against a spec mandating a same-day
+        # flat. Read it the same way the other metadata keys are read below.
+        hard_close_time = sig.get("metadata", {}).get("hard_close_time")
+
         return {
             "id": str(uuid.uuid4()),
             "group_id": group_id,
             "symbol": sig.get("symbol", ""),
+            "strategy_id": strategy_id,
+            "strategy": strategy_id,  # alias, matches portfolio_engine.py
             "direction": "BUY" if _is_buy(sig.get("direction", "BUY")) else "SELL",
             "entry_price": entry_price,
             "stop_loss": sig.get("stop_loss", 0),
@@ -809,24 +1368,41 @@ class BacktestEngine:
             "confluence_score": sig.get("confluence_score", 0),
             "balance_before": balance,
             "status": "OPEN",
+            "hard_close_time": hard_close_time,
             "entry_confirmations": entry_confirmations,
             "entry_snapshot_b64": sig.get("metadata", {}).get("entry_snapshot_b64", ""),
             "original_signal": sig,
         }
 
-    def _calc_pnl(self, direction: str, entry: float, exit_price: float, volume: float, symbol: str) -> float:
+    def _calc_pnl(
+        self,
+        direction: str,
+        entry: float,
+        exit_price: float,
+        volume: float,
+        symbol: str,
+        entry_time: Any = None,
+        exit_time: Any = None,
+    ) -> float:
         """
         Calculate P&L using the same data source chain as position sizing:
         MT5 live data (when connected) -> InstrumentProfile -> Standard defaults.
 
-        Applies simulation costs when configured:
+        Applies simulation costs, each resolved per-symbol from the user's explicit
+        config or (when unset) live-MT5/asset-class broker data — see
+        resolve_effective_costs():
           - slippage_pips: shifts effective entry price against the trade direction
           - spread_pips: pip cost of crossing bid/ask at entry (deducted from PnL)
           - commission_per_lot: round-turn broker commission (deducted from PnL)
+          - swap_*_per_lot_per_day: overnight financing, charged per rollover
+            crossed between entry_time and exit_time (Task 3). Only applied when
+            BOTH timestamps are supplied, i.e. on real closes — floating-equity
+            marks pass neither and are therefore unaffected.
 
         Formula: pnl = (price_diff / tick_size) * tick_value * volume - costs
         """
         from backend.risk.position_sizer import get_symbol_info
+        costs = self._costs_for(symbol)
         info = get_symbol_info(symbol)
         tick_value = info.get("tick_value", 1.0)
         tick_size  = info.get("tick_size",  0.00001)
@@ -843,8 +1419,9 @@ class BacktestEngine:
         value_per_unit_move = tick_value / tick_size
 
         # Apply slippage: shift effective entry against the trade direction
-        if self._slippage_pips > 0 and pip_size > 0:
-            slippage_price = self._slippage_pips * pip_size
+        slippage_pips = costs["slippage_pips"]
+        if slippage_pips > 0 and pip_size > 0:
+            slippage_price = slippage_pips * pip_size
             if _is_buy(direction):
                 entry = entry + slippage_price  # BUY fills higher (worse)
             else:
@@ -856,12 +1433,20 @@ class BacktestEngine:
             raw_pnl = -raw_pnl
 
         # Deduct spread cost (pip cost of crossing bid/ask at entry)
-        if self._spread_pips > 0 and pip_size > 0:
-            spread_cost = self._spread_pips * pip_size * value_per_unit_move * volume
+        spread_pips = costs["spread_pips"]
+        if spread_pips > 0 and pip_size > 0:
+            spread_cost = spread_pips * pip_size * value_per_unit_move * volume
             raw_pnl -= spread_cost
 
         # Deduct round-turn commission
-        if self._commission_per_lot > 0:
-            raw_pnl -= self._commission_per_lot * volume
+        commission_per_lot = costs["commission_per_lot"]
+        if commission_per_lot > 0:
+            raw_pnl -= commission_per_lot * volume
+
+        # Task 3: overnight financing on multi-day holds. Signed (MT5 convention:
+        # negative = charge), so it is ADDED. Only charged on real closes, where
+        # both timestamps are known.
+        if entry_time is not None and exit_time is not None:
+            raw_pnl += self._swap_cost(direction, volume, symbol, entry_time, exit_time)
 
         return raw_pnl

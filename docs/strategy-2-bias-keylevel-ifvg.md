@@ -112,6 +112,35 @@ for level in key_levels:
 | `target_rr_range` | 1.0–3.0 |
 | `max_trades_per_day` | 2 |
 | `session_start / session_end` | 09:30 / 11:00 ET |
+| `target_rr` | **2.0** (midpoint of the 1.0–3.0 range above) |
+| `sl_buffer_atr_mult` | **0.5** (added 2026-08) |
+| `min_sl_pips` / `min_sl_atr_mult` | **12.0 / 1.0** (added 2026-08) |
+| `a_plus_confluence_threshold` | **90** (was 85 — see note) |
+
+> **Revision note — 2026-08 cost-realism audit.**
+>
+> **`target_rr` held at 2.0, and the bottom of the documented 1.0–3.0 range is rejected.**
+> With a 12-pip stop and ~3.0 pips of FX-major round-trip friction (≈0.25R), a 1.0R target
+> nets 0.75R against a 1.25R loss → **62.5%** break-even win rate, against this document's
+> unverified ~70% claim. 2.0R needs only **41.7%**.
+>
+> **Stop floors added.** §Step 4 nominates "swing high/low (default — safest for
+> beginners)" as the stop method, and `engine.py:345` implements it flush at
+> `m5_swing_point` with no buffer at all — a stop placed exactly *on* a visible swing is
+> the single most-hunted price in the book. This matters more here than elsewhere: the
+> strategy is confined to 09:30–11:00 ET and enters on an M5 body-close through an IFVG,
+> so entry and the swing that formed the IFVG are often only a few pips apart *by
+> construction*. ⚠ All three fields are **not yet read by the engine** and are inert
+> until wired.
+>
+> **`a_plus_confluence_threshold` 85 → 90 closes a silently-broken rule.** The engine emits
+> a hard-coded `confluence_score` of 85 on every signal (`engine.py:364`). With the
+> threshold also at 85, the comparison was `85 >= 85` — so **every** setup qualified as
+> A+, and this document's selective "after 1 loss, only take a second trade if it's a
+> clearly A+ setup" carve-out silently became "always take a second trade after a loss".
+> 90 makes the gate unsatisfiable until a real scoring function exists, degrading the
+> day-stop rule to its safe reading: stop after the first loss. Retune to ~85 once
+> `confluence_score` is genuinely computed.
 
 ## Data Requirements
 OHLC candles at 5m, 15m, 30m, 1H, 4H, and Daily resolution, all

@@ -51,21 +51,34 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
   const updateDja = (k, v) => setForm({ ...form, drift_jump_alpha: { ...dja, [k]: v } });
   const crt = form.crt || {};
   const updateCrt = (k, v) => setForm({ ...form, crt: { ...crt, [k]: v } });
+  // Each remaining strategy keeps its own nested slice so that identically-named
+  // backend fields (target_rr, session_start, session_cutoff, min_sl_pips, …) do
+  // not collide between strategies the way the old flat top-level fields did.
+  const vwap = form.vwap || {};
+  const updateVwap = (k, v) => setForm({ ...form, vwap: { ...vwap, [k]: v } });
+  const htfFvg = form.htf_fvg_flip || {};
+  const updateHtfFvg = (k, v) => setForm({ ...form, htf_fvg_flip: { ...htfFvg, [k]: v } });
+  const biasIfvg = form.bias_ifvg || {};
+  const updateBiasIfvg = (k, v) => setForm({ ...form, bias_ifvg: { ...biasIfvg, [k]: v } });
+  const nyOpen = form.ny_open_retest || {};
+  const updateNyOpen = (k, v) => setForm({ ...form, ny_open_retest: { ...nyOpen, [k]: v } });
 
   if (strategyId === 'APA_v1') {
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-        <div><label style={{ fontSize: '0.7rem' }}>Confluence Threshold</label><input type="number" value={apa.confluence_threshold} onChange={e => updateApa('confluence_threshold', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>HTF Swing Length</label><input type="number" value={apa.swing_length_htf} onChange={e => updateApa('swing_length_htf', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>LTF Swing Length</label><input type="number" value={apa.swing_length_ltf} onChange={e => updateApa('swing_length_ltf', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>OB Impulse Ratio</label><input type="number" step="0.1" value={apa.ob_impulse_ratio} onChange={e => updateApa('ob_impulse_ratio', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>FVG Min Gap (pips)</label><input type="number" step="0.5" value={apa.fvg_min_gap_pips} onChange={e => updateApa('fvg_min_gap_pips', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Sweep Min Pips</label><input type="number" step="0.5" value={apa.liq_sweep_min_pips} onChange={e => updateApa('liq_sweep_min_pips', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Max Spread (pips)</label><input type="number" step="0.1" value={apa.max_spread_pips} onChange={e => updateApa('max_spread_pips', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Minor Fractal (M)</label><input type="number" value={apa.minor_fractal_m} onChange={e => updateApa('minor_fractal_m', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Major Fractal (M)</label><input type="number" value={apa.major_fractal_m} onChange={e => updateApa('major_fractal_m', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Shoulder Symmetry (× ATR)</label><input type="number" step="0.05" min="0" value={apa.shoulder_symmetry_tolerance_atr} onChange={e => updateApa('shoulder_symmetry_tolerance_atr', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Tight Level Threshold (× ATR)</label><input type="number" step="0.05" min="0" value={apa.tight_level_threshold_atr} onChange={e => updateApa('tight_level_threshold_atr', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>If Head and Shoulder are closer than this × ATR, the SL covers both wicks (the wider, survivable branch).</div></div>
+        <div><label style={{ fontSize: '0.7rem' }}>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={apa.sl_buffer_atr_mult} onChange={e => updateApa('sl_buffer_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Proportional cushion added beyond the structural wick stop.</div></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={apa.min_sl_pips} onChange={e => updateApa('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor so a structural stop can never land inside spread + commission. 0 disables.</div></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={apa.min_sl_atr_mult} onChange={e => updateApa('min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative stop floor. Whichever floor is larger wins. 0 disables.</div></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Invalidation Zone</label><select value={apa.invalidation_zone_source || 'right_shoulder'} onChange={e => updateApa('invalidation_zone_source', e.target.value)}><option value="right_shoulder">Right Shoulder (conservative)</option><option value="both">Left + Right Shoulder (wider)</option></select></div>
         <div><label style={{ fontSize: '0.7rem' }}>Manual HTF Bias</label><select value={form.manual_bias || 'NONE'} onChange={e => u('manual_bias', e.target.value)}><option value="NONE">Auto</option><option value="BULLISH">Bullish Only</option><option value="BEARISH">Bearish Only</option></select></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Session Start (UTC)</label><input type="text" value={apa.session_start} onChange={e => updateApa('session_start', e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff (UTC)</label><input type="text" value={apa.session_cutoff} onChange={e => updateApa('session_cutoff', e.target.value)} /></div>
         <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, marginTop: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={apa.session_filter_enabled ?? true} onChange={e => updateApa('session_filter_enabled', e.target.checked)} style={{ width: 14, height: 14 }} /> Session Filter Enabled</label>
         </div>
       </div>
     );
@@ -73,12 +86,18 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
   if (strategyId === 'DriftJumpAlpha_v1') {
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-        <div><label style={{ fontSize: '0.7rem' }}>Spike Lookback Bars</label><input type="number" value={dja.spike_lookback_bars} onChange={e => updateDja('spike_lookback_bars', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Drift EMA Fast</label><input type="number" value={dja.drift_ema_fast} onChange={e => updateDja('drift_ema_fast', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Drift EMA Slow</label><input type="number" value={dja.drift_ema_slow} onChange={e => updateDja('drift_ema_slow', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Min ADX to Trade</label><input type="number" value={dja.min_adx_to_trade} onChange={e => updateDja('min_adx_to_trade', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Jump Threshold (%)</label><input type="number" step="0.5" value={dja.jump_entry_percentile_threshold} onChange={e => updateDja('jump_entry_percentile_threshold', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Max Lots per Symbol</label><input type="number" step="0.1" value={dja.aggregate_max_lots_per_symbol} onChange={e => updateDja('aggregate_max_lots_per_symbol', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Spike Threshold (pips)</label><input type="number" step="0.5" min="0" value={dja.spike_threshold_pips} onChange={e => updateDja('spike_threshold_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>0 = auto (derived from the spike percentile).</div></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Recovery Target (pips)</label><input type="number" step="0.5" min="0" value={dja.recovery_target_pips} onChange={e => updateDja('recovery_target_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>0 = auto.</div></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" min="0" value={dja.max_trades_per_day} onChange={e => updateDja('max_trades_per_day', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={dja.max_daily_risk_pct} onChange={e => updateDja('max_daily_risk_pct', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Max Consecutive Losses</label><input type="number" min="0" value={dja.max_consecutive_losses} onChange={e => updateDja('max_consecutive_losses', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Cooldown After Max Losses (h)</label><input type="number" min="0" value={dja.cooldown_after_max_losses_hours} onChange={e => updateDja('cooldown_after_max_losses_hours', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Min RRR to Accept Trade</label><input type="number" step="0.1" min="0" value={dja.min_rrr_to_accept_trade} onChange={e => updateDja('min_rrr_to_accept_trade', +e.target.value)} /></div>
         <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, marginTop: 8 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={dja.trade_jumps_enabled} onChange={e => updateDja('trade_jumps_enabled', e.target.checked)} style={{ width: 14, height: 14 }} /> Trade Jumps Enabled</label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={dja.control_test_passed} onChange={e => updateDja('control_test_passed', e.target.checked)} style={{ width: 14, height: 14 }} /> Control Test Passed</label>
@@ -95,6 +114,8 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
         <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Session</label><input type="number" value={crt.max_trades_per_session} onChange={e => updateCrt('max_trades_per_session', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Session Start (ET)</label><input type="text" value={crt.session_start} onChange={e => updateCrt('session_start', e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff (ET)</label><input type="text" value={crt.session_cutoff} onChange={e => updateCrt('session_cutoff', e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={crt.min_sl_pips} onChange={e => updateCrt('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Hard stop floor — stops a tiny CRT candle producing a sub-spread stop. 0 disables.</div></div>
+        <div><label style={{ fontSize: '0.7rem' }}>SL ATR Multiplier</label><input type="number" step="0.1" min="0" value={crt.sl_atr_mult} onChange={e => updateCrt('sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>SL must also be ≥ this × ATR(14). Larger floor wins. 0 disables.</div></div>
         <div style={{ gridColumn: '1 / -1' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}>
             <input type="checkbox" checked={crt.bypass_session_synthetics ?? true} onChange={e => updateCrt('bypass_session_synthetics', e.target.checked)} />
@@ -106,44 +127,63 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
   }
   if (strategyId === 'VWAP_v1') return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 8 }}>
-      <div><label style={{ fontSize: '0.7rem' }}>VWAP Anchor (min)</label><input type="number" value={form.vwap_anchor_minutes ?? 15} onChange={e => u('vwap_anchor_minutes', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Momentum Lookback</label><input type="number" value={form.momentum_lookback_bars ?? 4} onChange={e => u('momentum_lookback_bars', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Momentum Threshold (%)</label><input type="number" step="0.01" value={form.momentum_threshold_pct ?? 0.1} onChange={e => u('momentum_threshold_pct', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>SL Points</label><input type="number" step="1" min="10" value={form.sl_points ?? 80} onChange={e => u('sl_points', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Primary SL distance in points (e.g. 170 for USDCHF = 17 pips)</div></div>
-      <div><label style={{ fontSize: '0.7rem' }}>SL ATR Multiplier</label><input type="number" step="0.1" min="0" value={form.vwap_sl_atr_multiplier ?? 0} onChange={e => u('vwap_sl_atr_multiplier', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>ATR floor: SL = max(SL Points, ATR × this). Set 0 for pure fixed SL.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>VWAP Anchor (min)</label><input type="number" value={vwap.vwap_anchor_minutes} onChange={e => updateVwap('vwap_anchor_minutes', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Momentum Lookback</label><input type="number" value={vwap.momentum_lookback_bars} onChange={e => updateVwap('momentum_lookback_bars', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Momentum Threshold (%)</label><input type="number" step="0.01" value={vwap.momentum_threshold_pct} onChange={e => updateVwap('momentum_threshold_pct', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>SL Method</label><select value={vwap.sl_method || 'auto'} onChange={e => updateVwap('sl_method', e.target.value)}><option value="auto">Auto (by instrument class)</option><option value="fixed_points">Fixed Points</option><option value="atr_multiple">ATR Multiple</option></select><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Auto = index CFDs/futures use SL Points; FX, metals, crypto and synthetics use the ATR multiple.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>SL Points</label><input type="number" step="1" min="10" value={vwap.sl_points} onChange={e => updateVwap('sl_points', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Native INDEX points, and only used when the resolved SL method is Fixed Points (index CFDs / index futures). It is not a pipette figure — on FX and everything else the stop comes from SL ATR Multiplier × ATR, floored by the two Min SL guards.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>SL ATR Multiplier</label><input type="number" step="0.1" min="0" value={vwap.sl_atr_multiplier} onChange={e => updateVwap('sl_atr_multiplier', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Stop = this × ATR of the M5 entry bars. 0 disables the ATR path entirely.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={vwap.min_sl_pips} onChange={e => updateVwap('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor for the low-volatility tail. 0 disables.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Min SL (× spread)</label><input type="number" step="0.5" min="0" value={vwap.min_sl_spread_mult} onChange={e => updateVwap('min_sl_spread_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Instrument-neutral stop floor: SL must be at least this × the modelled spread. Adapts to news-time blowouts.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" min="0" value={vwap.target_rr} onChange={e => updateVwap('target_rr', +e.target.value)} /></div>
     </div>
   );
   if (strategyId === 'HTFFVGFlip_v1') return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-      <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><select value={form.htf_timeframe} onChange={e => u('htf_timeframe', e.target.value)}>{['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Entry Confirm TF</label><select value={form.entry_confirmation_tf} onChange={e => u('entry_confirmation_tf', e.target.value)}>{['M1', 'M5', 'M15'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={form.target_rr} onChange={e => u('target_rr', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>
-      <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}><input type="checkbox" checked={form.require_unfilled_htf_fvg ?? true} onChange={e => u('require_unfilled_htf_fvg', e.target.checked)} /> Require Unfilled HTF FVG</label></div>
+      <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><select value={htfFvg.htf_timeframe} onChange={e => updateHtfFvg('htf_timeframe', e.target.value)}>{['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Entry Confirm TF</label><select value={htfFvg.entry_confirmation_tf} onChange={e => updateHtfFvg('entry_confirmation_tf', e.target.value)}>{['M1', 'M5', 'M15'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={htfFvg.target_rr} onChange={e => updateHtfFvg('target_rr', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={htfFvg.session_start} onChange={e => updateHtfFvg('session_start', e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={htfFvg.session_cutoff} onChange={e => updateHtfFvg('session_cutoff', e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={htfFvg.sl_buffer_atr_mult} onChange={e => updateHtfFvg('sl_buffer_atr_mult', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={htfFvg.min_sl_pips} onChange={e => updateHtfFvg('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor. 0 disables.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={htfFvg.min_sl_atr_mult} onChange={e => updateHtfFvg('min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative floor. Larger floor wins. 0 disables.</div></div>
+      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 16 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}><input type="checkbox" checked={htfFvg.require_unfilled_htf_fvg ?? true} onChange={e => updateHtfFvg('require_unfilled_htf_fvg', e.target.checked)} /> Require Unfilled HTF FVG</label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}><input type="checkbox" checked={htfFvg.session_filter_enabled ?? true} onChange={e => updateHtfFvg('session_filter_enabled', e.target.checked)} /> Session Filter Enabled</label>
+      </div>
     </div>
   );
   if (strategyId === 'BiasIFVG_v1') return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-      <div><label style={{ fontSize: '0.7rem' }}>Stop Method</label><input type="text" value={form.stop_method} onChange={e => u('stop_method', e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Target RR Range Min</label><input type="number" step="0.1" value={form.target_rr_range_min} onChange={e => u('target_rr_range_min', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Target RR Range Max</label><input type="number" step="0.1" value={form.target_rr_range_max} onChange={e => u('target_rr_range_max', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" value={form.max_trades_per_day} onChange={e => u('max_trades_per_day', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={form.session_start} onChange={e => u('session_start', e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={form.session_cutoff} onChange={e => u('session_cutoff', e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={biasIfvg.target_rr} onChange={e => updateBiasIfvg('target_rr', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" value={biasIfvg.max_trades_per_day} onChange={e => updateBiasIfvg('max_trades_per_day', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>A+ Confluence Threshold</label><input type="number" min="0" max="100" value={biasIfvg.a_plus_confluence_threshold} onChange={e => updateBiasIfvg('a_plus_confluence_threshold', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Score a setup must reach to be taken (0–100).</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={biasIfvg.session_start} onChange={e => updateBiasIfvg('session_start', e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={biasIfvg.session_cutoff} onChange={e => updateBiasIfvg('session_cutoff', e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Rejection Min Body (× ATR)</label><input type="number" step="0.05" min="0" value={biasIfvg.rejection_min_body_atr_mult} onChange={e => updateBiasIfvg('rejection_min_body_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Minimum rejection-candle body size, so a doji cannot count as displacement.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={biasIfvg.sl_buffer_atr_mult} onChange={e => updateBiasIfvg('sl_buffer_atr_mult', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={biasIfvg.min_sl_pips} onChange={e => updateBiasIfvg('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor. 0 disables.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={biasIfvg.min_sl_atr_mult} onChange={e => updateBiasIfvg('min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative floor. Larger floor wins. 0 disables.</div></div>
     </div>
   );
-  if (strategyId === 'NYOpenRetest_v1') return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-      <div><label style={{ fontSize: '0.7rem' }}>Range Start</label><input type="text" value={form.range_window_start} onChange={e => u('range_window_start', e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Range End</label><input type="text" value={form.range_window_end} onChange={e => u('range_window_end', e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Earliest Break Time</label><input type="text" value={form.earliest_valid_break_time} onChange={e => u('earliest_valid_break_time', e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Session End</label><input type="text" value={form.session_end} onChange={e => u('session_end', e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Stop Buffer (pts)</label><input type="number" step="0.1" value={form.stop_buffer_points} onChange={e => u('stop_buffer_points', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Fixed Target (pts)</label><input type="number" step="0.1" value={form.fixed_target_points} onChange={e => u('fixed_target_points', +e.target.value)} /></div>
-      <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}><input type="checkbox" checked={form.dynamic_target_override ?? true} onChange={e => u('dynamic_target_override', e.target.checked)} /> Dynamic Target Override</label></div>
-    </div>
-  );
+  if (strategyId === 'NYOpenRetest_v1') {
+    const rrMode = (nyOpen.target_mode || 'rr') === 'rr';
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <div><label style={{ fontSize: '0.7rem' }}>Range Start</label><input type="text" value={nyOpen.range_window_start} onChange={e => updateNyOpen('range_window_start', e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Range End</label><input type="text" value={nyOpen.range_window_end} onChange={e => updateNyOpen('range_window_end', e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Earliest Break Time</label><input type="text" value={nyOpen.earliest_valid_break_time} onChange={e => updateNyOpen('earliest_valid_break_time', e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Session End</label><input type="text" value={nyOpen.session_end} onChange={e => updateNyOpen('session_end', e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Stop Buffer (pts)</label><input type="number" step="0.1" value={nyOpen.stop_buffer_points} onChange={e => updateNyOpen('stop_buffer_points', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>SL Buffer (× ATR)</label><input type="number" step="0.1" min="0" value={nyOpen.sl_buffer_atr_mult} onChange={e => updateNyOpen('sl_buffer_atr_mult', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Target Mode</label><select value={nyOpen.target_mode || 'rr'} onChange={e => updateNyOpen('target_mode', e.target.value)}><option value="rr">R-Multiple (scale-free)</option><option value="points">Fixed Points</option></select></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" min="0" value={nyOpen.target_rr} onChange={e => updateNyOpen('target_rr', +e.target.value)} disabled={!rrMode} style={rrMode ? undefined : { opacity: 0.5 }} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>{rrMode ? 'Target = this × the realised stop distance.' : 'Inactive while Target Mode is Fixed Points.'}</div></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Fixed Target (pts)</label><input type="number" step="0.1" value={nyOpen.fixed_target_points} onChange={e => updateNyOpen('fixed_target_points', +e.target.value)} disabled={rrMode} style={rrMode ? { opacity: 0.5 } : undefined} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>{rrMode ? 'Inactive while Target Mode is R-Multiple.' : 'NQ-native point ceiling; unreachable on most FX pairs.'}</div></div>
+        <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}><input type="checkbox" checked={nyOpen.dynamic_target_override ?? true} onChange={e => updateNyOpen('dynamic_target_override', e.target.checked)} /> Dynamic Target Override</label></div>
+      </div>
+    );
+  }
   return null;
 }
 
@@ -1065,42 +1105,13 @@ function buildPortfolioStrategyParams(strategyId, form) {
     case 'CRT_v1':
       return form.crt || {};
     case 'VWAP_v1':
-      return {
-        vwap_anchor_minutes: form.vwap_anchor_minutes || 15,
-        momentum_lookback_bars: form.momentum_lookback_bars || 4,
-        momentum_threshold_pct: form.momentum_threshold_pct || 0.1,
-        sl_points: form.sl_points || 80.0,
-        sl_atr_multiplier: form.vwap_sl_atr_multiplier ?? 0,
-      };
+      return form.vwap || {};
     case 'HTFFVGFlip_v1':
-      return {
-        htf_timeframe: form.htf_timeframe,
-        entry_confirmation_tf: form.entry_confirmation_tf,
-        target_rr: form.target_rr,
-        require_unfilled_htf_fvg: form.require_unfilled_htf_fvg,
-        session_filter_enabled: form.session_filter_enabled,
-        session_start: form.session_start,
-        session_cutoff: form.session_cutoff,
-      };
+      return form.htf_fvg_flip || {};
     case 'BiasIFVG_v1':
-      return {
-        stop_method: form.stop_method,
-        target_rr_range_min: form.target_rr_range_min,
-        target_rr_range_max: form.target_rr_range_max,
-        max_trades_per_day: form.max_trades_per_day,
-        session_start: form.session_start,
-        session_cutoff: form.session_cutoff,
-      };
+      return form.bias_ifvg || {};
     case 'NYOpenRetest_v1':
-      return {
-        range_window_start: form.range_window_start,
-        range_window_end: form.range_window_end,
-        earliest_valid_break_time: form.earliest_valid_break_time,
-        session_end: form.session_end,
-        stop_buffer_points: form.stop_buffer_points,
-        fixed_target_points: form.fixed_target_points,
-        dynamic_target_override: form.dynamic_target_override,
-      };
+      return form.ny_open_retest || {};
     default:
       return {};
   }
@@ -1174,12 +1185,114 @@ const VirtualizedTradeList = memo(function VirtualizedTradeList({ displayGroups,
   );
 });
 
+// Simulation-cost fields use '' to mean "not explicitly set — resolve from the
+// broker". The backend types these as `float | str | None` and treats null /
+// '' / 'auto' as unset, at which point it sources the value from live MT5
+// symbol data (falling back to asset-class averages). An explicit 0.0 is a
+// deliberate zero-cost run and is honoured as such, which is exactly why the
+// two states must stay distinguishable here.
+const COST_FIELDS = ['slippage_pips', 'commission_per_lot', 'spread_pips'];
+const costOrAuto = (v) => (v === '' || v === null || v === undefined ? null : +v);
+
+// Form slices that are objects. The localStorage restore merges these one level
+// deep so a newly-added strategy parameter is not lost behind a stale blob.
+const NESTED_FORM_KEYS = ['apa', 'drift_jump_alpha', 'crt', 'vwap', 'htf_fvg_flip', 'bias_ifvg', 'ny_open_retest', 'prop_firm'];
+
+// Bump this whenever a default below changes in a way a cached blob would
+// override. Old keys are purged on load — see the `form` initialiser.
+const STORAGE_KEY = 'algoedge_bt_config_v2';
+const LEGACY_STORAGE_KEYS = ['algoedge_bt_config'];
+
+// Every value here mirrors the authoritative backend dataclass default
+// (RiskParams in backend/core/config_schema.py and each strategy's params.py).
+// The frontend sends these EXPLICITLY on every run, so any drift silently
+// overrides the backend rather than falling back to it. Field names must match
+// the dataclass fields exactly — the backend filters strategy_params through a
+// hasattr() check and drops anything it does not recognise.
+const DEFAULT_FORM = {
+  symbol: 'XAUUSD', initial_balance: 10000,
+  start_date: '', end_date: '', candle_count: 5000,
+  max_risk_hard_cap_pct: 2.0,
+  // APA (Advanced Price Action) strategy parameters — historically
+  // named "smc" after Smart Money Concepts, renamed since this state
+  // is specific to the APA strategy, not a general SMC strategy.
+  apa: {
+    minor_fractal_m: 3, major_fractal_m: 8,
+    shoulder_symmetry_tolerance_atr: 0.3, tight_level_threshold_atr: 0.35,
+    sl_buffer_atr_mult: 0.5, min_sl_pips: 12.0, min_sl_atr_mult: 1.0,
+    invalidation_zone_source: 'right_shoulder',
+    session_filter_enabled: true, session_start: '07:00', session_cutoff: '16:00',
+  },
+  drift_jump_alpha: {
+    // spike_lookback_bars removed — no such field on DriftJumpAlphaParams and no
+    // reference anywhere in backend/, so it was silently dropped by the hasattr filter.
+    drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20,
+    jump_entry_percentile_threshold: 95.0, trade_jumps_enabled: false, control_test_passed: false,
+    aggregate_max_lots_per_symbol: 6.0,
+    spike_threshold_pips: 0.0, recovery_target_pips: 0.0,
+    max_trades_per_day: 6, max_daily_risk_pct: 4.0,
+    max_consecutive_losses: 4, cooldown_after_max_losses_hours: 12,
+    min_rrr_to_accept_trade: 1.5,
+  },
+  crt: {
+    htf_timeframe: 'H1', ltf_timeframe: 'M5', target_r_multiple: 1.5, max_trades_per_session: 1,
+    session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
+    min_sl_pips: 15.0, sl_atr_mult: 1.0,
+  },
+  vwap: {
+    vwap_anchor_minutes: 15, momentum_lookback_bars: 4, momentum_threshold_pct: 0.1,
+    sl_method: 'auto', sl_points: 80.0, sl_atr_multiplier: 3.0,
+    min_sl_pips: 8.0, min_sl_spread_mult: 4.0, target_rr: 2.0,
+  },
+  htf_fvg_flip: {
+    htf_timeframe: 'H1', entry_confirmation_tf: 'M5', target_rr: 2.0,
+    require_unfilled_htf_fvg: true, session_filter_enabled: true,
+    session_start: '09:30', session_cutoff: '16:00',
+    sl_buffer_atr_mult: 0.5, min_sl_pips: 12.0, min_sl_atr_mult: 1.0,
+  },
+  bias_ifvg: {
+    session_start: '09:30', session_cutoff: '11:00', max_trades_per_day: 2, target_rr: 2.0,
+    sl_buffer_atr_mult: 0.5, min_sl_pips: 12.0, min_sl_atr_mult: 1.0,
+    a_plus_confluence_threshold: 90, rejection_min_body_atr_mult: 0.15,
+  },
+  ny_open_retest: {
+    range_window_start: '08:00', range_window_end: '08:15', earliest_valid_break_time: '09:30',
+    session_end: '11:00', stop_buffer_points: 5.0, fixed_target_points: 50.0,
+    dynamic_target_override: true, target_mode: 'rr', target_rr: 2.0, sl_buffer_atr_mult: 1.0,
+  },
+  // Global session gate (RiskParams / BacktestRequest.session_filter_enabled) —
+  // distinct from the per-strategy session_filter_enabled fields above.
+  session_filter_enabled: true,
+  risk_per_trade_pct: 0.5, min_rr: 3.0,
+  max_daily_drawdown_pct: 3.0, max_weekly_drawdown_pct: 6.0,
+  max_concurrent_positions: 3, max_daily_trades: 5,
+  min_sl_pips: 10.0, max_account_leverage: 30.0,
+  tp_count: 3, tp1_rr: 1.5, tp2_rr: 3.0, tp3_rr: 5.0, tp4_rr: 10.0, tp5_rr: 15.0,
+  tp_splits: '50,30,20',
+  be_trigger_rr: 1.5, be_buffer_pips: 0.0, be_buffer_atr_mult: 0.10,
+  trail_method_tp1: 'NONE', trail_method_tp2: 'ATR_TRAIL', trail_method_tp3: 'STRUCTURE_TRAIL',
+  trail_method_tp4: 'NONE', trail_method_tp5: 'NONE',
+  atr_trail_multiplier: 1.5, trail_pips: 15,
+  compounding_enabled: false,
+  prop_firm: {
+    account_mode: 'personal',
+    challenge_type: 'none',
+    account_size: 10000.0,
+    initial_balance: 10000.0,
+    max_lot_sizes: {}
+  },
+  target_profit_enabled: false, max_daily_profit: 500.0, max_weekly_profit: 2000.0,
+  manual_bias: 'NONE',
+  strategy_id: 'APA_v1',
+  // Simulation Costs (BUG-8/BUG-9) — '' means "auto, from broker data".
+  slippage_pips: '', commission_per_lot: '', spread_pips: '', simulate_wicks: true,
+};
+
 export default function Backtester() {
   const queryClient = useQueryClient();
   const { status } = useConnectionStore();
   const isAuth = useAuthStore(s => s.isAuthenticated);
   const [activeTab, setActiveTab] = useState('single'); // 'single' | 'portfolio'
-  const STORAGE_KEY = 'algoedge_bt_config';
   const PORTFOLIO_KEY = 'algoedge_portfolio_config';
 
   // ── Portfolio state ──
@@ -1230,7 +1343,7 @@ export default function Backtester() {
         trail_pips: form.trail_pips,
         session_filter_enabled: form.session_filter_enabled,
         prop_firm: form.prop_firm,
-        max_risk_hard_cap_pct: form.max_risk_hard_cap_pct ?? 3.0,
+        max_risk_hard_cap_pct: form.max_risk_hard_cap_pct ?? 2.0,
 
         max_concurrent_positions: form.max_concurrent_positions,
         max_daily_drawdown_pct: form.max_daily_drawdown_pct,
@@ -1242,9 +1355,10 @@ export default function Backtester() {
         max_weekly_profit: form.max_weekly_profit,
         // Simulation costs — must match single-symbol call so portfolio and
         // single results are comparable when the same settings are used.
-        slippage_pips: form.slippage_pips ?? 0.0,
-        commission_per_lot: form.commission_per_lot ?? 0.0,
-        spread_pips: form.spread_pips ?? 0.0,
+        // null = unset, so the backend sources the value from broker data.
+        slippage_pips: costOrAuto(form.slippage_pips),
+        commission_per_lot: costOrAuto(form.commission_per_lot),
+        spread_pips: costOrAuto(form.spread_pips),
         simulate_wicks: form.simulate_wicks ?? true,
       });
     },
@@ -1266,65 +1380,27 @@ export default function Backtester() {
   }, [remoteConfig]);
 
   const [form, setForm] = useState(() => {
-    // Restore last saved config from localStorage
+    // Restore last saved config from localStorage. Anything the saved blob does
+    // not carry falls back to DEFAULT_FORM, so parameters added after a user
+    // last ran a backtest arrive with the correct backend default rather than
+    // as `undefined`.
     try {
+      // Drop the pre-retune cache. v1 blobs pin the OLD defaults (1% risk,
+      // 3% hard cap, 2-pip BE buffer, zeroed simulation costs, …) and the
+      // frontend sends every one of them explicitly, so a returning user would
+      // silently keep overriding the whole cost-realism retune.
+      LEGACY_STORAGE_KEYS.forEach(k => localStorage.removeItem(k));
       const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved) || {};
+        const merged = { ...DEFAULT_FORM, ...parsed };
+        NESTED_FORM_KEYS.forEach(k => {
+          merged[k] = { ...DEFAULT_FORM[k], ...(parsed[k] || {}) };
+        });
+        return merged;
+      }
     } catch { }
-    return {
-      symbol: 'XAUUSD', initial_balance: 10000,
-      start_date: '', end_date: '', candle_count: 5000,
-      max_risk_hard_cap_pct: 3.0,
-      // APA (Advanced Price Action) strategy parameters — historically
-      // named "smc" after Smart Money Concepts, renamed since this state
-      // is specific to the APA strategy, not a general SMC strategy.
-      apa: {
-        confluence_threshold: 60, swing_length_htf: 5, swing_length_ltf: 3, ob_impulse_ratio: 2.0,
-        fvg_min_gap_pips: 5.0, liq_sweep_min_pips: 5.0, max_spread_pips: 3.0,
-        session_filter_enabled: true, news_filter_enabled: true,
-        enforce_htf_pd: true, enforce_fvg_displacement: false, enforce_asian_range_sweep: false,
-        minor_fractal_m: 3, major_fractal_m: 8,
-      },
-      drift_jump_alpha: {
-        spike_lookback_bars: 50, drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20,
-        jump_entry_percentile_threshold: 95.0, trade_jumps_enabled: false, control_test_passed: false, aggregate_max_lots_per_symbol: 6.0,
-      },
-      crt: {
-        htf_timeframe: 'H1', ltf_timeframe: 'M1', target_r_multiple: 1.5, max_trades_per_session: 1, session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
-      },
-      // Keep old fields just in case
-      confluence_threshold: 55, swing_length: 5, ob_impulse_ratio: 1.5,
-      fvg_min_gap_pips: 3.0, liq_sweep_min_pips: 2.0, max_spread_pips: 3.0,
-      session_filter_enabled: true, news_filter_enabled: true,
-      risk_per_trade_pct: 1.0, min_rr: 3.0,
-      max_daily_drawdown_pct: 3.0, max_weekly_drawdown_pct: 6.0,
-      max_concurrent_positions: 3, max_daily_trades: 5,
-      tp_count: 3, tp1_rr: 1.0, tp2_rr: 3.0, tp3_rr: 5.0, tp4_rr: 10.0, tp5_rr: 15.0,
-      tp_splits: '30,25,20,15,10',
-      be_trigger_rr: 1.0, be_buffer_pips: 2.0,
-      trail_method_tp1: 'NONE', trail_method_tp2: 'ATR_TRAIL', trail_method_tp3: 'STRUCTURE_TRAIL',
-      trail_method_tp4: 'NONE', trail_method_tp5: 'NONE',
-      atr_trail_multiplier: 1.5, trail_pips: 15,
-      compounding_enabled: false,
-      prop_firm: {
-        account_mode: 'personal',
-        challenge_type: 'none',
-        account_size: 10000.0,
-        initial_balance: 10000.0,
-        max_lot_sizes: {}
-      },
-      target_profit_enabled: false, max_daily_profit: 500.0, max_weekly_profit: 2000.0,
-      manual_bias: 'NONE',
-      strategy_id: 'APA_v1',
-      drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20, jump_entry_percentile_threshold: 95.0, trade_jumps_enabled: false, control_test_passed: false, aggregate_max_lots_per_symbol: 6.0,
-      htf_timeframe: 'H1', ltf_timeframe: 'M5', target_r_multiple: 1.5, max_trades_per_session: 1, session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
-      entry_confirmation_tf: 'M5', target_rr: 1.0, require_unfilled_htf_fvg: true,
-      stop_method: 'swing_high_low', target_rr_range_min: 1.0, target_rr_range_max: 3.0, max_trades_per_day: 2,
-      range_window_start: '08:00', range_window_end: '08:15', earliest_valid_break_time: '09:30', session_end: '11:00', stop_buffer_points: 5.0, fixed_target_points: 15.0, dynamic_target_override: true,
-      // Simulation Costs (BUG-8/BUG-9)
-      slippage_pips: 0.0, commission_per_lot: 0.0, spread_pips: 0.0, simulate_wicks: true,
-      vwap_sl_points: 80.0,
-    };
+    return JSON.parse(JSON.stringify(DEFAULT_FORM));
   });
 
   const RESULT_STORAGE_KEY = 'algoedge_bt_result';
@@ -1404,6 +1480,9 @@ export default function Backtester() {
           merged.drift_jump_alpha = { ...(c.drift_jump_alpha || {}), ...(prev.drift_jump_alpha || {}) };
           merged.crt = { ...(c.crt || {}), ...(prev.crt || {}) };
           merged.vwap = { ...(c.vwap || {}), ...(prev.vwap || {}) };
+          merged.htf_fvg_flip = { ...(c.htf_fvg_flip || {}), ...(prev.htf_fvg_flip || {}) };
+          merged.bias_ifvg = { ...(c.bias_ifvg || {}), ...(prev.bias_ifvg || {}) };
+          merged.ny_open_retest = { ...(c.ny_open_retest || {}), ...(prev.ny_open_retest || {}) };
           merged.compounding_enabled = prev.compounding_enabled ?? c.compounding?.compounding_enabled;
           
           return merged;
@@ -1471,70 +1550,42 @@ export default function Backtester() {
       setBtError(null);
       const validStrats = ['APA_v1', 'VWAP_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1'];
       const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'APA_v1';
-      let sp = {};
-      if (payload_strategy === 'APA_v1') sp = form.apa || {};
-      if (payload_strategy === 'DriftJumpAlpha_v1') sp = form.drift_jump_alpha || {};
-      if (payload_strategy === 'CRT_v1') sp = form.crt || {};
+      const sp = buildPortfolioStrategyParams(payload_strategy, form);
 
-      const payload = { ...form, strategy_id: payload_strategy, start_date: form.start_date || undefined, end_date: form.end_date || undefined, risk_config: { prop_firm: form.prop_firm }, max_risk_hard_cap_pct: form.max_risk_hard_cap_pct ?? 3.0, strategy_params: sp };
+      const payload = {
+        ...form,
+        strategy_id: payload_strategy,
+        start_date: form.start_date || undefined,
+        end_date: form.end_date || undefined,
+        // BacktestRequest has no top-level field for these three, but it spreads
+        // `risk_config` last into the engine's merged risk config, so this is the
+        // supported channel for RiskParams fields the request model does not name.
+        risk_config: {
+          prop_firm: form.prop_firm,
+          min_sl_pips: form.min_sl_pips,
+          max_account_leverage: form.max_account_leverage,
+          be_buffer_atr_mult: form.be_buffer_atr_mult,
+        },
+        max_risk_hard_cap_pct: form.max_risk_hard_cap_pct ?? 2.0,
+        strategy_params: sp,
+      };
       if (form.manual_bias && form.manual_bias !== 'NONE') {
         payload.manual_bias_overrides = { [form.symbol]: form.manual_bias };
       }
 
-      // NOTE: DriftJumpAlpha_v1 and CRT_v1 are deliberately absent from this chain —
-      // their settings panels (updateDja/updateCrt, ~line 49-53) write into nested
-      // form.drift_jump_alpha.*/form.crt.* state, which `sp` above already captures
-      // correctly. This chain previously also had a DriftJumpAlpha_v1/CRT_v1 branch
-      // here that re-read flat top-level fields (form.drift_ema_fast, form.htf_timeframe,
-      // etc.) those panels never write to — silently blanking out both strategies'
-      // configured params after `sp` had already set them correctly, the same class of
-      // bug fixed for APA_v1 (see the `sp` assignments above). VWAP_v1/HTFFVGFlip_v1/
-      // BiasIFVG_v1/NYOpenRetest_v1 genuinely use flat top-level fields in their panels,
-      // so their branches below are correct and this chain is the only place that builds
-      // strategy_params for them.
-      if (form.strategy_id === 'VWAP_v1') {
-        payload.strategy_params = {
-          vwap_anchor_minutes: form.vwap_anchor_minutes || 15,
-          momentum_lookback_bars: form.momentum_lookback_bars || 4,
-          momentum_threshold_pct: form.momentum_threshold_pct || 0.1,
-          sl_points: form.sl_points || 80.0,
-          sl_atr_multiplier: form.vwap_sl_atr_multiplier ?? 0,
-        };
-      } else if (form.strategy_id === 'HTFFVGFlip_v1') {
-        payload.strategy_params = {
-          htf_timeframe: form.htf_timeframe,
-          entry_confirmation_tf: form.entry_confirmation_tf,
-          target_rr: form.target_rr,
-          require_unfilled_htf_fvg: form.require_unfilled_htf_fvg,
-          session_filter_enabled: form.session_filter_enabled,
-          session_start: form.session_start,
-          session_cutoff: form.session_cutoff
-        };
-      } else if (form.strategy_id === 'BiasIFVG_v1') {
-        payload.strategy_params = {
-          stop_method: form.stop_method,
-          target_rr_range_min: form.target_rr_range_min,
-          target_rr_range_max: form.target_rr_range_max,
-          max_trades_per_day: form.max_trades_per_day,
-          session_start: form.session_start,
-          session_cutoff: form.session_cutoff
-        };
-      } else if (form.strategy_id === 'NYOpenRetest_v1') {
-        payload.strategy_params = {
-          range_window_start: form.range_window_start,
-          range_window_end: form.range_window_end,
-          earliest_valid_break_time: form.earliest_valid_break_time,
-          session_end: form.session_end,
-          stop_buffer_points: form.stop_buffer_points,
-          fixed_target_points: form.fixed_target_points,
-          dynamic_target_override: form.dynamic_target_override
-        };
-      }
+      // Every strategy's params now come from its own nested form slice via
+      // buildPortfolioStrategyParams(), so single-symbol and portfolio runs build
+      // strategy_params through exactly one code path. The previous per-strategy
+      // chain here re-read flat top-level fields, which meant HTFFVGFlip_v1 and
+      // BiasIFVG_v1 shared one `session_start`/`session_cutoff`/`target_rr`
+      // between them — configuring one silently reconfigured the other.
 
-      // Add simulation costs to every backtest payload (BUG-8/BUG-9)
-      payload.slippage_pips = form.slippage_pips ?? 0.0;
-      payload.commission_per_lot = form.commission_per_lot ?? 0.0;
-      payload.spread_pips = form.spread_pips ?? 0.0;
+      // Simulation costs (BUG-8/BUG-9). null = "not set by the user": the engine
+      // then sources spread/commission/slippage from live MT5 symbol data rather
+      // than modelling a zero-cost market.
+      payload.slippage_pips = costOrAuto(form.slippage_pips);
+      payload.commission_per_lot = costOrAuto(form.commission_per_lot);
+      payload.spread_pips = costOrAuto(form.spread_pips);
       payload.simulate_wicks = form.simulate_wicks ?? true;
 
       return runBacktest(payload);
@@ -1774,7 +1825,7 @@ export default function Backtester() {
             </div>
             <div>
               <label style={{ fontSize: '0.7rem' }}>TP Volume Split (%)</label>
-              <input type="text" value={form.tp_splits} onChange={e => u('tp_splits', e.target.value)} placeholder="30,25,20,15,10" />
+              <input type="text" value={form.tp_splits} onChange={e => u('tp_splits', e.target.value)} placeholder="50,30,20" />
               <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Comma-separated % per TP (must sum to 100)</div>
               {(() => {
                 const parts = (form.tp_splits || '').split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
@@ -1790,9 +1841,15 @@ export default function Backtester() {
               })()}
             </div>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--purple)' }}>━ Break-Even</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
               <div><label style={{ fontSize: '0.7rem' }}>BE Trigger (R)</label><input type="number" step="0.1" value={form.be_trigger_rr} onChange={e => u('be_trigger_rr', +e.target.value)} /></div>
-              <div><label style={{ fontSize: '0.7rem' }}>BE Buffer (pips)</label><input type="number" step="0.5" value={form.be_buffer_pips} onChange={e => u('be_buffer_pips', +e.target.value)} /></div>
+              <div><label style={{ fontSize: '0.7rem' }}>BE Buffer (pips)</label><input type="number" step="0.5" value={form.be_buffer_pips} onChange={e => u('be_buffer_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Keep at 0. A non-zero pip buffer can place the break-even stop beyond the market, where it fills as fabricated profit.</div></div>
+              <div><label style={{ fontSize: '0.7rem' }}>BE Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={form.be_buffer_atr_mult} onChange={e => u('be_buffer_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Scale-aware break-even cushion. Use this instead of the pip buffer.</div></div>
+            </div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--yellow)' }}>━ Safety Guards</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={form.min_sl_pips} onChange={e => u('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Portfolio-wide stop floor applied by the position sizer. 0 disables.</div></div>
+              <div><label style={{ fontSize: '0.7rem' }}>Max Account Leverage (×)</label><input type="number" step="1" min="0" value={form.max_account_leverage} onChange={e => u('max_account_leverage', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Caps notional exposure so a tiny stop cannot size into the 100×+ positions MT5 rejects outright.</div></div>
             </div>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--red)' }}>━ Trailing Stops</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -1845,21 +1902,28 @@ export default function Backtester() {
               </button>
               {form._broker_spread_info && <span style={{ fontSize: '0.6rem', color: 'var(--green)' }}>{form._broker_spread_info}</span>}
             </div>
+            <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', marginTop: 8 }}>
+              Leave a field empty to have the backend source it from your broker (live MT5 spread, swap and stops level; commission derived from deal history).
+              Entering a number — <strong>including 0</strong> — overrides that and is treated as a deliberate choice, so an explicit 0 models a zero-cost market.
+              {COST_FIELDS.some(f => form[f] !== '' && form[f] !== null && form[f] !== undefined) && (
+                <span style={{ color: 'var(--yellow)' }}> Some costs are currently overridden manually.</span>
+              )}
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 6 }}>
               <div>
                 <label style={{ fontSize: '0.7rem' }}>Slippage (pips)</label>
-                <input type="number" step="0.1" min="0" value={form.slippage_pips ?? 0} onChange={e => u('slippage_pips', +e.target.value)} />
-                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Extra pips added to entry price against the trade direction (simulates broker fill slippage). 1–3 pips typical for Forex.</div>
+                <input type="number" step="0.1" min="0" placeholder="Auto (from broker)" value={form.slippage_pips ?? ''} onChange={e => u('slippage_pips', e.target.value === '' ? '' : +e.target.value)} />
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Extra pips added to entry price against the trade direction (simulates broker fill slippage). 1–3 pips typical for Forex. Empty = auto.</div>
               </div>
               <div>
                 <label style={{ fontSize: '0.7rem' }}>Commission / Lot (account currency)</label>
-                <input type="number" step="0.5" min="0" value={form.commission_per_lot ?? 0} onChange={e => u('commission_per_lot', +e.target.value)} />
-                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Round-turn commission per lot deducted from PnL. Typical: $3.50–$7.00/lot for ECN brokers.</div>
+                <input type="number" step="0.5" min="0" placeholder="Auto (from broker)" value={form.commission_per_lot ?? ''} onChange={e => u('commission_per_lot', e.target.value === '' ? '' : +e.target.value)} />
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Round-turn commission per lot deducted from PnL. Typical: $3.50–$7.00/lot for ECN brokers. Empty = auto.</div>
               </div>
               <div>
                 <label style={{ fontSize: '0.7rem' }}>Spread (pips)</label>
-                <input type="number" step="0.1" min="0" value={form.spread_pips ?? 0} onChange={e => u('spread_pips', +e.target.value)} />
-                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Fixed bid/ask spread cost deducted at entry. Typical: 0.5–2 pips Forex, wider on synthetics/metals.</div>
+                <input type="number" step="0.1" min="0" placeholder="Auto (from broker)" value={form.spread_pips ?? ''} onChange={e => u('spread_pips', e.target.value === '' ? '' : +e.target.value)} />
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Fixed bid/ask spread cost deducted at entry. Typical: 0.5–2 pips Forex, wider on synthetics/metals. Empty = auto.</div>
               </div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderTop: '1px solid var(--border-subtle)' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.75rem', flex: '0 0 auto' }}>

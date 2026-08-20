@@ -434,7 +434,16 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
-        contract_size=1000,
+        # FIX (audit): contract_size was 1000, contradicting the PnL ratio.
+        # point_value_per_lot/point_size = 1.0/0.01 = 100 → $100 per $1.00 move
+        # per lot, which is exactly a 100-BARREL contract ($0.01 move × 100
+        # barrels = $1.00 per point). A 1000-barrel contract would make a $1.00
+        # move worth $1000, i.e. point_value_per_lot = 10.0.
+        # The 100-barrel spec is the standard retail/CFD WTI contract at
+        # IC Markets/Pepperstone/Deriv-style brokers, and the ratio is the
+        # load-bearing field (it drives both lot sizing AND PnL), so
+        # contract_size is corrected to agree with it. PnL behaviour unchanged.
+        contract_size=100,
         session_filter=True,
         news_filter=True,
         trades_24_7=False,
@@ -447,7 +456,9 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
-        contract_size=1000,
+        # FIX (audit): same as USOIL — Brent CFD is a 100-barrel contract here
+        # ($1.00 per 0.01 move per lot). contract_size 1000 → 100. PnL unchanged.
+        contract_size=100,
         session_filter=True,
         news_filter=True,
         trades_24_7=False,
@@ -536,8 +547,18 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     "EURAUD": InstrumentProfile(
         symbol="EURAUD", instrument_type="FOREX", point_size=0.00001, point_value_per_lot=0.65, lot_min=0.01, lot_max=100.0, lot_step=0.01, contract_size=100000, session_filter=True, news_filter=True, trades_24_7=False,
     ),
+    # FIX (audit): contract_size was 1, contradicting the PnL ratio.
+    # point_value_per_lot/point_size = 1.2/0.1 = 12 → $12 per 1.0 index point
+    # per lot. GER40 is EUR-denominated, so USD/point = contract_size ×
+    # point_size × EURUSD: 12 = cs × 0.1 × ~1.20 → cs = 10, i.e. the common
+    # €10-per-index-point DAX CFD contract (10 index units per lot). Note this
+    # is the one INDEX profile where ratio != contract_size legitimately —
+    # point_value_per_lot is USD while contract_size is in EUR index units.
+    # The ratio drives sizing and PnL, so it is preserved; only the cosmetic
+    # contract_size is corrected. (If your broker quotes DAX at €1/point,
+    # point_value_per_lot should become 0.12 and contract_size 1.)
     "GER40": InstrumentProfile(
-        symbol="GER40", instrument_type="INDEX", point_size=0.1, point_value_per_lot=1.2, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+        symbol="GER40", instrument_type="INDEX", point_size=0.1, point_value_per_lot=1.2, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=10, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "HK50": InstrumentProfile(
         symbol="HK50", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
@@ -650,12 +671,18 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     "NAS100": InstrumentProfile(
         symbol="NAS100",
         instrument_type="INDEX",
-        point_size=0.25,
-        point_value_per_lot=2.5,
+        point_size=0.25,          # NAS100 trades in 0.25-point ticks
+        point_value_per_lot=2.5,  # $2.50 per 0.25 tick
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
-        contract_size=1,
+        # FIX (audit): contract_size was 1, contradicting the PnL ratio.
+        # point_value_per_lot/point_size = 2.5/0.25 = 10 → $10 per index point
+        # per lot, the standard CFD spec (10 index units per lot; between the
+        # $5 micro and $20 E-mini NQ futures multipliers). USD-quoted, so
+        # contract_size must equal the ratio. The ratio is load-bearing and
+        # matches live PnL, so contract_size is corrected: 1 → 10.
+        contract_size=10,
         session_filter=True,
         news_filter=True,
         trades_24_7=False,
@@ -669,12 +696,16 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     "US500": InstrumentProfile(
         symbol="US500",
         instrument_type="INDEX",
-        point_size=0.1,
-        point_value_per_lot=1.0,
+        point_size=0.1,           # S&P CFD quoted to 0.1 index points
+        point_value_per_lot=1.0,  # $1.00 per 0.1 point
         lot_min=0.01,
         lot_max=50.0,
         lot_step=0.01,
-        contract_size=1,
+        # FIX (audit): contract_size was 1, contradicting the PnL ratio.
+        # 1.0/0.1 = 10 → $10 per index point per lot (10 index units per lot —
+        # the standard CFD spec, between the $5 micro and $50 E-mini ES
+        # multipliers). USD-quoted, so contract_size must equal the ratio.
+        contract_size=10,
         session_filter=True,
         news_filter=True,
         trades_24_7=False,
@@ -707,9 +738,13 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
 
     # ── Additional Indices ───────────────────────────────────────────────────
 
+    # FIX (audit): contract_size was 1, contradicting the PnL ratio.
+    # 1.0/0.1 = 10 → $10 per Russell 2000 index point per lot (10 index units
+    # per lot; the E-mini RTY futures multiplier is $50, the CFD is $10).
+    # USD-quoted, so contract_size must equal the ratio. Ratio preserved.
     "US2000": InstrumentProfile(
         symbol="US2000", instrument_type="INDEX", point_size=0.1, point_value_per_lot=1.0,
-        lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=1, session_filter=True, news_filter=True, trades_24_7=False,
+        lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=10, session_filter=True, news_filter=True, trades_24_7=False,
     ),
     "UK100": InstrumentProfile(
         symbol="UK100", instrument_type="INDEX", point_size=1.0, point_value_per_lot=1.0,
@@ -759,7 +794,17 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         # FIX (2.4): was lot_max=50.0 == lot_min — a data-entry bug that pinned every
         # XRPUSD trade to exactly 50 lots regardless of computed risk-based sizing.
         # Widened to match sibling crypto profiles (SOLUSD/LTCUSD use lot_max=1000).
-        symbol="XRPUSD", instrument_type="CRYPTO", point_size=0.0001, point_value_per_lot=0.01,
+        #
+        # FIX (audit): point_value_per_lot was 0.01 (copy-pasted from SOLUSD,
+        # whose point_size is 0.01) while XRP's point_size is 0.0001 to match
+        # its sub-dollar price. That made the ratio 100 — i.e. $100 per $1.00
+        # XRP move per lot, a 100-XRP contract — against contract_size=1.
+        # Here the RATIO is the wrong field, not contract_size: every sibling
+        # crypto profile (DOGUSD/SOLUSD/LTCUSD, and BTCUSD/ETHUSD) is 1 coin
+        # per lot with ratio 1.0, and XRPUSD's lot_min=50/lot_step=10 were
+        # chosen for a ~$25 minimum notional at 1 XRP per lot. Corrected to
+        # 0.0001 → ratio 1.0, consistent with contract_size=1.
+        symbol="XRPUSD", instrument_type="CRYPTO", point_size=0.0001, point_value_per_lot=0.0001,
         lot_min=50.0, lot_max=1000.0, lot_step=10.0, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "LTCUSD": InstrumentProfile(

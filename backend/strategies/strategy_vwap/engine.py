@@ -155,6 +155,67 @@ class VWAPEngine(BaseStrategy):
     def get_required_timeframes(self) -> list[str]:
         return [self.params.entry_timeframe]
 
+    # Index instruments where `sl_points` is a native unit and the fixed-point method
+    # from the source strategy is meaningful. Everything else resolves to ATR.
+    _INDEX_TOKENS = (
+        "NQ", "MNQ", "ES", "MES", "YM", "MYM", "RTY", "M2K",
+        "NAS100", "USTEC", "NDX", "US30", "US500", "SPX", "US2000",
+        "UK100", "GER40", "DAX", "FRA40", "EU50", "JP225", "HK50",
+        "AUS200", "SWI20", "NTH25",
+    )
+
+    def _is_index(self, symbol: str) -> bool:
+        s = symbol.upper().replace(" ", "")
+        return any(tok in s for tok in self._INDEX_TOKENS)
+
+    def _resolve_sl_distance(self, symbol: str, atr: float, pip_size: float) -> float:
+        """
+        Resolve the stop distance in PRICE units per the configured sl_method, then
+        apply the absolute cost floors. See params.py header for the derivation of
+        every constant referenced here.
+        """
+        method = getattr(self.params, "sl_method", "auto")
+        if method == "auto":
+            method = "fixed_points" if self._is_index(symbol) else "atr_multiple"
+
+        if method == "fixed_points":
+            # get_pip_size() returns 1.0 for index CFDs, so this is a genuine identity.
+            sl_dist = self.params.sl_points * pip_size
+        else:
+            k = getattr(self.params, "sl_atr_multiplier", 0.0) or 0.0
+            sl_dist = atr * k if k > 0 else 0.0
+
+        # ── Cost floors ──────────────────────────────────────────────────────
+        # A stop tighter than a few multiples of spread is not a stop — it is hit by
+        # the bid/ask bounce at the instant of entry. Floor is the larger of an
+        # absolute pip figure and a spread multiple (the latter adapts to news-time
+        # spread blowouts that a fixed pip figure cannot see).
+        floor = 0.0
+        min_pips = getattr(self.params, "min_sl_pips", 0.0) or 0.0
+        if min_pips > 0:
+            floor = min_pips * pip_size
+
+        spread_mult = getattr(self.params, "min_sl_spread_mult", 0.0) or 0.0
+        if spread_mult > 0:
+            try:
+                from backend.risk.broker_costs import get_broker_costs
+                spread_pips = get_broker_costs(symbol).get("spread_pips", 0.0) or 0.0
+                if spread_pips > 0:
+                    floor = max(floor, spread_mult * spread_pips * pip_size)
+            except Exception:
+                # Broker costs unavailable (no MT5, module missing) — the absolute
+                # min_sl_pips floor above still applies.
+                pass
+
+        if floor > 0 and sl_dist < floor:
+            logger.debug(
+                f"[{symbol}] SL floored: {sl_dist / pip_size:.1f} → {floor / pip_size:.1f} pips "
+                f"(method={method})"
+            )
+            sl_dist = floor
+
+        return sl_dist
+
     def notify_outcome(self, symbol: str, group_id: str, is_win: bool, pnl: float) -> None:
         """
         Called by the backtester/live engine after a full trade group closes.
@@ -234,22 +295,16 @@ class VWAPEngine(BaseStrategy):
             entry = latest["open"]
             atr = calculate_atr(candles)
 
-            # sl_points is configured in instrument "points" (e.g. 170 for USDCHF), not raw
-            # price units — it must be converted via the symbol's point/pip size before use,
-            # otherwise it's applied as a raw price delta (e.g. entry - 170 on a ~0.8 FX pair
-            # goes negative). sl_atr_multiplier acts as a FLOOR — if ATR suggests a wider SL,
-            # use that instead. This fixes the bug where sl_atr_multiplier (default 1.0) always
-            # won, making sl_points dead code (avg SL was 3.9 pips instead of configured 17 pips).
+            # Stop-loss method resolution — see params.py header for the full rationale.
+            # `sl_points` is a native INDEX-POINT figure from the source strategy (80 on NQ)
+            # and is meaningless on FX: multiplying it by get_pip_size() gave an 80-PIP stop
+            # on USDCHF, which turned this M5 scalper into a ~6.9-day swing hold in the real
+            # runs. Per doc §5 ("On any other instrument: convert to an ATR-multiple instead
+            # of a fixed point value"), points are used ONLY for index instruments; everything
+            # else uses ATR × k. A hard cost floor is then applied under both methods so a
+            # dead low-volatility session can never produce a sub-spread stop.
             pip_size = get_pip_size(symbol)
-            sl_dist = self.params.sl_points * pip_size
-            if self.params.sl_atr_multiplier > 0:
-                atr_sl = atr * self.params.sl_atr_multiplier
-                if atr_sl > sl_dist:
-                    sl_dist = atr_sl
-                    logger.debug(
-                        f"[{symbol}] ATR floor widened SL: sl_points={self.params.sl_points:.1f} "
-                        f"→ ATR×{self.params.sl_atr_multiplier}={atr_sl:.5f}"
-                    )
+            sl_dist = self._resolve_sl_distance(symbol, atr, pip_size)
 
             if direction == "BUY":
                 sl = entry - sl_dist

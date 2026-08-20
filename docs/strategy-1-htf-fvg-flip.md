@@ -85,8 +85,29 @@ on_new_low_tf_candle(candle):  # 5m
 |---|---|---|
 | `htf_timeframe` | 1H (alt: 4H) | Key-level timeframe |
 | `entry_confirmation_tf` | 5m | Can widen if too noisy |
-| `target_rr` | 1.0 | Ratio to next liquidity pool; user-overridable |
+| `target_rr` | ~~1.0~~ **2.0** | Ratio to next liquidity pool; user-overridable — see note |
 | `require_unfilled_htf_fvg` | true | Only take first tap of a gap |
+| `session_filter_enabled` | ~~(none)~~ **true** | Added 2026-08 — see note |
+| `session_start` / `session_cutoff` | **09:30 / 16:00 ET** | US RTH (engine converts to America/New_York) |
+| `sl_buffer_atr_mult` | **0.5** | ATR(14) cushion added to the structural stop |
+| `min_sl_pips` / `min_sl_atr_mult` | **12.0 / 1.0** | Absolute + volatility-relative stop floors |
+
+> **Revision note — 2026-08 cost-realism audit.**
+> **`target_rr` 1.0 → 2.0.** Round-trip friction on an FX major is ~3.0 pips (2.0 spread +
+> 0.4 slippage + ~0.6 commission), ≈0.25R against the 12-pip stops this config now
+> produces. A 1.0R target therefore nets 0.75R while a loss costs 1.25R → **62.5%**
+> break-even win rate. The "Backtest Reference" above self-reports ~75% on 27 unverified
+> trades; needing 62.5% merely to break even leaves no margin for out-of-sample decay.
+> At 2.0R: nets 1.75R against 1.25R → **41.7%** break-even.
+>
+> **Session filter enabled.** This answers the first item under "Open Questions for
+> Implementation" ("consider adding one if false signals cluster outside RTH") — forensic
+> review of real runs found exactly that clustering.
+>
+> **Stop floors added.** `engine.py:199` places the stop flush at `m5_swing_point` with no
+> buffer and no floor — i.e. exactly on the visible swing wick every other participant can
+> see. ⚠ `sl_buffer_atr_mult`, `min_sl_pips` and `min_sl_atr_mult` are **not yet read by
+> the engine** and are inert until wired.
 
 ## Data Requirements
 5m, 15m, and 1H/4H OHLC candles for the traded instrument, synchronized to the

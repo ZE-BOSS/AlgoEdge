@@ -488,18 +488,83 @@ If two open positions are on highly correlated pairs:
 | `max_concurrent_positions` | 3 | 1–10 | Max open trades |
 | `max_correlated_risk_pct` | 4.0% | 1–8% | Max on correlated pairs |
 | `min_rr` | 3.0 | 3.0–10.0 | Minimum RR to trade |
-| `tp1_rr` | 3.0 | 2.0–5.0 | TP1 RR target |
-| `tp2_rr` | 5.0 | 4.0–8.0 | TP2 RR target |
-| `tp3_rr` | 7.0 | 5.0–10.0 | TP3 RR target / max |
-| `tp_splits` | [40,35,25] | any 3 summing 100 | % per TP level |
-| `be_trigger_rr` | 1.0 | 0.5–2.0 | R multiple to trigger BE |
-| `be_buffer_pips` | 2.0 | 0–10 | Pips above entry for BE |
+| `tp1_rr` | ~~3.0~~ **1.5** | 1.5–5.0 | TP1 RR target — see §6.5a |
+| `tp2_rr` | ~~5.0~~ **3.0** | 3.0–8.0 | TP2 RR target — see §6.5a |
+| `tp3_rr` | ~~7.0~~ **5.0** | 5.0–10.0 | TP3 RR target / max — see §6.5a |
+| `tp_splits` | ~~[40,35,25]~~ **[50,30,20]** | any 3 summing 100 | % per TP level — see §6.5a |
+| `be_trigger_rr` | ~~1.0~~ **1.5** | 0.5–2.0 | R multiple to trigger BE — see §6.5a |
+| `be_buffer_pips` | ~~2.0~~ **0.0** | 0–10 | Pips above entry for BE — see §6.5a |
+| `be_buffer_atr_mult` | **0.10** | 0–0.5 | ATR-relative BE buffer (preferred over pips) |
+| `risk_per_trade_pct` | ~~1.0%~~ **0.5%** | 0.25–3.0% | See §6.5a |
+| `max_risk_hard_cap_pct` | ~~3.0%~~ **2.0%** | 0.5–3.0% | Per-trade ceiling; must stay < `max_daily_drawdown_pct` |
+| `min_sl_pips` | **10.0** | 0–50 | Global minimum stop distance (0 = disabled) |
+| `max_account_leverage` | **30.0** | 0–100 | Open notional / equity hard clamp (0 = disabled) |
 | `sl_method` | OB_EXTREME | see options | SL placement method |
 | `sl_buffer_pips` | 5.0 | 2–20 | SL buffer pips |
 | `trail_method_tp2` | ATR_TRAIL | 4 options | TP2 trailing method |
 | `trail_method_tp3` | STRUCTURE | 4 options | TP3 trailing method |
 | `atr_trail_multiplier` | 1.5 | 0.5–3.0 | ATR trail distance |
 | `trail_pips` | 15.0 | 5–50 | Fixed pip trail distance |
+
+### 6.5a Revision note — 2026-08 cost-realism audit
+
+The struck-through values above were the original spec figures. They have been superseded
+in `backend/core/config_schema.py` following a forensic review of 11 real USDCHF backtest
+runs (1,272 trade groups / 3,816 legs). This section records **why the doc was wrong**, so
+the change is not later "corrected" back.
+
+**1. The `tp1_rr` / `tp2_rr` / `tp3_rr` = 3/5/7 grid was never reachable.**
+It also contradicted every strategy spec in this repo, all of which document a 1R/3R/5R
+grid (`apa_strategy_implementation_plan.md` §6, `vwap_strategy_implementation_plan.md` §6).
+On a 12-pip FX stop, a 3R *first* target is 36 pips — inside a 90-minute session window,
+on a pair whose entire average daily range is ~55 pips. The operative grid is the strategy
+docs' 1/3/5, corrected upward at the first tier to **1.5/3/5**.
+
+**2. `tp1_rr` = 1.0 is not defensible net of costs.**
+FX-major round-trip friction is ~3.0 pips (2.0 spread + 0.4 slippage + ~0.6 commission at
+$6/lot) ≈ **0.25R** on a 12-pip stop, deducted from every trade regardless of outcome.
+
+| TP1 | Net win | Net loss | Break-even hit rate required |
+|---|---|---|---|
+| 1.0R | 0.75R | 1.25R | **62.5%** |
+| 1.5R | 1.25R | 1.25R | **50.0%** |
+
+Every win-rate figure behind these strategy docs (64–75%) is an unverified, self-reported
+marketing claim measured without costs. Requiring 62.5% just to break even leaves no margin
+for out-of-sample decay. 1.5R restores a symmetric, honestly-statable requirement.
+
+**3. `be_trigger_rr` = 1.0 while TP1 sat at 1.5R was strictly harmful.**
+It armed the scratch-out one third of the way *before* the first partial: a routine
+retracement inside a winning move converted a 1.25R-net trade into a 0R scratch, while
+doing nothing for losers (which never reach 1R). BE now coincides exactly with TP1 at 1.5R,
+as does `trail_activation_rr`, so there is one de-risking event rather than three staggered
+ones.
+
+**4. `be_buffer_pips` as a *fixed pip* quantity is a latent P&L bug, not just a bad value.**
+The audited runs used `be_buffer_pips = 10` against APA stops with a **3.47-pip median**.
+At BE the stop is set to `entry + 10 pips` ≈ `entry + 2.9R` — which is *above the market* at
+the moment BE fires (price is at ~1R). `backtester/engine.py:434` sees a stop on the wrong
+side of the bar open, classifies it as a gap, and fills it. Net effect: every surviving
+sub-position is force-closed at a profit the strategy never earned, the bar after TP1.
+This is a mechanical profit generator and a strong candidate for the artifact behind the
+observed "winners sized 1.63× larger than losers" alongside a positive dollar P&L on a
+**−0.367R** expectancy. Default is now `0.0`; spread cover moves to the scale-aware
+`be_buffer_atr_mult` and `BreakevenManager`'s live-spread term.
+
+**5. `risk_per_trade_pct` = 1.0% had zero headroom against its own circuit breaker.**
+`max_concurrent_positions` is 3, so three simultaneous losers = 3.0% = *exactly*
+`max_daily_drawdown_pct`. The shipped configuration was one ordinary adverse hour from
+halting itself. At 0.5% the same cluster costs 1.5%.
+
+**6. Two new fields close the gap that produced untradeable position sizes.**
+`position_sizer.py` has no minimum-stop guard and clamps only to the broker's `volume_max`
+(fallback 100.0 lots). That is how APA reached 40 lots on a $25,000 account — $4,000,000
+notional, ~160× account leverage, which MT5 rejects with retcode 10019 (No money).
+`min_sl_pips` and `max_account_leverage` are the portfolio-level backstop; the latter
+follows the hard-clamp pattern already specified in
+`DriftJumpAlpha_Strategy_Spec_v2.md` §1 ("never a soft warning").
+
+Full parameter-by-parameter reasoning: `implementation/strategy_parameter_audit.md`.
 
 ---
 

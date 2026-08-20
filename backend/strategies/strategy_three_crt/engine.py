@@ -271,6 +271,26 @@ class CRTEngine(BaseStrategy):
                     else:
                         sl = current_price + sl_dist
 
+                    # ── Structural-TP declaration (audit §10.10) ─────────────────────
+                    # CRT reverse-derives its SL from the TP (spec §6) precisely so the
+                    # structural target — C1's opposite extreme — lands at exactly
+                    # target_r_multiple. The RiskParams TP ladder then overrides
+                    # `take_profit` with a 1.5R/3R/5R grid whose upper tiers sit BEYOND
+                    # C1's extreme, i.e. beyond the only level this setup's thesis says
+                    # price is travelling to. With tp_splits at 50/30/20 that strands
+                    # 50% of every CRT position on targets the strategy does not believe
+                    # in.
+                    #
+                    # Resolving that is a product decision that lives in risk/multi_tp.py
+                    # (exempt CRT from the grid, or place the SL structurally and let the
+                    # grid own targets) and is deliberately NOT made here. What IS fixed
+                    # here is that the information was previously unrecoverable
+                    # downstream: the fields below state, explicitly and per-signal, what
+                    # the structural target was and at what R it sits, so the grid, the
+                    # backtester and the reports can distinguish a structural CRT target
+                    # from a grid-derived one instead of silently conflating them.
+                    structural_tp_rr = (abs(tp - current_price) / sl_dist) if sl_dist > 0 else None
+
                     return TradeSignal(
                         strategy_id="CRT_v1",
                         symbol=symbol,
@@ -285,7 +305,19 @@ class CRTEngine(BaseStrategy):
                         metadata={
                             "reason": "CRT Setup C1/C2. NY Session.",
                             "htf": htf,
-                            "tp_source": tp_source
+                            "tp_source": tp_source,
+                            # The strategy's own target, kept intact regardless of what
+                            # the risk grid later does to `take_profit`.
+                            "structural_tp": float(tp),
+                            "structural_tp_rr": round(structural_tp_rr, 3) if structural_tp_rr is not None else None,
+                            "tp_is_structural": tp_source == "c1_extreme",
+                            # Declares that this strategy's TP is thesis-bearing, not a
+                            # placeholder: any R-grid tier beyond structural_tp_rr is
+                            # unreachable by CRT's own hypothesis. Consumed by nothing
+                            # today — honouring it requires risk/multi_tp.py, which is a
+                            # separate, deliberate product decision (audit §10.10).
+                            "strategy_owns_tp": True,
+                            "max_meaningful_rr": round(structural_tp_rr, 3) if structural_tp_rr is not None else None,
                         }
                     )
 

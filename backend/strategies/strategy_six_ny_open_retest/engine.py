@@ -111,7 +111,6 @@ class NYOpenRetestEngine(BaseStrategy):
                     # Convert points to price delta
                     pip_size = get_pip_size(symbol)
                     buffer = self.params.stop_buffer_points * pip_size
-                    target = self.params.fixed_target_points * pip_size
 
                     # breakout_extreme is captured near the breakout swing (close to
                     # range_high/low), while entry is range_mid — breakout_extreme can end up
@@ -134,8 +133,47 @@ class NYOpenRetestEngine(BaseStrategy):
                         else:
                             stop_loss += atr_buffer
 
+                    # ── Target resolution (audit §10.9) ──────────────────────────
+                    # This used to be `fixed_target_points * pip_size`, unconditionally.
+                    # 50 "points" -> 50 PIPS on USDCHF, measured from range_mid inside a
+                    # 09:30-11:00 window, on a pair whose entire AVERAGE DAILY RANGE is
+                    # ~55 pips: effectively unreachable, so in the real runs every exit
+                    # came from the SL, the dynamic_target_override swing, or the session
+                    # close, and the documented target was decorative. An R-multiple is
+                    # the only target formulation simultaneously correct on NQ, USDCHF
+                    # and XAUUSD, so target_mode="rr" is now the default path.
+                    #
+                    # The R-multiple is measured AFTER stop_buffer_points and
+                    # sl_buffer_atr_mult have both been applied above, so it reflects the
+                    # stop the trade is actually taken on.
+                    target_mode = str(getattr(self.params, "target_mode", "points") or "points").lower()
+                    target = 0.0
+                    target_source = "fixed_points"
+                    if target_mode == "rr":
+                        target_rr = getattr(self.params, "target_rr", 0.0) or 0.0
+                        sl_dist = abs(entry - stop_loss)
+                        target = sl_dist * target_rr
+                        target_source = "rr"
+                        if target <= 0:
+                            # Degenerate config (target_rr <= 0) or a zero-width stop —
+                            # fall back to the legacy points path rather than emitting a
+                            # signal whose TP sits on top of the entry.
+                            self.log_event(
+                                f"[{symbol}] target_mode='rr' produced a non-positive target "
+                                f"(sl_dist={sl_dist:.5f}, target_rr={target_rr}) — falling back "
+                                f"to fixed_target_points.",
+                                level="WARN",
+                                category="NY_OPEN",
+                            )
+                            target = self.params.fixed_target_points * pip_size
+                            target_source = "fixed_points_fallback"
+                    else:
+                        target = self.params.fixed_target_points * pip_size
+
                     take_profit = entry + target if state["bias"] == "BUY" else entry - target
-                    
+
+                    # dynamic_target_override applies to WHICHEVER target results above:
+                    # if the nearer HTF swing is closer than the resolved target, use it.
                     if getattr(self.params, 'dynamic_target_override', True):
                         recent_candles = candles.iloc[-50:]
                         if state["bias"] == "BUY":
@@ -145,12 +183,14 @@ class NYOpenRetestEngine(BaseStrategy):
                             # — avoids holding through a resistance level just to reach the fixed TP.
                             if 0 < swing_dist < target:
                                 take_profit = recent_high
+                                target_source = "dynamic_swing"
                         else:
                             recent_low = recent_candles["low"].min()
                             swing_dist = entry - recent_low
                             if 0 < swing_dist < target:
                                 take_profit = recent_low
-                    
+                                target_source = "dynamic_swing"
+
                     state["status"] = "DONE"
                     return TradeSignal(
                         strategy_id="NYOpenRetest_v1",
@@ -160,9 +200,24 @@ class NYOpenRetestEngine(BaseStrategy):
                         entry_price=entry,
                         stop_loss=stop_loss,
                         take_profit=take_profit,
+                        # confluence_score is DELIBERATELY constant here. Unlike the
+                        # IFVG strategies, this setup has exactly one confluence chain
+                        # (08:00-08:15 range marked -> body close beyond it after 09:30
+                        # -> retest of range_mid) and every element is a hard gate: there
+                        # is no optional confluence to count, so a computed score would
+                        # be invented rather than measured. See audit §10.6.
                         confluence_score=92,
                         timestamp=float(latest["time"]) if "time" in latest else candles.index[-1].timestamp(),
-                        metadata={"setup": "NY_OPEN_RETEST"}
+                        metadata={
+                            "setup": "NY_OPEN_RETEST",
+                            "target_mode": target_mode,
+                            "target_source": target_source,
+                            "sl_pips": round(abs(entry - stop_loss) / pip_size, 2) if pip_size else None,
+                            "realised_rr": (
+                                round(abs(take_profit - entry) / abs(entry - stop_loss), 3)
+                                if abs(entry - stop_loss) > 0 else None
+                            ),
+                        }
                     )
 
         return None
