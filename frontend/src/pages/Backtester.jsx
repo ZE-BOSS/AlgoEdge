@@ -616,14 +616,23 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
   const filteredNormalized = useMemo(() => {
     return [...filteredGrouped]
       .map(g => ({
+        // group_id keeps summaryEngine's signal count (totalGroups) honest —
+        // without it, two symbols entering on the same bar collapse into one.
+        group_id: g.group_id,
         pnl: g.net_pnl ?? g.combined_pnl ?? g.pnl ?? 0,
         entry_time: g.entry_time_iso || g.entry_time,
         exit_time: g.exit_time_iso || g.exit_time,
         balance_before: g.balance_before,
+        balance_after: g.balance_after,
         direction: g.direction,
         entry_price: g.entry_price,
         stop_loss: g.stop_loss,
         exit_price: g.exit_price,
+        // Volume-weighted R across the group's TP legs. Passing it through
+        // lets summaryEngine use it instead of re-deriving R from the group's
+        // best-leg exit_price, which overstates partially-closed trades.
+        realized_rr: g.realized_rr,
+        pnl_r: g.pnl_r,
         session: g.entry_session,
         symbol: g.symbol,
       }))
@@ -653,9 +662,15 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     displayGroups = [{ label: 'All Trades', trades: displayGrouped }];
   } else {
     const groupsMap = {};
+    // Sort on a real timestamp captured per bucket, not on the label. The old
+    // `new Date(b) - new Date(a)` re-parsed the display label, and a Week
+    // label ("Week 3") is not a parseable date — the comparator returned NaN
+    // and left the weekly summary in arbitrary order.
+    const groupSortKey = {};
     displayGrouped.forEach(g => {
       if (!g.entry_time_iso) return;
       const d = new Date(g.entry_time_iso);
+      if (Number.isNaN(d.getTime())) return;
       let key = '';
       if (groupBy === 'Day') key = d.toLocaleDateString();
       if (groupBy === 'Week') key = `Week ${getWeekNumber(d)}`;
@@ -663,8 +678,10 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       if (groupBy === 'Year') key = d.getFullYear().toString();
       if (!groupsMap[key]) groupsMap[key] = [];
       groupsMap[key].push(g);
+      const ts = d.getTime();
+      if (groupSortKey[key] === undefined || ts < groupSortKey[key]) groupSortKey[key] = ts;
     });
-    const sortedKeys = Object.keys(groupsMap).sort((a, b) => new Date(b) - new Date(a));
+    const sortedKeys = Object.keys(groupsMap).sort((a, b) => groupSortKey[b] - groupSortKey[a]);
     displayGroups = sortedKeys.map(k => ({ label: k, trades: groupsMap[k] }));
   }
 
@@ -684,24 +701,38 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       const sorted = [...group.trades].sort((a, b) => new Date(a.entry_time_iso || 0) - new Date(b.entry_time_iso || 0));
       sorted.forEach(t => {
         if (startBal === null) startBal = t.balance_before;
-        endBal = t.balance_after;
 
         const dStr = (t.entry_time_iso || '').split('T')[0];
         if ((result.prop_firm_breach_days || []).includes(dStr)) isBreached = true;
       });
 
+      // Ending balance is the balance after the last trade to CLOSE. `sorted`
+      // is entry-ordered (that's the order the rows render in), and with
+      // overlapping positions the last-opened trade is frequently not the
+      // last-closed one — reading balance_after off it reported an ending
+      // balance that disagreed with startBal + period P&L.
+      const lastClosed = [...group.trades].sort(
+        (a, b) => new Date(a.exit_time_iso || a.entry_time_iso || 0) - new Date(b.exit_time_iso || b.entry_time_iso || 0)
+      ).slice(-1)[0];
+      endBal = lastClosed ? lastClosed.balance_after : null;
+
       // Reuse the exact same stats math as the top-level cards (and as
       // CumulativeSummary) so a period row's Max DD / Sharpe / Sortino /
       // Expectancy are computed consistently, not with a second formula.
       const normalized = sorted.map(t => ({
+        group_id: t.group_id,
         pnl: t.net_pnl ?? t.combined_pnl ?? t.pnl ?? 0,
         entry_time: t.entry_time_iso || t.entry_time,
         exit_time: t.exit_time_iso || t.exit_time,
         balance_before: t.balance_before,
+        balance_after: t.balance_after,
         direction: t.direction,
         entry_price: t.entry_price,
         stop_loss: t.stop_loss,
         exit_price: t.exit_price,
+        realized_rr: t.realized_rr,
+        pnl_r: t.pnl_r,
+        symbol: t.symbol,
       }));
       const stats = summaryEngine.computePeriodStats(normalized, startBal ?? initialBalance, initialBalance);
 
@@ -738,7 +769,10 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       return {
         period: group.label,
         tradeCount: stats.totalGroups,
-        startBal, endBal,
+        startBal,
+        // Older/portfolio-engine records don't always carry balance_after;
+        // derive it rather than rendering an em-dash next to a real P&L.
+        endBal: endBal != null ? endBal : (startBal != null ? startBal + stats.pnl : null),
         pnl: stats.pnl,
         winRate: stats.winRate,
         maxDdPct: stats.maxDdPct,
