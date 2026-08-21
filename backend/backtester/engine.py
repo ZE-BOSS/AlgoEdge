@@ -607,6 +607,14 @@ class BacktestEngine(CostModelMixin):
         # parameter picks up live-MT5 / asset-class broker data instead of the old
         # silent 0.0. Explicit user values still win. See resolve_effective_costs().
         self._init_cost_model()
+        # Pin instrument data for the whole run so position sizing (at entry) and
+        # _calc_pnl (at exit) can never resolve against different sources. Without
+        # this, get_symbol_info()'s 60-second wall-clock TTL expires mid-backtest and
+        # a connectivity flicker silently changes tick_value/tick_size between the two
+        # — observed producing a 160x spread in implied instrument value within a
+        # single XRPUSD run, and making backtests non-reproducible.
+        from backend.risk.position_sizer import freeze_symbol_info
+        freeze_symbol_info()
         # Wick simulation: use OHLC shadow-weighted path model for same-bar SL+TP resolution
         self._simulate_wicks = bool(risk_config.get("simulate_wicks", True))
         # Strategy attribution for saved trades (Task 6): the sig dicts built by
@@ -1355,6 +1363,10 @@ class BacktestEngine(CostModelMixin):
             "direction": "BUY" if _is_buy(sig.get("direction", "BUY")) else "SELL",
             "entry_price": entry_price,
             "stop_loss": sig.get("stop_loss", 0),
+            # Immutable copy of the stop as it stood at entry. `stop_loss` above is
+            # MUTATED by break-even and trailing, so it cannot be used to measure the
+            # risk originally taken — see compute_trade_metrics() in analytics/metrics.py.
+            "initial_stop_loss": sig.get("stop_loss", 0),
             "take_profit": tp.tp_price,
             "volume": tp.volume,
             "tp_level": tp.level,

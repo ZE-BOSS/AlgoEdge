@@ -534,6 +534,87 @@ def _clamp_spread(symbol: str, live_pips: float, defaults: dict) -> tuple[float,
     return live_pips, False
 
 
+# MT5 SYMBOL_SWAP_MODE values (MQL5 ENUM_SYMBOL_SWAP_MODE).
+_SWAP_MODE_DISABLED = 0
+_SWAP_MODE_POINTS = 1
+_SWAP_MODE_CURRENCY_SYMBOL = 2
+_SWAP_MODE_CURRENCY_MARGIN = 3
+_SWAP_MODE_CURRENCY_DEPOSIT = 4
+_SWAP_MODE_INTEREST_CURRENT = 5
+_SWAP_MODE_INTEREST_OPEN = 6
+_SWAP_MODE_REOPEN_CURRENT = 7
+_SWAP_MODE_REOPEN_BID = 8
+
+# A single day's financing should never approach a meaningful fraction of the
+# position's notional value. 0.5%/day is already extreme (≈180%/yr); anything
+# above it means we mis-parsed the units, so we fall back to the asset-class
+# default rather than model a cost that would dominate every result.
+MAX_DAILY_SWAP_PCT_OF_NOTIONAL = 0.5
+
+
+def _swaps_to_usd_per_lot_per_day(
+    info, symbol: str, swap_long: float, swap_short: float, defaults: dict
+) -> tuple[float, float, bool]:
+    """
+    Convert MT5's raw swap_long/swap_short into USD per lot per day.
+
+    MT5 reports swap in units that depend on `symbol_info().swap_mode`; the raw
+    number is NOT a USD amount. Reading it literally produced a -$178.09/lot/day
+    financing charge on XRPUSD, which at ~55 lots is ~$9,800/day and accounted
+    for 81-164% of the entire loss on those runs.
+
+    Conversions by mode:
+      POINTS            swap is in points  -> points * point_size * contract_size
+      CURRENCY_*        already a currency amount per lot -> used as-is
+      INTEREST_*        annual interest %  -> notional * pct/100 / 360
+      REOPEN_*/DISABLED position is re-opened rather than financed, or no swap.
+
+    Returns (long_usd, short_usd, ok). `ok=False` means the value failed the
+    plausibility check and the caller should keep the asset-class default.
+    """
+    mode = int(getattr(info, "swap_mode", _SWAP_MODE_CURRENCY_DEPOSIT) or 0)
+
+    if mode in (_SWAP_MODE_DISABLED, _SWAP_MODE_REOPEN_CURRENT, _SWAP_MODE_REOPEN_BID):
+        return 0.0, 0.0, True
+
+    point = float(getattr(info, "point", 0.0) or 0.0)
+    contract = float(getattr(info, "trade_contract_size", 0.0) or 0.0)
+    price = _last_price(symbol) or 0.0
+    notional = price * contract if (price > 0 and contract > 0) else 0.0
+
+    if mode == _SWAP_MODE_POINTS:
+        if point <= 0 or contract <= 0:
+            return 0.0, 0.0, False
+        factor = point * contract
+        long_usd, short_usd = swap_long * factor, swap_short * factor
+    elif mode in (_SWAP_MODE_INTEREST_CURRENT, _SWAP_MODE_INTEREST_OPEN):
+        if notional <= 0:
+            return 0.0, 0.0, False
+        long_usd = notional * (swap_long / 100.0) / 360.0
+        short_usd = notional * (swap_short / 100.0) / 360.0
+    else:  # CURRENCY_SYMBOL / CURRENCY_MARGIN / CURRENCY_DEPOSIT
+        # Already per lot per day in a currency. Non-USD account/symbol currencies
+        # are not converted here — an FX conversion would need the account
+        # currency and a live cross rate; the plausibility check below catches
+        # anything wildly off.
+        long_usd, short_usd = swap_long, swap_short
+
+    # Plausibility check against notional.
+    if notional > 0:
+        cap = notional * (MAX_DAILY_SWAP_PCT_OF_NOTIONAL / 100.0)
+        worst = max(abs(long_usd), abs(short_usd))
+        if worst > cap:
+            logger.warning(
+                f"[COSTS] {symbol}: derived swap ${worst:,.2f}/lot/day exceeds "
+                f"{MAX_DAILY_SWAP_PCT_OF_NOTIONAL}% of notional (${cap:,.2f}) using "
+                f"swap_mode={mode} (raw {swap_long}/{swap_short}) — implausible, "
+                f"falling back to the asset-class default."
+            )
+            return 0.0, 0.0, False
+
+    return long_usd, short_usd, True
+
+
 def _shape(d: dict, source: str) -> dict:
     """Project an internal working dict onto the exact public contract."""
     out = {
@@ -617,15 +698,25 @@ def get_broker_costs(symbol: str, use_live_mt5: bool = True) -> dict:
                 else:
                     degraded = True
 
-                # Swaps come straight off the symbol spec (already per lot per day
-                # in the swap currency for MODE_POINTS==0/CURRENCY brokers; for
-                # percentage/points swap modes this is an approximation, which is
-                # why an implausible magnitude falls back).
+                # Swaps: MT5 reports these in UNITS THAT DEPEND ON swap_mode, so the
+                # raw value must never be used directly as "USD per lot per day".
+                #
+                # This was a real, severe bug: XRPUSD returned swap_long = -178.09,
+                # which was taken literally. At a median ~55 lots that is ~$9,800 per
+                # day of financing, and swap alone accounted for 81-164% of the entire
+                # loss on the XRPUSD runs (est. $173k of a $214k loss on HTF FVG Flip;
+                # $299k on Bias IFVG). The number is not a USD amount at all.
                 swap_long = getattr(info, "swap_long", None)
                 swap_short = getattr(info, "swap_short", None)
                 if swap_long is not None and swap_short is not None:
-                    working["swap_long_per_lot_per_day"] = float(swap_long)
-                    working["swap_short_per_lot_per_day"] = float(swap_short)
+                    sl_usd, ss_usd, swap_ok = _swaps_to_usd_per_lot_per_day(
+                        info, symbol, float(swap_long), float(swap_short), defaults
+                    )
+                    if swap_ok:
+                        working["swap_long_per_lot_per_day"] = sl_usd
+                        working["swap_short_per_lot_per_day"] = ss_usd
+                    else:
+                        degraded = True
                 else:
                     degraded = True
 

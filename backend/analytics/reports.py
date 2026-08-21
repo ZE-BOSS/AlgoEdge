@@ -326,7 +326,16 @@ def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | 
         best_trade_r=max(r_values) if r_values else 0,
         worst_trade_r=min(r_values) if r_values else 0,
         profit_factor=stats["profit_factor"],
-        expectancy_r=safe_float((stats["win_rate"] * (sum(win_r) / len(win_r) if win_r else 0)) - ((1 - stats["win_rate"]) * (sum(loss_r) / len(loss_r) if loss_r else 0))),
+        # Expectancy = P(win)*avg_win_R + P(loss)*avg_loss_R.
+        # `loss_r` is collected as `[r for r in r_values if r <= 0]`, so
+        # avg_loss_r is ALREADY NEGATIVE. The previous form SUBTRACTED it
+        # ("- (1-wr) * avg_loss_r"), which added the average loss instead of
+        # deducting it and made expectancy_r structurally incapable of being
+        # negative. Measured on the 62 saved runs: htffvgflip reported
+        # +5.55R/trade against a true +0.08R; apa reported +2.42R against
+        # +0.22R; every single losing run reported a large positive
+        # expectancy. Adding the (negative) average loss is the correct form.
+        expectancy_r=safe_float((stats["win_rate"] * (sum(win_r) / len(win_r) if win_r else 0)) + ((1 - stats["win_rate"]) * (sum(loss_r) / len(loss_r) if loss_r else 0))),
         sharpe_ratio=safe_float(stats["sharpe_ratio"]),
         sortino_ratio=safe_float(stats["sortino_ratio"]),
         calmar_ratio=safe_float(calmar_ratio),

@@ -31,7 +31,6 @@ def compute_trade_metrics(trade: dict[str, Any]) -> dict[str, Any]:
     """
     entry = trade.get("entry_price", 0)
     exit_p = trade.get("exit_price", 0)
-    sl = trade.get("stop_loss", 0)
     direction = trade.get("direction", "BUY")
     symbol = trade.get("symbol", "")
 
@@ -40,7 +39,30 @@ def compute_trade_metrics(trade: dict[str, Any]) -> dict[str, Any]:
     else:
         pnl_raw = entry - exit_p
 
-    risk = abs(entry - sl) if sl else 1
+    # R MUST be measured against the ORIGINAL risk taken at entry, never against
+    # the current stop. `trade["stop_loss"]` is MUTATED in place by break-even and
+    # trailing logic, so by exit time it typically sits at (or near) entry.
+    #
+    # Using it as the denominator was a severe reporting bug: once break-even moved
+    # the stop to entry the denominator collapsed toward zero and R exploded. Real
+    # example from a run — SPX500, signal risk 67.02 pts, recorded stop distance at
+    # exit 0.43 pts, reported R = 243.51 for a trade whose true R was 1.50 (a plain
+    # TP1 hit). Pooled, this reported +14.87R expectancy on a run that LOST money.
+    # Every R-denominated metric downstream (expectancy_r, avg_win_r, total_pnl_r)
+    # was corrupted by it.
+    #
+    # Resolution order: an explicitly recorded initial stop, then the untouched
+    # signal that opened the trade, and only then the live stop as a last resort.
+    original_signal = trade.get("original_signal") or {}
+    initial_sl = (
+        trade.get("initial_stop_loss")
+        or original_signal.get("stop_loss")
+        or trade.get("stop_loss", 0)
+    )
+    # Risk is measured from the ACTUAL FILL to the INITIAL stop — that is the
+    # capital genuinely put at risk when the position opened. (Not the signal's
+    # theoretical entry, which was never transacted.)
+    risk = abs(entry - initial_sl) if initial_sl else 0
     realized_rr = pnl_raw / risk if risk > 0 else 0
 
     entry_time = trade.get("entry_time")

@@ -6,9 +6,10 @@ Provides explicit error reporting when fetch fails rather than returning silent 
 """
 
 import asyncio
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -20,6 +21,9 @@ except ImportError:
     mt5 = None
 
 logger = get_logger(__name__)
+
+# Cached broker UTC offset in hours (None = not yet measured).
+_SERVER_OFFSET_CACHE: float | None = None
 
 # Executor for blocking MT5 calls — single worker to serialize MT5 access
 _executor = ThreadPoolExecutor(max_workers=1)
@@ -43,8 +47,71 @@ def _get_timeframe_code(tf_str: str):
 
 
 
+def detect_server_utc_offset_hours() -> float:
+    """
+    Return the broker server's UTC offset in hours, so bar timestamps can be
+    converted to TRUE UTC.
+
+    MT5 reports bar times in SERVER time, encoded as a Unix epoch as though that
+    server time were UTC. Reading it as UTC therefore shifts every timestamp by the
+    server's offset, and every downstream Eastern-Time session gate with it.
+
+    Measured on the supplied runs: the FX trading week ran Mon 00:00 -> Sat 00:00 in
+    stored time, with ZERO Saturday/Sunday bars. The real FX week opens Sun 21:00 UTC
+    and closes Fri 21:00 UTC, and Sun 21:00 UTC == Mon 00:00 at UTC+3 — so the feed
+    was UTC+3 being read as UTC. Consequence: the code's "09:30 ET" was really
+    06:30 ET, and every session-anchored strategy (VWAP, NY Open Retest, CRT, APA)
+    traded three hours earlier than documented — the London morning, not the NY open.
+
+    Preference order:
+      1. ALGOEDGE_MT5_SERVER_UTC_OFFSET env var (explicit override, in hours)
+      2. Live measurement: the gap between the server's clock and true UTC
+      3. 0.0 — assume already-UTC, and warn
+    """
+    override = os.environ.get("ALGOEDGE_MT5_SERVER_UTC_OFFSET")
+    if override is not None:
+        try:
+            return float(override)
+        except ValueError:
+            logger.warning(f"[DATA] Invalid ALGOEDGE_MT5_SERVER_UTC_OFFSET={override!r}; ignoring.")
+
+    global _SERVER_OFFSET_CACHE
+    if _SERVER_OFFSET_CACHE is not None:
+        return _SERVER_OFFSET_CACHE
+
+    try:
+        if mt5 is not None:
+            tick = mt5.symbol_info_tick("EURUSD")
+            if tick and getattr(tick, "time", 0):
+                # tick.time is server time as a pseudo-UTC epoch; compare with real UTC.
+                delta_h = (tick.time - datetime.now(timezone.utc).timestamp()) / 3600.0
+                # Broker offsets are whole (occasionally half) hours; snap to the
+                # nearest half hour to absorb latency and clock skew.
+                offset = round(delta_h * 2) / 2
+                if -12 <= offset <= 14:
+                    _SERVER_OFFSET_CACHE = offset
+                    logger.info(f"[DATA] Detected MT5 server UTC offset: {offset:+.1f}h")
+                    return offset
+    except Exception as e:
+        logger.debug(f"[DATA] Server offset detection failed: {e}")
+
+    logger.warning(
+        "[DATA] Could not determine MT5 server UTC offset — assuming server time IS UTC. "
+        "If your broker is not UTC, every ET session gate will be shifted by the offset. "
+        "Set ALGOEDGE_MT5_SERVER_UTC_OFFSET to correct this."
+    )
+    _SERVER_OFFSET_CACHE = 0.0
+    return 0.0
+
+
 def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize a candle DataFrame: convert time to epoch seconds, sort, dedup."""
+    """
+    Normalize a candle DataFrame: convert time to epoch seconds, shift server time
+    to TRUE UTC, sort, dedup.
+
+    The server->UTC shift is what makes every downstream `astimezone(America/New_York)`
+    conversion correct. See detect_server_utc_offset_hours().
+    """
     if df.empty:
         return df
     # Convert datetime to epoch seconds if needed
@@ -57,6 +124,13 @@ def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
         if time_series.dt.tz is not None:
             time_series = time_series.dt.tz_localize(None)
         df['time'] = time_series.astype('int64') // 10**9
+    # Shift broker server time -> true UTC. Everything downstream (ET session gates,
+    # VWAP session anchoring, swap rollover boundaries) assumes UTC and is wrong by
+    # exactly this offset without it.
+    offset_h = detect_server_utc_offset_hours()
+    if offset_h:
+        df['time'] = df['time'] - int(round(offset_h * 3600))
+
     # Sort ascending by time and remove any duplicate timestamps
     df = df.sort_values('time').drop_duplicates(subset=['time'], keep='last').reset_index(drop=True)
     return df

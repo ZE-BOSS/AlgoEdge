@@ -143,11 +143,30 @@ class VWAPEngine(BaseStrategy):
         return et.strftime("%H:%M")
 
     def _is_in_exclusion(self, time_str: str) -> bool:
-        """Return True if inside first-hour exclusion or after entry cutoff."""
-        return (
-            self.params.session_open <= time_str <= self.params.session_exclude_end
-            or time_str >= self.params.entry_cutoff
-        )
+        """
+        Return True if this ET time is OUTSIDE the tradeable window.
+
+        The tradeable window is (session_exclude_end, entry_cutoff) — i.e. after the
+        first-hour exclusion has ended and before the entry cutoff.
+
+        BUG FIXED 2026-08: the previous form was
+
+            (session_open <= t <= session_exclude_end) or (t >= entry_cutoff)
+
+        which blocked the first hour and the post-cutoff tail but NEVER blocked the
+        PRE-SESSION hours. At t="03:00": "09:30" <= "03:00" is False and
+        "03:00" >= "15:30" is False, so the bar was treated as tradeable. VWAP —
+        a US-cash-session strategy whose entire premise is the session-anchored
+        institutional reference price — was therefore trading right through the
+        Asian and London sessions.
+
+        Measured on the supplied runs (EURUSD, n=259): 54% of all entries fell
+        outside the intended 10:30-15:30 ET window, clustering at 06:00-08:00 ET,
+        with 20 entries labelled ASIAN and 92 labelled LONDON. Anchored VWAP has no
+        institutional meaning in those hours — the session it is anchored to has
+        not opened yet.
+        """
+        return not (self.params.session_exclude_end < time_str < self.params.entry_cutoff)
 
     def _is_hard_close_time(self, time_str: str) -> bool:
         return time_str >= self.params.hard_close

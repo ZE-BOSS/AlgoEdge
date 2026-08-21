@@ -5,6 +5,7 @@ Position sizing engine: Fixed % and Kelly Criterion.
 Source: RiskManagement_Spec.md Section 5
 """
 
+import contextvars
 import math
 import time
 from backend.utils.logger import get_logger
@@ -177,6 +178,31 @@ def get_pip_size(symbol: str) -> float:
 
 _symbol_info_cache: dict[tuple[str, bool], tuple[float, dict]] = {}  # {(symbol, use_live_mt5): (timestamp, info)}
 
+# When set, symbol info is PINNED for the lifetime of a run: the first resolution
+# per symbol is reused for every subsequent call, so sizing at entry and P&L at exit
+# can never disagree, and a run is reproducible regardless of wall-clock timing or
+# MT5 connectivity. See get_symbol_info() for the failure this prevents.
+#
+# This is a ContextVar, NOT a module global, deliberately: backtests run in the same
+# process as the live bot, and a global freeze would leak into live trading — which
+# must always see fresh broker data. A ContextVar confines the pin to the async task
+# (or thread) running the backtest. Unset = normal live behaviour with the 60s TTL.
+_frozen_symbol_info_var: contextvars.ContextVar[dict[tuple[str, bool], dict] | None] = (
+    contextvars.ContextVar("frozen_symbol_info", default=None)
+)
+
+
+def freeze_symbol_info() -> None:
+    """Pin symbol info for the duration of a backtest run (idempotent, task-scoped)."""
+    if _frozen_symbol_info_var.get() is None:
+        _frozen_symbol_info_var.set({})
+        logger.info("[SIZER] Symbol info FROZEN for this run — sizing and PnL will use identical values.")
+
+
+def unfreeze_symbol_info() -> None:
+    """Release the pin and return to normal live TTL behaviour."""
+    _frozen_symbol_info_var.set(None)
+
 
 def _infer_digits(point_size: float) -> int:
     """
@@ -216,6 +242,29 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
     """
     now = time.time()
     cache_key = (symbol, use_live_mt5)
+
+    # ── Frozen mode (backtests) ───────────────────────────────────────────────
+    # When frozen, the first resolution for a symbol is pinned for the whole run
+    # and never re-resolved.
+    #
+    # Why this exists: the cache below expires on a 60-SECOND WALL-CLOCK TTL, but a
+    # backtest processes tens of thousands of bars over several minutes. The entry
+    # of a trade and its exit therefore routinely landed on opposite sides of a
+    # cache expiry, and if MT5 connectivity flickered in between, sizing resolved
+    # against one source (e.g. live MT5) while _calc_pnl resolved against another
+    # (InstrumentProfile, or the DEFAULT fallback at tick_value/tick_size =
+    # 1.0/0.00001). Position size and P&L were then computed with DIFFERENT
+    # instrument values.
+    #
+    # Observed on XRPUSD: within a single run, implied value-per-unit-move varied
+    # between 135 and 21,672 — a 160x spread on the same symbol — producing single
+    # trades that lost 190% of the account. It also made backtests NON-DETERMINISTIC:
+    # the same run could return different results depending on wall-clock timing and
+    # MT5 connection state, which disqualifies them for research use.
+    _frozen = _frozen_symbol_info_var.get()
+    if _frozen is not None and cache_key in _frozen:
+        return _frozen[cache_key]
+
     if cache_key in _symbol_info_cache:
         cached_time, info = _symbol_info_cache[cache_key]
         if now - cached_time < 60:
@@ -249,6 +298,8 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
                     "source": "MT5",
                 }
                 _symbol_info_cache[cache_key] = (now, res)
+                if _frozen is not None:
+                    _frozen[cache_key] = res
                 return res
         except Exception as e:
             logger.warning(f"[SIZER] {symbol}: MT5 symbol_info error: {e}. Falling back.")
@@ -263,6 +314,8 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
         cached_res.setdefault("digits", _infer_digits(cached_res.get("point", 0.00001)))
         cached_res.setdefault("spread_points", 0.0)
         _symbol_info_cache[cache_key] = (now, cached_res)
+        if _frozen is not None:
+            _frozen[cache_key] = cached_res
         return cached_res
 
     # ── 2. InstrumentProfile Fallback ─────────────────────────────────────────
@@ -287,6 +340,8 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
                 "source": "InstrumentProfile",
             }
             _symbol_info_cache[cache_key] = (now, res)
+            if _frozen is not None:
+                _frozen[cache_key] = res
             return res
     except ImportError:
         pass
@@ -306,6 +361,8 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
         "source": "DEFAULT",
     }
     _symbol_info_cache[cache_key] = (now, res)
+    if _frozen is not None:
+        _frozen[cache_key] = res
     return res
 
 

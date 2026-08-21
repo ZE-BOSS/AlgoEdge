@@ -70,6 +70,31 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
     for t in trades:
         gid = t.get("group_id", t.get("id", "unknown"))
         if gid not in groups:
+            # ── ENTRY-TIME stop, not the mutated one (R-metric corruption fix) ──
+            # `t["stop_loss"]` is mutated IN PLACE by the break-even and trailing
+            # logic while the position is open (engine.py `pos["stop_loss"] =
+            # action["new_sl"]`), so by the time a leg closes it holds the FINAL
+            # stop, not the stop the trade was sized and risked against.
+            #
+            # Every R-multiple downstream divides by abs(entry - stop_loss):
+            # realized_rr / max_rr_achieved / planned_rr / pnl_r below, and
+            # expectancy_r / avg_win_r / best_trade_r / total_pnl_r in
+            # analytics/reports.py (which reads this same group-level key).
+            # Once BE has moved the stop to ~entry the risk distance collapses
+            # toward zero and R explodes without bound.
+            #
+            # Measured over the 62 saved runs in debug/: 479 of 4380 groups
+            # (10.9%) carried a moved stop here. Effect on the R distribution,
+            # e.g. htffvgflip: avg win 12.10R -> 1.68R, max 239.2R -> 5.6R;
+            # biaskeylevelifvg: avg win 8.92R -> 1.73R, max 190.9R -> 7.2R.
+            # Dollar P&L is unaffected — this is purely a measurement defect,
+            # but it is the one that makes every R-based conclusion fiction.
+            #
+            # The entry-time stop survives untouched on the signal dict, so
+            # prefer it and fall back to the leg's own value only when the
+            # signal is missing (older records / hand-built trades).
+            _sig_sl = (t.get("original_signal") or {}).get("stop_loss")
+            _entry_sl = _sig_sl if _sig_sl else t.get("stop_loss", 0)
             groups[gid] = {
                 "group_id": gid,
                 "symbol": t.get("symbol", ""),
@@ -79,7 +104,7 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
                 "entry_time": t.get("entry_time"),
                 "entry_time_iso": t.get("entry_time_iso", ""),
                 "entry_session": t.get("entry_session", "UNKNOWN"),
-                "stop_loss": t.get("stop_loss", 0),
+                "stop_loss": _entry_sl,
                 "sub_trades": [],
                 "combined_pnl": 0,
                 "combined_volume": 0,

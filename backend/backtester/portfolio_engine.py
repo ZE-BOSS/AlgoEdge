@@ -82,6 +82,10 @@ class PortfolioBacktestEngine(CostModelMixin):
         # a portfolio can mix FX, indices and synthetics with wildly different
         # spread/commission/swap profiles.
         self._init_cost_model()
+        # Pin instrument data for the whole run — see the matching call in
+        # engine.py for the sizing/PnL divergence and non-determinism this prevents.
+        from backend.risk.position_sizer import freeze_symbol_info
+        freeze_symbol_info()
         # Wick simulation flag
         self._simulate_wicks = bool(risk_config.get("simulate_wicks", True))
 
@@ -769,6 +773,9 @@ class PortfolioBacktestEngine(CostModelMixin):
                         "entry_session": entry_session,
                         "entry_price": bar_open_price,
                         "stop_loss": sig["stop_loss"],
+                        # Immutable copy of the entry-time stop — `stop_loss` is mutated
+                        # by BE/trailing, so R must be measured against this instead.
+                        "initial_stop_loss": sig["stop_loss"],
                         "take_profit": lvl.tp_price,
                         "volume": lvl.volume,
                         "tp_level": lvl.level,
