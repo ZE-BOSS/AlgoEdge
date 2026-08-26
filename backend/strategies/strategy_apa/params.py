@@ -116,6 +116,133 @@ class APAParams:
     noise. Whichever is larger wins.
     """
 
+    max_sl_floor_atr_mult: float = 5.0
+    """
+    [6.5/S7] Ceiling on the cost floor `_sl_floor_distance` may produce,
+    expressed as an ATR multiple. 0 = disabled. The floor's job is to rescue a
+    structural stop that's TOO TIGHT (inside spread) — it has no business
+    silently re-widening a stop that was already comfortably wide (observed:
+    a stop floored from 465 to 550 pips with no upper bound at all). Default
+    5.0×ATR sits well above `min_sl_atr_mult`'s default (1.0), so it only
+    catches a genuinely pathological floor value, never normal floor activity.
+    Lowering this below `min_sl_atr_mult` overrides that field's effect too —
+    intentional, since this is meant to be the final word on how wide the
+    floor may go.
+    """
+
+    neckline_major_atr_tolerance: float = 1.0
+    """
+    [6.4/S3] How far (in ATR multiples) a BOS neckline may sit from the
+    nearest major-fractal swing and still count as "on a major level" rather
+    than a liquidity sweep. CHANGED from a hardcoded 0.5 — a pattern between
+    0.5x and this tolerance is now admitted (previously discarded outright)
+    but scores 0 on the NECKLINE PRECISION confluence component (which still
+    only awards points ≤0.30×ATR — see _confluence_score), so a looser match
+    is admitted at lower confidence/size rather than never evaluated at all.
+    Widen further to admit more borderline BOS levels; 0.5 restores the old
+    hard cutoff exactly (nothing between 0.5x and 1.0x will ever pass).
+    """
+
+    max_concurrent_patterns: int = 3
+    """
+    [6.2/S4] APA used to track exactly one candidate pattern per symbol at a
+    time — while it sat in AWAIT_BOS/AWAIT_RETEST/AWAIT_CONFIRMATION, no new
+    pattern was scanned, so one slow-to-resolve setup blocked every other
+    opportunity on that symbol. Candidates are now a bounded ring buffer of
+    up to this many, each ageing and resolving independently (see
+    pattern_max_age_bars/bos_max_age_bars/retest_max_age_bars below). Raise
+    for more concurrent setups per symbol; 1 reproduces the old single-slot
+    behaviour.
+    """
+
+    pattern_max_age_bars: int = 40
+    """
+    [6.1/S2] Max STRUCTURE-timeframe bars a candidate may sit in AWAIT_BOS
+    (pattern detected, no break of structure yet) before it expires and is
+    dropped. Replaces the old UTC-midnight calendar reset, which wiped an
+    in-flight AWAIT_BOS pattern arbitrarily at day boundaries regardless of
+    how fresh it actually was, while (per the old code's own gating) leaving
+    a genuinely stale AWAIT_RETEST/AWAIT_CONFIRMATION setup untouched — 40
+    bars on M15 is ~10 hours, generous for a pattern that's actively forming.
+    0 = never expire on age (not recommended — this is exactly the leak the
+    fix addresses).
+    """
+
+    bos_max_age_bars: int = 30
+    """
+    [6.1/S2] Max ENTRY-timeframe bars a candidate may sit in AWAIT_RETEST
+    (BOS confirmed, waiting for price to retest the Invalidation Zone) before
+    expiring. This is the timeout the old code was missing entirely — per the
+    forensic review, "the only invalidation is checked inside
+    AWAIT_CONFIRMATION, reached only after a retest touch. A setup whose
+    retest never comes holds the slot indefinitely." 30 bars on M5 is 2.5
+    hours. 0 = never expire.
+    """
+
+    retest_max_age_bars: int = 10
+    """
+    [6.1/S2] Max ENTRY-timeframe bars a candidate may sit in
+    AWAIT_CONFIRMATION (retest touched the IZ, waiting for the confirmation
+    rules to pass) before expiring. Shorter than bos_max_age_bars because a
+    retest that has already touched the zone should confirm quickly if the
+    setup is real. 0 = never expire.
+    """
+
+    session_filter_skip_24_7: bool = True
+    """
+    Exempt 24/7 instruments (crypto, synthetics) from the equity-session window.
+
+    Measured on 691 saved trades: the session effect is strong in aggregate
+    (NY +0.358R, ASIAN -0.112R) but reverses for instruments that do not follow
+    an equity clock — XRPUSD is +0.56R in the Asian window and -0.20R in NY.
+    Applying an equity session to crypto discards trades for no reason.
+
+    Uses the `trades_24_7` flag already on each InstrumentProfile, so no second
+    symbol list has to be kept in sync. Set False to apply the window to
+    everything regardless.
+    """
+
+    require_retest: bool = False
+    """
+    Whether a retest into the Invalidation Zone is REQUIRED before entry.
+
+    CHANGED to False (2026-08-24). Retest was previously mandatory and it was
+    selecting against the strategy rather than for it. Measured on XAUUSD over
+    one window:
+
+        setup_expired_await_retest ..... 192   BOS fired, price ran, never returned
+        setup_expired_await_bos ........  34
+        became signals .................  15
+        became trades ..................   5   MFE median 0.00R, 100% stopped
+
+    The 192 are breakouts that WORKED — price broke structure and kept going, so
+    the retest never came and APA never traded them. The 15 that did retest are,
+    by selection, the breakouts that were failing. Requiring a retest therefore
+    filtered out the winners and kept the losers.
+
+    False = enter once BOS and the confirmation rules pass, without waiting for
+    price to come back. True = the previous behaviour, for when you want the
+    better fill and accept missing the runners.
+
+    This is a genuine trade-off, not a bug fix: entering at the BOS close is a
+    worse price than a successful retest would have given. It is exposed in the
+    UI rather than decided here.
+    """
+
+    rejection_candle_confluence_points: int = 12
+    """
+    Confluence points awarded when the retest candle REJECTED the Invalidation
+    Zone — wicked in and closed back out on the trade's side.
+
+    A contributor, never a gate. A rejection is real evidence the zone held, so
+    it should raise the score (and, through confluence-scaled risk, the size) —
+    but demanding it would reintroduce the same filtering problem `require_retest`
+    just removed, one level down.
+
+    Scored 0 when no retest occurred at all, which is the honest reading: absence
+    of a rejection is not evidence against the setup when nothing was tested.
+    """
+
     invalidation_zone_source: str = "right_shoulder"
     """
     Which candle bodies define the retest Invalidation Zone.
@@ -154,3 +281,50 @@ class APAParams:
     # ── ATR Lookback ─────────────────────────────────────────────────────
     atr_lookback: int = 14
     """Number of bars used to calculate ATR for all multiplier calculations."""
+
+    # ── Daily loss guardrail (added 2026-08, [12.2/Part14]) ──────────────
+    max_losses_per_day: int = 0
+    """
+    Stop trading this strategy for the rest of the day after this many
+    losses. 0 = disabled (unlimited). Was previously only a `VWAPParams`
+    field — every strategy now gets the same guardrail available, generalised
+    by `risk/circuit_breaker.py`'s per-slot loss tracking [12.6] rather than
+    re-implemented per engine (VWAPEngine.notify_outcome's pattern).
+    """
+
+    # ── Phase 14 B3.4 — Rejection-candle entry gate ──────────────────────────
+    require_rejection_candle: bool = True
+    """
+    [Phase 14 B3.4] When True, a signal only fires after a candle wicks into the
+    Invalidation Zone AND closes back out on the trade's side — a close-out of the
+    IZ on the correct side is what \"rejection\" means.
+
+    This is the \"option 1\" fix from the plan: it waits for the zone to actively
+    reject price rather than entering the moment the IZ is touched. This is the
+    primary fix for the MFE≈0R signature (entering on the first touch at the worst
+    point of the move).
+
+    Set False to replicate pre-Phase-14 behaviour (enter as soon as the IZ is
+    touched, without waiting for close-back-out). The old `require_retest` param
+    stays separate — it controls whether a retest is required AT ALL before entry;
+    this param controls what constitutes a valid retest entry when one occurs.
+
+    The rejection confluence points (`rejection_candle_confluence_points`) are still
+    awarded when a rejection candle fires — they are now also a gate condition when
+    this param is True.
+    """
+
+    # ── Phase 14 B2.3 — In-trade hard invalidation ───────────────────────────
+    hard_invalidation_exit: bool = True
+    """
+    [Phase 14 B2.3] When True, a trade is closed at the bar's close price
+    whenever the bar's BODY (open-close range, not wick) closes beyond the pattern's
+    Head level — the spec defines this as hard invalidation of the H&S thesis.
+
+    Without this, a position that is structurally dead (head-close crossed) continues
+    running toward SL/TP/trail, booking unnecessary MFE erosion and adverse excursions
+    that the strategy's rules say should not be held.
+
+    Set False to disable, which restores the old behaviour of running every position
+    purely to its risk-engine stop/target.
+    """

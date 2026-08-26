@@ -3,6 +3,14 @@ import pytz
 
 from backend.core.config_schema import UserConfigV2
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
+from backend.strategies.core.markings import (
+    ROLE_CONFLUENCE,
+    ROLE_CONTEXT,
+    ROLE_INVALIDATION,
+    ROLE_TRIGGER,
+    MarkingCollector,
+    ts,
+)
 from backend.strategies.core.swing_structure import calculate_atr
 from backend.strategies.registry import register_strategy
 from backend.risk.position_sizer import get_pip_size
@@ -69,6 +77,7 @@ class NYOpenRetestEngine(BaseStrategy):
                     state["range_low"] = min(state["range_low"], latest["low"]) if state["range_low"] else latest["low"]
                 elif time_str >= self.params.range_window_end and state["range_high"] is not None:
                     state["range_mid"] = (state["range_high"] + state["range_low"]) / 2.0
+                    state["range_marked_time"] = candles.index[-1]  # [V1] chart anchor
                     state["status"] = "AWAIT_BREAK"
                     self.log_event(f"[{symbol}] NY Open Range marked: {state['range_high']} - {state['range_low']} (Mid: {state['range_mid']})", category="NY_OPEN")
 
@@ -88,11 +97,15 @@ class NYOpenRetestEngine(BaseStrategy):
                 if latest["close"] > state["range_high"]:
                     state["bias"] = "BUY"
                     state["status"] = "AWAIT_RETEST"
+                    state["break_time"] = candles.index[-1]  # [V1] chart anchor
+                    state["break_close"] = float(latest["close"])
                     state["breakout_extreme"] = candles.iloc[-10:]["low"].min()  # Lowest point of breakout swing
                     self.log_event(f"[{symbol}] NY Open bullish break detected. Awaiting retest to {state['range_mid']}", category="NY_OPEN")
                 elif latest["close"] < state["range_low"]:
                     state["bias"] = "SELL"
                     state["status"] = "AWAIT_RETEST"
+                    state["break_time"] = candles.index[-1]  # [V1] chart anchor
+                    state["break_close"] = float(latest["close"])
                     state["breakout_extreme"] = candles.iloc[-10:]["high"].max() # Highest point of breakout swing
                     self.log_event(f"[{symbol}] NY Open bearish break detected. Awaiting retest to {state['range_mid']}", category="NY_OPEN")
 
@@ -191,6 +204,57 @@ class NYOpenRetestEngine(BaseStrategy):
                                 take_profit = recent_low
                                 target_source = "dynamic_swing"
 
+                    # [V1 section C.6] Chart markings. The confluence chain is a
+                    # hard three-link sequence with no optional members (which is
+                    # why confluence_score is a constant here) — so the chart's
+                    # job is to show that each link resolved where it should.
+                    mk = MarkingCollector(timeframe)
+                    entry_t = ts(latest.get("time", candles.index[-1]))
+                    range_t = ts(state.get("range_marked_time", entry_t))
+
+                    mk.range_box(
+                        f"NY open range ({self.params.range_window_start}-{self.params.range_window_end})",
+                        state["range_high"], state["range_low"], range_t,
+                        end_time=entry_t, role=ROLE_CONFLUENCE,
+                        color="rgba(148,163,184,0.14)",
+                        range_high=round(float(state["range_high"]), 6),
+                        range_low=round(float(state["range_low"]), 6),
+                        range_size=round(abs(state["range_high"] - state["range_low"]), 6),
+                    )
+                    mk.level(
+                        "Range mid (retest / entry)", state["range_mid"], range_t,
+                        role=ROLE_TRIGGER, color="rgba(59,130,246,0.9)",
+                        rule="entry on retest of range_mid after a body close beyond the range",
+                    )
+                    if state.get("break_time") is not None:
+                        mk.structure(
+                            f"Body close beyond range ({state['bias']})",
+                            ts(state["break_time"]), price=state.get("break_close"),
+                            role=ROLE_TRIGGER,
+                            broke=("range_high" if state["bias"] == "BUY" else "range_low"),
+                            broke_level=round(float(
+                                state["range_high"] if state["bias"] == "BUY" else state["range_low"]
+                            ), 6),
+                        )
+                    mk.level(
+                        "Breakout swing extreme (stop reference)", float(breakout_extreme), entry_t,
+                        role=ROLE_CONTEXT, color="rgba(148,163,184,0.8)",
+                    )
+                    mk.level(
+                        "Stop loss", stop_loss, entry_t, role=ROLE_INVALIDATION,
+                        color="rgba(239,68,68,0.9)",
+                        buffer_points=getattr(self.params, "stop_buffer_points", None),
+                        atr_mult=getattr(self.params, "sl_buffer_atr_mult", 0.0),
+                        sl_pips=round(abs(entry - stop_loss) / pip_size, 2) if pip_size else None,
+                    )
+                    mk.level(
+                        "Take profit", take_profit, entry_t, role=ROLE_CONTEXT,
+                        color="rgba(16,185,129,0.9)",
+                        target_mode=target_mode, target_source=target_source,
+                        rr=(round(abs(take_profit - entry) / abs(entry - stop_loss), 3)
+                            if abs(entry - stop_loss) > 0 else None),
+                    )
+
                     state["status"] = "DONE"
                     return TradeSignal(
                         strategy_id="NYOpenRetest_v1",
@@ -217,6 +281,8 @@ class NYOpenRetestEngine(BaseStrategy):
                                 round(abs(take_profit - entry) / abs(entry - stop_loss), 3)
                                 if abs(entry - stop_loss) > 0 else None
                             ),
+                            # [V1] Chart geometry — see strategies/core/markings.py.
+                            **mk.as_metadata(),
                         }
                     )
 

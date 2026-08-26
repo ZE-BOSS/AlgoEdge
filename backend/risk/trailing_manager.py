@@ -19,7 +19,16 @@ class TrailingManager:
         self.config = config
         self.trail_pips = config.get("trail_pips", 15.0)
         self.atr_trail_multiplier = config.get("atr_trail_multiplier", 1.5)
-        self.trail_pct = config.get("trail_pct", 0.005)
+        # [4.3/D3] `trail_pct` is stored/edited everywhere else (RiskParams,
+        # position_manager.py's live PCT_TRAIL) as a PERCENT (0.5 means 0.5%).
+        # This class used to read it as an ALREADY-a-fraction value with its
+        # own divergent default (0.005) — silently correct only when the key
+        # was absent (falling to this default) and catastrophically wrong
+        # (150% trail distance for `trail_pct=1.5`) whenever a caller actually
+        # passed the real RiskParams-style percent value through. Converted
+        # ONCE here, at the point of consumption, using the same "percent /
+        # 100" convention position_manager.py already used correctly.
+        self.trail_pct = float(config.get("trail_pct", 0.5) or 0.0) / 100.0
         self.trail_timeframe = config.get("trail_timeframe", "M15")
         # §2.4 fix: read both key names for structure-trail swing length
         self.swing_length = config.get("swing_length", config.get("trail_structure_bars", 3))

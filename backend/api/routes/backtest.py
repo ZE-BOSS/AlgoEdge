@@ -31,8 +31,43 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+from backend.services.replay_stream import ReplayStreamer, bar_from_row  # noqa: E402
+
+# Ceiling on signals from one symbol in one run. Not a tuning knob — a circuit
+# breaker. See the guard at its use site for what it protects against.
+MAX_SIGNALS_PER_RUN = 5000
+from backend.services.log_stream import log_hub  # noqa: E402
+
 USER_BACKTEST_STATE = {}  # Fallback in-memory persistence: user_id -> state
 router = APIRouter(prefix="/api", tags=["backtest"])
+
+
+def _filter_run_logs(logs: list[dict], cap: int = 2000) -> list[dict]:
+    """
+    Task [I2]: a flat `logs[-100:]` slice discarded exactly the WARNING/ERROR
+    entries that explain a run's behaviour (margin-ceiling truncation, hard-cap
+    triggers, SL-floor widening) in favour of whatever INFO noise happened to be
+    most recent. Keep every WARNING/ERROR (they are the diagnostic signal and are
+    comparatively rare), then fill the remaining budget with an even sample of
+    INFO/DEBUG entries so the log still reads as a coherent timeline.
+    """
+    if not logs:
+        return []
+    important = [l for l in logs if str(l.get("level", "")).upper() in ("WARNING", "ERROR", "CRITICAL")]
+    other = [l for l in logs if str(l.get("level", "")).upper() not in ("WARNING", "ERROR", "CRITICAL")]
+
+    if len(important) >= cap:
+        # Even a WARNING/ERROR-only log exceeds the cap — keep the most recent ones.
+        return important[-cap:]
+
+    budget = cap - len(important)
+    if len(other) > budget:
+        step = len(other) / budget
+        other = [other[int(i * step)] for i in range(budget)]
+
+    merged = important + other
+    merged.sort(key=lambda l: l.get("time", ""))
+    return merged
 
 
 class BulkBacktestRequest(BaseModel):
@@ -84,6 +119,38 @@ class BacktestRequest(BaseModel):
     # ── Multi-Strategy Filters ──
     session_filter_enabled: bool = True
     manual_bias_overrides: dict[str, Any] = {}
+    # ── [Phase 2 sizing-truth] typed, optional — None resolves to the
+    # RiskParams default inside risk/engine.py & position_sizer.py, so these
+    # are real settings rather than only reachable via the untyped
+    # risk_config passthrough dict. See core/config_schema.py::RiskParams.
+    max_margin_utilisation_pct: float | None = None
+    min_deployable_risk_pct: float | None = None
+    min_stop_spread_multiple: float | None = None
+    confluence_risk_tiers: list[tuple[int, float]] | None = None
+    reject_below_confluence: bool | None = None
+    post_split_risk_tolerance_pct: float | None = None
+    exit_slippage_pips: float | str | None = None
+    open_risk_weight: float | None = None
+    allow_pyramiding: bool | None = None
+    min_bars_between_entries: int | None = None
+    max_account_leverage: float | None = None
+    min_sl_pips: float | None = None
+    # ── [Phase 4/5] backtest<->live parity + exit architecture ──
+    sizing_basis: str | None = None
+    be_spread_multiple: float | None = None
+    trail_require_be_first: bool | None = None
+    be_mode: str | None = None
+    be_trigger_tp_level: int | None = None
+    trail_method_tp1: str | None = None
+    trail_mode: str | None = None
+    trail_trigger_rr: float | None = None
+    trail_trigger_tp_level: int | None = None
+    tp_volume_pcts: list[float] | None = None
+    # ── [Phase 9] Portfolio governor ──
+    max_cluster_risk_pct: float | None = None
+    max_net_direction_risk_pct: float | None = None
+    symbol_cluster_overrides: dict[str, str] | None = None
+    strategy_risk_budget_pct: dict[str, float] | None = None
     # ── Simulation Costs — broker-sourced by default ──
     # `None` (the default) means "NOT explicitly set by the user": the engine
     # resolves the value from backend.risk.broker_costs.get_broker_costs(),
@@ -118,6 +185,13 @@ class PortfolioSymbolConfig(BaseModel):
     symbol: str
     strategy_id: str = "APA_v1"
     strategy_params: dict[str, Any] = {}
+    # [12.8/Part14] Optional — when two rows share the same `symbol` under
+    # different strategies, each needs its own slot_id so their candle data,
+    # signals, and positions don't collide in PortfolioBacktestEngine's
+    # internal dicts (which are keyed by slot, not bare symbol — see
+    # portfolio_engine.py::run()'s symbol_map parameter). Unset = the route
+    # derives one automatically from symbol+strategy_id.
+    slot_id: str | None = None
 
 
 class PortfolioBacktestRequest(BaseModel):
@@ -161,6 +235,35 @@ class PortfolioBacktestRequest(BaseModel):
     # ── Risk Safety Cap ──
     max_risk_hard_cap_pct: float = 3.0  # Absolute safety cap from PropFirmParams
     session_filter_enabled: bool = True
+    # ── [Phase 2 sizing-truth] — see BacktestRequest above for field meanings.
+    max_margin_utilisation_pct: float | None = None
+    min_deployable_risk_pct: float | None = None
+    min_stop_spread_multiple: float | None = None
+    confluence_risk_tiers: list[tuple[int, float]] | None = None
+    reject_below_confluence: bool | None = None
+    post_split_risk_tolerance_pct: float | None = None
+    exit_slippage_pips: float | str | None = None
+    open_risk_weight: float | None = None
+    allow_pyramiding: bool | None = None
+    min_bars_between_entries: int | None = None
+    max_account_leverage: float | None = None
+    min_sl_pips: float | None = None
+    # ── [Phase 4/5] backtest<->live parity + exit architecture ──
+    sizing_basis: str | None = None
+    be_spread_multiple: float | None = None
+    trail_require_be_first: bool | None = None
+    be_mode: str | None = None
+    be_trigger_tp_level: int | None = None
+    trail_method_tp1: str | None = None
+    trail_mode: str | None = None
+    trail_trigger_rr: float | None = None
+    trail_trigger_tp_level: int | None = None
+    tp_volume_pcts: list[float] | None = None
+    # ── [Phase 9] Portfolio governor ──
+    max_cluster_risk_pct: float | None = None
+    max_net_direction_risk_pct: float | None = None
+    symbol_cluster_overrides: dict[str, str] | None = None
+    strategy_risk_budget_pct: dict[str, float] | None = None
     # ── Simulation Costs — broker-sourced by default ──
     # `None` (the default) means "NOT explicitly set by the user": the engine
     # resolves the value from backend.risk.broker_costs.get_broker_costs(),
@@ -184,6 +287,57 @@ class PortfolioBacktestRequest(BaseModel):
     stops_level_pips: float | str | None = None
     # ── Wick Simulation (BUG-9) ──
     simulate_wicks: bool = True      # Use OHLC shadow-weighted model for ambiguous SL/TP bars
+
+
+async def reconcile_orphaned_runs() -> int:
+    """
+    Clear any backtest left marked "running" by a previous process.
+
+    A backtest lives entirely inside one server process, but its status is
+    persisted to Redis with a 1-hour TTL so the UI survives a page reload. Those
+    two facts combine badly on restart: the process dies mid-run, the Redis key
+    outlives it, and every client that asks then sees `status: "running"` for a
+    run that no longer exists anywhere. The Backtester sits on "Stop Backtest"
+    forever, refuses to start another, and shows no result — which is exactly
+    the "everything hangs, I see nothing" symptom.
+
+    Marked as an ERROR rather than deleted, so the UI can say what happened
+    instead of silently forgetting a run the user was watching.
+
+    Called once from the startup hook, before any request is served.
+    """
+    if not (HAS_REDIS and redis_client and redis_client.redis):
+        return 0
+
+    cleared = 0
+    try:
+        async for key in redis_client.redis.scan_iter(match="backtest_state:*"):
+            try:
+                raw = await redis_client.redis.get(key)
+                if not raw:
+                    continue
+                state = json.loads(raw)
+                if state.get("status") != "running":
+                    continue
+                state["status"] = "error"
+                state["progress"] = {
+                    "stage": "error",
+                    "pct": 0,
+                    "message": (
+                        "The backend restarted while this backtest was running, so "
+                        "it did not finish. Run it again."
+                    ),
+                }
+                await redis_client.redis.set(key, json.dumps(state), ex=3600)
+                cleared += 1
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning(f"[BACKTEST] Could not reconcile orphaned runs: {e}")
+
+    if cleared:
+        logger.info(f"[BACKTEST] Cleared {cleared} orphaned 'running' state(s) left by a previous process")
+    return cleared
 
 
 @router.get("/backtest_status")
@@ -290,6 +444,12 @@ async def run_backtest_endpoint(
         
     from backend.services.bot_service import bot_service
     bot_service.log_system_event(f"Backtest queued: {req.symbol}", category="BACKTEST")
+
+    # [Phase 13 section G] Tag every log record this run emits with a session id,
+    # so "show me the logs from that run" is a query rather than a grep.
+    log_session_id = log_hub.start_session(
+        f"{req.symbol} / {req.strategy_id}", kind="backtest",
+    )
 
     async def _run_backtest_task():
         global USER_BACKTEST_STATE
@@ -465,6 +625,17 @@ async def run_backtest_endpoint(
 
             signals = []
 
+            # [Phase 13 section C.3] Replay stream. Announces one leg (this is
+            # the single-symbol route) so the frontend can build its chart
+            # before any bars arrive, then feeds it the Phase-1 bar walk.
+            replay = ReplayStreamer(ws_manager, current_user.id, mode="single")
+            replay.init([{
+                "slot_id": req.symbol,
+                "symbol": req.symbol,
+                "strategy_id": req.strategy_id,
+                "timeframe": primary_tf,
+            }])
+
             async def generate_signals_simulated():
                 import asyncio
                 import numpy as np
@@ -479,11 +650,46 @@ async def run_backtest_endpoint(
 
                 last_yield_time = time.monotonic()
 
+                replay.leg_start(req.symbol, total_bars=max(0, len(primary_times) - 300))
+
+                # ── Hoisted per-loop work ────────────────────────────────
+                # Everything below used to be recomputed on EVERY bar. On a
+                # 5,000-bar run that is thousands of redundant pandas/parse
+                # operations, and they are what starved the event loop badly
+                # enough to time the WebSocket out mid-run.
+                #
+                # OHLC as flat numpy arrays: `primary_sorted.iloc[i]` builds a
+                # pandas Series per bar (~100us). Indexing a numpy array is ~1us.
+                _rep_o = primary_sorted["open"].to_numpy(dtype=float)
+                _rep_h = primary_sorted["high"].to_numpy(dtype=float)
+                _rep_l = primary_sorted["low"].to_numpy(dtype=float)
+                _rep_c = primary_sorted["close"].to_numpy(dtype=float)
+                _rep_t = primary_times.astype("datetime64[s]").astype("int64")
+
+                # Was `np.datetime64(datetime.fromisoformat(req.start_date))`
+                # inside the loop — a date string parsed once per bar.
+                _warmup_cutoff = (
+                    np.datetime64(datetime.fromisoformat(req.start_date))
+                    if req.start_date else None
+                )
+                # `sorted_tf.index.values` was also re-read per bar, per timeframe.
+                _tf_times_by_tf = {tf: indexed_by_tf[tf].index.values for tf in required_tfs}
+
                 for i in range(300, len(primary_times)):
-                    if i % 50 == 0:
-                        await asyncio.sleep(0.001)
+                    # Yield on ELAPSED TIME, not bar count. `last_yield_time` was
+                    # assigned here and never read — the time-based yield this
+                    # implements was clearly intended and never written, so the
+                    # loop yielded every 50 bars no matter how long those 50 bars
+                    # took. With multi-timeframe pandas slicing per bar that is
+                    # easily >1s of solid blocking, which is exactly long enough
+                    # to drop the WebSocket and fail the health poll ("system
+                    # goes offline"). Capping the block at ~40ms keeps the socket
+                    # and the UI alive without adding a yield per bar.
+                    _now = time.monotonic()
+                    if (_now - last_yield_time) > 0.04:
+                        await asyncio.sleep(0)
                         last_yield_time = time.monotonic()
-                    
+
                     if i % 600 == 0:
                         pct = int((i / len(primary_times)) * 80) + 10
                         current_state = await _get_state()
@@ -499,38 +705,60 @@ async def run_backtest_endpoint(
                         except: pass
 
                     current_time = primary_times[i]
-                    is_warmup = req.start_date and current_time < np.datetime64(datetime.fromisoformat(req.start_date))
+                    is_warmup = _warmup_cutoff is not None and current_time < _warmup_cutoff
+
+                    # Stream the bar being processed. Warm-up bars are skipped:
+                    # they exist only to prime indicator state and are outside
+                    # the window the user asked to see.
+                    if not is_warmup:
+                        replay.bar(req.symbol, {
+                            "time": int(_rep_t[i]),
+                            "open": float(_rep_o[i]),
+                            "high": float(_rep_h[i]),
+                            "low": float(_rep_l[i]),
+                            "close": float(_rep_c[i]),
+                        })
 
                     sig = None
 
                     for tf in required_tfs:
                         meta = TF_META.get(tf, TF_META["M5"])
                         sorted_tf = indexed_by_tf[tf]
-                        tf_times = sorted_tf.index.values
+                        tf_times = _tf_times_by_tf[tf]
 
                         if tf == primary_tf:
                             # Primary TF: use current bar index minus 1 (closed candle)
                             tf_end = i
-                            tf_start_idx = max(0, tf_end - meta["window"])
-                            slice_tf = sorted_tf.iloc[tf_start_idx:tf_end]
                             last_tf_time = primary_times[i]
                         else:
                             # HTF: find fully closed candle before current_time
                             np_td, np_unit = meta["np_td"]
                             cutoff = current_time - np.timedelta64(np_td, np_unit)
                             tf_end = int(np.searchsorted(tf_times, cutoff, side='right'))
-                            tf_start_idx = max(0, tf_end - meta["window"])
-                            slice_tf = sorted_tf.iloc[tf_start_idx:tf_end]
                             last_tf_time = tf_times[tf_end - 1] if tf_end > 0 else None
 
+                        # Build the DataFrame slice ONLY once this timeframe has
+                        # actually produced a new bar.
+                        #
+                        # The slice used to be built on every iteration and then
+                        # thrown away unless the timeframe had advanced — so on
+                        # M5-driven data an H4 slice was constructed ~48x more
+                        # often than it was used. Measured on XAUUSD/APA over
+                        # 1,200 bars (scripts/profile_signal_loop.py):
+                        #     slice every bar   18.22s   2,400 slices / 1,602 used
+                        #     slice on advance   8.66s   1,602 slices / 1,602 used
+                        # Identical signals out; 2.1x faster.
+                        if last_tf_time is None or last_tf_time == prev_time_by_tf[tf]:
+                            continue
+
+                        slice_tf = sorted_tf.iloc[max(0, tf_end - meta["window"]):tf_end]
                         if len(slice_tf) < 20:
                             continue
 
-                        if last_tf_time != prev_time_by_tf[tf]:
-                            s = await engine.on_bar(req.symbol, tf, slice_tf)
-                            if s:
-                                sig = s
-                            prev_time_by_tf[tf] = last_tf_time
+                        s = await engine.on_bar(req.symbol, tf, slice_tf)
+                        if s:
+                            sig = s
+                        prev_time_by_tf[tf] = last_tf_time
 
                     if sig and not is_warmup:
                         sig_dict = {
@@ -540,6 +768,7 @@ async def run_backtest_endpoint(
                             "entry_price": sig.entry_price,
                             "stop_loss": sig.stop_loss,
                             "take_profit": sig.take_profit,
+                            "timeframe": sig.timeframe,  # [12.10] see risk/engine.py's note
                             "confluence_score": sig.confluence_score,
                             "score_breakdown": sig.metadata.get("score_breakdown", {}),
                             "metadata": sig.metadata,
@@ -548,6 +777,34 @@ async def run_backtest_endpoint(
                             "confirmations": sig.metadata.get("confirmations", []),
                         }
                         sigs.append(sig_dict)
+                        replay.signal(req.symbol, sig_dict)
+
+                        # Runaway guard. A strategy that re-detects the same setup
+                        # every bar can emit tens of thousands of signals, and the
+                        # cost is not just a bad result: the log grows without
+                        # bound, memory climbs, and the event loop starves until
+                        # the whole backend stops answering — which is what
+                        # "backtest never finishes / bot goes offline" actually was.
+                        #
+                        # 5,000 is far above any legitimate run (the widest real
+                        # one so far produced 77 on 17k bars), so hitting this
+                        # means something is wrong, and stopping with a partial
+                        # result plus a loud log beats hanging the process.
+                        if len(sigs) >= MAX_SIGNALS_PER_RUN:
+                            logger.error(
+                                f"[BACKTEST] {req.symbol}: signal cap {MAX_SIGNALS_PER_RUN} hit at "
+                                f"bar {i}/{len(primary_times)} — aborting signal generation. "
+                                f"This almost always means a setup is re-arming every bar rather "
+                                f"than once. Check the run log for a repeated neckline/zone."
+                            )
+                            bot_service.log_system_event(
+                                f"Backtest {req.symbol}: signal cap hit ({MAX_SIGNALS_PER_RUN}) — "
+                                f"stopped early to protect the server.",
+                                category="BACKTEST", level="ERROR",
+                            )
+                            break
+
+                replay.leg_done(req.symbol)
                 return sigs
 
             signals = await generate_signals_simulated()
@@ -600,6 +857,44 @@ async def run_backtest_endpoint(
                 # engine falls back to this when stamping trades (was "UNKNOWN"
                 # on every saved grouped_trade).
                 "strategy_id": req.strategy_id,
+                # [2.15] Per-strategy TP1 RR override — see DriftJumpAlphaParams.tp1_rr_override.
+                "tp1_rr_overrides_by_strategy": (
+                    {req.strategy_id: req.strategy_params["tp1_rr_override"]}
+                    if req.strategy_params.get("tp1_rr_override") is not None else {}
+                ),
+                # [Phase 2 sizing-truth] only merged when explicitly set — None
+                # left out entirely so risk/engine.py's own None-means-default
+                # resolution (matching RiskParams) is what actually applies.
+                **{
+                    k: v for k, v in {
+                        "max_margin_utilisation_pct": req.max_margin_utilisation_pct,
+                        "min_deployable_risk_pct": req.min_deployable_risk_pct,
+                        "min_stop_spread_multiple": req.min_stop_spread_multiple,
+                        "confluence_risk_tiers": req.confluence_risk_tiers,
+                        "reject_below_confluence": req.reject_below_confluence,
+                        "post_split_risk_tolerance_pct": req.post_split_risk_tolerance_pct,
+                        "exit_slippage_pips": req.exit_slippage_pips,
+                        "open_risk_weight": req.open_risk_weight,
+                        "allow_pyramiding": req.allow_pyramiding,
+                        "min_bars_between_entries": req.min_bars_between_entries,
+                        "max_account_leverage": req.max_account_leverage,
+                        "min_sl_pips": req.min_sl_pips,
+                        "sizing_basis": req.sizing_basis,
+                        "be_spread_multiple": req.be_spread_multiple,
+                        "trail_require_be_first": req.trail_require_be_first,
+                        "be_mode": req.be_mode,
+                        "be_trigger_tp_level": req.be_trigger_tp_level,
+                        "trail_method_tp1": req.trail_method_tp1,
+                        "trail_mode": req.trail_mode,
+                        "trail_trigger_rr": req.trail_trigger_rr,
+                        "trail_trigger_tp_level": req.trail_trigger_tp_level,
+                        "tp_volume_pcts": req.tp_volume_pcts,
+                        "max_cluster_risk_pct": req.max_cluster_risk_pct,
+                        "max_net_direction_risk_pct": req.max_net_direction_risk_pct,
+                        "symbol_cluster_overrides": req.symbol_cluster_overrides,
+                        "strategy_risk_budget_pct": req.strategy_risk_budget_pct,
+                    }.items() if v is not None
+                },
                 **req.risk_config,
             }
 
@@ -618,6 +913,7 @@ async def run_backtest_endpoint(
                 candles_m15=candles_m15_idx,
                 candles_m5=candles_m5_idx,
                 save_mode="DISCARD",
+                strategy=engine,  # [Phase 14 B2.3] enables on_position_bar hook
             )
 
             report = results.get("report")
@@ -665,7 +961,19 @@ async def run_backtest_endpoint(
                 "equity_curve": results.get("equity_curve", []),
                 "trades": results.get("trades", []),
                 "grouped_trades": results.get("grouped_trades", []),
-                "run_logs": getattr(engine, 'run_logs', [])[-100:],  # Only keep last 100 to prevent UI/Redis freezing
+                "run_logs": _filter_run_logs(getattr(engine, 'run_logs', [])),
+                # [I1] The funnel is computed by the engine (self.rejection_funnel)
+                # and was silently dropped here — the frontend's rejection-funnel
+                # panel (Backtester.jsx) has never had data to render for a
+                # single-symbol run. The portfolio route already includes this key;
+                # this brings the single-symbol route to parity with it.
+                "rejection_funnel": results.get("rejection_funnel", {}),
+                # [I4] Every signal the strategy emitted that did NOT become a trade,
+                # with the gate that stopped it — answers "was there a setup that day"
+                # without re-running. Capped upstream in the engine at 500.
+                "blocked_signals": results.get("blocked_signals", []),
+                # [2.24] Distinguishes a drawdown-latched stretch from "no setups".
+                "circuit_breaker_summary": results.get("circuit_breaker_summary", {}),
                 # params_snapshot records the REQUEST as submitted. Merge in the
                 # cost model the engine actually resolved, so a saved backtest
                 # records what costs it assumed and where each came from
@@ -676,6 +984,7 @@ async def run_backtest_endpoint(
                     "resolved_cost_model": results.get("cost_model", {}),
                 },
                 "cost_model": results.get("cost_model", {}),
+                "log_session_id": log_session_id,
                 "report": {
                     "win_rate": report.win_rate if report else 0,
                     "profit_factor": report.profit_factor if report else 0,
@@ -702,6 +1011,17 @@ async def run_backtest_endpoint(
                 },
             }
             
+            # [Phase 13 section C.7] The continuous per-leg bar series, so the
+            # finished run can be scrubbed end-to-end. Distinct from each
+            # trade's own chart_data, which is only a +/-30-bar slice capped at
+            # 500 bars and cannot show the run as a whole.
+            try:
+                response["replay"] = replay.series_payload()
+                replay.done()
+                logger.info(f"[replay] single run complete: {replay.stats}")
+            except Exception as e:
+                logger.warning(f"[replay] series attach failed (chart only, run unaffected): {e}")
+
             sanitized = _sanitize(response)
             
             current_state = await _get_state()
@@ -718,6 +1038,10 @@ async def run_backtest_endpoint(
                     t.pop("chart_data_h1", None)
                     t.pop("chart_data_m15", None)
                     t.pop("chart_data_m5", None)
+            # Same reasoning as the per-trade chart_data above: the replay
+            # series is megabytes and the client already has it from the live
+            # stream. It stays in saved state, fetched via /replay when needed.
+            ws_payload.pop("replay", None)
             
             # Send the run logs immediately as part of the WS payload
             await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
@@ -745,9 +1069,11 @@ async def run_backtest_endpoint(
             try:
                 await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
             except: pass
+        finally:
+            log_hub.end_session(log_session_id)
 
     background_tasks.add_task(_run_backtest_task)
-    return {"status": "started", "message": "Backtest queued and running in the background."}
+    return {"status": "started", "message": "Backtest queued and running in the background.", "log_session_id": log_session_id}
 
 
 @router.post("/portfolio_backtest")
@@ -767,6 +1093,12 @@ async def run_portfolio_backtest_endpoint(
     from backend.services.bot_service import bot_service
     sym_list = [s.symbol for s in req.symbols]
     bot_service.log_system_event(f"Portfolio backtest queued: {', '.join(sym_list)}", category="BACKTEST")
+
+    # [Phase 13 section G] See the single-symbol route — same reasoning.
+    log_session_id = log_hub.start_session(
+        f"Portfolio: {', '.join(sym_list[:4])}{'...' if len(sym_list) > 4 else ''}",
+        kind="portfolio_backtest",
+    )
 
     async def _run_portfolio_task():
         global USER_BACKTEST_STATE
@@ -856,6 +1188,44 @@ async def run_portfolio_backtest_endpoint(
                 "swap_short_per_lot_per_day": req.swap_short_per_lot_per_day,
                 "stops_level_pips": req.stops_level_pips,
                 "simulate_wicks": req.simulate_wicks,
+                # [2.15] Per-strategy TP1 RR override — see DriftJumpAlphaParams.tp1_rr_override.
+                "tp1_rr_overrides_by_strategy": {
+                    sym_cfg.strategy_id: sym_cfg.strategy_params["tp1_rr_override"]
+                    for sym_cfg in req.symbols
+                    if sym_cfg.strategy_params.get("tp1_rr_override") is not None
+                },
+                # [Phase 2 sizing-truth] only merged when explicitly set — None
+                # left out so risk/engine.py's own default resolution applies.
+                **{
+                    k: v for k, v in {
+                        "max_margin_utilisation_pct": req.max_margin_utilisation_pct,
+                        "min_deployable_risk_pct": req.min_deployable_risk_pct,
+                        "min_stop_spread_multiple": req.min_stop_spread_multiple,
+                        "confluence_risk_tiers": req.confluence_risk_tiers,
+                        "reject_below_confluence": req.reject_below_confluence,
+                        "post_split_risk_tolerance_pct": req.post_split_risk_tolerance_pct,
+                        "exit_slippage_pips": req.exit_slippage_pips,
+                        "open_risk_weight": req.open_risk_weight,
+                        "allow_pyramiding": req.allow_pyramiding,
+                        "min_bars_between_entries": req.min_bars_between_entries,
+                        "max_account_leverage": req.max_account_leverage,
+                        "min_sl_pips": req.min_sl_pips,
+                        "sizing_basis": req.sizing_basis,
+                        "be_spread_multiple": req.be_spread_multiple,
+                        "trail_require_be_first": req.trail_require_be_first,
+                        "be_mode": req.be_mode,
+                        "be_trigger_tp_level": req.be_trigger_tp_level,
+                        "trail_method_tp1": req.trail_method_tp1,
+                        "trail_mode": req.trail_mode,
+                        "trail_trigger_rr": req.trail_trigger_rr,
+                        "trail_trigger_tp_level": req.trail_trigger_tp_level,
+                        "tp_volume_pcts": req.tp_volume_pcts,
+                        "max_cluster_risk_pct": req.max_cluster_risk_pct,
+                        "max_net_direction_risk_pct": req.max_net_direction_risk_pct,
+                        "symbol_cluster_overrides": req.symbol_cluster_overrides,
+                        "strategy_risk_budget_pct": req.strategy_risk_budget_pct,
+                    }.items() if v is not None
+                },
             }
 
 
@@ -864,12 +1234,40 @@ async def run_portfolio_backtest_endpoint(
             portfolio_data_m15 = {}
             portfolio_data_m5 = {}
             portfolio_signals = {}
+            # [12.8/Part14] cache_key (usually slot_id) -> real symbol, passed
+            # to PortfolioBacktestEngine.run() so it can resolve costs/pip-size
+            # against the real symbol while keying its internal per-slot dicts
+            # by cache_key — this is what lets two rows share `symbol` under
+            # different strategies without colliding.
+            symbol_map: dict[str, str] = {}
             portfolio_run_logs = []  # Aggregated across all per-symbol strategy engines
             total_symbols = len(req.symbols)
+
+            # [Phase 13 section C.5] Replay stream. One leg per SLOT, not per
+            # symbol: Phase 12 allows the same symbol under two strategies, and
+            # keying tabs by symbol alone would merge two independent legs into
+            # one chart — the exact aliasing the "independent legs" principle
+            # forbids. Announced up front so every tab exists before the first
+            # bar arrives, and the tab strip doesn't reflow mid-run.
+            replay = ReplayStreamer(ws_manager, current_user.id, mode="portfolio")
+            replay.init([
+                {
+                    "slot_id": c.slot_id or f"{c.symbol}::{c.strategy_id}",
+                    "symbol": c.symbol,
+                    "strategy_id": c.strategy_id,
+                    "timeframe": None,  # filled in by replay_leg_start
+                }
+                for c in req.symbols
+            ])
 
             for sym_idx, sym_cfg in enumerate(req.symbols):
                 sym = sym_cfg.symbol
                 strat_id = sym_cfg.strategy_id
+                # [12.8] Falls back to a deterministic symbol+strategy composite
+                # when the caller doesn't supply slot_id — still collision-free
+                # for the common "same symbol, different strategy" case.
+                slot_key = sym_cfg.slot_id or f"{sym}::{strat_id}"
+                symbol_map[slot_key] = sym
 
                 pct_base = int((sym_idx / total_symbols) * 80)
                 current_state = await _get_state()
@@ -947,11 +1345,41 @@ async def run_portfolio_backtest_endpoint(
                 # Generate signals for this symbol
                 sym_signals = []
                 import numpy as np
+                # `time` is used by the elapsed-time yield below. The
+                # single-symbol route imports it in its own scope; this one did
+                # not, so every portfolio run would have died with a NameError
+                # on the first bar. Caught by pyflakes, not by a test — there is
+                # no automated portfolio-backtest coverage.
+                import time
+
+                # Fires the frontend's tab auto-advance: the active tab follows
+                # replay_leg_start unless the user has manually pinned one.
+                replay.leg_start(slot_key, total_bars=max(0, len(primary_times) - 300))
+
+                # Same hoisting as the single-symbol route — see the comment
+                # block there. This loop runs once PER LEG, so the cost of
+                # recomputing these per bar multiplies by the leg count.
+                _rep_o = primary_sorted["open"].to_numpy(dtype=float)
+                _rep_h = primary_sorted["high"].to_numpy(dtype=float)
+                _rep_l = primary_sorted["low"].to_numpy(dtype=float)
+                _rep_c = primary_sorted["close"].to_numpy(dtype=float)
+                _rep_t = primary_times.astype("datetime64[s]").astype("int64")
+                _warmup_cutoff = (
+                    np.datetime64(datetime.fromisoformat(req.start_date))
+                    if req.start_date else None
+                )
+                _tf_times_by_tf = {tf: indexed_by_tf[tf].index.values for tf in required_tfs}
+                _last_yield = time.monotonic()
 
                 for i in range(300, len(primary_times)):
-                    if i % 50 == 0:
-                        await asyncio.sleep(0.001)
-                    
+                    # Elapsed-time yield rather than every-50-bars — see the
+                    # single-symbol route. This is what keeps the WebSocket and
+                    # the health poll alive through a long run.
+                    _now = time.monotonic()
+                    if (_now - _last_yield) > 0.04:
+                        await asyncio.sleep(0)
+                        _last_yield = time.monotonic()
+
                     if i % 600 == 0:
                         cur_state = await _get_state()
                         if cur_state.get("status") == "cancelled":
@@ -969,64 +1397,108 @@ async def run_portfolio_backtest_endpoint(
                         except: pass
 
                     current_time = primary_times[i]
-                    is_warmup = req.start_date and current_time < np.datetime64(datetime.fromisoformat(req.start_date))
+                    is_warmup = _warmup_cutoff is not None and current_time < _warmup_cutoff
+
+                    if not is_warmup:
+                        replay.bar(slot_key, {
+                            "time": int(_rep_t[i]),
+                            "open": float(_rep_o[i]),
+                            "high": float(_rep_h[i]),
+                            "low": float(_rep_l[i]),
+                            "close": float(_rep_c[i]),
+                        })
+
                     sig = None
 
                     for tf in required_tfs:
                         meta = TF_META.get(tf, TF_META["M5"])
                         sorted_tf = indexed_by_tf[tf]
-                        tf_times = sorted_tf.index.values
+                        tf_times = _tf_times_by_tf[tf]
 
                         if tf == primary_tf:
                             tf_end = i
-                            tf_start_idx = max(0, tf_end - meta["window"])
-                            slice_tf = sorted_tf.iloc[tf_start_idx:tf_end]
                             last_tf_time = primary_times[i]
                         else:
                             np_td, np_unit = meta["np_td"]
                             cutoff = current_time - np.timedelta64(np_td, np_unit)
                             tf_end = int(np.searchsorted(tf_times, cutoff, side='right'))
-                            tf_start_idx = max(0, tf_end - meta["window"])
-                            slice_tf = sorted_tf.iloc[tf_start_idx:tf_end]
                             last_tf_time = tf_times[tf_end - 1] if tf_end > 0 else None
 
+                        # Slice only once the timeframe has advanced — see the
+                        # single-symbol route for the measurement (2.1x).
+                        if last_tf_time is None or last_tf_time == prev_time_by_tf[tf]:
+                            continue
+
+                        slice_tf = sorted_tf.iloc[max(0, tf_end - meta["window"]):tf_end]
                         if len(slice_tf) < 20:
                             continue
 
-                        if last_tf_time != prev_time_by_tf[tf]:
-                            s = await strategy_engine.on_bar(sym, tf, slice_tf)
-                            if s:
-                                sig = s
-                            prev_time_by_tf[tf] = last_tf_time
+                        s = await strategy_engine.on_bar(sym, tf, slice_tf)
+                        if s:
+                            sig = s
+                        prev_time_by_tf[tf] = last_tf_time
 
                     if sig and not is_warmup:
                         sig_time = int(current_time.astype('datetime64[s]').astype(int)) if hasattr(current_time, 'astype') else int(current_time)
+                        # [12.5/12.6/12.8] Stamp slot_id onto the signal's own
+                        # metadata so risk/engine.py's slot-aware checks and
+                        # CircuitBreaker.position_opened(slot_id=...) resolve
+                        # correctly once this slot is in play.
+                        _sig_metadata = dict(sig.metadata or {})
+                        _sig_metadata["slot_id"] = slot_key
+                        # [12.5] Each slot gets its OWN independent
+                        # max_positions_per_symbol quota (not a shared
+                        # symbol-wide counter) — this is what actually lets
+                        # two strategies hold simultaneous positions on the
+                        # same real symbol. Same value as the portfolio-wide
+                        # setting; a per-slot override isn't exposed on
+                        # PortfolioSymbolConfig yet.
+                        _sig_metadata.setdefault("slot_max_positions", req.max_positions_per_symbol)
                         sym_signals.append({
                             "symbol": sig.symbol,
+                            "_cache_key": slot_key,  # [12.8]
                             "strategy_name": strat_id,
                             "direction": sig.direction,
                             "time": sig_time,
                             "entry_price": sig.entry_price,
                             "stop_loss": sig.stop_loss,
                             "take_profit": sig.take_profit,
+                            "timeframe": sig.timeframe,  # [12.10] see risk/engine.py's note
                             "confluence_score": sig.confluence_score,
-                            "metadata": sig.metadata,
+                            "metadata": _sig_metadata,
                         })
+                        replay.signal(slot_key, sym_signals[-1])
+
+                        # Same runaway guard as the single-symbol route, per leg.
+                        # It matters more here: a portfolio run loops this per
+                        # symbol, so one misbehaving leg would otherwise hang the
+                        # whole basket.
+                        if len(sym_signals) >= MAX_SIGNALS_PER_RUN:
+                            logger.error(
+                                f"[PORTFOLIO_BT] {sym}: signal cap {MAX_SIGNALS_PER_RUN} hit at "
+                                f"bar {i}/{len(primary_times)} — aborting this leg's signal "
+                                f"generation and continuing with the rest of the portfolio."
+                            )
+                            break
+
+                replay.leg_done(slot_key)
 
                 # Use the primary timeframe candles as the simulation dataframe for this symbol
                 primary_df = primary_sorted.copy()
                 if 'time' not in primary_df.columns:
                     primary_df['time'] = primary_df.index.astype('int64') // 10**9
 
-                portfolio_data[sym] = primary_df
+                # [12.8] Keyed by slot_key, not bare `sym` — lets two rows
+                # share `sym` under different strategies without colliding.
+                portfolio_data[slot_key] = primary_df
                 # Multi-timeframe candle sets for the HTF chart tabs, when the
                 # strategy actually fetched M15/M5 (mirrors the single-symbol
                 # /backtest endpoint's candles_m15_idx / candles_m5_idx).
                 if "M15" in indexed_by_tf:
-                    portfolio_data_m15[sym] = indexed_by_tf["M15"]
+                    portfolio_data_m15[slot_key] = indexed_by_tf["M15"]
                 if "M5" in indexed_by_tf:
-                    portfolio_data_m5[sym] = indexed_by_tf["M5"]
-                portfolio_signals[sym] = sym_signals
+                    portfolio_data_m5[slot_key] = indexed_by_tf["M5"]
+                portfolio_signals[slot_key] = sym_signals
 
                 # Capture this symbol's strategy-engine logs before it goes out
                 # of scope — without this, portfolio backtests never surface
@@ -1065,6 +1537,7 @@ async def run_portfolio_backtest_endpoint(
                 req.initial_balance,
                 portfolio_data_m15,
                 portfolio_data_m5,
+                symbol_map,  # [12.8]
             )
 
             # ── Sanitize and broadcast results ──
@@ -1117,6 +1590,10 @@ async def run_portfolio_backtest_endpoint(
                 "trades": results.get("trades", []),
                 "grouped_trades": results.get("grouped_trades", []),
                 "rejection_funnel": results.get("rejection_funnel", {}),
+                # [I4] see single-symbol route for rationale.
+                "blocked_signals": results.get("blocked_signals", []),
+                # [2.24] Distinguishes a drawdown-latched stretch from "no setups".
+                "circuit_breaker_summary": results.get("circuit_breaker_summary", {}),
                 # Per-symbol transaction costs the engine actually applied, with
                 # provenance (USER / MT5 / ASSET_CLASS_DEFAULT) for each field.
                 "cost_model": results.get("cost_model", {}),
@@ -1124,7 +1601,9 @@ async def run_portfolio_backtest_endpoint(
                     **(req.model_dump() if hasattr(req, "model_dump") else req.dict()),
                     "resolved_cost_model": results.get("cost_model", {}),
                 },
-                "run_logs": (portfolio_run_logs + results.get("run_logs", []))[-100:],  # Merge strategy + engine logs; keep last 100
+                # [I2] Merge strategy + engine logs, then keep all WARNING/ERROR +
+                # a sampled INFO tail instead of a flat last-100 slice.
+                "run_logs": _filter_run_logs(portfolio_run_logs + results.get("run_logs", [])),
                 "report": {
                     "win_rate": getattr(report, 'win_rate', 0) if report else results.get("win_rate", 0),
                     "profit_factor": getattr(report, 'profit_factor', 0) if report else results.get("profit_factor", 0),
@@ -1152,7 +1631,17 @@ async def run_portfolio_backtest_endpoint(
                     "bias_stats": getattr(report, 'bias_stats', {}) if report else {},
                     "confluence_stats": getattr(report, 'confluence_stats', {}) if report else {},
                 },
+                "log_session_id": log_session_id,
             }
+
+            # [Phase 13 section C.7] Continuous per-leg series for replay-mode
+            # scrubbing, keyed by slot_id to match the tab strip.
+            try:
+                response["replay"] = replay.series_payload()
+                replay.done()
+                logger.info(f"[replay] portfolio run complete: {replay.stats}")
+            except Exception as e:
+                logger.warning(f"[replay] series attach failed (chart only, run unaffected): {e}")
 
             sanitized = _sanitize(response)
             current_state = await _get_state()
@@ -1178,6 +1667,10 @@ async def run_portfolio_backtest_endpoint(
                         t.pop("chart_data", None)
                         t.pop("chart_data_m15", None)
                         t.pop("chart_data_m5", None)
+            # Same reasoning as the per-trade chart_data above — the client
+            # already received this series live; it is refetched from saved
+            # state via /replay rather than pushed again at completion.
+            ws_payload.pop("replay", None)
 
             await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
             await _save_state(current_state)
@@ -1196,9 +1689,15 @@ async def run_portfolio_backtest_endpoint(
             await _save_state(current_state)
             from backend.services.bot_service import bot_service
             bot_service.log_system_event(f"Portfolio backtest failed: {e!s}", category="BACKTEST", level="ERROR")
+        finally:
+            log_hub.end_session(log_session_id)
 
     background_tasks.add_task(_run_portfolio_task)
-    return {"status": "started", "message": f"Portfolio backtest queued for {len(req.symbols)} symbol(s)."}
+    return {
+        "status": "started",
+        "message": f"Portfolio backtest queued for {len(req.symbols)} symbol(s).",
+        "log_session_id": log_session_id,
+    }
 
 @router.get("/backtests")
 async def list_backtests(
@@ -1481,6 +1980,193 @@ async def get_saved_trade_chart(
     }
 
 
+@router.get("/backtest_result/replay")
+async def get_replay_series(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    [Phase 13 section C.7] The continuous per-leg bar series for the current
+    run, for replay-mode scrubbing.
+
+    Deliberately NOT included in the completion WebSocket payload: for a
+    multi-leg portfolio run this is the single largest object in the result,
+    and the client already streamed it live. It is fetched here only when a
+    page reload or a revisit means the client no longer has it.
+    """
+    state = USER_BACKTEST_STATE.get(current_user.id)
+    if state is None and HAS_REDIS and redis_client and redis_client.redis:
+        try:
+            data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
+            if data:
+                state = json.loads(data)
+        except Exception:
+            pass
+
+    if not state or not state.get("result"):
+        raise HTTPException(status_code=404, detail="No active or completed backtest found")
+
+    replay = state["result"].get("replay")
+    if replay and replay.get("series"):
+        return {**replay, "available": True, "reconstructed": False}
+
+    # No stored series — rebuild from the run's grouped trades, the same way the
+    # saved-run endpoint does. Covers a result produced before the replay stream
+    # existed, and one whose live stream failed mid-run.
+    #
+    # Deliberately NOT a 404: the client needs to tell "ask again later" (no run
+    # yet) apart from "this is all there will ever be".
+    groups = state["result"].get("grouped_trades") or []
+
+    class _G:
+        """
+        Attribute view over a grouped-trade dict.
+
+        `_replay_from_trades` reads via getattr because its primary caller passes
+        ORM rows; this adapts the in-memory dict shape to the same interface.
+        `entry_price`/`pnl` differ in name between the two shapes, so they are
+        mapped rather than passed straight through.
+        """
+        _ALIAS = {"pnl": "combined_pnl", "tp1_price": "take_profit"}
+
+        def __init__(self, d):
+            self._d = d
+
+        def __getattr__(self, k):
+            if k in self._ALIAS and self._ALIAS[k] in self._d:
+                return self._d[self._ALIAS[k]]
+            return self._d.get(k)
+
+    rebuilt = _replay_from_trades([_G(g) for g in groups],
+                                  state["result"].get("symbol"))
+    return {**rebuilt, "available": bool(rebuilt["series"])}
+
+
+def _replay_from_trades(trades: list, fallback_symbol: str | None = None) -> dict:
+    """
+    Rebuild a replay payload from a saved run's per-trade chart data.
+
+    Runs saved before `replay_data` existed have no continuous series — but they
+    DO carry a candle window around every trade (`chart_data*`, +/-30 bars, three
+    timeframes). Stitching those windows together, de-duplicated and sorted, gives
+    a series that covers exactly the parts of the run where something happened.
+
+    It is not the same thing as the live series: there are gaps between trades,
+    because nothing was recorded there. That is honest — and for reviewing a
+    finished run it is arguably the more useful view, since the empty stretches
+    carried no trades to look at. The response says `reconstructed: True` so the
+    client can label it rather than implying continuity it does not have.
+    """
+    def _load(value, default):
+        """
+        Accept both storage shapes.
+
+        A saved trade holds these fields as JSON STRINGS (SQLAlchemy Text
+        columns); an in-memory grouped trade holds them as live lists/dicts.
+        `safe_json_loads` returns the default for a non-string, so calling it on
+        the in-memory shape would silently discard the data — which is exactly
+        the bug this helper exists to avoid.
+        """
+        if value is None:
+            return default
+        if isinstance(value, (list, dict)):
+            return value
+        return safe_json_loads(value, default)
+
+    series: dict[str, list] = {}
+    signals: dict[str, list] = {}
+
+    for t in trades or []:
+        sym = (getattr(t, "symbol", None) or fallback_symbol or "UNKNOWN")
+        slot = sym
+        # Prefer the richest timeframe actually stored for this trade.
+        bars = []
+        for field in ("chart_data_m5", "chart_data_m15", "chart_data"):
+            raw = _load(getattr(t, field, None), [])
+            if raw and len(raw) > len(bars):
+                bars = raw
+        if bars:
+            series.setdefault(slot, []).extend(bars)
+
+        entry_t = getattr(t, "entry_time", None)
+        if entry_t is not None:
+            try:
+                ts = int(entry_t.timestamp()) if hasattr(entry_t, "timestamp") else int(entry_t)
+            except Exception:
+                ts = 0
+            smc = _load(getattr(t, "smc_data", None), {}) or {}
+            markings = (smc.get("boxes") or []) + (smc.get("lines") or []) + (smc.get("markers") or [])
+            signals.setdefault(slot, []).append({
+                "slot_id": slot,
+                "time": ts,
+                "direction": getattr(t, "direction", None),
+                "entry": getattr(t, "entry_price", None),
+                "sl": getattr(t, "stop_loss", None),
+                "tp": getattr(t, "tp1_price", None),
+                "confluence_score": getattr(t, "confluence_score", None),
+                "strategy_id": getattr(t, "strategy_id", None),
+                "exit_reason": getattr(t, "exit_reason", None),
+                "pnl": getattr(t, "pnl", None),
+                "markings": markings,
+                "confluence_summary": smc.get("confluence_summary", {}),
+            })
+
+    # De-duplicate by timestamp and sort — the per-trade windows overlap wherever
+    # two trades were close together, and the chart requires strictly ascending
+    # unique times or it silently drops bars.
+    cleaned: dict[str, list] = {}
+    for slot, bars in series.items():
+        seen: dict[int, dict] = {}
+        for b in bars:
+            try:
+                seen[int(b["time"])] = b
+            except (KeyError, TypeError, ValueError):
+                continue
+        cleaned[slot] = [seen[k] for k in sorted(seen)]
+
+    legs = [
+        {"slot_id": slot, "symbol": slot, "strategy_id": None, "timeframe": None}
+        for slot in sorted(cleaned)
+    ]
+    return {
+        "run_id": None,
+        "mode": "portfolio" if len(legs) > 1 else "single",
+        "legs": legs,
+        "series": cleaned,
+        "signals": signals,
+        "reconstructed": True,
+    }
+
+
+@router.get("/backtests/{backtest_id}/replay")
+async def get_saved_replay_series(
+    backtest_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Replay series for a SAVED run. Ownership-scoped, like every other saved-run route.
+
+    Falls back to reconstructing from per-trade chart data when the run predates
+    `replay_data`, so an old saved backtest still replays rather than showing an
+    empty panel.
+    """
+    result = await db.execute(
+        select(BacktestRun)
+        .options(selectinload(BacktestRun.trades))
+        .where(BacktestRun.id == backtest_id, BacktestRun.user_id == current_user.id)
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Backtest not found")
+
+    payload = safe_json_loads(getattr(run, "replay_data", None), None)
+    if payload and payload.get("series"):
+        return {**payload, "available": True, "reconstructed": False}
+
+    rebuilt = _replay_from_trades(list(run.trades or []), run.symbol)
+    return {**rebuilt, "available": bool(rebuilt["series"])}
+
+
 @router.get("/backtest_result/trade/{group_id}/chart")
 async def get_unsaved_trade_chart(
     group_id: str,
@@ -1624,6 +2310,8 @@ async def save_backtest_from_client(
         be_hit_rate=report.get("be_hit_rate", 0),
         trail_hit_rate=report.get("trail_hit_rate", 0),
         run_logs=json.dumps(data.get("run_logs", []), default=str),
+        # [Phase 13 section C.7] See runner.py — same field, client-save path.
+        replay_data=json.dumps(data.get("replay"), default=str) if data.get("replay") else None,
     )
     
     db.add(run)

@@ -5,6 +5,7 @@ Async PostgreSQL session factory using SQLAlchemy + asyncpg.
 Provides dependency injection for FastAPI routes.
 """
 
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -22,8 +23,15 @@ logger = get_logger(__name__)
 
 # Create async engine
 is_sqlite = settings.database.url.startswith("sqlite")
+
+# SQL echo used to be tied to DEBUG, which meant a normal `DEBUG=true` dev setup
+# logged EVERY statement. That is not free: a backtest writes hundreds of trade
+# rows, and echoing each one costs formatting, I/O, and — since Phase 13 put a
+# WebSocket sink on the logger — pressure on the same socket the replay stream
+# uses. Given its own switch so verbose SQL is a deliberate choice.
+_sql_echo = os.environ.get("ALGOEDGE_SQL_ECHO", "").strip().lower() in ("1", "true", "yes")
 engine_kwargs = {
-    "echo": settings.server.debug,
+    "echo": _sql_echo,
 }
 if not is_sqlite:
     engine_kwargs.update({
@@ -78,6 +86,15 @@ async def init_db():
             "ALTER TABLE backtest_runs ADD COLUMN bias_stats TEXT;",
             "ALTER TABLE backtest_runs ADD COLUMN confluence_stats TEXT;",
             "ALTER TABLE backtest_runs ADD COLUMN title TEXT;",
+            "ALTER TABLE backtest_runs ADD COLUMN replay_data TEXT;",
+            # `strategy_id` was added to the BacktestTrade MODEL without a
+            # matching migration, so every save failed with
+            # "table backtest_trades has no column named strategy_id" — a hard
+            # 500 that the frontend surfaced only as "Network error". It is the
+            # column that tells a saved portfolio run which strategy produced
+            # each trade, so without it a multi-strategy run is unreadable
+            # after saving.
+            "ALTER TABLE backtest_trades ADD COLUMN strategy_id TEXT;",
         ]
 
         # DROP COLUMN ... IF EXISTS is Postgres syntax — SQLite's ALTER TABLE

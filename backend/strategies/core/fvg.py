@@ -16,7 +16,14 @@ logger = get_logger(__name__)
 class FVGDetector:
     """Detects 3-candle Fair Value Gaps."""
 
-    def __init__(self, fvg_min_gap_atr_mult: float = 0.2, min_gap_pips: float = None, max_fvgs: int = 20):
+    def __init__(
+        self,
+        fvg_min_gap_atr_mult: float = 0.2,
+        min_gap_pips: float = None,
+        max_fvgs: int = 20,
+        displacement_atr_mult: float = 0.0,
+        displacement_body_pct: float = 0.0,
+    ):
         # Backward compatibility for one release
         if min_gap_pips is not None:
             logger.warning("min_gap_pips is deprecated; use fvg_min_gap_atr_mult instead.")
@@ -25,6 +32,16 @@ class FVGDetector:
             self.atr_multiplier = fvg_min_gap_atr_mult
         self.active_fvgs = []
         self.max_fvgs = max_fvgs
+        # [6.11/S13/G8] Displacement gate: admit an FVG only when the MIDDLE
+        # candle (the one whose directional move actually created the gap) is
+        # itself a genuine displacement candle — large range and a dominant
+        # body, not just any 3-candle sequence whose gap happens to clear the
+        # ATR-scaled size threshold above. 0 = disabled (the default, so every
+        # existing caller — e.g. Bias-IFVG's M5 IFVG detector — is unaffected;
+        # this is opt-in per instance, wired on for HTF FVG Flip's HTF-level
+        # detector specifically).
+        self.displacement_atr_mult = displacement_atr_mult or 0.0
+        self.displacement_body_pct = displacement_body_pct or 0.0
 
     def update(self, candles: pd.DataFrame) -> list[dict[str, Any]]:
         """
@@ -80,12 +97,23 @@ class FVGDetector:
 
         # 3. Detect new FVG from the last 3 candles
         c1, c2, c3 = candles.iloc[-3], candles.iloc[-2], candles.iloc[-1]
-        
+
+        # [6.11/S13/G8] Displacement gate on the MIDDLE candle (c2) — the one
+        # whose directional move actually created the gap.
+        displacement_ok = True
+        if self.displacement_atr_mult > 0 or self.displacement_body_pct > 0:
+            c2_range = c2["high"] - c2["low"]
+            c2_body = abs(c2["close"] - c2["open"])
+            if self.displacement_atr_mult > 0 and atr > 0:
+                displacement_ok = displacement_ok and (c2_range >= self.displacement_atr_mult * atr)
+            if self.displacement_body_pct > 0:
+                displacement_ok = displacement_ok and (c2_range > 0 and (c2_body / c2_range) >= self.displacement_body_pct)
+
         # Bullish FVG
         if c3["low"] > c1["high"]:
             gap = c3["low"] - c1["high"]
-            logger.debug(f"[TRACE] FVG Check | ATR: {atr:.5f} | min_gap: {min_required_gap:.5f} | actual gap: {gap:.5f} | PASS: {gap >= min_required_gap}")
-            if gap >= min_required_gap:
+            logger.debug(f"[TRACE] FVG Check | ATR: {atr:.5f} | min_gap: {min_required_gap:.5f} | actual gap: {gap:.5f} | PASS: {gap >= min_required_gap and displacement_ok}")
+            if gap >= min_required_gap and displacement_ok:
                 new_fvg = {
                     "type": "BULLISH",
                     "top": c3["low"],
@@ -99,8 +127,8 @@ class FVGDetector:
         # Bearish FVG
         elif c1["low"] > c3["high"]:
             gap = c1["low"] - c3["high"]
-            logger.debug(f"[TRACE] FVG Check | ATR: {atr:.5f} | min_gap: {min_required_gap:.5f} | actual gap: {gap:.5f} | PASS: {gap >= min_required_gap}")
-            if gap >= min_required_gap:
+            logger.debug(f"[TRACE] FVG Check | ATR: {atr:.5f} | min_gap: {min_required_gap:.5f} | actual gap: {gap:.5f} | PASS: {gap >= min_required_gap and displacement_ok}")
+            if gap >= min_required_gap and displacement_ok:
                 new_fvg = {
                     "type": "BEARISH",
                     "top": c1["low"],

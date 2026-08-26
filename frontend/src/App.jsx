@@ -3,7 +3,8 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 're
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   LayoutDashboard, BookOpen, FlaskConical, BarChart3,
-  Zap, Settings, Wifi, WifiOff, Loader2, LogOut, ChevronLeft, ChevronRight
+  Zap, Settings, Wifi, WifiOff, Loader2, LogOut, ChevronLeft, ChevronRight,
+  Sparkles, Activity, Terminal
 } from 'lucide-react';
 import { useState } from 'react';
 import { useBackendConnection, useWebSocket } from './hooks/useBackendConnection';
@@ -19,6 +20,10 @@ const Journal = lazy(() => import('./pages/Journal'));
 const Backtester = lazy(() => import('./pages/Backtester'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Signals = lazy(() => import('./pages/Signals'));
+const Analysis = lazy(() => import('./pages/Analysis'));
+const StrategyLab = lazy(() => import('./pages/StrategyLab'));
+const Fundamentals = lazy(() => import('./pages/Fundamentals'));
+const Logs = lazy(() => import('./pages/Logs'));
 const SettingsPage = lazy(() => import('./pages/Settings/index'));
 
 const queryClient = new QueryClient({
@@ -55,6 +60,10 @@ function Sidebar({ isCollapsed, setIsCollapsed }) {
     { to: '/backtester', icon: FlaskConical, label: 'Backtester' },
     { to: '/analytics', icon: BarChart3, label: 'Analytics' },
     { to: '/signals', icon: Zap, label: 'Signals' },
+    { to: '/strategy-lab', icon: FlaskConical, label: 'Strategy Lab' },
+    { to: '/fundamentals', icon: Activity, label: 'Fundamentals' },
+    { to: '/analysis', icon: Sparkles, label: 'Analysis' },
+    { to: '/logs', icon: Terminal, label: 'Logs' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ];
 
@@ -122,6 +131,10 @@ function AppContent() {
               <Route path="/backtester" element={<Backtester />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/signals" element={<Signals />} />
+              <Route path="/strategy-lab" element={<StrategyLab />} />
+              <Route path="/fundamentals" element={<Fundamentals />} />
+              <Route path="/analysis" element={<Analysis />} />
+              <Route path="/logs" element={<Logs />} />
               <Route path="/settings/*" element={<SettingsPage />} />
             </Routes>
           </Suspense>

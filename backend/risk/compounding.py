@@ -557,6 +557,14 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     # The ratio drives sizing and PnL, so it is preserved; only the cosmetic
     # contract_size is corrected. (If your broker quotes DAX at €1/point,
     # point_value_per_lot should become 0.12 and contract_size 1.)
+    # [1.14/C2] UNRESOLVED, and now known to be unresolvable here. Checked
+    # 2026-08-23: mt5.symbol_select("GER40") returns False on this Deriv-Demo
+    # account — the broker does not offer it (nor NAS100 / US30). So the
+    # ratio/contract_size mismatch flagged in the audit cannot be confirmed or
+    # corrected against a live quote, and the profile is also unreachable in
+    # practice: any run naming GER40 fails at data fetch, not at sizing.
+    # Left EXACTLY as-is rather than adjusted on a guess. Re-verify against a
+    # broker that actually lists it before trusting these numbers.
     "GER40": InstrumentProfile(
         symbol="GER40", instrument_type="INDEX", point_size=0.1, point_value_per_lot=1.2, lot_min=0.01, lot_max=50.0, lot_step=0.01, contract_size=10, session_filter=True, news_filter=True, trades_24_7=False,
     ),
@@ -783,8 +791,15 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
     # before trading these live. lot_min is set for a rough ~$15-50 minimum
     # notional given typical DOGE/XRP/SOL/LTC prices, not a confirmed broker minimum.
     "DOGUSD": InstrumentProfile(
-        symbol="DOGUSD", instrument_type="CRYPTO", point_size=0.0001, point_value_per_lot=0.0001,
-        lot_min=100.0, lot_max=1000000.0, lot_step=10.0, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
+        # [C3] Verified 2026-08-23 against mt5.symbol_info("DOGUSD"):
+        #     volume_min=1500.0  volume_max=100000.0  volume_step=100.0
+        #     digits=5  point=1e-05  trade_contract_size=1.0
+        # point_size corrected 0.0001 -> 1e-05 to match the broker's 5 digits;
+        # lot_max was 10x too LARGE (1,000,000 vs. 100,000), so the sizer could
+        # produce volumes the broker would reject at the top of the range as
+        # well as the bottom.
+        symbol="DOGUSD", instrument_type="CRYPTO", point_size=0.00001, point_value_per_lot=0.00001,
+        lot_min=1500.0, lot_max=100000.0, lot_step=100.0, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "SOLUSD": InstrumentProfile(
         symbol="SOLUSD", instrument_type="CRYPTO", point_size=0.01, point_value_per_lot=0.01,
@@ -804,13 +819,66 @@ INSTRUMENT_PROFILES: dict[str, InstrumentProfile] = {
         # per lot with ratio 1.0, and XRPUSD's lot_min=50/lot_step=10 were
         # chosen for a ~$25 minimum notional at 1 XRP per lot. Corrected to
         # 0.0001 → ratio 1.0, consistent with contract_size=1.
+        # [1.15/1.16/C3] RESOLVED 2026-08-23 against the live terminal, not guessed.
+        # mt5.symbol_info("XRPUSD") on Deriv-Demo returns:
+        #     volume_min=500.0  volume_max=90000.0  volume_step=100.0
+        #     digits=4  point=0.0001  trade_contract_size=1.0
+        #     trade_tick_value=0.0001  trade_tick_size=0.0001
+        # The previous lot_min=50 / lot_step=10 were BOTH 10x too small, and
+        # lot_max=1000 was 90x too small. That is not a rounding difference: a
+        # backtest sizing this symbol at, say, 19.22 lots (as the debug runs in
+        # `debug/` did) would be rejected outright by the broker for sitting
+        # below volume_min. Every XRPUSD backtest result predating this line was
+        # therefore simulating trades that could not have been placed.
         symbol="XRPUSD", instrument_type="CRYPTO", point_size=0.0001, point_value_per_lot=0.0001,
-        lot_min=50.0, lot_max=1000.0, lot_step=10.0, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
+        lot_min=500.0, lot_max=90000.0, lot_step=100.0, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
     "LTCUSD": InstrumentProfile(
         symbol="LTCUSD", instrument_type="CRYPTO", point_size=0.01, point_value_per_lot=0.01,
         lot_min=0.1, lot_max=1000.0, lot_step=0.1, contract_size=1, session_filter=False, news_filter=False, trades_24_7=True,
     ),
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [Task 1.12/1.13 — Part 11 §C1 of the master plan] CROSS-CURRENCY CONVERSION
+# ─────────────────────────────────────────────────────────────────────────────
+# Every FX pair below has a non-USD quote currency, so its `point_value_per_lot`
+# above needs a quote-currency-to-USD conversion baked in to be correct — see
+# each profile's inline comment. As stored, that conversion is a STATIC
+# point-in-time rate snapshot with no live refresh: correct the day it was
+# written, drifting as the real rate moves. This map is what lets
+# position_sizer.py replace the snapshot with a live MT5 quote when one is
+# available (falling back to the snapshot above when it is not) — see
+# resolve_cross_rate_point_value() in position_sizer.py.
+#
+# CORRECTED 2026-08-22: an earlier pass of this audit flagged these 13 profiles
+# as "internally inconsistent" using ratio == contract_size as the test — that
+# invariant only holds when quote currency == USD. Back-calculating the
+# implied rate from each one (test_instrument_profiles.py) shows they decode to
+# plausible real exchange rates (GBPJPY -> USDJPY ~149.25, USDCHF -> ~0.870,
+# EURGBP -> GBPUSD ~1.27, etc.) — i.e. they were never arithmetically wrong,
+# only stale. Do not "fix" these numbers directly; fix staleness via the live
+# resolver instead.
+#
+# convention: "indirect" currencies (JPY, CHF, CAD) are quoted as USD/XXX
+# (USDJPY = JPY per 1 USD) -> converting requires DIVIDING by the live rate.
+# "direct" currencies (GBP, AUD, NZD, EUR as quote) are quoted as XXX/USD ->
+# converting is a direct MULTIPLY.
+FX_CROSS_CONVERSION: dict[str, tuple[str, str]] = {
+    # symbol: (MT5 quote pair to fetch a live rate from, "direct" | "indirect")
+    "USDJPY": ("USDJPY", "indirect"),
+    "GBPJPY": ("USDJPY", "indirect"),
+    "EURJPY": ("USDJPY", "indirect"),
+    "AUDJPY": ("USDJPY", "indirect"),
+    "CADJPY": ("USDJPY", "indirect"),
+    "USDCHF": ("USDCHF", "indirect"),
+    "GBPCHF": ("USDCHF", "indirect"),
+    "USDCAD": ("USDCAD", "indirect"),
+    "GBPCAD": ("USDCAD", "indirect"),
+    "EURGBP": ("GBPUSD", "direct"),
+    "EURAUD": ("AUDUSD", "direct"),
+    "GBPAUD": ("AUDUSD", "direct"),
+    "GBPNZD": ("NZDUSD", "direct"),
 }
 
 # Aliases for Deriv MT5 symbol naming variations
@@ -863,6 +931,25 @@ SYMBOL_ALIASES: dict[str, str] = {
     "S&P 500": "US500", "US 500": "US500", "INX": "US500", "ES": "US500", "US SP 500": "US500", "SP500.cash": "US500",
     "GER40": "GER40", "DAX": "GER40", "DE40": "GER40", "DAX40": "GER40", "GER30": "GER40",
     "HK50": "HK50", "Hang Seng": "HK50", "HSI": "HK50", "HSI50": "HK50",
+
+    # ── Deriv's long-form CFD names ───────────────────────────────────────
+    # Read off the live Deriv-Demo terminal (2026-08-26) while building the
+    # per-broker symbol map (task 14.9). Deriv writes indices out in full
+    # rather than using the four-letter codes, so without these the discovery
+    # pass reports the instrument as "not listed" even though it is offered —
+    # which is exactly the GER40/GER30 case that motivated Part C.
+    "Germany 40": "GER40",
+    "Hong Kong 50": "HK50",
+    "Swiss 20": "SWI20",
+    "US Small Cap 2000": "US2000",
+    "UK Brent Oil": "UKOIL",
+    "Australia 200": "AUS200",
+    "Europe 50": "EU50",
+    "France 40": "FRA40",
+    "Netherlands 25": "NETH25",
+    "Spain 35": "SPA35",
+    "UK 100": "UK100",
+    "Japan 225": "JP225",
     "BTC": "BTCUSD", "Bitcoin": "BTCUSD",
     "Aussie": "AUDUSD", "Geppy": "GBPJPY", "GJ": "GBPJPY",
     "GBPNZD": "GBPNZD", "GBPAUD": "GBPAUD", "GBPCHF": "GBPCHF",
@@ -893,21 +980,156 @@ SYMBOL_ALIASES: dict[str, str] = {
     "LTC": "LTCUSD", "Litecoin": "LTCUSD", "LTCUSD": "LTCUSD",
 }
 
+import os
 import re
+import threading
+
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+# ─────────────────────────────────────────────────────────────────────────
+# [C1/C3/1.15/1.16] Live broker overlay
+# ─────────────────────────────────────────────────────────────────────────
+#
+# The tables above are hand-maintained constants, and on 2026-08-23 they were
+# checked against the live terminal for the first time:
+#
+#     57 of 59 verifiable profiles disagreed with the broker.
+#     15 had a materially wrong point_value_per_lot.
+#
+# The failures are not random, and two of them cannot be fixed by editing
+# constants at all:
+#
+#   * **Frozen FX rates (audit C1).** AUDJPY/CADJPY/EURJPY/GBPJPY/USDJPY all
+#     carry point_value_per_lot = 6.7 against a live 6.29 — a USDJPY rate from
+#     whenever the table was written. USDCHF/GBPCHF carry 1.15 against 1.2477.
+#     These are not typos; they are a quote frozen into a constant, and they go
+#     stale again the moment the rate moves. No edit fixes that permanently.
+#   * **Lot constraints (C3).** XRPUSD's profile said lot_min=50/step=10; the
+#     broker says 500/100. A backtest sizing at 19 lots was simulating an order
+#     the broker rejects outright.
+#
+# So the fix is architectural rather than another round of hand-editing: when
+# MT5 is connected, the BROKER is the source of truth, and the static profile is
+# the fallback for when it is not (CI, a Linux box, an unlisted symbol).
+#
+# Overridden from symbol_info: lot_min/lot_max/lot_step, point_size,
+# contract_size, and point_value_per_lot (derived as
+# `trade_tick_value x point_size / trade_tick_size` — the broker's own
+# account-currency value per point, which is exactly what the frozen constants
+# were trying and failing to approximate).
+#
+# NOT overridden: session_filter / news_filter / trades_24_7 / instrument_type.
+# Those are policy, not broker facts, and stay yours.
+#
+# Set ALGOEDGE_DISABLE_LIVE_PROFILES=1 to pin the static tables — useful when
+# reproducing an old backtest exactly.
+
+_LIVE_OVERLAY_DISABLED = os.environ.get("ALGOEDGE_DISABLE_LIVE_PROFILES", "").strip() in ("1", "true", "TRUE")
+
+# Cached per resolved symbol. A backtest must see ONE profile for its whole run:
+# re-reading mid-run would let position size drift as the FX rate moves, which
+# would make the run unreproducible. Call `refresh_live_profiles()` between runs.
+_live_cache: dict[str, "InstrumentProfile | None"] = {}
+_live_cache_lock = threading.Lock()
+_overlay_logged: set[str] = set()
+
+
+def refresh_live_profiles() -> None:
+    """Drop the overlay cache so the next lookup re-reads the terminal."""
+    with _live_cache_lock:
+        _live_cache.clear()
+        _overlay_logged.clear()
+
+
+def _build_live_profile(resolved: str, base: "InstrumentProfile") -> "InstrumentProfile | None":
+    """Overlay live symbol_info onto `base`. Returns None when unavailable."""
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        return None
+
+    try:
+        if not mt5.symbol_select(resolved, True):
+            return None
+        info = mt5.symbol_info(resolved)
+    except Exception:
+        return None
+
+    if info is None or not info.point or not info.trade_tick_size:
+        return None
+
+    point_size = float(info.point)
+    # Broker's account-currency value of one `point_size` move, per lot.
+    pv = float(info.trade_tick_value) * (point_size / float(info.trade_tick_size))
+    if pv <= 0:
+        # A zero/negative tick value means the terminal has not populated this
+        # symbol yet (it happens right after symbol_select on a cold terminal).
+        # Falling back is correct; guessing is not.
+        return None
+
+    import dataclasses
+    live = dataclasses.replace(
+        base,
+        point_size=point_size,
+        point_value_per_lot=pv,
+        lot_min=float(info.volume_min),
+        lot_max=float(info.volume_max),
+        lot_step=float(info.volume_step),
+        contract_size=float(info.trade_contract_size) or base.contract_size,
+    )
+
+    # Log once per symbol, and only when it actually changed something — a
+    # silent override of position sizing is exactly the kind of thing that
+    # should be visible in the run log.
+    if resolved not in _overlay_logged:
+        _overlay_logged.add(resolved)
+        deltas = []
+        for field in ("point_size", "point_value_per_lot", "lot_min", "lot_max", "lot_step", "contract_size"):
+            was, now = getattr(base, field), getattr(live, field)
+            if was and abs(float(now) - float(was)) / max(abs(float(was)), 1e-12) > 1e-6:
+                deltas.append(f"{field} {was} -> {now}")
+        if deltas:
+            logger.info(
+                f"[PROFILE] {resolved}: using live broker values ({'; '.join(deltas)})"
+            )
+    return live
+
 
 def get_instrument_profile(symbol: str) -> InstrumentProfile | None:
-    """Look up instrument profile with alias resolution and suffix stripping."""
+    """
+    Look up an instrument profile, preferring live broker values.
+
+    Resolution order:
+      1. alias/suffix-normalise the symbol
+      2. if MT5 is connected and knows it -> static profile overlaid with
+         symbol_info (cached for the process; see refresh_live_profiles)
+      3. otherwise the static profile unchanged
+    """
     # Common suffixes added by brokers (.m, c, _i, #, .a)
     clean_symbol = re.sub(r'(\.m|c|_i|#|\.a|x)$', '', symbol, flags=re.IGNORECASE)
     clean_symbol = clean_symbol.replace('/', '')
-    
-    # Try the cleaned symbol first
+
     resolved = SYMBOL_ALIASES.get(clean_symbol, clean_symbol)
     profile = INSTRUMENT_PROFILES.get(resolved)
-    if profile:
+    if profile is None:
+        # Fallback to the exact raw symbol
+        resolved = SYMBOL_ALIASES.get(symbol, symbol)
+        profile = INSTRUMENT_PROFILES.get(resolved)
+    if profile is None:
+        return None
+
+    if _LIVE_OVERLAY_DISABLED:
         return profile
-        
-    # Fallback to the exact raw symbol
-    resolved_exact = SYMBOL_ALIASES.get(symbol, symbol)
-    return INSTRUMENT_PROFILES.get(resolved_exact)
+
+    with _live_cache_lock:
+        if resolved in _live_cache:
+            cached = _live_cache[resolved]
+            return cached if cached is not None else profile
+
+    live = _build_live_profile(resolved, profile)
+    with _live_cache_lock:
+        _live_cache[resolved] = live
+    return live if live is not None else profile
 

@@ -5,6 +5,14 @@ from backend.core.config_schema import UserConfigV2
 from backend.risk.position_sizer import get_pip_size
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
 from backend.strategies.core.fvg import FVGDetector
+from backend.strategies.core.markings import (
+    ROLE_CONFLUENCE,
+    ROLE_CONTEXT,
+    ROLE_INVALIDATION,
+    ROLE_TRIGGER,
+    MarkingCollector,
+    ts,
+)
 from backend.strategies.core.market_structure import MarketStructureDetector
 from backend.strategies.core.swing_structure import calculate_atr
 from backend.strategies.registry import register_strategy
@@ -26,7 +34,9 @@ class HTFFVGFlipEngine(BaseStrategy):
         self.htf_detectors = {}
         self.m5_detectors = {}
         self.ms_detectors = {}
-        self.last_trade_date = {}
+        # [6.1b/S2] Entry-timeframe bar counter per symbol, driving
+        # setup_max_age_bars — replaces the old last_trade_date calendar reset.
+        self.entry_bar_index: dict = {}
 
     def _init_state(self, symbol: str):
         if symbol not in self.state:
@@ -34,6 +44,7 @@ class HTFFVGFlipEngine(BaseStrategy):
                 "status": "AWAIT_HTF_TAP",
                 "bias": None,
                 "tap_time": None,
+                "tap_bar_index": None,
                 "m5_fvg": None,
                 "m5_swing_point": None,
                 # Confluence inputs (audit §10.6) — recorded as the state machine
@@ -41,7 +52,15 @@ class HTFFVGFlipEngine(BaseStrategy):
                 "htf_fvg_first_tap": False,
                 "sl_floored": False,
             }
-            self.htf_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.2)
+            self.entry_bar_index[symbol] = 0
+            # [6.11/S13/G8] Displacement gate wired on for the HTF-level
+            # detector only — the M5 detector (looking for the opposing
+            # inversion gap) is unaffected, matching the spec's scope.
+            self.htf_detectors[symbol] = FVGDetector(
+                fvg_min_gap_atr_mult=0.2,
+                displacement_atr_mult=getattr(self.params, "fvg_displacement_atr_mult", 0.0),
+                displacement_body_pct=getattr(self.params, "fvg_displacement_body_pct", 0.0),
+            )
             self.m5_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
             # Used to derive HTF trend context so we only act on FVG taps that are
             # counter to the recent trend (spec requirement — see on_bar step 2).
@@ -194,24 +213,37 @@ class HTFFVGFlipEngine(BaseStrategy):
         current_time = candles.index[-1]
         latest = candles.iloc[-1]
         
-        current_date = current_time.date()
-        if symbol not in self.last_trade_date or self.last_trade_date[symbol] != current_date:
-            # Reset state for the new trading day
-            self.state[symbol] = {
-                "status": "AWAIT_HTF_TAP",
-                "bias": None,
-                "tap_time": None,
-                "m5_fvg": None,
-                "m5_swing_point": None,
-                # Confluence inputs (audit §10.6) — recorded as the state machine
-                # advances, scored at signal-emission time by _confluence_score().
-                "htf_fvg_first_tap": False,
-                "sl_floored": False,
-            }
-            state = self.state[symbol]
-            self.last_trade_date[symbol] = current_date
-            self.log_event(f"[{symbol}] State reset for new trading day.", category="FVG_FLIP")
-        
+        # [6.1b/S2] Replaces the old UTC-midnight calendar reset, which wiped
+        # EVERY in-progress setup at the day boundary regardless of how fresh
+        # it actually was (even one bar from firing in AWAIT_INVERSION_CLOSE).
+        # Staleness is now an explicit bar-count budget from the HTF tap.
+        if timeframe == self.params.entry_confirmation_tf:
+            self.entry_bar_index[symbol] = self.entry_bar_index.get(symbol, 0) + 1
+            setup_max_age = getattr(self.params, "setup_max_age_bars", 0) or 0
+            if (
+                setup_max_age > 0
+                and state["status"] != "AWAIT_HTF_TAP"
+                and state.get("tap_bar_index") is not None
+                and (self.entry_bar_index[symbol] - state["tap_bar_index"]) > setup_max_age
+            ):
+                self.log_event(
+                    f"[{symbol}] setup_expired_{state['status'].lower()} — no signal after "
+                    f"{self.entry_bar_index[symbol] - state['tap_bar_index']} entry bars "
+                    f"(budget {setup_max_age}).",
+                    category="FVG_FLIP",
+                )
+                self.state[symbol] = {
+                    "status": "AWAIT_HTF_TAP",
+                    "bias": None,
+                    "tap_time": None,
+                    "tap_bar_index": None,
+                    "m5_fvg": None,
+                    "m5_swing_point": None,
+                    "htf_fvg_first_tap": False,
+                    "sl_floored": False,
+                }
+                state = self.state[symbol]
+
         # Process HTF (Keep trackers updated)
         if timeframe == self.params.htf_timeframe:
             self.htf_detectors[symbol].update(candles)
@@ -250,7 +282,12 @@ class HTFFVGFlipEngine(BaseStrategy):
                         fvg["tapped"] = True
                         state["status"] = "AWAIT_INVERSION_FVG"
                         state["bias"] = "BUY"
+                        # [V1] Freeze the tapped gap for the chart — the
+                        # detector mutates and eventually drops it.
+                        state["htf_fvg"] = dict(fvg)
+                        state["htf_trend_at_tap"] = htf_trend
                         state["tap_time"] = current_time
+                        state["tap_bar_index"] = self.entry_bar_index.get(symbol, 0)
                         self.log_event(f"[{symbol}] HTF Bullish FVG tapped by M5 (counter-trend vs BEARISH). Bias: BUY", category="FVG_FLIP")
                         break
                     # Bearish FVG tap -> expect bounce down (SELL bias); counter-trend only if HTF trend is BULLISH
@@ -261,7 +298,12 @@ class HTFFVGFlipEngine(BaseStrategy):
                         fvg["tapped"] = True
                         state["status"] = "AWAIT_INVERSION_FVG"
                         state["bias"] = "SELL"
+                        # [V1] Freeze the tapped gap for the chart — the
+                        # detector mutates and eventually drops it.
+                        state["htf_fvg"] = dict(fvg)
+                        state["htf_trend_at_tap"] = htf_trend
                         state["tap_time"] = current_time
+                        state["tap_bar_index"] = self.entry_bar_index.get(symbol, 0)
                         self.log_event(f"[{symbol}] HTF Bearish FVG tapped by M5 (counter-trend vs BULLISH). Bias: SELL", category="FVG_FLIP")
                         break
 
@@ -381,6 +423,67 @@ class HTFFVGFlipEngine(BaseStrategy):
                     # Reset state for next setup
                     state["status"] = "AWAIT_HTF_TAP"
 
+                    # [V1 section C.6] Chart markings. This setup is a four-link
+                    # chain (HTF gap tapped -> opposing LTF gap forms -> gap is
+                    # retested -> price closes through it) and every link is
+                    # drawn below from the values the engine actually used.
+                    mk = MarkingCollector(timeframe)
+                    entry_t = ts(latest.get("time", current_time))
+                    htf_fvg = state.get("htf_fvg") or {}
+
+                    if htf_fvg.get("top") is not None:
+                        mk.fvg(
+                            f"HTF {htf_fvg.get('type', '')} FVG (tapped)",
+                            htf_fvg["top"], htf_fvg["bottom"], ts(htf_fvg.get("index", entry_t)),
+                            end_time=entry_t, role=ROLE_CONFLUENCE,
+                            timeframe=self.params.htf_timeframe if getattr(self, "params", None) else None,
+                            color="rgba(168,85,247,0.16)",
+                            fvg_type=htf_fvg.get("type"),
+                            consequent_encroachment=htf_fvg.get("ce"),
+                            first_tap=bool(state.get("htf_fvg_first_tap")),
+                            htf_trend_at_tap=state.get("htf_trend_at_tap"),
+                            counter_trend=True,
+                        )
+                    if state.get("tap_time") is not None:
+                        mk.structure(
+                            "HTF FVG tap", ts(state["tap_time"]), role=ROLE_CONFLUENCE,
+                            bias=state["bias"],
+                        )
+                    if fvg.get("top") is not None:
+                        mk.fvg(
+                            f"LTF {fvg.get('type', '')} FVG (inverted)",
+                            fvg["top"], fvg["bottom"], ts(fvg.get("index", entry_t)),
+                            end_time=entry_t, role=ROLE_TRIGGER,
+                            color="rgba(59,130,246,0.18)",
+                            fvg_type=fvg.get("type"),
+                            consequent_encroachment=fvg.get("ce"),
+                            inversion_boundary=round(float(boundary), 6),
+                        )
+                    mk.structure(
+                        "Inversion close (displacement)", entry_t, price=entry,
+                        role=ROLE_TRIGGER,
+                        displacement_atr=round(displacement_atr, 3) if displacement_atr is not None else None,
+                        displacement_gate=getattr(self.params, "min_displacement_atr", None) if getattr(self, "params", None) else None,
+                        atr=round(float(atr), 6) if atr else None,
+                        boundary=round(float(boundary), 6),
+                    )
+                    mk.level(
+                        "M5 structural swing (stop reference)", float(swing_point), entry_t,
+                        role=ROLE_CONTEXT, color="rgba(148,163,184,0.8)",
+                    )
+                    mk.level(
+                        "Stop loss", sl, entry_t, role=ROLE_INVALIDATION,
+                        color="rgba(239,68,68,0.9)",
+                        sl_distance=round(sl_dist, 6),
+                        sl_pips=round(sl_dist / pip_size, 2) if pip_size else None,
+                        floored=bool(floored),
+                        basis="structural swing + sl_buffer_atr_mult, then cost floors",
+                    )
+                    mk.level(
+                        f"Take profit ({rr}R)", tp, entry_t, role=ROLE_CONTEXT,
+                        color="rgba(16,185,129,0.9)", target_rr=rr,
+                    )
+
                     return TradeSignal(
                         strategy_id="HTFFVGFlip_v1",
                         symbol=symbol,
@@ -397,6 +500,8 @@ class HTFFVGFlipEngine(BaseStrategy):
                             "sl_floored": floored,
                             "swing_point": float(swing_point),
                             "displacement_atr": round(displacement_atr, 3) if displacement_atr is not None else None,
+                            # [V1] Chart geometry — see strategies/core/markings.py.
+                            **mk.as_metadata(),
                         }
                     )
 

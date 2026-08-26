@@ -11,6 +11,9 @@ class NYOpenRetestParams:
     earliest_valid_break_time: str = "09:30"
     session_end: str = "11:00"
 
+    max_losses_per_day: int = 0
+    """[12.2/Part14] Generic daily loss guardrail, standardised across every strategy (was only on VWAPParams). 0 = disabled."""
+
     stop_buffer_points: float = 5.0
     """
     Buffer beyond the opposite side of the 08:00 range, in "points" -> converted via

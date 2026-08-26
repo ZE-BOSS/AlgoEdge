@@ -31,7 +31,18 @@ class PropFirmValidator:
         self.account_size = get_val("account_size", 10000.0)
         self.initial_balance = get_val("initial_balance", 10000.0)
         self.max_lot_sizes = get_val("max_lot_sizes", {})
-        
+        # [3.10/E7] Real, user-editable settings replacing hardcoded constants
+        # in validate_trade() below (999.0 default lot cap, 5/13 position
+        # limits) and the trading-day rule in update_equity_balance() (0.005).
+        self.default_max_lot = get_val("default_max_lot", None)
+        self.max_positions_per_symbol = get_val("max_positions_per_symbol", 5)
+        self.max_total_positions = get_val("max_total_positions", 13)
+        self.trading_day_rule = get_val("trading_day_rule", "PROFIT_PCT")
+        self.trading_day_profit_pct = get_val("trading_day_profit_pct", 0.5)
+        # Per-trading-day flags for ANY_TRADE / ANY_CLOSED rules, reset at EOD rollover.
+        self._traded_today = False
+        self._closed_today = False
+
         # Drawdown limits (user-configurable, resettable from the UI)
         default_daily = 4.0 if self.challenge_type in ["1-step", "flex"] else 5.0
         default_max = 8.0 if self.challenge_type in ["1-step", "flex"] else 10.0
@@ -199,9 +210,19 @@ class PropFirmValidator:
             self.eod_baseline = balance
             self.last_eod_date = current_trading_date
 
-            # Check minimum trading day requirement
-            if self.daily_profit >= (self.initial_balance * 0.005):
+            # [3.11/E8] Check minimum trading day requirement per trading_day_rule
+            # (was hardcoded to PROFIT_PCT @ 0.5%). ANY_TRADE/ANY_CLOSED count the
+            # day the moment a trade opens/closes, regardless of profit.
+            if self.trading_day_rule == "ANY_TRADE":
+                day_counts = self._traded_today
+            elif self.trading_day_rule == "ANY_CLOSED":
+                day_counts = self._closed_today
+            else:  # PROFIT_PCT — original hardcoded behaviour, now editable
+                day_counts = self.daily_profit >= (self.initial_balance * (self.trading_day_profit_pct / 100.0))
+            if day_counts:
                 self.active_trading_days += 1
+            self._traded_today = False
+            self._closed_today = False
             self.daily_profit = 0.0
             changed = True
             logger.info(f"[PropFirm] New Trading Day {current_trading_date}. EOD Baseline set to {self.eod_baseline}")
@@ -368,13 +389,15 @@ class PropFirmValidator:
             self._telegram_alert(msg, alert_key=f"trade_breach_{symbol}_{self.breach_reason[:30]}")
 
         sym_open = self.open_positions_by_symbol.get(symbol, 0)
-        if sym_open >= 5:
-            logger.warning(f"Max 5 positions reached for {symbol} (Trade allowed per user request)")
+        if sym_open >= self.max_positions_per_symbol:
+            logger.warning(f"Max {self.max_positions_per_symbol} positions reached for {symbol} (Trade allowed per user request)")
 
-        if self.open_positions_count >= 13:
-            logger.warning("Max 13 total open positions reached (Trade allowed per user request)")
+        if self.open_positions_count >= self.max_total_positions:
+            logger.warning(f"Max {self.max_total_positions} total open positions reached (Trade allowed per user request)")
 
-        max_lot_allowed = self.max_lot_sizes.get(symbol, 999.0)
+        max_lot_allowed = self.max_lot_sizes.get(
+            symbol, self.default_max_lot if self.default_max_lot is not None else float("inf")
+        )
         current_lots = self.open_lots_by_symbol.get(symbol, 0.0)
         if (current_lots + requested_lots) > max_lot_allowed:
             reason = (
@@ -397,6 +420,7 @@ class PropFirmValidator:
     def record_trade_opened(self, symbol: str, lots: float):
         if not self.enabled:
             return
+        self._traded_today = True
         self.open_positions_count += 1
         self.open_positions_by_symbol[symbol] = self.open_positions_by_symbol.get(symbol, 0) + 1
         self.open_lots_by_symbol[symbol] = self.open_lots_by_symbol.get(symbol, 0.0) + lots
@@ -404,6 +428,7 @@ class PropFirmValidator:
     def record_trade_closed(self, symbol: str, lots: float, pnl: float):
         if not self.enabled:
             return
+        self._closed_today = True
         self.open_positions_count = max(0, self.open_positions_count - 1)
         if symbol in self.open_positions_by_symbol:
             self.open_positions_by_symbol[symbol] = max(0, self.open_positions_by_symbol[symbol] - 1)

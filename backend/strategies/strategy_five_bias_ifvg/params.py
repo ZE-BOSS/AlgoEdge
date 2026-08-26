@@ -2,6 +2,37 @@ from dataclasses import dataclass
 
 @dataclass
 class BiasIFVGParams:
+    # ── [D-5] Where the IFVG is allowed to form ──────────────────────────
+    ifvg_leg_mode: str = "APPROACH"
+    """
+    RESOLVED 2026-08-23 from the strategy spec, which was unambiguous where the
+    engine was not.
+
+    `docs/strategy-2-bias-keylevel-ifvg.md` Step 3:
+        "Define the manipulation leg: the swing (high->low, or low->high) that
+         ACTUALLY TOUCHED the Step 2 key level. Scan the 5m timeframe for FVGs
+         that exist WITHIN THAT SPECIFIC LEG (not elsewhere on chart)."
+
+    The leg that touched the level is the leg that APPROACHED it, so a
+    spec-conformant scan looks at gaps formed on the way IN, which then invert
+    when price closes back through them on the way out. The engine did the
+    opposite — it only considered gaps forming AFTER the tap — and its own
+    comment flagged the mismatch as an open product question.
+
+      "APPROACH" - spec-conformant (DEFAULT): gaps within the leg that reached
+                   the key level, i.e. formed at or before the tap.
+      "REACTION" - the engine's previous behaviour: gaps forming after the tap,
+                   inside the move away from the level. Retained because the
+                   entire existing backtest corpus was produced under it, so it
+                   is what a historical result must be reproduced against.
+      "BOTH"     - either side of the tap. Widest, and the right setting for a
+                   like-for-like comparison run.
+
+    Which of the two is more profitable is an empirical question, not a
+    doctrinal one. The default follows the spec; the flag exists so you can
+    settle it with a backtest rather than an argument.
+    """
+
     # Spec's documented primary NY-session edge is 09:30-11:00 ET. The previous
     # 08:00-17:00 default spanned nearly the whole trading day and effectively
     # disabled the "primary trading window" hypothesis the strategy is built on.
@@ -11,6 +42,18 @@ class BiasIFVGParams:
     # 2nd trade if it's A+; stop after 2 losses regardless) caps realistic same-day
     # trade count at 2 — see BiasIFVGEngine.notify_outcome/_can_trade_today.
     max_trades_per_day: int = 2
+
+    max_losses_per_day: int = 0
+    """
+    [12.2/Part14] Generic daily loss guardrail, standardised across every
+    strategy (was only on VWAPParams). Default 0 (disabled) here deliberately
+    — this strategy already has its own, more specific day-stop rule
+    (`_can_trade_today`: stop after 1 win, stop after 2 losses, 2nd-trade-
+    after-1-loss confluence clamp — see engine.py). Set this to a nonzero
+    value only if you want an ADDITIONAL, simpler slot-level cutoff on top of
+    that existing rule.
+    """
+
     target_rr: float = 2.0
     """
     Spec §Step 4 gives a take-profit RANGE of 1:1 to 1:3 and lists `target_rr_range`
@@ -74,6 +117,29 @@ class BiasIFVGParams:
 
     ENGINE BUG: confluence_score is a constant, not a computed quality measure.
     """
+
+    setup_max_age_bars: int = 40
+    """
+    [6.1b/S2] Max M5 bars an in-progress setup (AWAIT_IFVG_SETUP or
+    AWAIT_IFVG_CLOSE — i.e. a key level has been tapped and the engine is
+    waiting on the M5 IFVG/inversion) may run before it's dropped, reverting
+    to AWAIT_KEY_LEVEL with bias preserved. Replaces the old UTC-midnight
+    calendar reset, which wiped the ENTIRE state (including HTF bias) at the
+    day boundary regardless of freshness — even a setup one bar from firing.
+    0 = never expire on age. Does not affect trades_today/wins_today/
+    losses_today, which remain genuinely calendar-day counters by spec design.
+    """
+
+    second_trade_size_modifier: float = 0.5
+    """
+    [6.12/S15] Size multiplier applied to a 2nd trade taken after 1 loss when
+    its confluence falls below `a_plus_confluence_threshold`. CHANGED from an
+    outright rejection (BLOCK) to this CLAMP — the setup still fires, just at
+    reduced size, rather than being discarded entirely for missing an
+    inherently somewhat arbitrary confidence bar. 1.0 = no reduction (fire at
+    full size even when sub-threshold, effectively disabling the clamp).
+    """
+
     rejection_min_body_atr_mult: float = 0.15
     """
     Minimum candle body size, as a multiple of M15 ATR(14), for a rejection wick to

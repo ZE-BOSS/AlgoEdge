@@ -32,6 +32,8 @@ __pycache__/
 
 .venv/
 venv/
+venv_win/
+venv_win/Scripts/
 env/
 
 .pytest_cache/

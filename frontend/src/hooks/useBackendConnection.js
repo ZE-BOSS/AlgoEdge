@@ -38,6 +38,10 @@ export function useWebSocket() {
   const wsRef = useRef(null);
   const timeoutRef = useRef(null);
   const retryRef = useRef(1000);
+  // Caps the speculative token refresh on an ambiguous 1006 close to one
+  // attempt, so a server that is simply down cannot drive a refresh loop.
+  // Reset on every successful open.
+  const authRetryRef = useRef(0);
   const { setWsConnected, status } = useConnectionStore();
   const user = useAuthStore((s) => s.user);
   const token = useAuthStore((s) => s.token);
@@ -57,26 +61,52 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       setWsConnected(true);
-      retryRef.current = 1000; // Reset backoff
+      retryRef.current = 1000;   // Reset backoff
+      authRetryRef.current = 0;  // A live socket clears the refresh budget
     };
 
     ws.onclose = (event) => {
       setWsConnected(false);
       wsRef.current = null;
 
-      // Auth failure codes: 4001 (invalid token), 4003 (forbidden), 1008 (policy violation)
-      // HTTP 403 manifests as close code 1006 (abnormal) or the server sends 4001/4003
+      // Auth failure codes: 4001 (invalid token), 4003 (forbidden), 1008 (policy).
       const isAuthError = [4001, 4003, 1008].includes(event.code);
       const isAbnormalWithReason = event.code === 1006 && event.reason?.includes('403');
 
+      // 1006 with no reason is the ambiguous case: the browser reports it for a
+      // genuine network drop AND for a handshake the server refused before
+      // accepting. Access tokens live 15 minutes, so an expiry mid-session
+      // produced exactly this — and the old logic read it as a network blip and
+      // reconnected forever with the same dead token, silently killing the log
+      // stream, replay feed and backtest progress until a page reload.
+      //
+      // The server now accepts-then-closes so 4001 survives, but a proxy or an
+      // older backend can still swallow it. So: on a bare 1006, try ONE token
+      // refresh before falling back to plain reconnects. `authRetryRef` stops
+      // that becoming a refresh loop against a server that is simply down.
+      const isBareAbnormal = event.code === 1006 && !event.reason;
+
       if (isAuthError || isAbnormalWithReason) {
-        // Try refresh once; if unavailable or fails, logout
         if (typeof refreshToken === 'function') {
-          refreshToken().catch(() => logout());
+          authRetryRef.current = 0;
+          refreshToken().then(() => connect()).catch(() => logout());
         } else {
           logout();
         }
-        return; // Don't schedule reconnect with stale token
+        return; // Don't schedule a reconnect with a stale token
+      }
+
+      if (isBareAbnormal && authRetryRef.current < 1 && typeof refreshToken === 'function') {
+        authRetryRef.current += 1;
+        refreshToken()
+          .then(() => connect())
+          .catch(() => {
+            // Not an auth problem after all — fall back to normal backoff.
+            const delay = Math.min(retryRef.current, 30000);
+            retryRef.current = delay * 2;
+            timeoutRef.current = setTimeout(connect, delay);
+          });
+        return;
       }
 
       // Exponential backoff reconnect: 1s → 2s → 4s → 8s → 30s cap

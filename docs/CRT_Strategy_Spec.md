@@ -2,6 +2,20 @@
 
 Source: a discretionary NY-session CRT scalp strategy (demonstrated on MNQ futures), formalized here into implementable rules. Sections flagged **[OPEN]** mark places where the source was discretionary or informal and a default had to be chosen for this spec — review before implementing as-is.
 
+> **UPDATED (2026-08, Phase 6 — [Doc-3]).** Three changes since this spec was written: (1) `bias_neutral_mode`
+> (`BLOCK`/`REDUCED_SIZE`/`ALLOW`, default `REDUCED_SIZE`) replaces the hard BLOCK on a NEUTRAL HTF bias —
+> measured on real logs this was the single largest rejection category (254/900 evaluations); a valid C2
+> sweep with no confirmed trend now trades at reduced size instead of being discarded. (2)
+> `trigger_grace_bars` (default 2) lets a live `c2_trigger` survive that many additional HTF closes before
+> invalidating, instead of expiring on the very next one. (3) **Target-mode exemption**: this spec's own
+> "Architectural discrepancy" note below (SL derived backward from a structural TP that the RiskParams
+> TP-grid then silently overrides) is still open — CRT still declares `structural_tp`/`structural_tp_rr`/
+> `tp_is_structural` in its signal metadata (unchanged from before), and VWAP v2 (Phase 8) now uses the
+> identical pattern for its own σ-band targets. Neither strategy is actually exempted from the grid yet;
+> that product decision (exempt CRT/VWAP from the grid, or place SL structurally and let the grid own
+> targets) remains unmade — see `risk/multi_tp.py`'s TODO. See `implementation/TASKS.md` Phase 6 (6.8–6.10)
+> for the full change record.
+
 ## Flow Summary
 
 ```

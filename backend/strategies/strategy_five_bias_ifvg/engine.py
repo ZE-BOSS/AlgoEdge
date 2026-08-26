@@ -5,6 +5,14 @@ from backend.core.config_schema import UserConfigV2
 from backend.risk.position_sizer import get_pip_size
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
 from backend.strategies.core.fvg import FVGDetector
+from backend.strategies.core.markings import (
+    ROLE_CONFLUENCE,
+    ROLE_CONTEXT,
+    ROLE_INVALIDATION,
+    ROLE_TRIGGER,
+    MarkingCollector,
+    ts,
+)
 from backend.strategies.core.swing_structure import calculate_atr
 from backend.strategies.registry import register_strategy
 from backend.utils.logger import get_logger
@@ -25,7 +33,10 @@ class BiasIFVGEngine(BaseStrategy):
         self.m15_detectors = {}
         self.m5_detectors = {}
         self.last_trade_date = {}
-        
+        # [6.1b/S2] M5 bar counter per symbol, driving setup_max_age_bars —
+        # independent of the calendar-day reset (see on_bar).
+        self.m5_bar_index: dict = {}
+
     def _init_state(self, symbol: str):
         if symbol not in self.state:
             self.state[symbol] = {
@@ -35,6 +46,8 @@ class BiasIFVGEngine(BaseStrategy):
                 "m5_fvg_to_invert": None,
                 "m5_swing_point": None,
                 "manipulation_leg_start": None,
+                "approach_leg_start": None,
+                "setup_started_bar": None,
                 "trades_today": 0,
                 "wins_today": 0,
                 "losses_today": 0,
@@ -44,6 +57,7 @@ class BiasIFVGEngine(BaseStrategy):
                 "confluent_level_count": 0,
                 "sl_floored": False,
             }
+            self.m5_bar_index[symbol] = 0
             self.htf_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
             self.m15_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.1)
             self.m5_detectors[symbol] = FVGDetector(fvg_min_gap_atr_mult=0.05)
@@ -70,11 +84,12 @@ class BiasIFVGEngine(BaseStrategy):
                 category="BIAS_IFVG",
             )
 
-    def _can_trade_today(self, state: dict, candidate_confluence: int | None = None) -> bool:
+    def _can_trade_today(self, state: dict) -> bool:
         """
-        Spec day-stop rule: stop for the day after 1 win; after 1 loss, only take a
-        2nd trade if it's a clearly A+ setup at a new key level; stop entirely after
-        2 losses regardless.
+        Spec HARD day-stop conditions only: stop for the day after 1 win; stop
+        entirely after 2 losses. Both are pure trade-count rules, unrelated to
+        confluence — see `_second_trade_size_modifier` for the confluence-gated
+        "2nd trade after 1 loss" rule, which is a CLAMP, not a BLOCK [6.12/S15].
         """
         wins = state.get("wins_today", 0)
         losses = state.get("losses_today", 0)
@@ -82,11 +97,25 @@ class BiasIFVGEngine(BaseStrategy):
             return False
         if losses >= 2:
             return False
-        if losses == 1:
-            threshold = getattr(self.params, "a_plus_confluence_threshold", 85)
-            if candidate_confluence is None or candidate_confluence < threshold:
-                return False
         return True
+
+    def _second_trade_size_modifier(self, state: dict, candidate_confluence: int | None) -> float:
+        """
+        [6.12/S15] After exactly 1 loss, the spec allows a 2nd trade only if
+        it's "a clearly A+ setup" — previously enforced as an outright BLOCK
+        below `a_plus_confluence_threshold`, discarding a real setup entirely
+        for falling short of a bar that's inherently somewhat arbitrary.
+        CLAMPED instead: a sub-threshold 2nd-after-a-loss setup still fires,
+        at reduced size, rather than being skipped for the rest of the day.
+        Returns 1.0 (no reduction) for every other trade.
+        """
+        if state.get("losses_today", 0) != 1:
+            return 1.0
+        threshold = getattr(self.params, "a_plus_confluence_threshold", 85)
+        reduced = getattr(self.params, "second_trade_size_modifier", 0.5)
+        if candidate_confluence is None or candidate_confluence < threshold:
+            return reduced
+        return 1.0
 
     def _detect_cisd_and_rejections(self, candles: pd.DataFrame, bias: str) -> list:
         if len(candles) < 5 or bias is None:
@@ -239,6 +268,35 @@ class BiasIFVGEngine(BaseStrategy):
 
         return sl_dist, floored
 
+    def _approach_leg_start(self, candles: "pd.DataFrame", bias: str, lookback: int = 40):
+        """
+        [D-5] When the swing that reached the key level began.
+
+        The spec's "manipulation leg" is the swing that ACTUALLY TOUCHED the
+        key level, so its start is the last extreme before the tap on the
+        opposite side of the move:
+
+          BUY  — price fell into a bullish level, so the leg started at the
+                 highest high in the recent window.
+          SELL — mirror: the lowest low.
+
+        A window rather than a full swing-structure walk on purpose: the tap has
+        just happened, the leg is by definition recent, and `lookback` M5 bars
+        (~3h) comfortably covers it. Returning the window's own start when the
+        extreme sits at its edge is the safe failure — it widens the search
+        rather than silently excluding the gap the setup depends on.
+        """
+        try:
+            window = candles.iloc[-lookback:]
+            if window.empty:
+                return candles.index[-1]
+            idx = window["high"].idxmax() if bias == "BUY" else window["low"].idxmin()
+            return idx
+        except Exception:
+            # Never let leg-start resolution break a signal; the caller falls
+            # back to the tap time, which reproduces REACTION behaviour.
+            return None
+
     def _count_confluent_levels(self, symbol: str, state: dict, chosen: dict) -> int:
         """
         How many OTHER recorded key levels overlap the tapped level's price band.
@@ -351,28 +409,43 @@ class BiasIFVGEngine(BaseStrategy):
         current_time = candles.index[-1]
         latest = candles.iloc[-1]
         
+        # [6.1b/S2] Scoped to the day-stop TRADE COUNTERS only — these are
+        # genuinely calendar-day rules by spec design ("stop after 1 win
+        # TODAY", "2 losses TODAY"). The in-progress setup (bias/key_level/
+        # status/m5_fvg_to_invert/etc) used to be wiped here too, at the exact
+        # UTC-midnight boundary regardless of freshness — that's now handled
+        # below by an explicit bar-age budget instead (setup_max_age_bars).
         current_date = current_time.date()
         if symbol not in self.last_trade_date or self.last_trade_date[symbol] != current_date:
-            self.state[symbol] = {
-                "bias": None,
-                "key_level": None,
-                "status": "AWAIT_BIAS",
-                "m5_fvg_to_invert": None,
-                "m5_swing_point": None,
-                "manipulation_leg_start": None,
-                "trades_today": 0,
-                "wins_today": 0,
-                "losses_today": 0,
-                "extra_levels": [],
-                # Confluence inputs (audit §10.6) — recorded as the state machine
-                # advances, scored at signal-emission time by _confluence_score().
-                "confluent_level_count": 0,
-                "sl_floored": False,
-            }
-            state = self.state[symbol]
+            state["trades_today"] = 0
+            state["wins_today"] = 0
+            state["losses_today"] = 0
             self.last_trade_date[symbol] = current_date
-            self.log_event(f"[{symbol}] State reset for new trading day.", category="BIAS_IFVG")
-        
+            self.log_event(f"[{symbol}] Day-stop counters reset for new trading day.", category="BIAS_IFVG")
+
+        if timeframe == "M5":
+            self.m5_bar_index[symbol] = self.m5_bar_index.get(symbol, 0) + 1
+            setup_max_age = getattr(self.params, "setup_max_age_bars", 0) or 0
+            if (
+                setup_max_age > 0
+                and state["status"] not in ("AWAIT_BIAS", "AWAIT_KEY_LEVEL")
+                and state.get("setup_started_bar") is not None
+                and (self.m5_bar_index[symbol] - state["setup_started_bar"]) > setup_max_age
+            ):
+                self.log_event(
+                    f"[{symbol}] setup_expired_{state['status'].lower()} — no signal after "
+                    f"{self.m5_bar_index[symbol] - state['setup_started_bar']} M5 bars "
+                    f"(budget {setup_max_age}). Reverting to key-level search (bias preserved).",
+                    category="BIAS_IFVG",
+                )
+                state["status"] = "AWAIT_KEY_LEVEL"
+                state["key_level"] = None
+                state["m5_fvg_to_invert"] = None
+                state["m5_swing_point"] = None
+                state["manipulation_leg_start"] = None
+                state["approach_leg_start"] = None
+                state["setup_started_bar"] = None
+
         # 1. Determine Bias (HTF: H4) — always update on each H4 bar regardless of status.
         # Spec: "15m secondary check can flip bias intraday" — bias must be re-evaluated continuously.
         if timeframe == "H4":
@@ -388,6 +461,8 @@ class BiasIFVGEngine(BaseStrategy):
                     state["m5_fvg_to_invert"] = None
                     state["m5_swing_point"] = None
                     state["manipulation_leg_start"] = None
+                    state["approach_leg_start"] = None
+                    state["setup_started_bar"] = None
                     state["status"] = "AWAIT_KEY_LEVEL"
                 elif state["status"] == "AWAIT_BIAS":
                     # First time bias is established
@@ -428,6 +503,8 @@ class BiasIFVGEngine(BaseStrategy):
                         state["key_level"] = fvg
                         state["status"] = "AWAIT_IFVG_SETUP"
                         state["manipulation_leg_start"] = current_time
+                        state["approach_leg_start"] = self._approach_leg_start(candles, state["bias"])
+                        state["setup_started_bar"] = self.m5_bar_index.get(symbol, 0)  # [6.1b/S2]
                         state["confluent_level_count"] = self._count_confluent_levels(symbol, state, fvg)
                         self.log_event(f"[{symbol}] M15 Bullish FVG tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                         break
@@ -435,6 +512,8 @@ class BiasIFVGEngine(BaseStrategy):
                         state["key_level"] = fvg
                         state["status"] = "AWAIT_IFVG_SETUP"
                         state["manipulation_leg_start"] = current_time
+                        state["approach_leg_start"] = self._approach_leg_start(candles, state["bias"])
+                        state["setup_started_bar"] = self.m5_bar_index.get(symbol, 0)  # [6.1b/S2]
                         state["confluent_level_count"] = self._count_confluent_levels(symbol, state, fvg)
                         self.log_event(f"[{symbol}] M15 Bearish FVG tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                         break
@@ -446,6 +525,8 @@ class BiasIFVGEngine(BaseStrategy):
                             state["key_level"] = lvl
                             state["status"] = "AWAIT_IFVG_SETUP"
                             state["manipulation_leg_start"] = current_time
+                            state["approach_leg_start"] = self._approach_leg_start(candles, state["bias"])
+                            state["setup_started_bar"] = self.m5_bar_index.get(symbol, 0)  # [6.1b/S2]
                             state["confluent_level_count"] = self._count_confluent_levels(symbol, state, lvl)
                             self.log_event(f"[{symbol}] M15 {lvl['type']} tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                             break
@@ -453,20 +534,36 @@ class BiasIFVGEngine(BaseStrategy):
                             state["key_level"] = lvl
                             state["status"] = "AWAIT_IFVG_SETUP"
                             state["manipulation_leg_start"] = current_time
+                            state["approach_leg_start"] = self._approach_leg_start(candles, state["bias"])
+                            state["setup_started_bar"] = self.m5_bar_index.get(symbol, 0)  # [6.1b/S2]
                             state["confluent_level_count"] = self._count_confluent_levels(symbol, state, lvl)
                             self.log_event(f"[{symbol}] M15 {lvl['type']} tapped by M5. Awaiting M5 IFVG.", category="BIAS_IFVG")
                             break
             
-            # Look for an opposing M5 FVG that forms DURING the reaction.
-            # NOTE (unresolved product ambiguity — intentionally left as-is): this
-            # searches for gaps forming AFTER the key-level tap. The spec's
-            # "manipulation leg" language can also be read as describing the leg that
-            # APPROACHED the level (i.e. before the tap). Re-aligning either the doc's
-            # wording or this scan direction needs a product decision; not changed here.
+            # [D-5 — RESOLVED 2026-08-23] Look for the opposing M5 FVG to invert.
+            #
+            # Which leg it may come from is now a setting rather than an
+            # unresolved ambiguity. The spec (Step 3) defines the manipulation
+            # leg as "the swing that ACTUALLY TOUCHED the key level" and says to
+            # scan for gaps "within that specific leg" — that is the APPROACH,
+            # so APPROACH is the default. The engine's previous behaviour
+            # (post-tap gaps only) is retained as REACTION because the existing
+            # backtest corpus was produced under it. See BiasIFVGParams.
             if state["status"] == "AWAIT_IFVG_SETUP":
+                leg_mode = str(getattr(self.params, "ifvg_leg_mode", "APPROACH") or "APPROACH").upper()
+                tap_time = state.get("manipulation_leg_start") or pd.Timestamp.min
+                leg_start = state.get("approach_leg_start") or tap_time
+
+                if leg_mode == "REACTION":
+                    window_start, window_end = tap_time, pd.Timestamp.max
+                elif leg_mode == "BOTH":
+                    window_start, window_end = leg_start, pd.Timestamp.max
+                else:  # APPROACH — spec-conformant default
+                    window_start, window_end = leg_start, tap_time
+
                 for fvg in reversed(m5_fvgs):
                     fvg_time = fvg.get("index", pd.Timestamp.min)
-                    if fvg_time >= state.get("manipulation_leg_start", pd.Timestamp.min):
+                    if window_start <= fvg_time <= window_end:
                         if state["bias"] == "BUY" and fvg["type"] == "BEARISH":
                             state["m5_fvg_to_invert"] = fvg
                             state["status"] = "AWAIT_IFVG_CLOSE"
@@ -567,21 +664,87 @@ class BiasIFVGEngine(BaseStrategy):
                     displacement_atr = (abs(entry - boundary) / atr) if atr > 0 else None
                     confluence_score = self._confluence_score(state, displacement_atr)
 
-                    # Full day-stop rule, now against a REAL confluence score: after
-                    # one loss only a genuinely A+ setup may be the second trade.
-                    if not self._can_trade_today(state, candidate_confluence=confluence_score):
+                    # Hard day-stop rule (unconditional halves only — see
+                    # _can_trade_today's docstring).
+                    if not self._can_trade_today(state):
                         self.log_event(
-                            f"[{symbol}] Setup rejected by day-stop rule: confluence "
-                            f"{confluence_score} < a_plus_confluence_threshold "
-                            f"{getattr(self.params, 'a_plus_confluence_threshold', 85)} "
-                            f"after {state.get('losses_today', 0)} loss(es) today.",
+                            f"[{symbol}] Setup rejected by hard day-stop rule "
+                            f"(wins={state.get('wins_today', 0)}, losses={state.get('losses_today', 0)}).",
                             category="BIAS_IFVG",
                         )
                         state["status"] = "AWAIT_KEY_LEVEL"
                         return None
 
+                    # [6.12/S15] 2nd-trade-after-1-loss A+ rule — CLAMP, not BLOCK.
+                    size_modifier = self._second_trade_size_modifier(state, candidate_confluence=confluence_score)
+                    if size_modifier < 1.0:
+                        self.log_event(
+                            f"[{symbol}] 2nd trade after 1 loss: confluence {confluence_score} < "
+                            f"a_plus_confluence_threshold {getattr(self.params, 'a_plus_confluence_threshold', 85)} "
+                            f"— sizing clamped to {size_modifier:.0%} instead of skipped.",
+                            category="BIAS_IFVG",
+                        )
+
                     state["status"] = "AWAIT_KEY_LEVEL"
                     state["trades_today"] += 1
+
+                    # [V1 section C.6] Chart markings. The chain here is
+                    # bias -> key level tapped -> opposing M5 FVG -> inversion
+                    # close. `confluent_level_count` was already measured for
+                    # the confluence score; this is what puts the levels it
+                    # counted on the chart instead of just their count.
+                    mk = MarkingCollector("M5")
+                    entry_t = ts(latest.get("time", current_time))
+                    key_level = state.get("key_level") or {}
+
+                    mk.structure(
+                        f"Daily bias: {state['bias']}", entry_t, role=ROLE_CONFLUENCE,
+                        bias=state["bias"],
+                        confluent_levels=int(state.get("confluent_level_count", 0) or 0),
+                    )
+                    if key_level.get("top") is not None:
+                        mk.box(
+                            "OB" if "CISD" in str(key_level.get("type", "")) else "FVG",
+                            f"Key level ({key_level.get('type', '')})",
+                            key_level["top"], key_level["bottom"],
+                            ts(key_level.get("index", entry_t)),
+                            end_time=entry_t, role=ROLE_CONFLUENCE,
+                            color="rgba(168,85,247,0.16)",
+                            level_type=key_level.get("type"),
+                            consequent_encroachment=key_level.get("ce"),
+                            confluent_level_count=int(state.get("confluent_level_count", 0) or 0),
+                        )
+                    if fvg.get("top") is not None:
+                        mk.fvg(
+                            f"IFVG ({fvg.get('type', '')} -> inverted)",
+                            fvg["top"], fvg["bottom"], ts(fvg.get("index", entry_t)),
+                            end_time=entry_t, role=ROLE_TRIGGER,
+                            color="rgba(59,130,246,0.18)",
+                            fvg_type=fvg.get("type"),
+                            inversion_boundary=round(float(boundary), 6),
+                        )
+                    mk.structure(
+                        "Inversion close (displacement)", entry_t, price=entry,
+                        role=ROLE_TRIGGER,
+                        displacement_atr=round(displacement_atr, 3) if displacement_atr is not None else None,
+                        atr=round(float(atr), 6) if atr else None,
+                        size_modifier=size_modifier,
+                    )
+                    mk.level(
+                        "M5 structural swing (stop reference)", float(swing_ref), entry_t,
+                        role=ROLE_CONTEXT, color="rgba(148,163,184,0.8)",
+                    )
+                    mk.level(
+                        "Stop loss", sl, entry_t, role=ROLE_INVALIDATION,
+                        color="rgba(239,68,68,0.9)",
+                        sl_distance=round(sl_dist, 6),
+                        sl_pips=round(sl_dist / pip_size, 2) if pip_size else None,
+                        floored=bool(floored),
+                    )
+                    mk.level(
+                        f"Take profit ({target_rr}R)", tp, entry_t, role=ROLE_CONTEXT,
+                        color="rgba(16,185,129,0.9)", target_rr=target_rr,
+                    )
 
                     return TradeSignal(
                         strategy_id="BiasIFVG_v1",
@@ -600,6 +763,9 @@ class BiasIFVGEngine(BaseStrategy):
                             "swing_point": float(swing_ref),
                             "confluent_levels": int(state.get("confluent_level_count", 0) or 0),
                             "displacement_atr": round(displacement_atr, 3) if displacement_atr is not None else None,
+                            "size_modifier": size_modifier,
+                            # [V1] Chart geometry — see strategies/core/markings.py.
+                            **mk.as_metadata(),
                         }
                     )
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Server, Save, Loader2, Check, Wifi, WifiOff, Trash2, Shield, Eye, EyeOff, MessageSquare } from 'lucide-react';
-import { getBrokerStatus, saveBrokerStandard, testBrokerConnection, removeBrokerStandard, testMt5Entry, testMt5Close, testMt5Breakeven, testMt5Trail, getConfig, updateConfig } from '../../services/api';
+import { Server, Save, Loader2, Check, Wifi, WifiOff, Trash2, Shield, Eye, EyeOff, MessageSquare, RefreshCw, Search, AlertTriangle } from 'lucide-react';
+import { getBrokerStatus, saveBrokerStandard, testBrokerConnection, removeBrokerStandard, testMt5Entry, testMt5Close, testMt5Breakeven, testMt5Trail, getConfig, updateConfig, getInstrumentResolution } from '../../services/api';
 import { useConnectionStore, useAuthStore } from '../../store';
 
 function BrokerCard({ title, description, type, brokerStatus, onSave, onTest, onRemove }) {
@@ -311,6 +311,141 @@ function Mt5DiagnosticCard() {
   );
 }
 
+/**
+ * Symbol resolution strip (Phase 14 Part C.3, task 14.9).
+ *
+ * Answers "will my config run on this broker?" before a data fetch fails.
+ * A config names the canonical instrument (GER40); this shows what the connected
+ * broker actually calls it (Germany 40 on Deriv), or why it cannot be traded here.
+ */
+function InstrumentResolutionCard() {
+  const { status } = useConnectionStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const [filter, setFilter] = useState('');
+  const [showAll, setShowAll] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const queryClient = useQueryClient();
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['instrument-resolution'],
+    queryFn: () => getInstrumentResolution().then(r => r.data),
+    enabled: status === 'ONLINE' && isAuthenticated,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const res = await getInstrumentResolution(true);
+      queryClient.setQueryData(['instrument-resolution'], res.data);
+    } catch { /* the error branch below already covers a failed load */ }
+    setRefreshing(false);
+  };
+
+  const rows = data?.instruments || [];
+  const q = filter.trim().toLowerCase();
+  const filtered = rows.filter(r => {
+    if (!showAll && !r.available) return false;
+    if (!q) return true;
+    return r.canonical.toLowerCase().includes(q)
+      || (r.broker_symbol || '').toLowerCase().includes(q);
+  });
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title"><Search size={14} /> Symbol Resolution</span>
+        {data?.connected && (
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            {data.available_count}/{data.total_count} available · {data.broker}
+          </span>
+        )}
+      </div>
+
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 16 }}>
+        Your configs name the <strong>canonical</strong> instrument. This is the symbol that name
+        resolves to on the connected broker — so a config written for one broker runs unchanged on
+        another. Instruments this broker does not list are shown with the reason instead of failing
+        later at data fetch.
+      </div>
+
+      {isLoading && (
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          <Loader2 size={14} className="spin" /> Enumerating broker symbols…
+        </div>
+      )}
+
+      {error && (
+        <div style={{ fontSize: '0.85rem', color: 'var(--red)' }}>
+          Could not load symbol resolution: {error.response?.data?.detail || error.message}
+        </div>
+      )}
+
+      {data && !data.connected && (
+        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <WifiOff size={14} /> {data.message}
+        </div>
+      )}
+
+      {data?.connected && (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              type="text"
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+              placeholder="Filter instruments…"
+              style={{ flex: '1 1 180px', minWidth: 0 }}
+            />
+            <button className="btn btn-secondary" onClick={() => setShowAll(!showAll)}>
+              {showAll ? 'Available only' : 'Show unavailable'}
+            </button>
+            <button className="btn btn-secondary" onClick={handleRefresh} disabled={refreshing}>
+              {refreshing ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+              Rediscover
+            </button>
+          </div>
+
+          <div style={{ maxHeight: 340, overflowY: 'auto', overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--text-muted)' }}>
+                  <th style={{ padding: '6px 8px', position: 'sticky', top: 0, background: 'var(--bg-secondary)' }}>Canonical</th>
+                  <th style={{ padding: '6px 8px', position: 'sticky', top: 0, background: 'var(--bg-secondary)' }}>Broker symbol</th>
+                  <th style={{ padding: '6px 8px', position: 'sticky', top: 0, background: 'var(--bg-secondary)' }}>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(r => {
+                  const differs = r.available && r.broker_symbol !== r.canonical;
+                  return (
+                    <tr key={r.canonical} style={{ borderTop: '1px solid var(--border)', opacity: r.available ? 1 : 0.55 }}>
+                      <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>{r.canonical}</td>
+                      <td style={{ padding: '6px 8px', whiteSpace: 'nowrap', color: differs ? 'var(--green)' : 'var(--text-primary)' }}>
+                        {r.broker_symbol || '—'}
+                        {differs && <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>(renamed)</span>}
+                      </td>
+                      <td style={{ padding: '6px 8px', color: 'var(--text-muted)' }}>
+                        {r.ambiguous_with?.length > 0 && !r.available && (
+                          <AlertTriangle size={12} style={{ verticalAlign: -2, marginRight: 4, color: 'var(--red)' }} />
+                        )}
+                        {r.reason}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <tr><td colSpan={3} style={{ padding: 12, color: 'var(--text-muted)' }}>No instruments match.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function TelegramSettingsCard() {
   const [token, setToken] = useState('');
   const [chatId, setChatId] = useState('');
@@ -427,6 +562,7 @@ export default function BrokerSettings() {
         </div>
       </div>
       
+      <InstrumentResolutionCard />
       <TelegramSettingsCard />
       <Mt5DiagnosticCard />
     </div>

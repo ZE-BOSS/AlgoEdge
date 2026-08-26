@@ -73,6 +73,9 @@ class PortfolioBacktestEngine(CostModelMixin):
             "errors": 0,
             "approved": 0
         }
+        # [I4] Mirrors engine.py's blocked_signals — see that file for rationale.
+        self.blocked_signals: list[dict[str, Any]] = []
+        self._blocked_signals_cap = 500
         self.run_logs = []
         # ── Simulation costs (Task 2) ──
         # Resolved lazily PER SYMBOL via CostModelMixin._costs_for(): explicit user
@@ -155,6 +158,24 @@ class PortfolioBacktestEngine(CostModelMixin):
 
         return raw_pnl
 
+    def _record_blocked(self, sig: dict[str, Any], current_time: Any, gate: str, reason: str = "") -> None:
+        """[I4] Mirrors engine.py::_record_blocked — see that file for rationale."""
+        if len(self.blocked_signals) >= self._blocked_signals_cap:
+            return
+        try:
+            time_iso = _epoch_to_iso(current_time)
+        except Exception:
+            time_iso = str(current_time)
+        self.blocked_signals.append({
+            "time": time_iso,
+            "symbol": sig.get("symbol", ""),
+            "direction": sig.get("direction", ""),
+            "entry_price": sig.get("entry_price"),
+            "stop_loss": sig.get("stop_loss"),
+            "gate": gate,
+            "reason": reason,
+        })
+
     def run(
         self,
         portfolio_data: dict[str, pd.DataFrame],
@@ -162,8 +183,28 @@ class PortfolioBacktestEngine(CostModelMixin):
         initial_balance: float = 10000.0,
         portfolio_data_m15: dict[str, pd.DataFrame] = None,
         portfolio_data_m5: dict[str, pd.DataFrame] = None,
+        symbol_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        
+        """
+        [12.8/Part14] `portfolio_data`/`portfolio_signals` are keyed by a
+        DEDUP/CACHE KEY, not necessarily the real tradeable symbol — this is
+        what lets two InstrumentSlots trading the SAME symbol under different
+        strategies coexist in one portfolio run (each gets its own candle
+        series, e.g. different primary timeframes) without their entries
+        overwriting each other in these dicts. `symbol_map` (cache_key ->
+        real_symbol) resolves the real symbol wherever one is genuinely
+        needed (cost/pip-size lookups, MT5 calls, trade records) — every
+        POSITION/SIGNAL dict's own "symbol" field is ALWAYS the real symbol
+        regardless of what its cache key looks like (see `_cache_key`
+        threaded onto both below). `symbol_map=None` (every caller before
+        12.8) makes cache_key == real_symbol everywhere, reproducing today's
+        behaviour exactly — this parameter is purely additive.
+        """
+        symbol_map = symbol_map or {}
+
+        def _real_symbol(cache_key: str) -> str:
+            return symbol_map.get(cache_key, cache_key)
+
         balance = initial_balance
         self.trades = []
         self.open_positions = []
@@ -180,7 +221,7 @@ class PortfolioBacktestEngine(CostModelMixin):
         # run log states which costs were applied and their provenance
         # (USER / MT5 / ASSET_CLASS_DEFAULT) before any trade is simulated.
         for _sym in portfolio_data.keys():
-            self._costs_for(_sym)
+            self._costs_for(_real_symbol(_sym))
 
         all_timestamps = set()
         for sym, df in portfolio_data.items():
@@ -250,7 +291,14 @@ class PortfolioBacktestEngine(CostModelMixin):
         all_signals = []
         for sym, sigs in portfolio_signals.items():
             for sig in sigs:
-                sig["symbol"] = sym  # Ensure symbol is attached
+                # [12.8] `sym` here is the dedup/cache key, which is only
+                # guaranteed to equal the real symbol when no two slots share
+                # one. Preserve whatever real symbol the signal already
+                # carries (set by the caller at signal-creation time) instead
+                # of clobbering it — `_cache_key` carries the grouping key
+                # for this engine's own bar/ATR/swing cache lookups.
+                sig.setdefault("symbol", _real_symbol(sym))
+                sig["_cache_key"] = sym
                 all_signals.append(sig)
         
         all_signals.sort(key=lambda x: float(x.get("time", float("inf"))))
@@ -264,9 +312,10 @@ class PortfolioBacktestEngine(CostModelMixin):
             # 1. Update floating equity and check limits
             open_pnl = 0.0
             for pos in self.open_positions:
-                sym = pos.get("symbol")
-                if sym in symbol_cache and current_time in symbol_cache[sym]["bars"]:
-                    pos["_last_known_close"] = symbol_cache[sym]["bars"][current_time]["close"]
+                sym = pos.get("symbol")  # real symbol — cost/pnl functions
+                _ckey = pos.get("_cache_key", sym)  # [12.8] bar-cache lookup key
+                if _ckey in symbol_cache and current_time in symbol_cache[_ckey]["bars"]:
+                    pos["_last_known_close"] = symbol_cache[_ckey]["bars"][current_time]["close"]
                 last_close = pos.get("_last_known_close", pos["entry_price"])
                 open_pnl += self._calc_pnl(pos["direction"], pos["entry_price"], last_close, pos["volume"], sym)
             
@@ -293,10 +342,10 @@ class PortfolioBacktestEngine(CostModelMixin):
             for _p in self.open_positions:
                 if _p.get("tp_level") != 1:
                     continue
-                _sym = _p.get("symbol")
-                if _sym not in symbol_cache or current_time not in symbol_cache[_sym]["bars"]:
+                _ckey = _p.get("_cache_key", _p.get("symbol"))  # [12.8]
+                if _ckey not in symbol_cache or current_time not in symbol_cache[_ckey]["bars"]:
                     continue
-                _bar = symbol_cache[_sym]["bars"][current_time]
+                _bar = symbol_cache[_ckey]["bars"][current_time]
                 _open_p_pp = _bar.get("open", _bar["close"])
                 # Item 3.7: reuse the same ambiguity-resolved tp_hit determination
                 # as the real close logic below (shared helper — also matches
@@ -309,11 +358,12 @@ class PortfolioBacktestEngine(CostModelMixin):
                     _tp1_closing_this_bar.add(_p.get("group_id"))
 
             for pos in self.open_positions[:]:
-                sym = pos.get("symbol")
-                if sym not in symbol_cache or current_time not in symbol_cache[sym]["bars"]:
+                sym = pos.get("symbol")  # real symbol
+                _ckey = pos.get("_cache_key", sym)  # [12.8]
+                if _ckey not in symbol_cache or current_time not in symbol_cache[_ckey]["bars"]:
                     continue # No tick for this symbol at this time
-                
-                bar = symbol_cache[sym]["bars"][current_time]
+
+                bar = symbol_cache[_ckey]["bars"][current_time]
                 current_price = bar["close"]
                 high = bar["high"]
                 low = bar["low"]
@@ -435,8 +485,8 @@ class PortfolioBacktestEngine(CostModelMixin):
                         tp1_hit_groups.add(pos.get("group_id"))
                     continue
 
-                current_atr = symbol_cache[sym]["atr"].get(current_time, 0.0)
-                swing_points = symbol_cache[sym]["swings"].get(current_time, [])
+                current_atr = symbol_cache[_ckey]["atr"].get(current_time, 0.0)  # [12.8]
+                swing_points = symbol_cache[_ckey]["swings"].get(current_time, [])
 
                 actions = self.risk_engine.manage_open_position(
                     pos, current_price,
@@ -452,7 +502,9 @@ class PortfolioBacktestEngine(CostModelMixin):
                         elif action.get("reason") == "TRAIL":
                             pos["trail_applied"] = True
 
-            if tp1_hit_groups:
+            # [4.7/D8/F5] Was unconditional — now gated on be_mode, matching engine.py.
+            _be_mode_cascade = self.risk_config.get("be_mode", "EITHER")
+            if tp1_hit_groups and _be_mode_cascade in ("TP_HIT", "EITHER"):
                 for pos in self.open_positions:
                     if pos.get("group_id") in tp1_hit_groups and pos not in closed_this_bar:
                         _sym = pos.get("symbol", "")
@@ -461,7 +513,8 @@ class PortfolioBacktestEngine(CostModelMixin):
                         # `current_price` belongs to whichever symbol the bar loop is on,
                         # which is not necessarily this position's.
                         _mkt = pos.get("_last_known_close", pos["entry_price"])
-                        _atr = symbol_cache.get(_sym, {}).get("atr", {}).get(current_time, 0.0)
+                        _pos_ckey = pos.get("_cache_key", _sym)  # [12.8]
+                        _atr = symbol_cache.get(_pos_ckey, {}).get("atr", {}).get(current_time, 0.0)
                         # Clamped BE — see _breakeven_stop() in engine.py for why the clamp
                         # exists (it prevented a stop being placed beyond the market and
                         # force-filled as a phantom gap, fabricating ~+1R on every BE exit).
@@ -573,52 +626,70 @@ class PortfolioBacktestEngine(CostModelMixin):
                 signal_idx += 1
 
                 symbol = sig.get("symbol")
+                cache_key = sig.get("_cache_key", symbol)  # [12.8]
                 sig_is_buy = _is_buy(sig.get("direction", "BUY"))
-                
+
+                # [12.5/12.8] Scoped to THIS SLOT (cache_key), not the bare
+                # symbol — two different strategy slots on the same real
+                # symbol must not block each other's entries.
                 already_open = False
                 for p in self.open_positions:
                     p_is_buy = _is_buy(p.get("direction", "BUY"))
-                    if p.get("symbol") == symbol and p_is_buy == sig_is_buy:
+                    if p.get("_cache_key", p.get("symbol")) == cache_key and p_is_buy == sig_is_buy:
                         already_open = True
                         break
                         
                 if already_open:
+                    self._record_blocked(sig, current_time_dt, "same_direction_already_open")
                     continue
 
                 group_id = str(uuid.uuid4())[:8]
                 sig["group_id"] = group_id
-                
+
                 self.rejection_funnel["total_evaluated"] += 1
-                
+
                 passed_gates = sig.get("metadata", {}).get("passed_gates", True)
                 if not passed_gates:
                     reasons = sig.get("metadata", {}).get("rejection_reasons", [])
                     for r in reasons:
                         gate = r.split(":")[0] if ":" in r else "Unknown Strategy Rule"
                         self.rejection_funnel["strategy_rejections"][gate] = self.rejection_funnel["strategy_rejections"].get(gate, 0) + 1
+                    self._record_blocked(sig, current_time_dt, f"strategy:{reasons[0].split(':')[0] if reasons else 'unknown'}", "; ".join(reasons))
                     continue
 
                 # Prop Firm hard block — skip new signals when drawdown limit is breached (except in backtesting where we only flag)
                 if self.prop_firm_validator.enabled and self.prop_firm_validator.is_breached and not getattr(self.prop_firm_validator, 'is_backtesting', False):
                     self.rejection_funnel["risk_rejections"]["prop_firm_drawdown_block"] = self.rejection_funnel["risk_rejections"].get("prop_firm_drawdown_block", 0) + 1
+                    self._record_blocked(sig, current_time_dt, "prop_firm_drawdown_block")
                     continue
 
                 approved, reason, tp_levels = False, "Error", []
                 try:
+                    # [4.2/D1] Same resolver as the single-symbol engine / live —
+                    # see backtester/engine.py's evaluate_signal call for the full rationale.
+                    from backend.risk.position_sizer import resolve_sizing_base_balance
+                    _sizing_base_balance = resolve_sizing_base_balance(
+                        self.risk_config.get("sizing_basis", "STATIC"),
+                        static_balance=initial_balance,
+                        live_balance=balance,
+                        live_equity=balance,
+                    )
                     approved, reason, tp_levels = self.risk_engine.evaluate_signal(
                         signal_data=sig,
                         account_balance=balance,
                         current_time=current_time_dt,
-                        initial_balance=initial_balance
+                        initial_balance=_sizing_base_balance
                     )
                 except Exception as e:
                     self.invalid_signals += 1
                     self.rejection_funnel["errors"] += 1
+                    self._record_blocked(sig, current_time_dt, "engine_error", str(e))
                     continue
 
                 if not approved:
                     self.invalid_signals += 1
                     self.rejection_funnel["risk_rejections"][reason] = self.rejection_funnel["risk_rejections"].get(reason, 0) + 1
+                    self._record_blocked(sig, current_time_dt, "risk_engine", reason)
                     continue
 
                 is_valid, val_reason = _validate_position(
@@ -627,6 +698,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                 if not is_valid:
                     self.invalid_signals += 1
                     self.rejection_funnel["risk_rejections"][val_reason] = self.rejection_funnel["risk_rejections"].get(val_reason, 0) + 1
+                    self._record_blocked(sig, current_time_dt, "invalid_position_geometry", val_reason)
                     continue
 
                 self.rejection_funnel["approved"] += 1
@@ -637,7 +709,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                 # entry_price unconditionally — sig["entry_price"] is kept only
                 # as a reference/logging value below (confirmations, risk-dollar
                 # sizing distance, run_logs), not as the fill price.
-                _bar_for_fill = symbol_cache.get(symbol, {}).get("bars", {}).get(current_time)
+                _bar_for_fill = symbol_cache.get(cache_key, {}).get("bars", {}).get(current_time)  # [12.8]
                 bar_open_price = (
                     _bar_for_fill["open"] if _bar_for_fill and "open" in _bar_for_fill else sig["entry_price"]
                 )
@@ -688,6 +760,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                     self.rejection_funnel["risk_rejections"][_fill_reject_key] = (
                         self.rejection_funnel["risk_rejections"].get(_fill_reject_key, 0) + 1
                     )
+                    self._record_blocked(sig, current_time_dt, f"fill:{_fill_reject_key}", _fill_reject_detail)
                     self.run_logs.append({
                         "time": _epoch_to_iso(sig_time),
                         "level": "WARNING",
@@ -703,11 +776,23 @@ class PortfolioBacktestEngine(CostModelMixin):
                     "message": f"Opened {sig['direction']} {symbol} @ {sig['entry_price']:.5f} | {len(tp_levels)} TPs"
                 })
 
+                # [2.7/A5 parity] Re-anchor SL/TP to the actual fill, same fix
+                # as backtester/engine.py::_create_position — this path never
+                # had it: every leg's stop/target stayed pinned to the
+                # strategy's theoretical signal price, so realised risk/RR
+                # drifted with fill slippage exactly as described for the
+                # single-symbol engine, just never fixed here. sl_distance is
+                # invariant under this parallel shift, so it re-validates
+                # trivially against the check already run above.
+                _fill_delta = bar_open_price - sig["entry_price"]
+
                 # Bug 3 fix: notify circuit breaker of the new signal group so
                 # daily_trades_count, max_concurrent_positions, and
                 # open_positions_by_symbol are properly accumulated.
                 # Previously this call was missing entirely from portfolio engine,
                 # making all CB trade-count limits ineffective in portfolio backtests.
+                strategy_id = sig.get("strategy_name", sig.get("strategy_id", "UNKNOWN"))
+
                 if hasattr(self.risk_engine, "circuit") and hasattr(self.risk_engine.circuit, "position_opened"):
                     from backend.risk.position_sizer import calculate_risk_dollars
                     actual_risk = sum(
@@ -719,6 +804,9 @@ class PortfolioBacktestEngine(CostModelMixin):
                         len(tp_levels),
                         symbol=symbol,
                         initial_risk_dollars=actual_risk,
+                        strategy_id=strategy_id,
+                        direction=sig.get("direction", ""),  # [9.6]
+                        slot_id=sig.get("metadata", {}).get("slot_id", ""),  # [12.5/12.6]
                     )
 
                 # Detect entry session (used for session win-rate breakdown and
@@ -727,8 +815,6 @@ class PortfolioBacktestEngine(CostModelMixin):
                     entry_session = detect_session(sig_time)
                 except Exception:
                     entry_session = "UNKNOWN"
-
-                strategy_id = sig.get("strategy_name", sig.get("strategy_id", "UNKNOWN"))
 
                 # Mirror engine.py's confirmations list so the frontend's
                 # "Entry Confirmations" panel has something to render. Built
@@ -744,14 +830,16 @@ class PortfolioBacktestEngine(CostModelMixin):
                 signal_confirmations = sig.get("confirmations", [])
 
                 for lvl in tp_levels:
+                    _leg_sl = sig["stop_loss"] + _fill_delta
+                    _leg_tp = lvl.tp_price + _fill_delta
                     entry_confirmations = [
                         f"Direction: {sig.get('direction', 'UNKNOWN')}",
                         f"Symbol: {symbol}",
                         f"Strategy: {strategy_id}",
                         f"Entry Price: {bar_open_price:.5f}",
                         f"Signal Entry Price (reference): {sig['entry_price']:.5f}",
-                        f"Stop Loss: {sig['stop_loss']:.5f}",
-                        f"Take Profit (TP{lvl.level}): {lvl.tp_price:.5f}",
+                        f"Stop Loss (re-anchored to fill): {_leg_sl:.5f}",
+                        f"Take Profit (TP{lvl.level}, re-anchored to fill): {_leg_tp:.5f}",
                         f"RR Multiplier: 1:{lvl.rr_multiplier:.1f}",
                         f"Volume: {lvl.volume:.2f} lots ({lvl.volume_pct * 100:.0f}%)",
                         f"Entry Session: {entry_session}",
@@ -765,6 +853,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                         "id": str(uuid.uuid4()),
                         "group_id": group_id,
                         "symbol": symbol,
+                        "_cache_key": cache_key,  # [12.8]
                         "strategy_id": strategy_id,
                         "strategy": strategy_id,  # kept as an alias for backward compatibility
                         "direction": sig["direction"],
@@ -772,16 +861,25 @@ class PortfolioBacktestEngine(CostModelMixin):
                         "entry_time_iso": _epoch_to_iso(sig_time),
                         "entry_session": entry_session,
                         "entry_price": bar_open_price,
-                        "stop_loss": sig["stop_loss"],
+                        "stop_loss": _leg_sl,
                         # Immutable copy of the entry-time stop — `stop_loss` is mutated
                         # by BE/trailing, so R must be measured against this instead.
-                        "initial_stop_loss": sig["stop_loss"],
-                        "take_profit": lvl.tp_price,
+                        "initial_stop_loss": _leg_sl,
+                        "original_sl": _leg_sl,  # risk/engine.py::manage_open_position reads this key [4.1/F1]
+                        # [2.7/A5 parity] Theoretical (pre-fill) signal levels, for audit.
+                        "signal_entry_price": sig["entry_price"],
+                        "signal_stop_loss": sig["stop_loss"],
+                        "take_profit": _leg_tp,
                         "volume": lvl.volume,
                         "tp_level": lvl.level,
                         "be_applied": False,
                         "trail_applied": False,
-                        "trail_method": self.risk_config.get("trailing_method", "NONE"),
+                        # [Phase 5 parity] was reading a global "trailing_method" key
+                        # that nothing ever set (always fell to the "NONE" default,
+                        # unconditionally) instead of this TP level's own resolved
+                        # trail method — trailing was silently dead for every
+                        # portfolio-mode position regardless of trail_method_tpN config.
+                        "trail_method": lvl.trail_method,
                         "metadata": sig.get("metadata", {}),
                         "mae_pips": 0.0,
                         "mfe_pips": 0.0,
@@ -799,6 +897,8 @@ class PortfolioBacktestEngine(CostModelMixin):
                         "hard_close_time": sig.get("metadata", {}).get("hard_close_time"),
                         "entry_confirmations": entry_confirmations,
                         "entry_snapshot_b64": sig.get("metadata", {}).get("entry_snapshot_b64", ""),
+                        # [I3] see engine.py's matching field for rationale.
+                        "sizing_diagnostics": sig.get("metadata", {}).get("sizing_diagnostics"),
                         "original_signal": sig,
                         "_last_known_close": bar_open_price
                     }
@@ -827,9 +927,10 @@ class PortfolioBacktestEngine(CostModelMixin):
         if self.open_positions:
             for pos in self.open_positions:
                 sym = pos.get("symbol")
-                if sym in symbol_cache:
-                    last_time = max(symbol_cache[sym]["bars"].keys())
-                    bar = symbol_cache[sym]["bars"][last_time]
+                _ckey = pos.get("_cache_key", sym)  # [12.8]
+                if _ckey in symbol_cache:
+                    last_time = max(symbol_cache[_ckey]["bars"].keys())
+                    bar = symbol_cache[_ckey]["bars"][last_time]
                     pos["exit_price"] = bar["close"]
                     pos["exit_time"] = last_time
                 else:
@@ -855,13 +956,35 @@ class PortfolioBacktestEngine(CostModelMixin):
         from backend.analytics.reports import generate_risk_report
         import uuid as _uuid
         
+        # [12.8] trade_grouper.py resolves chart candles by the trade's REAL
+        # symbol (`candles.get(trade["symbol"])`), but portfolio_data/
+        # portfolio_data_m15/portfolio_data_m5 are keyed by cache_key, which
+        # only equals the real symbol when no two slots share one. Re-key by
+        # real symbol here (first cache_key seen for a given real symbol
+        # wins — if two slots share a symbol with different candle sets,
+        # this is a "which chart to show" tie, not a correctness issue for
+        # PnL, which never uses this re-keyed dict).
+        def _by_real_symbol(data: dict | None) -> dict:
+            if not data:
+                return {}
+            out = {}
+            for ckey, df in data.items():
+                rs = _real_symbol(ckey)
+                out.setdefault(rs, df)
+            return out
+
         # Group trades using the shared utility. Pass the per-symbol candle
         # dicts through so trade_grouper can extract chart_data / SMC zones
         # per group (previously this was called with no candle data at all,
         # so chart_data/chart_data_m15/chart_data_m5 were always empty for
         # every portfolio backtest — see trade_grouper.py's symbol-aware
         # candle resolution for how the dict form is handled).
-        grouped_trades = group_trades(self.trades, portfolio_data, portfolio_data_m15, portfolio_data_m5)
+        grouped_trades = group_trades(
+            self.trades,
+            _by_real_symbol(portfolio_data),
+            _by_real_symbol(portfolio_data_m15),
+            _by_real_symbol(portfolio_data_m5),
+        )
         
         # Pass the true initial_balance explicitly — do NOT rely on inference
         # from trades[0].balance_before (fragile, and was the root cause of
@@ -894,11 +1017,17 @@ class PortfolioBacktestEngine(CostModelMixin):
             "equity_curve": self.equity_curve,
             "report": report,
             "rejection_funnel": self.rejection_funnel,
+            "blocked_signals": self.blocked_signals,
             "run_logs": self.run_logs,
             "prop_firm_breach_days": sorted(list(breach_days)),
             # Task 2: per-symbol record of the transaction costs this run assumed
             # and where each value came from (USER vs MT5 vs asset-class default).
             "cost_model": self.cost_model,
+            # [2.24] Distinguishes a drawdown-latched stretch from "no setups".
+            "circuit_breaker_summary": {
+                "paused_checks": self.risk_engine.circuit.paused_bars,
+                "last_pause_reason": self.risk_engine.circuit.last_pause_reason,
+            },
         }
 
         logger.info(f"[PORTFOLIO] ═══ Global backtest complete ═══")

@@ -2,6 +2,9 @@ from dataclasses import dataclass
 
 @dataclass
 class HTFFVGFlipParams:
+    max_losses_per_day: int = 0
+    """[12.2/Part14] Generic daily loss guardrail, standardised across every strategy (was only on VWAPParams). 0 = disabled."""
+
     session_filter_enabled: bool = True
     """
     CHANGED False → True (2026-08). The spec's own "Open Questions" section says:
@@ -80,4 +83,31 @@ class HTFFVGFlipParams:
     """
     Volatility-relative minimum: SL distance must also be >= this × ATR(14) on the
     entry confirmation timeframe. 0 = disabled. Whichever floor is larger wins.
+    """
+
+    fvg_displacement_atr_mult: float = 1.5
+    """
+    [6.11/S13/G8] Displacement gate on the HTF FVG's middle candle — admit the
+    gap only when that candle's range is >= this many ATR(14). 0 = disabled.
+    This engine previously had no displacement requirement at all: any 3-bar
+    gap clearing the (much smaller) `fvg_min_gap_atr_mult` size threshold
+    qualified, including gaps left by a small, indecisive middle candle that
+    doesn't represent real directional commitment.
+    """
+    fvg_displacement_body_pct: float = 0.60
+    """
+    [6.11/S13/G8] Companion to fvg_displacement_atr_mult: the middle candle's
+    body must also be >= this fraction of its own range (a dominant body, not
+    a long-wicked indecision candle). 0 = disabled.
+    """
+
+    setup_max_age_bars: int = 30
+    """
+    [6.1b/S2] Max entry-confirmation-timeframe bars a setup may spend between
+    the HTF FVG tap and firing a signal (covers AWAIT_INVERSION_FVG through
+    AWAIT_INVERSION_CLOSE) before it's dropped. Replaces the old UTC-midnight
+    calendar reset, which wiped EVERY in-progress setup — including one
+    already sitting in AWAIT_INVERSION_CLOSE, a single bar from firing — at
+    the day boundary regardless of freshness. 30 bars on M5 is 2.5 hours.
+    0 = never expire on age.
     """

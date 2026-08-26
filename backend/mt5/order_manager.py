@@ -5,6 +5,7 @@ Order placement, modification, and multi-position management logic.
 """
 
 import asyncio
+import math
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -46,9 +47,25 @@ class OrderManager:
         sl: float,
         tp: float,
         magic: int,
-        comment: str = ""
+        comment: str = "",
+        deviation_points: int = 20,
+        signal_entry_price: float | None = None,
     ) -> dict[str, Any]:
-        """Place a single market order."""
+        """Place a single market order.
+
+        deviation_points: [Task 1.9] max allowed slippage in MT5-native points —
+        was a hardcoded 20 here; callers should pass
+        config.risk.mt5_order_deviation_points. Default kept at 20 so any caller
+        that doesn't pass it explicitly sees unchanged behaviour.
+
+        signal_entry_price: [2.8/A5] the theoretical price sl/tp were computed
+        relative to (the strategy's signal entry), if known. When supplied,
+        sl/tp are re-anchored by the delta between this and the actual live
+        fill (tick.ask/tick.bid) before submission — the same fix applied in
+        backtester/engine.py::_create_position (2.7), for backtest/live
+        parity. None (the default) skips re-anchoring for any caller that
+        doesn't have this value (unchanged prior behaviour).
+        """
         logger.info(f"Placing {direction} on {symbol} (vol: {volume})")
         
         if not mt5:
@@ -69,7 +86,19 @@ class OrderManager:
             return {"success": False, "error": "Invalid symbol"}
             
         price = tick.ask if direction.upper() in ("BUY", "BULLISH") else tick.bid
-        
+
+        # [2.8/A5] Re-anchor SL/TP to the actual live fill, mirroring the
+        # backtest fix (2.7): shift both by the same delta between the
+        # theoretical signal entry and the real fill price, so realised risk
+        # matches what was sized instead of drifting with execution slippage.
+        if signal_entry_price is not None and signal_entry_price > 0:
+            fill_delta = price - signal_entry_price
+            if fill_delta != 0.0:
+                if sl > 0:
+                    sl = sl + fill_delta
+                if tp > 0:
+                    tp = tp + fill_delta
+
         sym_info = mt5.symbol_info(symbol)
         if not sym_info:
             logger.error(f"Order failed: Could not get symbol info for {symbol}")
@@ -86,12 +115,24 @@ class OrderManager:
             sl = round(sl, digits) if sl > 0 else 0.0
             tp = round(tp, digits) if tp > 0 else 0.0
         
+        # [2.20/D9] Floor to the lot step — never round up (which can push an
+        # already-at-the-margin-cap lot back above the cap it was just
+        # clamped to) — and never clamp UP to volume_min: a volume that
+        # floors below the broker's minimum is un-fillable at the intended
+        # risk and must be a refusal, not a silent size-up.
         vol_step = sym_info.volume_step
+        volume = min(volume, sym_info.volume_max)
         if vol_step > 0:
-            volume = round(volume / vol_step) * vol_step
-        volume = max(sym_info.volume_min, min(volume, sym_info.volume_max))
+            volume = math.floor(volume / vol_step) * vol_step
         volume = round(volume, 8)  # Clean float artifacts
-        
+        if volume <= 0 or volume < sym_info.volume_min:
+            err_msg = (
+                f"Volume {volume} floors below {symbol}'s minimum tradeable "
+                f"volume {sym_info.volume_min} — refusing rather than rounding up."
+            )
+            logger.warning(err_msg)
+            return {"success": False, "error": err_msg}
+
         # Pre-execution validation to give clear error messages for stale signals (Invalid stops)
         stoplevel = sym_info.trade_stops_level * sym_info.point
         if direction.upper() in ("BUY", "BULLISH"):
@@ -135,7 +176,7 @@ class OrderManager:
             "price": price,
             "sl": sl,
             "tp": tp,
-            "deviation": 20,
+            "deviation": deviation_points,
             "magic": magic,
             "comment": comment,
             "type_time": mt5.ORDER_TIME_GTC,
@@ -192,22 +233,32 @@ class OrderManager:
         volumes: list[float],
         sl: float,
         tps: list[float],
-        magic_base: int
+        magic_base: int,
+        deviation_points: int = 20,
+        signal_entry_price: float | None = None,
     ) -> list[dict[str, Any]]:
         """
         Place multiple sub-positions for TP1, TP2, TP3.
+
+        signal_entry_price: [2.8/A5] passed through to each leg's
+        place_market_order so every leg is re-anchored to the SAME actual
+        fill (each leg gets its own live tick.ask/bid at send time, which can
+        differ slightly between legs — re-anchoring relative to the shared
+        theoretical signal entry keeps them consistent with how the sizing
+        was computed).
         """
         logger.info(f"Placing multi-position on {symbol}")
         results = []
-        
+
         for i, (vol, tp) in enumerate(zip(volumes, tps)):
             magic = magic_base + i
             comment = f"TP{i+1}"
             res = await OrderManager.place_market_order(
-                symbol, direction, vol, sl, tp, magic, comment
+                symbol, direction, vol, sl, tp, magic, comment,
+                deviation_points=deviation_points, signal_entry_price=signal_entry_price,
             )
             results.append(res)
-            
+
         return results
 
     @staticmethod
@@ -303,7 +354,7 @@ class OrderManager:
         return True
 
     @staticmethod
-    async def close_position(ticket: int) -> bool:
+    async def close_position(ticket: int, deviation_points: int = 20) -> bool:
         """Close an open position at market."""
         logger.info(f"Closing position {ticket}")
         
@@ -343,7 +394,7 @@ class OrderManager:
             "type": action,
             "position": ticket,
             "price": price,
-            "deviation": 20,
+            "deviation": deviation_points,
             "magic": position.magic,
             "comment": "manual close",
             "type_time": mt5.ORDER_TIME_GTC,

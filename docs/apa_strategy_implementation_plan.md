@@ -1,3 +1,16 @@
+> **UPDATED (2026-08, Phase 6 — [Doc-1]).** The state machine described below (§10 onward,
+> `strategy_apa/engine.py`) has been rewritten from a single-candidate slot to a bounded list of
+> independently-progressing candidates (`max_concurrent_patterns`, default 3), each with its own
+> per-state staleness budget (`pattern_max_age_bars`/`bos_max_age_bars`/`retest_max_age_bars`) instead
+> of the old UTC-midnight calendar reset. Also fixed since this plan was written: the body-close BOS
+> test now reads `close`, not `min(open,close)`/`max(open,close)`; the `is_major` neckline gate widened
+> from a hardcoded 0.5×ATR to `neckline_major_atr_tolerance` (default 1.0), with a pattern admitted only
+> by the wider tolerance scoring lower on confluence instead of being discarded; the SL cost floor is now
+> capped at `max_sl_floor_atr_mult` (default 5.0×ATR) so it can only ever narrow a too-tight stop, never
+> silently re-widen an already-wide one. The pattern-detection rules (H&S geometry, Invalidation Zone,
+> confirmation) documented from §1 onward are unchanged — only the state machine holding them changed.
+> See `implementation/TASKS.md` Phase 6 (6.1–6.5) for the full change record and verification notes.
+
 # Advanced Price Action (APA) — Deterministic Implementation Plan (AlgoEdge)
 ## v2 — Optimized against Michael FX / Forex Course Academy's A.P.A. framework
 

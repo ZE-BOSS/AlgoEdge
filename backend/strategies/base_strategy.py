@@ -31,9 +31,10 @@ class TradeSignal(BaseModel):
 class TradeAction(BaseModel):
     """Action to take on an open position."""
     ticket: int
-    action: str  # "CLOSE", "MODIFY_SL"
+    action: str          # "CLOSE", "MODIFY_SL"
     new_sl: float | None = None
     close_pct: float = 1.0
+    close_reason: str = "STRATEGY_EXIT"  # Shown in exit_reason column
 
 
 from backend.utils.logger import get_logger
@@ -41,12 +42,41 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 
 class BaseStrategy:
-    """Interface that all strategies must implement."""
+    """
+    Interface that all strategies must implement.
+
+    Fundamental gates (Phase 14 Stream 4)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Strategies can opt-in to fundamental filtering by instantiating a
+    FundamentalGateRunner in __init__ and assigning it to self.fundamental_gates:
+
+        from backend.strategies.core.fundamental_gate import (
+            EconCalendarGate, FundamentalGateRunner,
+        )
+        self.fundamental_gates = FundamentalGateRunner([
+            EconCalendarGate(buffer_minutes=15, impact_levels=["High"]),
+        ], fail_loudly=True)
+
+    The gate check is then made in on_bar() before returning a signal:
+
+        if self.fundamental_gates:
+            blocked, reason = self.fundamental_gates.check(signal, is_backtesting=self.is_backtesting)
+            if blocked:
+                self.log_event(f"Signal blocked by FundamentalGate: {reason}", level="INFO", category="GATE")
+                return None
+
+    Gates that require a live fetch are automatically skipped during backtests
+    (is_backtesting=True), so no extra guard is needed in the strategy itself.
+    """
 
     def __init__(self, user_config: Any):
         self.config = user_config
         self.is_backtesting = False
         self.run_logs = []
+        # [Phase 14 Stream 4] Opt-in fundamental gate runner.
+        # Strategies that want fundamental filtering assign a FundamentalGateRunner
+        # here; the default None means no filtering applies.
+        self.fundamental_gates = None
 
     def log_event(self, message: str, level: str = "INFO", category: str = "STRATEGY"):
         from datetime import datetime, timezone
@@ -85,6 +115,32 @@ class BaseStrategy:
     def get_required_timeframes(self) -> list[str]:
         """Return list of timeframes this strategy needs."""
         raise NotImplementedError
+
+    def on_position_bar(
+        self,
+        symbol: str,
+        timeframe: str,
+        candles: "pd.DataFrame",
+        position: dict,
+    ) -> "TradeAction | None":
+        """
+        Called once per closed bar for every open position this strategy owns.
+
+        Intentionally SYNCHRONOUS — `BacktestEngine.run()` is executed in a
+        thread pool via `asyncio.to_thread`, so an `async` hook would require
+        event-loop re-entry and defeat the purpose. Live execution similarly
+        calls this from inside its bar-processing thread.
+
+        Return a `TradeAction` to close or modify the position, or `None` to
+        leave the risk engine in charge (the default).
+
+        Phase 14 B2.3 primary use-case: APA's hard invalidation exit — if the
+        current bar's body closes back beyond the Head level that defined the
+        pattern, the thesis is invalidated and the trade is cut immediately.
+        Without this hook the position would run to SL, TP, or trail despite the
+        spec explicitly requiring an early exit under this condition.
+        """
+        return None
 
     def notify_outcome(self, symbol: str, group_id: str, is_win: bool, pnl: float) -> None:
         """

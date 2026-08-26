@@ -62,14 +62,45 @@ class CircuitBreaker:
         self.target_profit_enabled = config.get("target_profit_enabled", False)
         self.max_daily_profit = config.get("max_daily_profit", 500.0)
         self.max_weekly_profit = config.get("max_weekly_profit", 2000.0)
+        # [2.18/2.19 / P2-R3/R4] Per-strategy overrides, keyed by strategy_id.
+        # A strategy not present here falls back to the global limit above —
+        # empty dicts (the default) reproduce today's global-only behaviour
+        # exactly. Lets a high-frequency engine (e.g. VWAP) get a tighter
+        # concurrent-position/daily-trade budget than a low-frequency one
+        # (e.g. APA) without lowering the global cap for everyone.
+        self.max_daily_trades_by_strategy: dict[str, int] = config.get("max_daily_trades_by_strategy", {}) or {}
+        self.max_concurrent_positions_by_strategy: dict[str, int] = config.get("max_concurrent_positions_by_strategy", {}) or {}
 
         # State
         self.daily_trades_count = 0
+        self.daily_trades_count_by_strategy: dict[str, int] = {}
+        self.open_positions_by_strategy: dict[str, int] = {}
+        # [12.5/Part14] Per-SLOT open-position count and daily-loss count.
+        # Distinct from open_positions_by_symbol: once the same symbol can run
+        # under two different strategy slots (InstrumentSlot), a single
+        # symbol-wide counter would incorrectly block slot B's entry just
+        # because slot A already has a position open on the same symbol.
+        # Empty by default — a caller that never passes slot_id (every
+        # existing call site, until 12.7/12.8 wire slot dispatch through)
+        # reproduces today's symbol-wide-only behaviour exactly.
+        self.open_positions_by_slot: dict[str, int] = {}
+        self.losses_today_by_slot: dict[str, int] = {}  # [12.6]
         self.daily_pnl = 0.0
         self.weekly_pnl = 0.0
+        # [9.7] Per-strategy realised P&L — feeds RiskParams.strategy_risk_budget_pct
+        # so a high-frequency engine can't consume a low-frequency one's share of
+        # the daily/weekly drawdown budget. Open (unrealised) risk stays globally
+        # shared — see evaluate_signal's docstring note on this boundary.
+        self.strategy_daily_pnl: dict[str, float] = {}
+        self.strategy_weekly_pnl: dict[str, float] = {}
         self.open_positions_by_symbol: dict[str, int] = {}
         self.is_paused = False
         self.pause_reason = ""
+        # [2.24] How many bars/checks this run has spent paused, and why — lets
+        # a drawdown-latched week be visibly distinct from "no setups fired",
+        # instead of both looking identical in the report (companion to [I4]).
+        self.paused_bars = 0
+        self.last_pause_reason = ""
         self.last_trade_closed_time: dict[str, int] = {}
         # Bug 4: Track the balance at day-start for correct daily drawdown % denominator.
         self._day_start_balance: float = 0.0
@@ -98,24 +129,46 @@ class CircuitBreaker:
             self.load_state()
 
 
-    def check_all(self, account_balance: float, current_time: datetime | None = None) -> tuple[bool, str]:
+    def check_all(self, account_balance: float, current_time: datetime | None = None, strategy_id: str | None = None) -> tuple[bool, str]:
         """Run all active circuit breaker checks."""
         self._check_daily_reset(current_time)
         self._check_weekly_reset(current_time)
 
+        result = self._check_all_inner(account_balance, current_time, strategy_id)
+        ok, reason = result
+        # [2.24] Track paused bars/checks for the report — a latched breaker
+        # should be visibly distinct from "the strategy found no setups".
+        if not ok:
+            self.paused_bars += 1
+            self.last_pause_reason = reason
+        return result
+
+    def _check_all_inner(self, account_balance: float, current_time: datetime | None, strategy_id: str | None) -> tuple[bool, str]:
         if self.is_paused:
             return False, self.pause_reason
 
-        # 1. Max daily trades
+        # 1. Max daily trades (global, then per-strategy if configured)
         if self.max_daily_trades > 0 and self.daily_trades_count >= self.max_daily_trades:
             self.is_paused = True
             self.pause_reason = f"Daily max trades limit reached ({self.daily_trades_count}/{self.max_daily_trades})"
             return False, self.pause_reason
 
-        # 3. Max open positions (total across symbols)
+        if strategy_id and strategy_id in self.max_daily_trades_by_strategy:
+            strat_limit = self.max_daily_trades_by_strategy[strategy_id]
+            strat_count = self.daily_trades_count_by_strategy.get(strategy_id, 0)
+            if strat_limit > 0 and strat_count >= strat_limit:
+                return False, f"Daily max trades limit reached for {strategy_id} ({strat_count}/{strat_limit})"
+
+        # 3. Max open positions (total across symbols; then per-strategy if configured)
         total_open = sum(self.open_positions_by_symbol.values())
         if total_open >= self.max_concurrent_positions:
             return False, f"Max open positions reached ({total_open}/{self.max_concurrent_positions})"
+
+        if strategy_id and strategy_id in self.max_concurrent_positions_by_strategy:
+            strat_cap = self.max_concurrent_positions_by_strategy[strategy_id]
+            strat_open = self.open_positions_by_strategy.get(strategy_id, 0)
+            if strat_open >= strat_cap:
+                return False, f"Max open positions reached for {strategy_id} ({strat_open}/{strat_cap})"
 
         # 4. Daily Drawdown Percentage
         # Bug 4 fix: Use the day-start balance as the denominator, not the
@@ -163,32 +216,81 @@ class CircuitBreaker:
         """Calculate the total initial risk dollars of all currently active groups."""
         return sum(g.get("initial_risk", 0.0) for g in self.active_groups.values())
 
-    def check_symbol(self, symbol: str, timeframe: str = "M15", current_time: datetime | None = None) -> tuple[bool, str]:
+    def check_symbol(
+        self,
+        symbol: str,
+        timeframe: str = "M15",
+        current_time: datetime | None = None,
+        slot_id: str | None = None,
+        slot_max_positions: int | None = None,
+        slot_max_losses_per_day: int | None = None,
+    ) -> tuple[bool, str]:
         """Check if a new position can be opened on the given symbol.
         Enforces one active signal group per symbol at a time, and a timeframe-aware cooldown.
+
+        [12.5/12.6/Part14] When `slot_id` is supplied, the position-count
+        check resolves against THIS SLOT's own open-position count and
+        `slot_max_positions` (falling back to the global symbol-wide check
+        when either is omitted — this is what makes two InstrumentSlots on
+        the same symbol independent of each other rather than sharing one
+        counter), and a per-slot daily-loss cap is enforced when
+        `slot_max_losses_per_day` is supplied. Every existing call site that
+        doesn't pass `slot_id` gets EXACTLY today's symbol-wide-only
+        behaviour — this is purely additive.
         """
         # 1. Timeframe Cooldown Check
         if symbol in self.last_trade_closed_time and current_time is not None:
             try:
                 tf_seconds = _timeframe_to_seconds(timeframe)
                 current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
-                
+
                 # Floor both to the candle boundary to see if we are in the same candle
                 current_candle = (int(current_epoch) // tf_seconds) * tf_seconds
                 closed_candle = (self.last_trade_closed_time[symbol] // tf_seconds) * tf_seconds
-                
+
                 if current_candle <= closed_candle:
                     return False, f"{timeframe} Cooldown Active: Waiting for current {timeframe} candle to close"
             except (ValueError, TypeError):
                 pass
 
-        # 2. Max positions check
-        sym_open = self.open_positions_by_symbol.get(symbol, 0)
-        if sym_open >= self.max_positions_per_symbol:
-            return False, f"Max positions reached for {symbol} ({sym_open}/{self.max_positions_per_symbol})"
+        # 2. Max positions check — per-slot when possible, else symbol-wide.
+        if slot_id and slot_max_positions is not None:
+            slot_open = self.open_positions_by_slot.get(slot_id, 0)
+            if slot_open >= slot_max_positions:
+                return False, f"Max positions reached for slot {slot_id} on {symbol} ({slot_open}/{slot_max_positions})"
+        else:
+            sym_open = self.open_positions_by_symbol.get(symbol, 0)
+            if sym_open >= self.max_positions_per_symbol:
+                return False, f"Max positions reached for {symbol} ({sym_open}/{self.max_positions_per_symbol})"
+
+        # 3. [12.6] Per-slot daily loss cap.
+        if slot_id and slot_max_losses_per_day is not None and slot_max_losses_per_day > 0:
+            slot_losses = self.losses_today_by_slot.get(slot_id, 0)
+            if slot_losses >= slot_max_losses_per_day:
+                return False, f"Max daily losses reached for slot {slot_id} on {symbol} ({slot_losses}/{slot_max_losses_per_day})"
+
         return True, "OK"
 
-    def position_opened(self, group_id: str, sub_trade_count: int, symbol: str = "", initial_risk_dollars: float = 0.0):
+    def get_cluster_open_risk(self, cluster: str, overrides: dict[str, str] | None = None) -> float:
+        """[9.5] Sum of initial_risk across every active group whose symbol resolves to `cluster`."""
+        from backend.risk.portfolio_governor import resolve_cluster
+        return sum(
+            g.get("initial_risk", 0.0)
+            for g in self.active_groups.values()
+            if resolve_cluster(g.get("symbol", ""), overrides) == cluster
+        )
+
+    def get_net_direction_open_risk(self, cluster: str, direction: str, overrides: dict[str, str] | None = None) -> float:
+        """[9.6] Sum of initial_risk across every active group in `cluster`, taken in the SAME effective direction as `direction` (cluster-inversion-aware)."""
+        from backend.risk.portfolio_governor import resolve_net_direction_key
+        total = 0.0
+        for g in self.active_groups.values():
+            g_cluster, g_dir = resolve_net_direction_key(g.get("symbol", ""), g.get("direction", ""), overrides)
+            if g_cluster == cluster and g_dir == direction:
+                total += g.get("initial_risk", 0.0)
+        return total
+
+    def position_opened(self, group_id: str, sub_trade_count: int, symbol: str = "", initial_risk_dollars: float = 0.0, strategy_id: str = "", direction: str = "", slot_id: str = ""):
         """
         Track a new signal group opening.
 
@@ -203,10 +305,18 @@ class CircuitBreaker:
         signal even if previous groups have already closed (groups-opened semantics).
         """
         self.daily_trades_count += 1
+        if strategy_id:
+            self.daily_trades_count_by_strategy[strategy_id] = self.daily_trades_count_by_strategy.get(strategy_id, 0) + 1
+            self.open_positions_by_strategy[strategy_id] = self.open_positions_by_strategy.get(strategy_id, 0) + 1
+        if slot_id:  # [12.5]
+            self.open_positions_by_slot[slot_id] = self.open_positions_by_slot.get(slot_id, 0) + 1
         self.active_groups[group_id] = {
             "pnl": 0.0,
             "sub_trades": sub_trade_count,
             "symbol": symbol,
+            "strategy_id": strategy_id,
+            "direction": direction,  # [9.6]
+            "slot_id": slot_id,  # [12.5/12.6]
             "initial_risk": initial_risk_dollars,
             # Store open timestamp so daily reset can detect cross-day stale groups
             "opened_at": _utc_now_str(),
@@ -232,39 +342,83 @@ class CircuitBreaker:
             # not individual leg outcomes.
             if self.active_groups[group_id]["sub_trades"] <= 0:
                 group_pnl = self.active_groups[group_id]["pnl"]
-                self._record_trade_result(group_pnl, group_pnl >= 0)
+                self._record_trade_result(
+                    group_pnl, group_pnl >= 0,
+                    strategy_id=self.active_groups[group_id].get("strategy_id", ""),
+                    slot_id=self.active_groups[group_id].get("slot_id", ""),
+                )
                 # Set per-symbol cooldown (live only)
                 sym = self.active_groups[group_id].get("symbol", "")
                 if not self.is_backtest and current_time is not None and sym:
                     current_epoch = int(current_time.timestamp()) if hasattr(current_time, 'timestamp') else float(current_time)
                     self.last_trade_closed_time[sym] = int(current_epoch)
 
+                strat = self.active_groups[group_id].get("strategy_id", "")
+                slot = self.active_groups[group_id].get("slot_id", "")
                 del self.active_groups[group_id]
                 if sym and sym in self.open_positions_by_symbol:
                     self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
                     if self.open_positions_by_symbol[sym] == 0:
                         del self.open_positions_by_symbol[sym]
+                if strat and strat in self.open_positions_by_strategy:
+                    self.open_positions_by_strategy[strat] = max(0, self.open_positions_by_strategy[strat] - 1)
+                    if self.open_positions_by_strategy[strat] == 0:
+                        del self.open_positions_by_strategy[strat]
+                if slot and slot in self.open_positions_by_slot:  # [12.5]
+                    self.open_positions_by_slot[slot] = max(0, self.open_positions_by_slot[slot] - 1)
+                    if self.open_positions_by_slot[slot] == 0:
+                        del self.open_positions_by_slot[slot]
 
     def rollback_position(self, group_id: str):
         """Rollback an opened position if MT5 execution failed entirely."""
         if group_id in self.active_groups:
             sym = self.active_groups[group_id].get("symbol", "")
+            strat = self.active_groups[group_id].get("strategy_id", "")
+            slot = self.active_groups[group_id].get("slot_id", "")
             del self.active_groups[group_id]
             self.daily_trades_count = max(0, self.daily_trades_count - 1)
+            if strat and strat in self.daily_trades_count_by_strategy:
+                self.daily_trades_count_by_strategy[strat] = max(0, self.daily_trades_count_by_strategy[strat] - 1)
             if sym and sym in self.open_positions_by_symbol:
                 self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
                 if self.open_positions_by_symbol[sym] == 0:
                     del self.open_positions_by_symbol[sym]
+            if strat and strat in self.open_positions_by_strategy:
+                self.open_positions_by_strategy[strat] = max(0, self.open_positions_by_strategy[strat] - 1)
+                if self.open_positions_by_strategy[strat] == 0:
+                    del self.open_positions_by_strategy[strat]
+            if slot and slot in self.open_positions_by_slot:  # [12.5]
+                self.open_positions_by_slot[slot] = max(0, self.open_positions_by_slot[slot] - 1)
+                if self.open_positions_by_slot[slot] == 0:
+                    del self.open_positions_by_slot[slot]
         self.save_state()
 
     def record_external_close(self, symbol: str, pnl: float, current_time: datetime | None = None):
         """
         Record a trade close from the MT5 sync loop.
-        If the symbol is in active_groups, delegates to position_closed to decrement sub_trades
-        and clean up memory. If not (e.g. post-restart), forcefully decrements the symbol count.
+        If an active group for this symbol is tracked, delegates to position_closed
+        to decrement sub_trades and clean up memory. If not (e.g. post-restart),
+        forcefully decrements the symbol count.
+
+        [4.8/D10] group_id is now a real UUID (bot_service.py no longer uses
+        `group_id = signal.symbol`), so groups must be found by their stored
+        "symbol" field rather than the old `symbol in self.active_groups`
+        direct-key check, which only ever worked because group_id used to BE
+        the symbol string. With `allow_pyramiding` off (the default), at most
+        one active group exists per symbol, so this match is unambiguous;
+        with pyramiding on, the FIRST matching group is picked (this call site
+        only receives symbol/pnl/close_time, not a ticket-to-group mapping, so
+        exact per-position attribution isn't available here) — the group's
+        sub_trades/PnL bookkeeping may attribute a close to the wrong sibling
+        group when >1 group shares a symbol, though the symbol-level and
+        daily/weekly PnL totals are unaffected either way.
         """
-        if symbol in self.active_groups:
-            self.position_closed(group_id=symbol, pnl=pnl, current_time=current_time)
+        matching_group_id = next(
+            (gid for gid, g in self.active_groups.items() if g.get("symbol") == symbol),
+            None,
+        )
+        if matching_group_id is not None:
+            self.position_closed(group_id=matching_group_id, pnl=pnl, current_time=current_time)
         else:
             self._record_trade_result(pnl, pnl >= 0)
             # Decrement symbol count if tracked
@@ -280,8 +434,10 @@ class CircuitBreaker:
 
     def record_backtest_close(self, group_id: str, group_pnl: float, current_time: datetime | None = None):
         """Used by backtester to finalize a group's total PnL at once, triggering drawdown checks."""
-        self._record_trade_result(group_pnl, group_pnl >= 0)
-        
+        _strat = self.active_groups[group_id].get("strategy_id", "") if group_id in self.active_groups else ""
+        _slot = self.active_groups[group_id].get("slot_id", "") if group_id in self.active_groups else ""
+        self._record_trade_result(group_pnl, group_pnl >= 0, strategy_id=_strat, slot_id=_slot)
+
         sym = self.active_groups[group_id].get("symbol", "") if group_id in self.active_groups else ""
         
         # Bug 9: skip cooldown in backtest — see position_closed() comment above.
@@ -293,11 +449,21 @@ class CircuitBreaker:
                 pass
             
         if group_id in self.active_groups:
+            strat = self.active_groups[group_id].get("strategy_id", "")
+            slot = self.active_groups[group_id].get("slot_id", "")
             del self.active_groups[group_id]
             if sym and sym in self.open_positions_by_symbol:
                 self.open_positions_by_symbol[sym] = max(0, self.open_positions_by_symbol[sym] - 1)
                 if self.open_positions_by_symbol[sym] == 0:
                     del self.open_positions_by_symbol[sym]
+            if strat and strat in self.open_positions_by_strategy:
+                self.open_positions_by_strategy[strat] = max(0, self.open_positions_by_strategy[strat] - 1)
+                if self.open_positions_by_strategy[strat] == 0:
+                    del self.open_positions_by_strategy[strat]
+            if slot and slot in self.open_positions_by_slot:  # [12.5]
+                self.open_positions_by_slot[slot] = max(0, self.open_positions_by_slot[slot] - 1)
+                if self.open_positions_by_slot[slot] == 0:
+                    del self.open_positions_by_slot[slot]
 
     def save_state(self):
         """Save current state to file (skipped in backtest)."""
@@ -362,10 +528,15 @@ class CircuitBreaker:
             logger.error(f"[CB] Failed to load state: {e}")
 
 
-    def _record_trade_result(self, pnl: float, is_win: bool):
+    def _record_trade_result(self, pnl: float, is_win: bool, strategy_id: str = "", slot_id: str = ""):
         """Update state after a grouped trade fully closes."""
         self.daily_pnl += pnl
         self.weekly_pnl += pnl
+        if strategy_id:
+            self.strategy_daily_pnl[strategy_id] = self.strategy_daily_pnl.get(strategy_id, 0.0) + pnl
+            self.strategy_weekly_pnl[strategy_id] = self.strategy_weekly_pnl.get(strategy_id, 0.0) + pnl
+        if slot_id and not is_win:  # [12.6]
+            self.losses_today_by_slot[slot_id] = self.losses_today_by_slot.get(slot_id, 0) + 1
         self.save_state()
 
     def reconcile_from_mt5(self, open_symbols: list[str]):
@@ -463,6 +634,9 @@ class CircuitBreaker:
         if self.last_reset_day is None or today != self.last_reset_day:
             self.daily_pnl = 0.0
             self.daily_trades_count = 0
+            self.daily_trades_count_by_strategy = {}
+            self.strategy_daily_pnl = {}  # [9.7]
+            self.losses_today_by_slot = {}  # [12.6]
             self.last_reset_day = today
             # Bug 4 fix: reset the day-start balance anchor so the new day's
             # first check_all() captures the opening balance correctly.
@@ -496,6 +670,7 @@ class CircuitBreaker:
         # Bug 2 fix: None sentinel means first bar — always trigger to set last_reset_week.
         if self.last_reset_week is None or current_week != self.last_reset_week:
             self.weekly_pnl = 0.0
+            self.strategy_weekly_pnl = {}  # [9.7]
             self.last_reset_week = current_week
             # §2.6 fix: reset the week-start balance anchor so the new week's first
             # check_all() captures the opening balance correctly (mirrors

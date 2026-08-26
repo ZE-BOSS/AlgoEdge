@@ -144,6 +144,14 @@ body {
 
 .main-content {
   flex: 1;
+  /* A flex item defaults to `min-width: auto`, which means it refuses to
+     shrink below its widest child's min-content width. One wide table or one
+     long unbreakable string inside a card was therefore enough to push this
+     container past the viewport and drag the whole page into horizontal
+     scroll — the "expanding out of frame" behaviour. `min-width: 0` lets it
+     shrink; wide children scroll inside their own box instead (see .card). */
+  min-width: 0;
+  max-width: 100%;
   margin-left: 240px;
   padding: 24px 32px;
   min-height: 100vh;
@@ -311,6 +319,78 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 20px;
+}
+
+/* Grid items carry the same `min-width: auto` default as flex items, so a wide
+   child inside one column widens the whole track rather than scrolling. This is
+   the second half of the overflow fix in .main-content. */
+.grid-2 > *,
+.grid-3 > *,
+.metrics-grid > * {
+  min-width: 0;
+}
+
+/* Wide content scrolls inside its own box rather than widening the page.
+   Tables and pre blocks are the two things that reliably blow a layout out. */
+.card {
+  min-width: 0;
+}
+
+.card table,
+.table-scroll {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.card pre,
+.card code {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Long unbreakable strings — a serialised risk_config, a symbol map, a stack
+   frame — have no space to wrap at, so they render as one very wide word.
+   `overflow-wrap: anywhere` lets the browser break them mid-token, which is
+   the only thing that keeps a JSON blob inside its card.
+
+   Scoped to text containers only. Applying it to buttons shreds their labels
+   one character per line ("S / av / e"), because a button is narrow by design
+   and `anywhere` will happily break at every glyph. */
+.card p,
+.card li,
+.card dd,
+.card .param-value {
+  overflow-wrap: anywhere;
+}
+
+/* Table cells are deliberately NOT in the list above. `anywhere` breaks at any
+   glyph, which turns "-483.78" into "-48 / 3.7 / 8" — a number split across
+   three lines is worse than a table that scrolls. Tables already scroll inside
+   their own box (see .card table), so they need no help wrapping. */
+.card td,
+.card th {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* Figures stay on one line and align on the decimal. */
+.card td,
+.metric-value,
+.stat-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Controls keep their labels intact and size to their text instead. */
+.card button,
+.card .btn,
+button,
+.btn {
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: nowrap;
 }
 
 /* ── Tables ──────────────────────────────────────────────────── */
@@ -549,6 +629,29 @@ label {
 }
 
 /* ── Responsive ──────────────────────────────────────────────── */
+/* The layout previously went straight from "full desktop" to "phone" at 768px,
+   so every width between — a half-screen window, a small laptop, a tablet —
+   rendered the desktop layout in a container too narrow for it. These two
+   intermediate steps are what stop the config form and the results panel from
+   overflowing at those sizes. */
+@media (max-width: 1280px) {
+  .grid-3 {
+    grid-template-columns: 1fr 1fr;
+  }
+  .main-content {
+    padding: 20px 22px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .grid-2, .grid-3 {
+    grid-template-columns: 1fr;
+  }
+  .metrics-grid {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+}
+
 @media (max-width: 768px) {
   .sidebar {
     transform: translateX(-100%);
@@ -566,6 +669,15 @@ label {
   .grid-2, .grid-3 {
     grid-template-columns: 1fr;
   }
+}
+
+/* Nothing may push the document into horizontal scroll. If a child still
+   overflows after the rules above, it scrolls within itself — the page does
+   not. This is the backstop that makes "out of frame" impossible rather than
+   merely unlikely. */
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 /* ── Login Page ──────────────────────────────────────────────── */

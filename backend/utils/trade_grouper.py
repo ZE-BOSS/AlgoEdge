@@ -7,6 +7,14 @@ from datetime import datetime, timezone
 
 logger = get_logger(__name__)
 
+# [V1] Marking-kind routing. Imported rather than re-listed so adding a kind in
+# strategies/core/markings.py cannot silently start dropping markings here.
+from backend.strategies.core.markings import (  # noqa: E402
+    BOX_KINDS as _BOX_KINDS,
+    LINE_KINDS as _LINE_KINDS,
+    POINT_KINDS as _POINT_KINDS,
+)
+
 def _to_epoch_seconds(val):
     """
     Robustly convert an epoch number, python/pandas datetime, or numpy scalar
@@ -90,11 +98,20 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
             # Dollar P&L is unaffected — this is purely a measurement defect,
             # but it is the one that makes every R-based conclusion fiction.
             #
-            # The entry-time stop survives untouched on the signal dict, so
-            # prefer it and fall back to the leg's own value only when the
-            # signal is missing (older records / hand-built trades).
+            # [7.8/H3] Preference order, most-correct first:
+            #   1. t["initial_stop_loss"] — the position's stop as actually
+            #      opened, i.e. RE-ANCHORED TO THE FILL PRICE (Phase 2 §2.7)
+            #      before any BE/trailing mutation. This is the real risk the
+            #      trade was taken against.
+            #   2. original_signal.stop_loss — the strategy's THEORETICAL
+            #      pre-fill stop (kept for older records where
+            #      initial_stop_loss doesn't exist yet, and for engines that
+            #      never got the fill re-anchor). Measurably less accurate
+            #      than #1 whenever fill slippage moved the actual stop.
+            #   3. t["stop_loss"] — the mutated, current value; last resort.
+            _init_sl = t.get("initial_stop_loss")
             _sig_sl = (t.get("original_signal") or {}).get("stop_loss")
-            _entry_sl = _sig_sl if _sig_sl else t.get("stop_loss", 0)
+            _entry_sl = _init_sl if _init_sl else (_sig_sl if _sig_sl else t.get("stop_loss", 0))
             groups[gid] = {
                 "group_id": gid,
                 "symbol": t.get("symbol", ""),
@@ -105,6 +122,12 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
                 "entry_time_iso": t.get("entry_time_iso", ""),
                 "entry_session": t.get("entry_session", "UNKNOWN"),
                 "stop_loss": _entry_sl,
+                # [7.8/H3] Also emitted explicitly at group level (not just
+                # folded into "stop_loss") so any frontend consumer can apply
+                # its own initial_stop_loss ?? original_signal?.stop_loss ??
+                # stop_loss fallback chain without depending on this
+                # function's own resolution order.
+                "initial_stop_loss": _entry_sl,
                 "sub_trades": [],
                 "combined_pnl": 0,
                 "combined_volume": 0,
@@ -143,6 +166,27 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
         g["pnl"] = g["combined_pnl"]
         g["exit_price"] = g["best_exit"].get("exit_price", 0) if g["best_exit"] else 0
         g["exit_reason"] = g["best_exit"].get("exit_reason", "UNKNOWN") if g["best_exit"] else "UNKNOWN"
+
+        # Exit-management flags, rolled up from the legs.
+        #
+        # These were never propagated, so the group — and therefore the saved
+        # row, which reads `t.get("be_applied", False)` — always recorded False.
+        # Across 691 analysed trades `be_applied` was False on every single one
+        # while 106 of them had exit_reason "BE_SL", i.e. break-even demonstrably
+        # fired and the flag denied it. Any analysis keyed on the flag silently
+        # saw nothing, so what break-even actually costs was unmeasurable.
+        #
+        # ANY leg reaching break-even makes it true for the group: break-even is
+        # a property of the position's management, and the legs share one stop.
+        g["be_applied"] = any(bool(st.get("be_applied")) for st in sub_trades)
+        g["trail_applied"] = any(bool(st.get("trail_applied")) for st in sub_trades)
+        # The trailing method that actually ran, rather than whichever leg
+        # happened to sort first.
+        g["trail_method"] = next(
+            (st.get("trail_method") for st in sub_trades
+             if st.get("trail_applied") and st.get("trail_method")),
+            (sub_trades[0].get("trail_method") if sub_trades else None),
+        )
         # Propagate balance_before/after and net_pnl from sub_trades.
         # NOTE: raw trade dicts from portfolio_engine.py never carry a
         # "balance_before" key at all, so sub_trades[0].get("balance_before")
@@ -295,12 +339,73 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
                 g["chart_data_m15"] = _extract_chart_data(group_candles_m15, entry_time, exit_time, 20, 5)
                 g["chart_data_m5"] = _extract_chart_data(group_candles_m5, entry_time, exit_time, 30, 10)
                 
-                # Generate SMC zones based on the first trade's signal data
+                # ── Chart markings -> smc_data (see strategies/core/markings.py) ──
+                # [V1] Until 2026-08-23 this filter only knew "OB"/"FVG"/"STRUCTURE",
+                # and no strategy wrote metadata["markings"] at all, so smc_data was
+                # empty on every trade ever grouped. Both halves are fixed: the
+                # strategies now emit markings, and the routing below covers the full
+                # kind vocabulary rather than three of its eight members.
                 sig = g.get("original_signal", {})
-                # Generate SMC zones from signal metadata
-                markings = sig.get("metadata", {}).get("markings", [])
-                g["smc_data"]["boxes"] = [m for m in markings if m["type"] in ("OB", "FVG")]
-                g["smc_data"]["markers"] = [m for m in markings if m["type"] == "STRUCTURE"]
+                markings = sig.get("metadata", {}).get("markings", []) or []
+
+                # A marking's `end_time` is None when the strategy emitted it,
+                # because at signal time the trade has not ended yet — and the
+                # renderer reads None as "extend to the right edge of the chart".
+                # The result was every level from every signal running the full
+                # width and crossing over each other's setups.
+                #
+                # Here the exit IS known, so clamp to it: a level stops being
+                # relevant the moment the trade it belongs to closes (TP, SL, BE,
+                # trail or hard stop — whichever ended it). A small pad keeps the
+                # line visibly reaching the exit marker rather than stopping just
+                # short of it.
+                _exit_epoch = None
+                try:
+                    _x = g.get("exit_time") or g.get("entry_time")
+                    if _x is not None:
+                        _exit_epoch = int(_x) if isinstance(_x, (int, float)) \
+                            else int(pd.Timestamp(_x).timestamp())
+                except Exception:
+                    _exit_epoch = None
+
+                _pad = 0
+                if _exit_epoch and g.get("entry_time"):
+                    try:
+                        _e = g["entry_time"]
+                        _entry_epoch = int(_e) if isinstance(_e, (int, float)) \
+                            else int(pd.Timestamp(_e).timestamp())
+                        # 3% of the trade's own duration, capped — proportional so
+                        # it looks right on a 20-minute scalp and a 3-day swing.
+                        _pad = min(max(int((_exit_epoch - _entry_epoch) * 0.03), 60), 3600)
+                    except Exception:
+                        _pad = 0
+
+                boxes, lines, markers = [], [], []
+                for m in markings:
+                    if not isinstance(m, dict):
+                        continue
+                    m = dict(m)  # never mutate the signal's own metadata
+                    if _exit_epoch and not m.get("end_time"):
+                        m["end_time"] = _exit_epoch + _pad
+                    elif _exit_epoch and m.get("end_time", 0) > _exit_epoch + _pad:
+                        # A strategy that set its own end_time past the exit gets
+                        # clamped too — same reasoning.
+                        m["end_time"] = _exit_epoch + _pad
+                    kind = m.get("type") or m.get("kind")
+                    if kind in _BOX_KINDS:
+                        boxes.append(m)
+                    elif kind in _LINE_KINDS:
+                        lines.append(m)
+                    elif kind in _POINT_KINDS:
+                        markers.append(m)
+                g["smc_data"]["boxes"] = boxes
+                g["smc_data"]["lines"] = lines
+                g["smc_data"]["markers"] = markers
+                # Role-keyed label index, so a trade row can answer "which
+                # confluences did this entry require" without walking geometry.
+                summary = sig.get("metadata", {}).get("confluence_summary")
+                if summary:
+                    g["smc_data"]["confluence_summary"] = summary
                 
             except Exception as e:
                 logger.warning(

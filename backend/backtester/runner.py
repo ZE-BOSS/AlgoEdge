@@ -100,6 +100,7 @@ async def run_backtest(
     candles_m15: pd.DataFrame = None,
     candles_m5: pd.DataFrame = None,
     title: str | None = None,
+    strategy: Any = None,
 ) -> dict[str, Any]:
     """
     Execute a backtest and optionally persist results to PostgreSQL.
@@ -127,7 +128,10 @@ async def run_backtest(
     # Run CPU-bound engine in a thread pool so it doesn't block the event loop
     # (without this, ALL other API requests hang until the backtest finishes)
     import asyncio
-    results = await asyncio.to_thread(engine.run, candles, signals, initial_balance, candles_m15, candles_m5)
+    results = await asyncio.to_thread(
+        engine.run, candles, signals, initial_balance, candles_m15, candles_m5,
+        strategy,
+    )
 
     # Broadcast: engine complete
     await _broadcast_progress(user_id, {
@@ -214,6 +218,9 @@ async def run_backtest(
         bias_stats=report.bias_stats,
         confluence_stats=report.confluence_stats,
         run_logs=json.dumps(results.get("run_logs", []), default=_json_default),
+        # [Phase 13 section C.7] Persist the continuous replay series so a
+        # saved run can still be scrubbed end-to-end after a reload.
+        replay_data=json.dumps(results.get("replay"), default=_json_default) if results.get("replay") else None,
     )
 
     async with get_session() as session:

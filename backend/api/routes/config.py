@@ -27,6 +27,19 @@ class UpdateConfigRequest(BaseModel):
     preset_name: str | None = None
 
 
+@router.get("/config/parameter_schema")
+async def get_parameter_schema():
+    """
+    [7.1/H2] Machine-readable parameter schema generated from RiskParams,
+    PropFirmParams, and every strategy's Params dataclass — `{key, group,
+    label, type, unit, help, default, affects}` per field, with `help`
+    extracted from each field's existing attribute-docstring. No auth
+    required — this describes the config SHAPE, not any user's data.
+    """
+    from backend.core.schema_introspection import build_full_schema
+    return {"fields": build_full_schema()}
+
+
 @router.get("/config")
 async def get_user_config(
     current_user: User = Depends(get_current_user),
@@ -86,4 +99,16 @@ async def update_user_config(
         logger.info(f"Config created for {current_user.email}: {list(req.config.keys())}")
 
     bot_service.log_system_event(f"Config saved: {', '.join(list(req.config.keys())[:5])}", category="CONFIG")
-    return {"updated": True}
+
+    # [12.9/Part14] Non-blocking cross-validation — same pattern as the
+    # existing risk_per_trade_pct-vs-max_risk_hard_cap_pct frontend warning:
+    # informational, never rejects the save.
+    validation_warnings: list[str] = []
+    try:
+        from backend.core.config_schema import UserConfigV2
+        parsed = UserConfigV2.from_dict(json.loads(config.config_json))
+        validation_warnings = parsed.validate_slot_position_caps()
+    except Exception as e:
+        logger.warning(f"[12.9] Slot cap cross-validation skipped (config didn't parse cleanly): {e}")
+
+    return {"updated": True, "validation_warnings": validation_warnings}

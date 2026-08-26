@@ -2,6 +2,31 @@
 ## AlgoEdge — Risk Management System Specification
 ### Multi-TP | Trailing Stop | Break-Even | Multiple Positions | User-Controlled
 
+> **MAJOR UPDATE (2026-08, Phase 5 — [Doc-7]): RR-triggered exit architecture.** Break-even and trailing
+> are no longer coupled to TP-hit events by default. Both gained a `mode` field
+> (`RiskParams.be_mode` / `RiskParams.trail_mode`, each `RR | TP_HIT | EITHER | NONE`): `RR` fires purely
+> off an R-multiple threshold (`be_trigger_rr` / `trail_trigger_rr`) regardless of whether any TP has
+> closed; `TP_HIT` fires only when a specific TP level closes; `EITHER` (the default for `be_mode`, so
+> nothing shifts for an existing config) is whichever comes first; `NONE` disables the mechanism outright.
+> `RiskParams.trail_require_be_first` (default `False`) decouples trailing from break-even entirely —
+> the scenario this section's design failed to express before: **a single TP at a chosen RR, 100% volume,
+> with break-even and trailing each independently triggerable by RR level rather than TP hit**, is now
+> directly configurable (`tp_count=1`, `trail_method_tp1` — previously hardcoded to no trailing at all —
+> `be_mode=RR`, `trail_mode=RR`, `trail_require_be_first=false`). `tp_volume_pcts` replaces the
+> `tp_splits` string-parsed field (kept as a deprecated alias). See §3.4/§5.3 below for where this
+> plugs in, and the `blended_rr` note directly below for the accompanying `min_rr` re-spec.
+>
+> **`min_rr` now gates on blended RR, not the last TP's RR.** `blended_rr = Σ(volume_pct_i × rr_i)` across
+> every configured TP leg — the previous check tested only the LAST TP's RR, which is trivially satisfied
+> by a high tail target (e.g. TP3 at 5R) regardless of how little volume ever reaches it and was never a
+> real per-trade edge filter. `blended_rr` and the BE-scratch-adjusted `blended_rr_be` are computed on
+> every approved signal and surfaced in `sizing_diagnostics`; `last_tp_rr` is kept as a displayed-only
+> figure. `expected_rr` (weighting by each level's historical hit rate) is specified but not implemented
+> — it needs a live per-level hit-rate feed the risk engine doesn't have access to per-signal; that would
+> live in the analytics/reporting layer instead. See `implementation/TASKS.md` Phase 5 for the full
+> change record and verification notes (the RR-triggered-trailing-without-BE scenario above was verified
+> directly against the engine, not just implemented).
+
 ---
 
 ## Overview

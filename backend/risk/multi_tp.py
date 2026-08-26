@@ -51,24 +51,57 @@ class MultiTPManager:
         self.tp3_rr = config.get("tp3_rr", 5.0)
         self.tp4_rr = config.get("tp4_rr", 10.0)
         self.tp5_rr = config.get("tp5_rr", 15.0)
-        raw_splits = config.get("tp_splits", [40, 30, 20, 5, 5])
-        if isinstance(raw_splits, str):
-            try:
-                self.tp_splits = [float(x.strip()) for x in raw_splits.split(",") if x.strip()]
-            except ValueError:
-                self.tp_splits = [40, 30, 20, 5, 5]
-        elif isinstance(raw_splits, list):
-            self.tp_splits = [float(x) for x in raw_splits]
+        # [5.1/5.2/Part4] tp_volume_pcts is the explicit, typed replacement for
+        # tp_splits (which accepted a comma-separated string — an odd shape
+        # for a numeric list, kept only for back-compat). tp_volume_pcts wins
+        # when set; tp_splits (string or list) remains the fallback source so
+        # nothing that already configures tp_splits breaks.
+        raw_volume_pcts = config.get("tp_volume_pcts")
+        if isinstance(raw_volume_pcts, list) and raw_volume_pcts:
+            self.tp_splits = [float(x) for x in raw_volume_pcts]
         else:
-            self.tp_splits = [40, 30, 20, 5, 5]
+            raw_splits = config.get("tp_splits", [40, 30, 20, 5, 5])
+            if isinstance(raw_splits, str):
+                try:
+                    self.tp_splits = [float(x.strip()) for x in raw_splits.split(",") if x.strip()]
+                except ValueError:
+                    self.tp_splits = [40, 30, 20, 5, 5]
+            elif isinstance(raw_splits, list):
+                self.tp_splits = [float(x) for x in raw_splits]
+            else:
+                self.tp_splits = [40, 30, 20, 5, 5]
         self.tp_count = config.get("tp_count", 3)  # User-configurable: how many TPs (1–5)
         self.min_rr = config.get("min_rr", 3.0)
         self.multi_position_mode = config.get("multi_position_mode", True)
         self.prop_firm_config = config.get("prop_firm", {})
 
+        # [2.15] Per-strategy TP1 RR override, resolved through normal param
+        # lookup instead of a strategy_id=="DriftJumpAlpha" branch hardcoded
+        # into calculate_tp_levels. MultiTPManager is a single shared instance
+        # across every strategy in a portfolio run, so this must be a
+        # {strategy_id: rr} dict, not one flat value — a flat override would
+        # silently apply to every strategy sharing this instance, not just the
+        # one that asked for it. Populated from each strategy's own
+        # tp1_rr_override param field (e.g. DriftJumpAlphaParams.tp1_rr_override)
+        # by the caller assembling risk_config (backtest.py routes).
+        self.tp1_rr_overrides_by_strategy: dict[str, float] = config.get("tp1_rr_overrides_by_strategy", {}) or {}
+
+        # [2.13] Diagnostics from the most recent calculate_tp_levels() call —
+        # requested vs. actually placed TP count, so a caller can tell "the
+        # strategy asked for 3 TPs but only 2 fit the risk cap" apart from a
+        # signal that was simply rejected outright.
+        self.last_tp_levels_requested: int = 0
+        self.last_tp_levels_placed: int = 0
+
         # Trail methods per TP level (all configurable)
+        # [5.1/5.2/F2] trail_method_tp1 was hardcoded None — with tp_count=1
+        # this made trailing structurally impossible no matter what was
+        # configured. Now reads the real (default "NONE") field; downstream
+        # TrailingManager.calculate_trailing_sl's else-branch already treats
+        # any unrecognised method string (including "NONE") as "no trail",
+        # same convention trail_method_tp2-5 already rely on.
         self.trail_methods = [
-            None,                                               # TP1: no trail
+            config.get("trail_method_tp1", "NONE"),            # TP1
             config.get("trail_method_tp2", "ATR_TRAIL"),       # TP2
             config.get("trail_method_tp3", "STRUCTURE_TRAIL"), # TP3
             config.get("trail_method_tp4", "ATR_TRAIL"),       # TP4
@@ -116,9 +149,11 @@ class MultiTPManager:
             logger.error(f"Unknown direction '{direction}' — cannot calculate TPs")
             return []
 
-        # Override TP1 RR for DriftJumpAlpha to be much tighter (0.5R) because crash spikes
-        # happen fast and reverse quickly.
-        tp1_rr_used = 0.5 if strategy_id == "DriftJumpAlpha" else self.tp1_rr
+        # [2.15] Per-strategy TP1 RR override (e.g. DriftJumpAlpha's crash-spike
+        # setups want a much tighter TP1 than the global default), resolved
+        # through normal per-strategy param lookup rather than a hardcoded
+        # strategy_id branch.
+        tp1_rr_used = self.tp1_rr_overrides_by_strategy.get(strategy_id, self.tp1_rr)
 
         rr_multipliers = [tp1_rr_used, self.tp2_rr, self.tp3_rr, self.tp4_rr, self.tp5_rr]
         tp_prices = [entry + (risk * rr * sign) for rr in rr_multipliers]
@@ -129,6 +164,10 @@ class MultiTPManager:
 
         # How many TPs the user wants (clamped 1–5)
         active_count = max(1, min(self.tp_count, 5))
+        # [2.13] default; overwritten on every success path below, left as-is
+        # (0 placed) if the function returns [] for any reason.
+        self.last_tp_levels_requested = active_count
+        self.last_tp_levels_placed = 0
 
         if not self.multi_position_mode:
             # Single position mode — use only TP1
@@ -143,6 +182,33 @@ class MultiTPManager:
             )
             if not self._validate_tp(tp, entry, direction):
                 return []
+            self.last_tp_levels_placed = 1
+            return [tp]
+
+        # [2.14] tp_count == 1 has nothing to split — skip the whole
+        # lot_min-flooring/remainder-sweep machinery below (which exists purely
+        # to keep EVERY sub-position at or above the broker's minimum lot when
+        # dividing volume across multiple legs) and just floor the full
+        # requested volume to the lot step, matching the multi_position_mode
+        # branch above.
+        if active_count == 1:
+            info = get_symbol_info(symbol, use_live_mt5=use_live_mt5)
+            lot_step = info.get("volume_step", 0.01)
+            vol = math.floor(total_volume / lot_step) * lot_step if lot_step > 0 else total_volume
+            tp = TPLevel(
+                level=1,
+                rr_multiplier=tp1_rr_used,
+                volume_pct=1.0,
+                tp_price=tp_prices[0],
+                volume=round(vol, 4),
+                trail_method=self.trail_methods[0] if self.trail_methods else None,
+                deferred=False,
+            )
+            self.last_tp_levels_requested = 1
+            if not self._validate_tp(tp, entry, direction):
+                self.last_tp_levels_placed = 0
+                return []
+            self.last_tp_levels_placed = 1
             return [tp]
 
         # Build TP levels with volume splits — ALL immediate
@@ -218,9 +284,38 @@ class MultiTPManager:
                     f"Reducing TP count first..."
                 )
 
-                # Step 1: Reduce TP count (drop last TPs one by one)
+                # Step 1: Reduce TP count (drop last TPs one by one). [2.13] Before
+                # accepting a surviving subset at its ORIGINAL (smaller) split
+                # volumes, first try reallocating the FULL requested budget across
+                # just those surviving levels — dropping TP3 shouldn't mean TP1/TP2
+                # stay pinned at their original 50%/30% split-of-100% when the
+                # account could deploy the whole 80% (or more) across the two of
+                # them and still respect the risk cap.
                 while len(levels) > 1:
                     levels = levels[:-1]  # drop last TP
+                    n_remaining = len(levels)
+                    remaining_weight = sum(splits[:n_remaining])
+                    if remaining_weight > 0:
+                        reallocated = []
+                        for i, tp in enumerate(levels):
+                            w = splits[i] / remaining_weight
+                            rv = total_volume * w
+                            rv = math.floor(rv / lot_step) * lot_step if lot_step > 0 else rv
+                            rv = min(max(lot_min, round(rv, 4)), max_lot_allowed)
+                            reallocated.append(rv)
+                        reallocated_risk = calculate_risk_dollars(
+                            sum(reallocated), entry, sl, symbol, use_live_mt5=use_live_mt5
+                        )
+                        if reallocated_risk <= max_risk_cap_dollars:
+                            for tp, rv in zip(levels, reallocated):
+                                tp.volume = rv
+                            actual_total_risk = reallocated_risk
+                            logger.info(
+                                f"[MultiTP] {symbol}: Risk capped by reallocating the full budget "
+                                f"to {n_remaining} TP(s). actual_risk=${actual_total_risk:.2f}"
+                            )
+                            break
+
                     actual_total_risk = calculate_risk_dollars(
                         sum(tp.volume for tp in levels), entry, sl, symbol, use_live_mt5=use_live_mt5
                     )
@@ -269,6 +364,12 @@ class MultiTPManager:
             f"TP levels: {len(levels)} | dir={direction} | entry={entry} | "
             f"risk={abs(entry-sl):.5f} | tp_count={len(levels)}"
         )
+
+        # [2.13] requested vs. placed — lets a caller distinguish "the risk cap
+        # forced fewer TPs than the strategy/config asked for" from a signal
+        # that was simply rejected outright.
+        self.last_tp_levels_requested = active_count
+        self.last_tp_levels_placed = len(levels)
 
         return levels
 

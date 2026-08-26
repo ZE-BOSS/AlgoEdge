@@ -551,8 +551,68 @@ _SWAP_MODE_REOPEN_BID = 8
 # default rather than model a cost that would dominate every result.
 MAX_DAILY_SWAP_PCT_OF_NOTIONAL = 0.5
 
+# Absolute ceiling on overnight financing, in ACCOUNT currency per lot per day.
+#
+# The percent-of-notional check above cannot catch a currency-unit error: a
+# GBPJPY lot carries ~$21M notional, so 0.5% permits $105,000/lot/day and it
+# happily accepted an unconverted -1893 JPY as -$1,893. Real financing on a
+# standard lot runs single-digit to low-hundreds; $500 is generous headroom for
+# an exotic and still two orders of magnitude below a JPY/USD confusion.
+MAX_ABS_DAILY_SWAP_PER_LOT = 500.0
+
 
 def _swaps_to_usd_per_lot_per_day(
+    info, symbol: str, swap_long: float, swap_short: float, defaults: dict
+) -> tuple[float, float, bool]:
+    """See _convert_swap_impl — this signature is unchanged for callers."""
+    return _convert_swap_impl(info, symbol, swap_long, swap_short, defaults)
+
+
+def _account_currency(default: str = "USD") -> str:
+    """Account currency from the live terminal, falling back to USD."""
+    try:
+        import MetaTrader5 as mt5
+        acc = mt5.account_info()
+        return (getattr(acc, "currency", None) or default).upper()
+    except Exception:
+        return default
+
+
+def _fx_to_account(info, symbol: str) -> float | None:
+    """
+    Multiplier converting one unit of the symbol's PROFIT currency into the
+    account currency.
+
+    Returns 1.0 when they already match, a live rate when a cross exists, and
+    None when neither is available — in which case the caller must not guess.
+
+    Tries the direct pair first (JPYUSD), then the inverse (USDJPY -> 1/rate),
+    which is the one that actually exists for JPY crosses.
+    """
+    profit_ccy = (getattr(info, "currency_profit", "") or "").upper()
+    acct = _account_currency()
+    if not profit_ccy or profit_ccy == acct:
+        return 1.0
+
+    try:
+        import MetaTrader5 as mt5
+    except Exception:
+        return None
+
+    for pair, invert in ((f"{profit_ccy}{acct}", False), (f"{acct}{profit_ccy}", True)):
+        try:
+            if not mt5.symbol_select(pair, True):
+                continue
+            tick = mt5.symbol_info_tick(pair)
+            px = float(getattr(tick, "bid", 0) or 0) or float(getattr(tick, "ask", 0) or 0)
+            if px > 0:
+                return (1.0 / px) if invert else px
+        except Exception:
+            continue
+    return None
+
+
+def _convert_swap_impl(
     info, symbol: str, swap_long: float, swap_short: float, defaults: dict
 ) -> tuple[float, float, bool]:
     """
@@ -582,6 +642,13 @@ def _swaps_to_usd_per_lot_per_day(
     price = _last_price(symbol) or 0.0
     notional = price * contract if (price > 0 and contract > 0) else 0.0
 
+    # Which branches yield a figure in the symbol's PROFIT currency rather than
+    # the account's. Everything except CURRENCY_DEPOSIT does — points are worth
+    # `point * contract` of the quote currency, and `notional` is price x
+    # contract, also quote currency. Only CURRENCY_DEPOSIT is already in the
+    # account's own currency by definition.
+    needs_fx = mode != _SWAP_MODE_CURRENCY_DEPOSIT
+
     if mode == _SWAP_MODE_POINTS:
         if point <= 0 or contract <= 0:
             return 0.0, 0.0, False
@@ -593,16 +660,62 @@ def _swaps_to_usd_per_lot_per_day(
         long_usd = notional * (swap_long / 100.0) / 360.0
         short_usd = notional * (swap_short / 100.0) / 360.0
     else:  # CURRENCY_SYMBOL / CURRENCY_MARGIN / CURRENCY_DEPOSIT
-        # Already per lot per day in a currency. Non-USD account/symbol currencies
-        # are not converted here — an FX conversion would need the account
-        # currency and a live cross rate; the plausibility check below catches
-        # anything wildly off.
+        # Per lot per day, but in the SYMBOL's currency — not necessarily the
+        # account's. This branch previously used the number as-is and said so:
+        # "Non-USD account/symbol currencies are not converted here ... the
+        # plausibility check below catches anything wildly off."
+        #
+        # It did not. Measured on a real GBPJPY run: MT5 reported
+        # swap_short = -1893, which is JPY. Consumed as USD that is a $1,893
+        # per-lot-per-day charge — roughly 150x too large. The notional check
+        # let it through because the cap is a percentage of a ~$21M notional,
+        # and 1893 is nowhere near that.
+        #
+        # The damage was not subtle: a GBPJPY take-profit worth +5.26R was
+        # recorded as a -$1,770 LOSS because financing swamped it, and the
+        # account equity ran to -$25,099 over the run. `pnl_r` stayed correct
+        # throughout (it is derived from price), which is why cash P&L and
+        # R-multiple disagreed on 21 of 113 trades.
         long_usd, short_usd = swap_long, swap_short
 
-    # Plausibility check against notional.
+    # Convert the symbol's currency into the account's. This is the step whose
+    # absence produced the GBPJPY damage: MT5 reports swap_mode=POINTS with
+    # swap_short=-18.93, which the points branch correctly turns into 1,893 —
+    # of JPY. Spent as USD that is a $1,893/lot/day charge, ~150x reality, and
+    # it converted a +5.26R take-profit into a -$1,770 loss.
+    if needs_fx:
+        rate = _fx_to_account(info, symbol)
+        if rate is None:
+            # Refuse rather than guess. The asset-class default is wrong by a
+            # little; an unconverted quote-currency figure can be wrong by 150x.
+            logger.warning(
+                f"[COSTS] {symbol}: swap resolves to "
+                f"{getattr(info, 'currency_profit', '?')} and no rate to the account "
+                f"currency was available — using the asset-class default."
+            )
+            return 0.0, 0.0, False
+        long_usd, short_usd = long_usd * rate, short_usd * rate
+
+    # Plausibility checks.
+    worst = max(abs(long_usd), abs(short_usd))
+
+    # Absolute per-lot bound, checked FIRST because the notional test below is
+    # far too loose to catch a currency-unit error: on GBPJPY the notional is
+    # ~$21M, so a 0.5% cap permits $105,000/lot/day and waved through the
+    # unconverted -1893 JPY figure. No real instrument finances at more than a
+    # few hundred per lot per day, so anything past that is a units bug.
+    if worst > MAX_ABS_DAILY_SWAP_PER_LOT:
+        logger.warning(
+            f"[COSTS] {symbol}: derived swap ${worst:,.2f}/lot/day exceeds the "
+            f"absolute sanity bound of ${MAX_ABS_DAILY_SWAP_PER_LOT:,.0f} "
+            f"(swap_mode={mode}, raw {swap_long}/{swap_short}, "
+            f"profit_ccy={getattr(info, 'currency_profit', '?')}) — almost certainly a "
+            f"currency-unit error; falling back to the asset-class default."
+        )
+        return 0.0, 0.0, False
+
     if notional > 0:
         cap = notional * (MAX_DAILY_SWAP_PCT_OF_NOTIONAL / 100.0)
-        worst = max(abs(long_usd), abs(short_usd))
         if worst > cap:
             logger.warning(
                 f"[COSTS] {symbol}: derived swap ${worst:,.2f}/lot/day exceeds "

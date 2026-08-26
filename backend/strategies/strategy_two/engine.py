@@ -360,9 +360,32 @@ class DriftJumpAlphaEngine(BaseStrategy):
         # "insufficient trend strength" case this filter exists to reject. The old
         # `pd.notna(adx_val) and ...` check let NaN silently bypass the filter
         # instead of blocking on it.
+        # [6.13/S18] adx_size_modifier feeds into the final size_modifier below —
+        # 1.0 unless the REDUCED_SIZE clamp below actually reduces it.
+        adx_size_modifier = 1.0
         if not pd.notna(adx_val) or adx_val < min_adx:
-            self.log_event(f"ADX {adx_val:.1f} < {min_adx}. Drift Regime ignored due to weak trend.")
-            regime_active = False
+            adx_gate_mode = getattr(self.params, "adx_gate_mode", "REDUCED_SIZE") if self.params else "BLOCK"
+            if adx_gate_mode == "BLOCK":
+                self.log_event(f"ADX {adx_val:.1f} < {min_adx}. Drift Regime ignored due to weak trend.")
+                regime_active = False
+            else:
+                # Percentile rank of the current ADX within its own recent
+                # history, so "weak trend" is measured against this
+                # instrument's own regime, not an arbitrary fixed threshold.
+                recent_adx = df["adx"].tail(100).dropna()
+                if len(recent_adx) >= 10 and pd.notna(adx_val):
+                    percentile = float((recent_adx < adx_val).mean())
+                else:
+                    percentile = 0.0
+                floor = getattr(self.params, "adx_gate_min_size_modifier", 0.1) if self.params else 0.1
+                adx_size_modifier = max(floor, percentile)
+                self.log_event(
+                    f"ADX {adx_val:.1f} < {min_adx} — REDUCED_SIZE mode, sizing scaled to "
+                    f"{adx_size_modifier:.0%} (ADX {percentile:.0%} percentile of recent history) "
+                    f"instead of blocked."
+                )
+                # regime_active is left as computed from the EMA-separation
+                # check above — the setup is allowed through, at reduced size.
 
         if not regime_active:
             # Do NOT clear post_jump_regime_reset here — this branch fires on
@@ -408,6 +431,10 @@ class DriftJumpAlphaEngine(BaseStrategy):
         size_modifier = 1.0
         if gap_pct >= SPEC_DEFAULTS['gap_percentile_hard_reduce']:
             size_modifier = 1.0 - (SPEC_DEFAULTS['size_reduction_pct_at_hard_threshold'] / 100.0)
+        # [6.13/S18] Combine with the ADX-percentile clamp — both are
+        # independent size-reduction factors (gap-extremity vs. trend
+        # strength), so they multiply rather than one overriding the other.
+        size_modifier *= adx_size_modifier
             
         buffer = 1.5 * atr_val
         

@@ -1,3 +1,14 @@
+> **SUPERSEDED (2026-08, Phase 8/[8.8])** — the engine implementation described
+> below (single pullback trigger, VWAP itself as the entry, no σ-bands) has
+> been replaced by the band-framework rewrite in
+> [`vwap_strategy_v2.md`](vwap_strategy_v2.md): VWAP as bias/fair-value only,
+> ±1σ/±2σ/±3σ bands, two setups (Pullback-to-Value + Band Reversion), a real
+> 0–100 confluence score, and σ-band-based targets exempt from the global
+> R-grid. This document is kept for the historical "v1 vs. Matteo Conti
+> source" comparison in §1 — the RULES it derives (session windows, daily
+> guardrails, the stop-loss convention resolution) are still the basis for
+> the current `VWAPParams`, only the entry/exit engine logic changed.
+
 # VWAP Strategy — Deterministic Implementation Plan (AlgoEdge)
 ## v2 — Optimized against Matteo Conti's "Drift VWAP Pullback" (Golden Ticket VWAP)
 

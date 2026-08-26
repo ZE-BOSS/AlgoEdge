@@ -35,6 +35,15 @@ class BotService:
         self.engine = None
         self.risk_engine = None          # Cached RiskEngine — rebuilt only when config changes
         self._risk_engine_fp = None      # Fingerprint tuple for cache invalidation
+        # [4.2/D1] For personal accounts under sizing_basis="STATIC", the
+        # static anchor is the balance first observed after this service
+        # started — NOT prop_firm.initial_balance (that field's $10,000
+        # default previously caused "Bug 12": lot sizes computed against
+        # $10k instead of a real $25k personal account). Cached once per
+        # process lifetime; a bot restart re-anchors to the balance at
+        # that moment, matching what "static" should mean for an account
+        # with no explicit starting-balance concept of its own.
+        self._static_personal_balance_anchor: float | None = None
         self.circuit_breaker = None
         self.prop_firm_validator = None
 
@@ -448,51 +457,98 @@ class BotService:
                     except Exception as e:
                         logger.error(f"Failed to update prop firm equity: {e}")
 
-                # Maintain a dictionary of engines per symbol
+                # Maintain a dictionary of engines per SLOT (was per symbol)
                 if not hasattr(self, 'engines'):
                     self.engines = {}
-                
+
                 had_execution_failure = False
 
-                for symbol in self.symbols:
+                # [12.7/Part14] Slot-aware dispatch — the same symbol may now
+                # run under more than one strategy concurrently
+                # (InstrumentSlot, [12.1]). self.symbols remains the
+                # authoritative filter of which symbols are active for this
+                # bot run (set by /bot/start); each active symbol resolves to
+                # its one-or-more ENABLED slots. A symbol with no matching
+                # slot at all (e.g. a bare symbol list with no
+                # instrument_slots/instrument_settings backing it) gets a
+                # synthetic single default-strategy slot, reproducing today's
+                # "APA_v1 fallback" behaviour exactly. slot_id is derived
+                # DETERMINISTICALLY (not a fresh uuid4 per scan) so
+                # self.engines[slot_id] correctly finds and reuses the SAME
+                # engine instance across scan cycles — a fresh id every cycle
+                # would silently wipe every strategy's internal state machine
+                # on every single scan.
+                import uuid as _uuid_mod
+                from backend.core.config_schema import InstrumentSlot as _InstrumentSlot
+                _slots_by_symbol: dict[str, list] = {}
+                for _slot in (getattr(config, 'instrument_slots', None) or []):
+                    if _slot.enabled:
+                        _slots_by_symbol.setdefault(_slot.symbol, []).append(_slot)
+
+                effective_slots = []
+                for _sym in self.symbols:
+                    _matching = _slots_by_symbol.get(_sym)
+                    if _matching:
+                        effective_slots.extend(_matching)
+                    else:
+                        effective_slots.append(_InstrumentSlot(
+                            slot_id=_uuid_mod.uuid5(_uuid_mod.NAMESPACE_OID, f"{_sym}:APA_v1").hex[:12],
+                            symbol=_sym, strategy_id="APA_v1",
+                        ))
+
+                for slot in effective_slots:
+                    symbol = slot.symbol
                     if not self.running:
                         break
 
                     # Throttle between symbols to avoid overwhelming MT5
                     await asyncio.sleep(0.5)
 
-                    self._log_event(f"Scanning {symbol}...", category="SCAN")
+                    self._log_event(f"Scanning {symbol} [{slot.strategy_id}]...", category="SCAN")
 
                     try:
                         import pandas as pd
 
                         from backend.mt5.order_manager import OrderManager
                         from backend.risk.engine import RiskEngine
-                        
+
                         def _index_candles(df):
                             if 'time' in df.columns:
                                 return df.set_index(pd.to_datetime(df['time'], unit='s'))
                             return df
 
-                        # ── DYNAMIC STRATEGY RESOLUTION ──
-                        strategy_id = "APA_v1"
-                        
-                        if hasattr(config, 'instrument_settings') and config.instrument_settings:
-                            for settings in config.instrument_settings:
-                                if settings.symbol == symbol:
-                                    strategy_id = getattr(settings, 'strategy_id', "APA_v1")
-                                    if strategy_id == "SMC_v1":
-                                        strategy_id = "APA_v1"
-                                    break
-                        
-                        # Instantiate engine if not exists
-                        if symbol not in self.engines or getattr(self.engines[symbol], 'strategy_id', None) != strategy_id:
+                        # ── STRATEGY RESOLUTION — now via the slot itself, not a
+                        # separate instrument_settings lookup keyed by symbol ──
+                        strategy_id = slot.strategy_id
+                        if strategy_id == "SMC_v1":
+                            strategy_id = "APA_v1"
+
+                        # Instantiate engine if not exists — keyed by slot_id so
+                        # two slots on the same symbol never share one engine's
+                        # (and therefore one strategy's) internal state dict.
+                        if slot.slot_id not in self.engines or getattr(self.engines[slot.slot_id], 'strategy_id', None) != strategy_id:
                             engine_class = get_strategy(strategy_id)
-                            self.engines[symbol] = engine_class(config)
-                            self.engines[symbol].strategy_id = strategy_id
-                            self._log_event(f"[{symbol}] Instantiated {strategy_id} Engine", "INFO", "BOT")
-                            
-                        current_engine = self.engines[symbol]
+                            new_engine = engine_class(config)
+                            # [12.1/12.7] strategy_params_override — engine.params
+                            # starts as a REFERENCE to the shared config.<strategy>
+                            # object (config.apa, config.vwap, ...), which every
+                            # OTHER slot running the same strategy also reads. A
+                            # per-slot override must rebind engine.params to its
+                            # OWN copy first, or applying it here would silently
+                            # leak into every sibling slot sharing that strategy.
+                            if getattr(slot, "strategy_params_override", None):
+                                import copy as _copy
+                                new_engine.params = _copy.deepcopy(new_engine.params)
+                                for _k, _v in slot.strategy_params_override.items():
+                                    if hasattr(new_engine.params, _k):
+                                        setattr(new_engine.params, _k, _v)
+                                    else:
+                                        logger.warning(f"[{symbol}] slot {slot.slot_id}: strategy_params_override key '{_k}' not found on {strategy_id} params — ignored")
+                            self.engines[slot.slot_id] = new_engine
+                            self.engines[slot.slot_id].strategy_id = strategy_id
+                            self._log_event(f"[{symbol}] Instantiated {strategy_id} Engine (slot {slot.slot_id})", "INFO", "BOT")
+
+                        current_engine = self.engines[slot.slot_id]
                         
                         # Get required timeframes for the strategy
                         req_tfs = current_engine.get_required_timeframes() if hasattr(current_engine, 'get_required_timeframes') else ["H4", "M15", "M5"]
@@ -580,41 +636,34 @@ class BotService:
                                     "SIGNAL", "SIGNAL"
                                 )
 
-                                # === Enforce Max Concurrent Positions (MT5 = source of truth) ===
-                                try:
-                                    import MetaTrader5 as mt5
-                                    mt5_positions = mt5.positions_get()
-                                    if mt5_positions:
-                                        # Count unique open symbols — our design is 1 group per
-                                        # symbol, so any positions on a symbol = 1 signal counted.
-                                        # Previously used round(time/5) time-bucket grouping, which
-                                        # counted 3 TP sub-positions as 3 signals (Bug A).
-                                        open_symbols = set(p.symbol for p in mt5_positions)
-                                        live_trade_count = len(open_symbols)
-                                        symbol_trade_count = 1 if signal.symbol in open_symbols else 0
-                                    else:
-                                        live_trade_count = 0
-                                        symbol_trade_count = 0
-                                        
-                                    max_concurrent = getattr(config.risk, 'max_concurrent_positions', 3)
-                                    max_per_symbol = getattr(config.risk, 'max_positions_per_symbol', 1)
-                                    
-                                    if live_trade_count >= max_concurrent:
-                                        self._log_event(f"[REJECTED] Max open positions reached globally ({live_trade_count}/{max_concurrent})", "SIGNAL", "RISK")
-                                        await self._save_signal_state(signal, "SKIPPED", f"Max open positions reached globally ({live_trade_count}/{max_concurrent})")
-                                        continue
-                                        
-                                    if symbol_trade_count >= max_per_symbol:
-                                        self._log_event(f"[REJECTED] Max positions reached for {signal.symbol} ({symbol_trade_count}/{max_per_symbol})", "SIGNAL", "RISK")
-                                        await self._save_signal_state(signal, "SKIPPED", f"Max positions reached for {signal.symbol} ({symbol_trade_count}/{max_per_symbol})")
-                                        continue
-                                except Exception as e:
-                                    logger.error(f"Error checking open positions: {e}")
-
-
                                 # === Check Circuit Breaker ===
+                                # [4.8/D10] Position-per-symbol and max-concurrent-positions limits
+                                # are now enforced ONLY here. This used to be preceded by a SEPARATE
+                                # MT5-live-position-count check duplicating exactly what
+                                # CircuitBreaker.check_symbol (per-symbol) and check_all (global
+                                # concurrent, inside evaluate_signal below) already enforce — two
+                                # independent implementations of the same rule is exactly the kind
+                                # of divergence Rule-5 exists to catch, and CircuitBreaker's state is
+                                # kept accurate against MT5 via reconcile_from_mt5() on startup, so
+                                # it doesn't need a parallel direct-MT5-count fallback here.
                                 if self.circuit_breaker:
-                                    cb_ok, cb_reason = self.circuit_breaker.check_symbol(signal.symbol)
+                                    # [12.5/Part14] Slot-aware — was a bare check_symbol(symbol),
+                                    # which would incorrectly block a second slot's signal against
+                                    # the GLOBAL symbol-wide position count even though
+                                    # evaluate_signal's own (slot-aware) check further down would
+                                    # have allowed it. Must agree with evaluate_signal's internal
+                                    # check_symbol call or this early-exit silently overrides it.
+                                    _slot_max_positions = (
+                                        slot.max_positions_per_symbol
+                                        if slot.max_positions_per_symbol is not None
+                                        else getattr(config.risk, "max_positions_per_symbol", 1)
+                                    )
+                                    cb_ok, cb_reason = self.circuit_breaker.check_symbol(
+                                        signal.symbol,
+                                        slot_id=slot.slot_id,
+                                        slot_max_positions=_slot_max_positions,
+                                        slot_max_losses_per_day=slot.max_losses_per_day,
+                                    )
                                     if not cb_ok:
                                         self._log_event(f"[REJECTED] Circuit breaker blocked {signal.symbol}: {cb_reason}", "SIGNAL", "RISK")
                                         await self._save_signal_state(signal, "SKIPPED", cb_reason)
@@ -660,7 +709,13 @@ class BotService:
                                         "prop_firm": {
                                             "account_mode": getattr(config.prop_firm, "account_mode", "personal"),
                                             "max_lot_sizes": getattr(config.prop_firm, "max_lot_sizes", {}),
-                                            "initial_balance": getattr(config.prop_firm, "initial_balance", 10000.0)
+                                            "initial_balance": getattr(config.prop_firm, "initial_balance", 10000.0),
+                                            # [3.10/3.11] real, user-editable settings — see PropFirmParams.
+                                            "default_max_lot": getattr(config.prop_firm, "default_max_lot", None),
+                                            "max_positions_per_symbol": getattr(config.prop_firm, "max_positions_per_symbol", 5),
+                                            "max_total_positions": getattr(config.prop_firm, "max_total_positions", 13),
+                                            "trading_day_rule": getattr(config.prop_firm, "trading_day_rule", "PROFIT_PCT"),
+                                            "trading_day_profit_pct": getattr(config.prop_firm, "trading_day_profit_pct", 0.5),
                                         },
                                         # max_risk_hard_cap_pct: user-configurable absolute safety cap from RiskParams.
                                         # Active for ALL account modes (personal and prop_firm).
@@ -691,18 +746,61 @@ class BotService:
                                         "trail_activation_rr": getattr(config.risk, "trail_activation_rr", 1.0),
                                         "trail_step_pips": getattr(config.risk, "trail_step_pips", 5.0),
                                         "trail_structure_bars": getattr(config.risk, "trail_structure_bars", 3),
+                                        # [Phase 2 sizing-truth] real, user-editable settings that used to
+                                        # be hardcoded module constants — see core/config_schema.py::RiskParams.
+                                        # getattr(..., None) so an older saved config without these fields
+                                        # still resolves to the position_sizer.py fallback default, not 0/False.
+                                        "max_margin_utilisation_pct": getattr(config.risk, "max_margin_utilisation_pct", None),
+                                        "max_account_leverage": getattr(config.risk, "max_account_leverage", None),
+                                        "min_deployable_risk_pct": getattr(config.risk, "min_deployable_risk_pct", 0.0),
+                                        "min_stop_spread_multiple": getattr(config.risk, "min_stop_spread_multiple", None),
+                                        "confluence_risk_tiers": getattr(config.risk, "confluence_risk_tiers", None),
+                                        "reject_below_confluence": getattr(config.risk, "reject_below_confluence", True),
+                                        "post_split_risk_tolerance_pct": getattr(config.risk, "post_split_risk_tolerance_pct", 5.0),
+                                        "exit_slippage_pips": getattr(config.risk, "exit_slippage_pips", None),
+                                        "open_risk_weight": getattr(config.risk, "open_risk_weight", 0.5),
+                                        "allow_pyramiding": getattr(config.risk, "allow_pyramiding", False),
+                                        "min_bars_between_entries": getattr(config.risk, "min_bars_between_entries", 0),
+                                        "min_sl_pips": getattr(config.risk, "min_sl_pips", 0.0),
+                                        # [Phase 4 parity]
+                                        "sizing_basis": getattr(config.risk, "sizing_basis", "STATIC"),
+                                        "be_spread_multiple": getattr(config.risk, "be_spread_multiple", 2.0),
+                                        "trail_require_be_first": getattr(config.risk, "trail_require_be_first", False),
+                                        # [Phase 5 exit-architecture]
+                                        "be_mode": getattr(config.risk, "be_mode", "EITHER"),
+                                        "be_trigger_tp_level": getattr(config.risk, "be_trigger_tp_level", 1),
+                                        "trail_method_tp1": getattr(config.risk, "trail_method_tp1", "NONE"),
+                                        "trail_mode": getattr(config.risk, "trail_mode", "RR"),
+                                        "trail_trigger_rr": getattr(config.risk, "trail_trigger_rr", 1.5),
+                                        "trail_trigger_tp_level": getattr(config.risk, "trail_trigger_tp_level", 1),
+                                        "tp_volume_pcts": getattr(config.risk, "tp_volume_pcts", None),
+                                        # [Phase 9 portfolio governor]
+                                        "max_cluster_risk_pct": getattr(config.risk, "max_cluster_risk_pct", 0.0),
+                                        "max_net_direction_risk_pct": getattr(config.risk, "max_net_direction_risk_pct", 0.0),
+                                        "symbol_cluster_overrides": getattr(config.risk, "symbol_cluster_overrides", None),
+                                        "strategy_risk_budget_pct": getattr(config.risk, "strategy_risk_budget_pct", None),
+                                        # [2.15] Per-strategy TP1 RR override — see DriftJumpAlphaParams.tp1_rr_override.
+                                        "tp1_rr_overrides_by_strategy": (
+                                            {"DriftJumpAlpha": config.drift_jump_alpha.tp1_rr_override}
+                                            if getattr(config.drift_jump_alpha, "tp1_rr_override", None) is not None
+                                            else {}
+                                        ),
                                     }
 
 
                                     # Cache RiskEngine across scan cycles — only rebuild when key settings change.
                                     # MultiTPManager/BreakevenManager/TrailingManager are expensive to construct;
                                     # risk_config dict is still built fresh each signal to pick up config edits.
-                                    _rf = (
-                                        risk_config["risk_per_trade_pct"],
-                                        risk_config.get("tp_count", 3),
-
-                                        risk_config.get("min_rr", 3.0),
-                                    )
+                                    # [3.16/D4] Was a 3-field tuple (risk_per_trade_pct, tp_count, min_rr) — any
+                                    # OTHER field changing (e.g. margin cap, confluence tiers, be/trail settings)
+                                    # was silently invisible to the cache, so RiskEngine kept running with a
+                                    # stale config until one of those 3 fields also happened to change. A hash
+                                    # of the full serialised dict catches every field.
+                                    import hashlib as _hashlib
+                                    import json as _json
+                                    _rf = _hashlib.sha256(
+                                        _json.dumps(risk_config, sort_keys=True, default=str).encode()
+                                    ).hexdigest()
                                     if self.risk_engine is None or self._risk_engine_fp != _rf:
                                         self.risk_engine = RiskEngine(risk_config)
                                         self._risk_engine_fp = _rf
@@ -719,8 +817,35 @@ class BotService:
                                         )
 
 
-                                    # Enforces 1 active signal per symbol, so symbol is uniquely identifying
-                                    group_id = signal.symbol
+                                    # [4.8/D10] Was `group_id = signal.symbol` — relying on the
+                                    # symbol string doubling as a de-facto "1 active group per
+                                    # symbol" enforcement mechanism, duplicating (and only
+                                    # coincidentally agreeing with) what
+                                    # CircuitBreaker.check_symbol's max_positions_per_symbol
+                                    # already enforces properly. A real per-signal UUID (matching
+                                    # how the backtester generates group_id) is required for
+                                    # allow_pyramiding (2.17) to ever stack >1 group on one
+                                    # symbol — with the old scheme two groups on the same symbol
+                                    # would collide on and silently overwrite one shared
+                                    # active_groups[symbol] entry.
+                                    import uuid as _uuid
+                                    group_id = str(_uuid.uuid4())[:8]
+
+                                    _signal_metadata = dict(getattr(signal, 'metadata', {}) or {})
+                                    # [12.5/12.6/Part14] Slot-aware circuit-breaker/risk
+                                    # checks — None-defaulted overrides fall back to the
+                                    # global RiskParams value, same "None = inherit"
+                                    # convention as InstrumentSlot's own fields.
+                                    _signal_metadata["slot_id"] = slot.slot_id
+                                    _signal_metadata["slot_max_positions"] = (
+                                        slot.max_positions_per_symbol
+                                        if slot.max_positions_per_symbol is not None
+                                        else getattr(config.risk, "max_positions_per_symbol", 1)
+                                    )
+                                    if slot.max_losses_per_day is not None:
+                                        _signal_metadata["slot_max_losses_per_day"] = slot.max_losses_per_day
+                                    if slot.risk_per_trade_pct is not None:
+                                        _signal_metadata["slot_risk_per_trade_pct"] = slot.risk_per_trade_pct
 
                                     signal_data = {
                                         "group_id": group_id,
@@ -729,26 +854,43 @@ class BotService:
                                         "entry_price": signal.entry_price,
                                         "stop_loss": signal.stop_loss,
                                         "take_profit": signal.take_profit,
+                                        "timeframe": signal.timeframe,  # [12.10] see risk/engine.py's note
                                         "chart_data": signal.chart_data,
                                         # Include metadata so size_modifier and confluence-based
                                         # risk scaling (get_confluence_scaled_risk) reach the engine.
-                                        "metadata": getattr(signal, 'metadata', {}) or {},
+                                        "metadata": _signal_metadata,
                                     }
+
+                                    # [4.2/D1] What position sizing is computed against — see
+                                    # RiskParams.sizing_basis and resolve_sizing_base_balance().
+                                    # STATIC (the default) previously meant "always
+                                    # prop_firm.initial_balance", which is exactly Bug 12
+                                    # (defaults to $10,000, wrong for a personal account with
+                                    # no such field of its own) — for personal accounts the
+                                    # static anchor is now this process's first-observed
+                                    # balance instead, never a config default that may not
+                                    # match the real account.
+                                    from backend.risk.position_sizer import resolve_sizing_base_balance
+                                    _account_mode = getattr(getattr(config, "prop_firm", None), "account_mode", "personal")
+                                    if _account_mode == "prop_firm":
+                                        _static_balance = getattr(config.prop_firm, "initial_balance", account_balance)
+                                    else:
+                                        if self._static_personal_balance_anchor is None:
+                                            self._static_personal_balance_anchor = account_balance
+                                        _static_balance = self._static_personal_balance_anchor
+                                    _live_equity = broker.account_info.equity if hasattr(broker.account_info, 'equity') else account_balance
+                                    _sizing_base_balance = resolve_sizing_base_balance(
+                                        getattr(config.risk, "sizing_basis", "STATIC"),
+                                        static_balance=_static_balance,
+                                        live_balance=account_balance,
+                                        live_equity=_live_equity,
+                                    )
 
                                     approved, reason, tp_levels = self.risk_engine.evaluate_signal(
                                         signal_data,
                                         account_balance,
                                         current_time=datetime.now(timezone.utc),  # explicit time
-                                        # Bug 12 fix: use actual account_balance as initial_balance
-                                        # for personal accounts.  The old code always read
-                                        # prop_firm.initial_balance (defaults to $10,000) even
-                                        # when account_mode == 'personal', causing lot sizes to
-                                        # be calculated against $10k instead of the real $25k.
-                                        initial_balance=(
-                                            getattr(config.prop_firm, "initial_balance", account_balance)
-                                            if getattr(getattr(config, "prop_firm", None), "account_mode", "personal") == "prop_firm"
-                                            else account_balance
-                                        )
+                                        initial_balance=_sizing_base_balance,
                                     )
 
                                     if approved:
@@ -771,6 +913,9 @@ class BotService:
                                             self.circuit_breaker.position_opened(
                                                 group_id, len(tp_levels), symbol=signal.symbol,
                                                 initial_risk_dollars=initial_risk_dollars,
+                                                strategy_id=signal.strategy_id,
+                                                direction=signal.direction,  # [9.6]
+                                                slot_id=slot.slot_id,  # [12.5/12.6]
                                             )
 
                                         # Place ALL TP positions at entry (no deferred stacking)
@@ -797,6 +942,10 @@ class BotService:
                                                         tp=tp.tp_price,
                                                         magic=1001 + (tp.level * 10),
                                                         comment=f"AE_TP{tp.level}",
+                                                        deviation_points=getattr(config.risk, "mt5_order_deviation_points", 20),
+                                                        # [2.8/A5] re-anchor SL/TP to the actual live fill —
+                                                        # backtest/live parity with engine.py::_create_position (2.7).
+                                                        signal_entry_price=signal.entry_price,
                                                     )
                                                     
                                                     if result.get("success"):
@@ -1144,7 +1293,8 @@ class BotService:
                             close_time = datetime.fromtimestamp(deal["time"], timezone.utc) if deal.get("time") else None
                             # record_external_close() handles the post-restart case where
                             # active_groups is empty (position_closed() would be a no-op).
-                            # group_id == symbol by design (one active signal group per symbol).
+                            # [4.8/D10] group_id is a UUID now, not the symbol — record_external_close()
+                            # looks the active group up by its stored "symbol" field internally.
                             self.circuit_breaker.record_external_close(cb_symbol, net_profit, close_time)
                         if getattr(self, "prop_firm_validator", None):
                             self.prop_firm_validator.record_trade_closed(deal.get("symbol", "UNKNOWN"), deal.get("volume", 0.0), net_profit)

@@ -13,6 +13,14 @@ import pytz
 
 from backend.services.bot_service import bot_service
 from backend.strategies.base_strategy import BaseStrategy, TradeSignal
+from backend.strategies.core.markings import (
+    ROLE_CONFLUENCE,
+    ROLE_CONTEXT,
+    ROLE_INVALIDATION,
+    ROLE_TRIGGER,
+    MarkingCollector,
+    ts,
+)
 from backend.strategies.core.market_structure import MarketStructureDetector
 from backend.strategies.registry import register_strategy
 from backend.utils.logger import get_logger
@@ -49,6 +57,7 @@ class CRTEngine(BaseStrategy):
                 "ms_detector": MarketStructureDetector(swing_length=5, min_bos_count=1),
                 "c1": None,
                 "c2_trigger": None,
+                "c2_trigger_htf_bars_survived": 0,  # [6.10/S12]
                 "trades_today": 0,
                 "last_trade_date": None,
                 # Live bar-time deduplication: mirrors backtester's prev_time_by_tf
@@ -143,9 +152,20 @@ class CRTEngine(BaseStrategy):
                 self.log_event(f"New C1 Candidate set on HTF: High {state['c1']['high']}, Low {state['c1']['low']}")
             else:
                 if state["c2_trigger"] is not None:
-                    # Trigger timeout - invalidate if a new HTF candle closes without LTF trigger firing
-                    self.log_event("Trigger timeout - LTF did not fire before next HTF close. Invalidating setup.")
+                    # [6.10/S12] Grace window — was 0 (any trigger not fired before
+                    # the very next HTF close was discarded outright).
+                    grace = getattr(self.params, "trigger_grace_bars", 0) or 0
+                    survived = state.get("c2_trigger_htf_bars_survived", 0)
+                    if survived < grace:
+                        state["c2_trigger_htf_bars_survived"] = survived + 1
+                        self.log_event(
+                            f"Trigger not yet fired at HTF close ({survived + 1}/{grace} grace bars used) — keeping setup alive.",
+                        )
+                        return None
+                    # Trigger timeout - invalidate if the LTF trigger still hasn't fired
+                    self.log_event("Trigger timeout - LTF did not fire within the grace window. Invalidating setup.")
                     state["c2_trigger"] = None
+                    state["c2_trigger_htf_bars_survived"] = 0
                     state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
                     return None
 
@@ -164,28 +184,68 @@ class CRTEngine(BaseStrategy):
 
                 bias = self._get_htf_bias(state)
 
-                # MarketStructureDetector.trend only ever produces "NEUTRAL" /
-                # "BULLISH" / "BEARISH" — it never returns "FLAT" — so check
-                # against "NEUTRAL" (a flat/undetermined bias) instead.
-                if bias == "NEUTRAL":
-                    self.log_event("HTF bias is NEUTRAL (no confirmed trend) — skipping C2 evaluation, setting new C1 candidate.")
+                # [6.8/S9] MarketStructureDetector.trend only ever produces "NEUTRAL" /
+                # "BULLISH" / "BEARISH" — it never returns "FLAT" — so check against
+                # "NEUTRAL" (a flat/undetermined bias) instead. Was a hard BLOCK here
+                # (254/900 evaluations on the forensic NDX log, the single largest
+                # rejection category); now configurable via bias_neutral_mode.
+                bias_neutral_mode = getattr(self.params, "bias_neutral_mode", "REDUCED_SIZE") if getattr(self, 'params', None) else "BLOCK"
+                if bias == "NEUTRAL" and bias_neutral_mode == "BLOCK":
+                    self.log_event("HTF bias is NEUTRAL (no confirmed trend) — BLOCK mode, skipping C2 evaluation, setting new C1 candidate.")
                     state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
                     return None
 
                 valid_bullish = (c2_low < c1_low < c2_close < c1_high)
                 valid_bearish = c2_high > c1_high and (c1_low < c2_close < c1_high)
 
-                if valid_bullish and bias == "BULLISH":
+                # A NEUTRAL bias no longer hard-fails the direction match when
+                # bias_neutral_mode allows it through — the C2 sweep's own direction
+                # substitutes for HTF confirmation, at reduced size unless ALLOW.
+                bias_confirmed_bullish = bias == "BULLISH"
+                bias_confirmed_bearish = bias == "BEARISH"
+                neutral_allows = bias == "NEUTRAL" and bias_neutral_mode in ("REDUCED_SIZE", "ALLOW")
+                size_modifier = 1.0
+                if bias == "NEUTRAL" and bias_neutral_mode == "REDUCED_SIZE":
+                    size_modifier = getattr(self.params, "bias_neutral_size_modifier", 0.5)
+
+                if valid_bullish and (bias_confirmed_bullish or neutral_allows):
                     if in_session:
                         self.log_event(f"Valid Bullish C2 sweep! HTF Bias: {bias}. Trigger level set to {c2_high}.")
-                        state["c2_trigger"] = {"direction": "BUY", "level": c2_high, "c1_extreme": c1_high}
+                        state["c2_trigger"] = {
+                            "direction": "BUY", "level": c2_high, "c1_extreme": c1_high,
+                            "size_modifier": size_modifier, "bias_at_trigger": bias,
+                            # [V1] Range geometry captured HERE, on the HTF bar that
+                            # actually formed it — `state["c1"]` is cleared before the
+                            # LTF branch runs, so without this the chart could only
+                            # ever show the entry, never the range it broke out of.
+                            "geom": {
+                                "c1_high": c1_high, "c1_low": c1_low,
+                                "c2_high": c2_high, "c2_low": c2_low,
+                                "c2_close": c2_close,
+                                "c2_time": ts(candles.index[-1]),
+                                "htf": htf,
+                            },
+                        }
+                        state["c2_trigger_htf_bars_survived"] = 0
                     else:
                         self.log_event("Valid C2 but out of session. Ignoring.")
                         state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
-                elif valid_bearish and bias == "BEARISH":
+                elif valid_bearish and (bias_confirmed_bearish or neutral_allows):
                     if in_session:
                         self.log_event(f"Valid Bearish C2 sweep! HTF Bias: {bias}. Trigger level set to {c2_low}.")
-                        state["c2_trigger"] = {"direction": "SELL", "level": c2_low, "c1_extreme": c1_low}
+                        state["c2_trigger"] = {
+                            "direction": "SELL", "level": c2_low, "c1_extreme": c1_low,
+                            "size_modifier": size_modifier, "bias_at_trigger": bias,
+                            # [V1] See the bullish branch — same reason.
+                            "geom": {
+                                "c1_high": c1_high, "c1_low": c1_low,
+                                "c2_high": c2_high, "c2_low": c2_low,
+                                "c2_close": c2_close,
+                                "c2_time": ts(candles.index[-1]),
+                                "htf": htf,
+                            },
+                        }
+                        state["c2_trigger_htf_bars_survived"] = 0
                     else:
                         self.log_event("Valid C2 but out of session. Ignoring.")
                         state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
@@ -200,6 +260,10 @@ class CRTEngine(BaseStrategy):
                 direction = state["c2_trigger"]["direction"]
                 trigger_lvl = state["c2_trigger"]["level"]
                 tp = state["c2_trigger"]["c1_extreme"]
+                # [6.8/S9] Captured before the trigger dict is cleared below.
+                _trigger_size_modifier = state["c2_trigger"].get("size_modifier", 1.0)
+                _trigger_bias = state["c2_trigger"].get("bias_at_trigger")
+                _trigger_geom = state["c2_trigger"].get("geom") or {}
 
                 triggered = False
                 if (direction == "BUY" and current_price > trigger_lvl) or (direction == "SELL" and current_price < trigger_lvl):
@@ -291,6 +355,73 @@ class CRTEngine(BaseStrategy):
                     # from a grid-derived one instead of silently conflating them.
                     structural_tp_rr = (abs(tp - current_price) / sl_dist) if sl_dist > 0 else None
 
+                    # [V1 §C.6] Chart markings. CRT's whole thesis is "C2 swept
+                    # C1's extreme and closed back inside, so price is going to
+                    # C1's opposite extreme" — none of which was visible on the
+                    # chart before. Every element below is the actual number the
+                    # setup used, not a re-derivation.
+                    mk = MarkingCollector(ltf)
+                    entry_t = ts(candles.index[-1])
+                    c2_t = _trigger_geom.get("c2_time", entry_t)
+
+                    if _trigger_geom:
+                        mk.range_box(
+                            f"C1 range ({_trigger_geom.get('htf', htf)})",
+                            _trigger_geom["c1_high"], _trigger_geom["c1_low"], c2_t,
+                            end_time=entry_t, role=ROLE_CONFLUENCE,
+                            c1_high=_trigger_geom["c1_high"], c1_low=_trigger_geom["c1_low"],
+                            range_size=round(abs(_trigger_geom["c1_high"] - _trigger_geom["c1_low"]), 6),
+                        )
+                        swept_level = _trigger_geom["c1_low"] if direction == "BUY" else _trigger_geom["c1_high"]
+                        mk.liquidity(
+                            "Swept liquidity (C1 extreme)", swept_level, c2_t,
+                            role=ROLE_TRIGGER, end_time=entry_t,
+                            side="sell-side" if direction == "BUY" else "buy-side",
+                            swept_by=_trigger_geom["c2_low"] if direction == "BUY" else _trigger_geom["c2_high"],
+                            sweep_depth=round(
+                                abs(swept_level - (_trigger_geom["c2_low"] if direction == "BUY"
+                                                  else _trigger_geom["c2_high"])), 6),
+                        )
+                        mk.structure(
+                            "C2 sweep + close back inside", c2_t,
+                            price=_trigger_geom["c2_close"], role=ROLE_TRIGGER,
+                            timeframe=_trigger_geom.get("htf", htf),
+                            c2_high=_trigger_geom["c2_high"], c2_low=_trigger_geom["c2_low"],
+                            c2_close=_trigger_geom["c2_close"],
+                            rule="c2_low < c1_low < c2_close < c1_high" if direction == "BUY"
+                                 else "c2_high > c1_high and c1_low < c2_close < c1_high",
+                        )
+
+                    mk.level(
+                        "C2 breakout trigger", trigger_lvl, entry_t, role=ROLE_TRIGGER,
+                        color="rgba(16,185,129,0.9)",
+                        crossed_at=round(current_price, 6),
+                        direction=direction,
+                    )
+                    mk.structure(
+                        f"HTF bias: {_trigger_bias}", c2_t, role=ROLE_CONFLUENCE,
+                        timeframe=htf, bias=_trigger_bias,
+                        neutral_mode=getattr(self.params, "bias_neutral_mode", None) if getattr(self, "params", None) else None,
+                        size_modifier=_trigger_size_modifier,
+                    )
+                    mk.level(
+                        "Structural TP (C1 opposite extreme)", tp, entry_t,
+                        role=ROLE_CONTEXT, color="rgba(16,185,129,0.9)",
+                        tp_source=tp_source, target_r=target_r,
+                        rr=round(structural_tp_rr, 3) if structural_tp_rr is not None else None,
+                    )
+                    mk.level(
+                        "Stop loss", sl, entry_t, role=ROLE_INVALIDATION,
+                        color="rgba(239,68,68,0.9)",
+                        derivation="TP distance / target_r (spec §6), then floored",
+                        sl_distance=round(sl_dist, 6),
+                        floor_pips=min_sl_pips_val, floor_atr_mult=sl_atr_mult_val,
+                        floor_binding=(
+                            "atr" if sl_dist == min_sl_from_atr and min_sl_from_atr > min_sl_from_pips
+                            else ("pips" if sl_dist == min_sl_from_pips else "none")
+                        ),
+                    )
+
                     return TradeSignal(
                         strategy_id="CRT_v1",
                         symbol=symbol,
@@ -306,6 +437,10 @@ class CRTEngine(BaseStrategy):
                             "reason": "CRT Setup C1/C2. NY Session.",
                             "htf": htf,
                             "tp_source": tp_source,
+                            # [6.8/S9] size_modifier < 1.0 when this setup traded
+                            # without HTF bias confirmation (bias_neutral_mode).
+                            "size_modifier": _trigger_size_modifier,
+                            "bias_at_trigger": _trigger_bias,
                             # The strategy's own target, kept intact regardless of what
                             # the risk grid later does to `take_profit`.
                             "structural_tp": float(tp),
@@ -318,6 +453,8 @@ class CRTEngine(BaseStrategy):
                             # separate, deliberate product decision (audit §10.10).
                             "strategy_owns_tp": True,
                             "max_meaningful_rr": round(structural_tp_rr, 3) if structural_tp_rr is not None else None,
+                            # [V1] Chart geometry — see strategies/core/markings.py.
+                            **mk.as_metadata(),
                         }
                     )
 

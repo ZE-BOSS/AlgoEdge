@@ -1,3 +1,28 @@
+> **[Housekeeping-4] STATUS UPDATE 2026-08-23** — this doc predates and was superseded by
+> `implementation/MASTER-IMPLEMENTATION-PLAN.md` Part 14 / Phase 12. Per-item status:
+> - **Phase 4** (per-strategy risk fields) — **mostly superseded**. §4.1 (missing fields on strategy
+>   Params): done (Master Plan 12.2, `max_losses_per_day` added to all 6 strategies). §4.2/§4.3
+>   (CircuitBreaker/backtester wiring): done, but per-SLOT not per-strategy-global — a stronger form
+>   than this doc asked for (Master Plan 12.5/12.6). §4.4/§4.5 (frontend exposure): **still open**, same
+>   as Master Plan 12.11/12.12.
+> - **Phase 5** (cache staleness) — **investigated and fixed, but not via any of §5.1-§5.3's specific
+>   hypotheses.** The actual bug (Master Plan 12.10): `risk/engine.py`'s per-symbol cooldown always used
+>   a hardcoded "M15" fallback because no caller populated `metadata.timeframe`, regardless of a
+>   strategy's real entry timeframe — up to 3x the intended cooldown for any M5 strategy. §5.1 (daily
+>   reset audit) and §5.3 (MT5-seeded reconciliation on restart) were checked and found already correct
+>   (`_check_daily_reset`'s None-sentinel handling; `reconcile_from_mt5()` exists and is called on
+>   startup) — not the actual cause. §5.2 (`_last_signal_time` TTL) not re-audited this pass.
+> - **Phase 6.1** (max_positions_per_symbol not enforced live) — **done**, and further strengthened:
+>   Master Plan [4.8] removed a redundant, non-slot-aware direct-MT5-count check in `bot_service.py`;
+>   `CircuitBreaker.check_symbol` is now the sole enforcement point, slot-aware (12.5).
+> - **Phase 6.2** (Backtest Cancelled traceback in Telegram) — **not addressed this pass**, still open.
+> - **Phase 7** (`InstrumentSlot`) — **superseded** by Master Plan Phase 12's implementation, which
+>   differs in one deliberate respect: `slot_id` is a real UUID (`uuid.uuid4().hex[:12]`), not a
+>   human-readable string like `"usdchf-vwap-1"` as sketched below — Part 14 of the master plan
+>   explicitly requires this ("UUID, not derived from symbol") specifically to avoid the same
+>   natural-key collision class of bug `group_id = signal.symbol` caused elsewhere (fixed at [4.8]).
+>   See `implementation/TASKS.md` Phase 12 for the full, verified implementation record.
+
 # AlgoEdge — Implementation Plan (Phase 4–7)
 
 ## Background

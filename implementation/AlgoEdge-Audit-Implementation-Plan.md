@@ -173,6 +173,12 @@ allowed_symbols: [NQ, MNQ]
 - Max concurrent open trades across *all* strategies combined
 - Max daily/trailing/static drawdown (using the types from §3.4)
 - **Correlation exposure cap** — worth adding explicitly: if HTF FVG Flip, Bias/Key-Level/IFVG, and NY Open Break-Retest can all fire on the same NQ move simultaneously, you can end up with 3x the intended risk on one directional bet without any single strategy's config catching it. A portfolio-level correlation/exposure check across simultaneously-open positions closes this gap.
+  **[Housekeeping-4] DONE 2026-08-23** — `RiskParams.max_cluster_risk_pct` / `max_net_direction_risk_pct`
+  (Master Plan Phase 9.5/9.6, `risk/portfolio_governor.py`), enforced in `risk/engine.py::evaluate_signal`.
+  Static clustering table (metals/USD-majors/JPY-crosses/indices/crypto), not a live rolling-correlation
+  computation — see that module's own docstring for why. Verified: a XAUUSD+XAGUSD position pair
+  correctly rejected past the configured cluster cap; USDJPY/USDCHF BUYs correctly net against
+  EURUSD/GBPUSD SELLs as the same underlying USD bet.
 
 **Architecture recommendation**: route every order — live or backtest — through a single risk-engine gatekeeper module. Never let strategy code submit orders directly. Centralizing this is what prevents bugs like §2.1 from being duplicated across multiple code paths in the first place.
 

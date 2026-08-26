@@ -471,7 +471,15 @@ class PositionManager:
                     continue
 
                 # --- 1. BREAKEVEN LOGIC ---
-                if hasattr(risk, 'be_trigger_rr') and risk.be_trigger_rr > 0 and not pos.be_applied:
+                # [5.1/5.5/Part4] be_mode: RR-triggered BE only fires under RR/EITHER —
+                # TP_HIT is handled entirely by the CASCADE block further down, which
+                # already triggers off a sibling TP closing. NONE disables BE outright.
+                be_mode = getattr(risk, 'be_mode', 'EITHER')
+                if (
+                    be_mode in ("RR", "EITHER")
+                    and hasattr(risk, 'be_trigger_rr') and risk.be_trigger_rr > 0
+                    and not pos.be_applied
+                ):
                     pips_in_profit = (current_price - entry_price) / pip_size_val if is_buy else (entry_price - current_price) / pip_size_val
 
                     # Phase-5 fix: use the TRUE original SL from the parent Trade as
@@ -483,54 +491,103 @@ class PositionManager:
                     pt_be = tq_be.scalars().first()
                     if pt_be:
                         original_sl = pt_be.stop_loss
+
+                    # [4.4/D5] Was `risk_pips = 20.0` when the parent's original stop
+                    # couldn't be resolved — a fabricated risk basis that silently
+                    # mis-triggers (or fails to trigger) BE at the wrong R-multiple for
+                    # whatever this symbol's actual stop distance really is. Skip this
+                    # tick instead; it will re-resolve once the parent Trade row is
+                    # consistent (a transient DB race, not a permanent condition).
                     if original_sl == 0.0:
-                        risk_pips = 20.0 # fallback
+                        logger.warning(
+                            f"[BE] {live_pos.ticket} ({symbol}): parent trade's original "
+                            f"stop_loss could not be resolved (parent_trade_id="
+                            f"{pos.parent_trade_id}). Skipping BE check this tick."
+                        )
                     else:
                         risk_pips = abs(entry_price - original_sl) / pip_size_val
-                    
-                    if risk_pips > 0:
-                        current_rr = pips_in_profit / risk_pips
-                        if current_rr >= risk.be_trigger_rr:
-                            be_atr_mult = getattr(risk, 'be_buffer_atr_mult', 0.0)
-                            be_pips = getattr(risk, 'be_buffer_pips', 2.0)
-                            atr_val = await self._get_or_fetch_atr(symbol, pip_size_val)
-                            be_buffer = max(be_atr_mult * atr_val, be_pips * pip_size_val)
-                            
-                            # Ensure BE buffer covers spread + commission to prevent net loss
-                            sym_info = mt5.symbol_info(symbol)
-                            tick = mt5.symbol_info_tick(symbol)
-                            
-                            real_spread = 0.0
-                            if tick and tick.ask > tick.bid:
-                                real_spread = tick.ask - tick.bid
-                            elif sym_info and sym_info.spread > 0:
-                                real_spread = sym_info.spread * sym_info.point
-                            
-                            if real_spread <= 0:
-                                real_spread = 2.0 * pip_size_val # fallback 2 pips
-                                
-                            min_spread_buffer = real_spread * 2.0 # 2x spread for safety against commission/slippage
-                            be_buffer = max(be_buffer, min_spread_buffer)
-                                
-                            new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
-                            
-                            move_sl = False
-                            if is_buy and new_sl > current_sl or not is_buy and (current_sl == 0.0 or new_sl < current_sl):
-                                move_sl = True
-                                
-                            if move_sl:
-                                success = await self._modify_sl(live_pos.ticket, symbol, new_sl)
-                                if success:
-                                    modifications_made = True
-                                    pos.stop_loss = new_sl
-                                    pos.be_applied = True
-                                    logger.info(f"Moved SL to Breakeven: {live_pos.ticket} -> {new_sl}")
-                                continue  # Skip trailing SL this tick — BE was attempted (success or fail)
+
+                        if risk_pips > 0:
+                            current_rr = pips_in_profit / risk_pips
+                            if current_rr >= risk.be_trigger_rr:
+                                be_atr_mult = getattr(risk, 'be_buffer_atr_mult', 0.0)
+                                be_pips = getattr(risk, 'be_buffer_pips', 2.0)
+                                be_spread_mult = getattr(risk, 'be_spread_multiple', 2.0)
+                                atr_val = await self._get_or_fetch_atr(symbol, pip_size_val)
+
+                                # Ensure BE buffer covers spread + commission to prevent net loss
+                                sym_info = mt5.symbol_info(symbol)
+                                tick = mt5.symbol_info_tick(symbol)
+
+                                real_spread = 0.0
+                                if tick and tick.ask > tick.bid:
+                                    real_spread = tick.ask - tick.bid
+                                elif sym_info and sym_info.spread > 0:
+                                    real_spread = sym_info.spread * sym_info.point
+
+                                if real_spread <= 0:
+                                    real_spread = 2.0 * pip_size_val # fallback 2 pips
+
+                                # [4.5/D6/F4] Shared formula with backtest — was an
+                                # independent max(atr, pips) then a SEPARATE max(.., spread*2x)
+                                # bolted on after, diverging from both other BE-buffer
+                                # implementations in this codebase.
+                                from backend.risk.breakeven_manager import resolve_be_buffer
+                                be_buffer = resolve_be_buffer(
+                                    spread_price=real_spread,
+                                    atr=atr_val,
+                                    pip_size=pip_size_val,
+                                    be_buffer_pips=be_pips,
+                                    be_buffer_atr_mult=be_atr_mult,
+                                    be_spread_multiple=be_spread_mult,
+                                )
+
+                                new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
+
+                                move_sl = False
+                                if is_buy and new_sl > current_sl or not is_buy and (current_sl == 0.0 or new_sl < current_sl):
+                                    move_sl = True
+
+                                if move_sl:
+                                    success = await self._modify_sl(live_pos.ticket, symbol, new_sl)
+                                    if success:
+                                        modifications_made = True
+                                        pos.stop_loss = new_sl
+                                        pos.be_applied = True
+                                        logger.info(f"Moved SL to Breakeven: {live_pos.ticket} -> {new_sl}")
+                                    continue  # Skip trailing SL this tick — BE was attempted (success or fail)
 
                 # --- 2. TRAILING SL LOGIC ---
                 tp_level = getattr(pos, 'tp_level', 1) if pos else 1
+                # [5.1/5.5/F2] trail_method_tp1 now resolves like every other
+                # level (getattr on the RiskParams instance) — it used to be
+                # meaningless because the field didn't exist; the fix was
+                # adding it to RiskParams (5.1), not here.
                 trail_method = getattr(risk, f'trail_method_tp{tp_level}', 'NONE')
-                if trail_method != "NONE":
+                # [4.6/D7/F3] Was unconditional — trailing could start before
+                # break-even no matter what, the opposite of backtest's old
+                # (also wrong) always-require-BE default. Both now honour the
+                # same flag.
+                trail_require_be_first = getattr(risk, 'trail_require_be_first', False)
+                be_gate_ok = (not trail_require_be_first) or pos.be_applied
+                trail_mode = getattr(risk, 'trail_mode', 'RR')
+                if trail_method != "NONE" and be_gate_ok and trail_mode != "NONE":
+                    if trail_mode not in ("RR", "TP_HIT", "EITHER"):
+                        trail_mode = "RR"
+                    if trail_mode != "RR" and not getattr(self, '_warned_trail_mode_live', False):
+                        # [5.5] TP_HIT/EITHER trail activation needs a
+                        # sibling-TP-closed signal the way the BE cascade has —
+                        # live doesn't have that wired for trailing yet.
+                        # Falling back to the RR condition rather than never
+                        # activating at all; documented gap, not silent.
+                        logger.warning(
+                            f"[TRAIL] trail_mode={trail_mode} is not yet implemented in live "
+                            f"position management (TP_HIT trail activation needs a per-TP-close "
+                            f"signal not currently wired here) — falling back to the RR condition "
+                            f"(trail_trigger_rr/trail_activation_rr) for this and future ticks."
+                        )
+                        self._warned_trail_mode_live = True
+
                     if pos and getattr(pos, 'trail_activated', False):
                         current_rr = 999.0
                         activation_rr = 0.0
@@ -540,16 +597,23 @@ class PositionManager:
                             tq = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
                             pt = tq.scalars().first()
                             if pt: original_sl = pt.stop_loss
-                            
-                        if original_sl != 0.0:
-                            risk_pips = abs(entry_price - original_sl) / pip_size_val
-                        else:
-                            risk_pips = 20.0
-                            
+
+                        # [4.4/D5] Was `risk_pips = 20.0` — a fabricated risk
+                        # basis. Skip this tick's trailing check instead of
+                        # trailing against a made-up distance.
+                        if original_sl == 0.0:
+                            logger.warning(
+                                f"[TRAIL] {live_pos.ticket} ({symbol}): parent trade's original "
+                                f"stop_loss could not be resolved (parent_trade_id="
+                                f"{pos.parent_trade_id}). Skipping trailing check this tick."
+                            )
+                            continue
+                        risk_pips = abs(entry_price - original_sl) / pip_size_val
+
                         pips_in_profit = (current_price - entry_price) / pip_size_val if is_buy else (entry_price - current_price) / pip_size_val
                         current_rr = pips_in_profit / risk_pips if risk_pips > 0 else 0
-                        activation_rr = getattr(risk, 'trail_activation_rr', 1.0)
-                        
+                        activation_rr = getattr(risk, 'trail_trigger_rr', getattr(risk, 'trail_activation_rr', 1.0))
+
                     if current_rr >= activation_rr:
                         new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method, tp_level)
                         if new_trail_sl is not None:
@@ -568,16 +632,21 @@ class PositionManager:
                                         pos.trail_activated = True
 
             # --- BREAKEVEN CASCADE CHECK ---
+            # [5.1/5.5] This IS the live implementation of the TP_HIT BE
+            # trigger (a sibling TP closing) — it used to run unconditionally,
+            # regardless of be_mode or even be_on_tp1_hit, so a user setting
+            # be_mode="RR" (RR-only) still got BE forced on every TP close.
             # Trigger off the LOWEST tp_level sub-position that has closed, not hardcoded TP1.
             # This handles partial fills where TP1's order failed but TP2/TP3 succeeded.
-            for parent_id, positions in trades_map.items():
+            _be_mode_cascade = getattr(risk, 'be_mode', 'EITHER')
+            for parent_id, positions in ({} if _be_mode_cascade in ("RR", "NONE") else trades_map).items():
                 sorted_positions = sorted(positions, key=lambda p: p.tp_level)
                 trigger_pos = None
                 for sp in sorted_positions:
                     if sp.mt5_ticket not in mt5_tickets and sp.status in ("CLOSED", "RECONCILE_FAILED"):
                         trigger_pos = sp
                         break
-                
+
                 if trigger_pos:
                     alive_positions = [p for p in positions if p.mt5_ticket in mt5_tickets]
                     if alive_positions:
@@ -588,26 +657,34 @@ class PositionManager:
                         # Use both ATR and Pip relative buffers, taking the max
                         be_atr_mult = getattr(risk, 'be_buffer_atr_mult', 0.0)
                         be_pips = getattr(risk, 'be_buffer_pips', 2.0)
+                        be_spread_mult = getattr(risk, 'be_spread_multiple', 2.0)
                         # Fetch real ATR
                         atr_val = await self._get_or_fetch_atr(symbol, pip_size_val)
-                        be_buffer = max(be_atr_mult * atr_val, be_pips * pip_size_val)
-                        
+
                         # Ensure BE buffer covers spread + commission to prevent net loss
                         sym_info = mt5.symbol_info(symbol)
                         tick = mt5.symbol_info_tick(symbol)
-                        
+
                         real_spread = 0.0
                         if tick and tick.ask > tick.bid:
                             real_spread = tick.ask - tick.bid
                         elif sym_info and sym_info.spread > 0:
                             real_spread = sym_info.spread * sym_info.point
-                        
+
                         if real_spread <= 0:
                             real_spread = 2.0 * pip_size_val # fallback 2 pips
-                            
-                        min_spread_buffer = real_spread * 2.0 # 2x spread for safety against commission/slippage
-                        be_buffer = max(be_buffer, min_spread_buffer)
-                            
+
+                        # [4.5/D6/F4] Shared formula — see resolve_be_buffer().
+                        from backend.risk.breakeven_manager import resolve_be_buffer
+                        be_buffer = resolve_be_buffer(
+                            spread_price=real_spread,
+                            atr=atr_val,
+                            pip_size=pip_size_val,
+                            be_buffer_pips=be_pips,
+                            be_buffer_atr_mult=be_atr_mult,
+                            be_spread_multiple=be_spread_mult,
+                        )
+
                         new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
                         
                         for alive_pos in alive_positions:

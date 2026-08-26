@@ -187,6 +187,70 @@ async def get_broker_status(
     }
 
 
+# ── Symbol identity (Phase 14 Part C / task 14.9) ────────────────────────────
+
+@router.get("/instruments")
+async def get_instrument_resolution(
+    refresh: bool = False,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    How each canonical instrument resolves to a symbol on the connected broker.
+
+    This is what makes a config portable: the config names `GER40`, and the
+    active broker's map turns that into `GER30` on Deriv or `GER40` on
+    FundedNext. Unavailable instruments are returned explicitly with the reason,
+    so pickers can disable them ("not listed by Deriv-Demo") instead of letting
+    the user pick one that fails later at data fetch.
+    """
+    import MetaTrader5 as mt5
+
+    from backend.core.instruments import (
+        broker_id_from_account,
+        discover_broker_symbols,
+        get_broker_map,
+    )
+
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, mt5.terminal_info):
+        return {
+            "connected": False,
+            "broker_id": None,
+            "message": "MT5 is not connected — cannot enumerate symbols",
+            "instruments": [],
+        }
+
+    info = await loop.run_in_executor(None, mt5.account_info)
+    broker_id = broker_id_from_account(
+        getattr(info, "company", None), getattr(info, "server", None)
+    )
+
+    mapping = None if refresh else get_broker_map(broker_id)
+    if mapping is None:
+        symbols = await loop.run_in_executor(None, mt5.symbols_get)
+        mapping = discover_broker_symbols(broker_id, symbols)
+
+    rows = [
+        {
+            "canonical": r.canonical,
+            "broker_symbol": r.broker_symbol,
+            "available": r.available,
+            "reason": r.reason,
+            "ambiguous_with": r.ambiguous_with,
+        }
+        for r in sorted(mapping.values(), key=lambda x: (not x.available, x.canonical))
+    ]
+    return {
+        "connected": True,
+        "broker_id": broker_id,
+        "broker": getattr(info, "company", None),
+        "server": getattr(info, "server", None),
+        "available_count": sum(1 for r in rows if r["available"]),
+        "total_count": len(rows),
+        "instruments": rows,
+    }
+
+
 @router.post("/test")
 async def test_broker_connection(
     req: TestBrokerRequest,

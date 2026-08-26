@@ -42,13 +42,103 @@ therefore calibrated against ATR(M5). If the engine is ever changed to feed M15 
 ATR is ~1.7× larger and k must be divided by ~1.7 (i.e. k≈1.75 instead of 3.0).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 
 
 @dataclass
 class VWAPParams:
     """
     Tunable parameters for Strategy VWAP: Drift VWAP Pullback.
+    """
+
+    # ── VWAP v2 (Phase 8) ────────────────────────────────────────────────
+    # Source material (implementation/strategy_update/ TapeDragon carousels):
+    # VWAP is a FRAMEWORK — fair value (VWAP line), trend context (slope),
+    # extremes (±1σ/±2σ/±3σ bands), and confluence. "Let VWAP guide your
+    # bias, not your entry." The v1 engine implemented only the trend-context
+    # half (a single Setup 1-like pullback, no bands at all, VWAP itself as
+    # the entry trigger rather than the bias). v2 adds the missing band
+    # framework and the mean-reversion setup the source material treats as
+    # equally central.
+    vwap_bands_enabled: bool = True
+    """[8.1/8.2] Compute ±1σ/±2σ/±3σ VWAP bands. False reproduces v1 (VWAP line only, entry_mode forced to PULLBACK_TO_VALUE with pullback_max_distance_sigma/reversion checks skipped)."""
+
+    vwap_band_sigmas: list[float] = field(default_factory=lambda: [1.0, 2.0, 3.0])
+    """[8.1/8.2] Which sigma multiples to compute bands at. First three entries are used as ±1σ/±2σ/±3σ by the setups below regardless of list length."""
+
+    vwap_band_lookback: int = 0
+    """[8.1] 0 = bands computed since the session anchor (matching the VWAP line itself); >0 = a rolling N-bar lookback instead. 0 is the doc-faithful default."""
+
+    entry_mode: Literal["PULLBACK_TO_VALUE", "BAND_REVERSION", "BOTH"] = "BOTH"
+    """[8.1] Which setup(s) are active. PULLBACK_TO_VALUE = trend continuation (v1's setup, now with band/convergence/volume gates). BAND_REVERSION = new mean-reversion-to-VWAP setup (8.4). BOTH = either may fire."""
+
+    pullback_requires_convergence: bool = True
+    """[8.1/8.3] Setup 1 gate: distance from close to VWAP must be SHRINKING vs the prior bar (price actually pulling back toward value), not just a red/green candle — v1 only checked candle colour, which admits a candle accelerating AWAY from VWAP as long as it happens to be red/green."""
+
+    pullback_max_distance_sigma: float = 1.0
+    """[8.1/8.3] Setup 1 only triggers while price is inside this many sigma of VWAP — a "pullback" beyond ±1σ is already most of the way to a band-reversion setup, not a shallow retracement to value."""
+
+    first_pullback_only: bool = True
+    """[8.1/8.3] Only the FIRST Setup-1 trigger since the session anchor is taken; later ones in the same session are ignored. Resets with the daily/session reset."""
+
+    reversion_min_sigma: float = 2.0
+    """[8.1/8.4] Setup 2 (Band Reversion) only triggers when price closes beyond this many sigma — "never fade inside 2σ" per the source material."""
+
+    reversion_requires_rejection: bool = True
+    """[8.1/8.4] Setup 2 gate: the trigger candle must show a rejection wick (see reversion_min_rejection_wick_pct) against the extension, not just a close beyond the band."""
+
+    reversion_min_rejection_wick_pct: float = 0.50
+    """[8.4] Minimum rejection-wick fraction of the trigger candle's total range, when reversion_requires_rejection is True."""
+
+    reversion_requires_trend_neutral: bool = True
+    """[8.1/8.4] Setup 2 gate: do not fade a band extension while momentum (the same momentum_threshold_pct test Setup 1 uses) confirms a real trend in the extension's direction — "do not fade a strong trend"."""
+
+    reversion_max_vwap_slope_atr_pct: float = 0.10
+    """[8.4] Setup 2 gate: |VWAP(now) - VWAP(prev anchor bar)| must be below this fraction of ATR — "flat VWAP slope"."""
+
+    volume_confirmation_mult: float = 0.0
+    """
+    [8.1] Both setups require trigger-bar volume >= this multiple of the rolling
+    mean over `volume_confirmation_lookback_bars`. 0 = disabled.
+
+    CHANGED 1.2 -> 0.0 (2026-08-25). At 1.2 this produced ZERO signals on gold
+    across 7.5 months. Gate-by-gate on 6,000 XAUUSD M5 bars:
+
+        tradeable bars                      1239
+        + price above vwap                   718
+        + vwap rising                        681
+        + momentum up                        404
+        + inside 1-sigma band                101
+        + converging                          55
+        + volume >= 1.2x                       0   <-- every candidate gone
+
+    Two reasons it cannot work here, and they compound:
+
+    1. MT5 CFD feeds report TICK volume (a count of price updates), not traded
+       size. The docstring already flagged 0 as the right value for such feeds —
+       the default simply never matched the platform this runs on.
+    2. More fundamentally, the pullback setup selects for a CONVERGING,
+       low-momentum bar — the quietest bar of the move — and then demanded it
+       also be a 1.2x volume spike. The two conditions pull against each other
+       by construction, so the filter was close to self-contradictory even on a
+       feed with real volume.
+
+    Set it back above 0 only on a venue that reports genuine traded volume, and
+    check the gate funnel above still leaves candidates before trusting a run.
+    """
+
+    volume_confirmation_lookback_bars: int = 20
+    """[8.1] Rolling window (entry-timeframe bars) for the volume_confirmation_mult rolling mean."""
+
+    target_mode: Literal["SIGMA_BAND", "R_GRID"] = "SIGMA_BAND"
+    """
+    [8.6/P2-X5] SIGMA_BAND (default): Setup 1 targets +2σ/-2σ, Setup 2 targets
+    VWAP itself — both declared via metadata.structural_tp/structural_tp_rr
+    (same pattern CRT uses) so the RiskParams TP grid can be exempted rather
+    than silently overriding a target with no relationship to either setup's
+    thesis. R_GRID restores v1 behaviour (advisory tp = entry ± sl_dist,
+    fully overridden by the grid).
     """
 
     # ── VWAP Calculation ─────────────────────────────────────────────────
@@ -95,23 +185,26 @@ class VWAPParams:
     is the only way to keep the spec-faithful NQ behaviour AND a sane FX behaviour in one
     default configuration.
 
-    ENGINE WIRING REQUIRED: strategy_vwap/engine.py currently ignores this field and
-    unconditionally computes `sl_dist = sl_points * get_pip_size(symbol)` then takes
-    max(that, ATR × sl_atr_multiplier). See the audit doc for the precise change.
+    WIRED 2026-08: engine.py's `_resolve_sl_distance` reads this field and branches
+    on `_is_index(symbol)` — the note that used to be here ("engine ignores this
+    field") predates that fix and no longer applies.
     """
 
     sl_points: float = 80.0
     """
-    Fixed SL in native INDEX POINTS. Per doc §5 this is an NQ/MNQ figure (80 points),
-    and is only applied when the resolved sl_method is "fixed_points" — i.e. for index
-    CFDs / index futures, where get_pip_size() returns 1.0 and the multiplication is a
-    genuine identity. Left at the doc's 80.0.
+    Fixed SL in native INDEX PRICE UNITS. Per doc §5 this is an NQ/MNQ figure (80
+    points = an 80.00 price move), and is only applied when the resolved sl_method
+    is "fixed_points" — i.e. for index CFDs / index futures. Left at the doc's 80.0.
 
-    DO NOT read this as pips on FX. Under the current engine code it is multiplied by
-    get_pip_size() = 0.0001 for USDCHF, yielding an 80-PIP stop on an M5 pullback
-    scalper — the direct cause of the ~6.9-day holds seen in the real backtests.
-    The frontend hint "170 for USDCHF = 17 pips" (Backtester.jsx:112) describes a
-    pipette convention the engine does not implement, and is wrong as written.
+    CORRECTED 2026-08-22 (Part 11 §B3): engine.py used to multiply this by
+    get_pip_size(symbol), on the assumption that get_pip_size() == 1.0 for every
+    index — verifiably false for NAS100/USTEC/NDX (0.25) and US500/SPX/US2000/
+    GER40/DAX (0.1), which silently shrank an 80-point stop to 20 or 8 points on
+    exactly the most-traded indices in this book. sl_points is now applied directly
+    with no conversion, matching what this docstring always said it should do.
+
+    DO NOT read this as pips on FX. `sl_method="auto"` never selects "fixed_points"
+    for FX — see `_is_index()` — so this field has no effect there regardless.
     """
 
     sl_atr_multiplier: float = 3.0

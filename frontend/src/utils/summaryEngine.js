@@ -224,8 +224,14 @@ function tradeR(t) {
   const recorded = t.realized_rr != null ? t.realized_rr : t.pnl_r;
   if (recorded != null && Number.isFinite(Number(recorded))) return Number(recorded);
 
+  // [7.8/H3] initial_stop_loss (fill-anchored, Phase 2 §2.7) is the most
+  // accurate entry-time risk reference; original_signal.stop_loss (pre-fill
+  // theoretical) is the next best; t.stop_loss (possibly BE/trailing-mutated)
+  // is the last resort. trade_grouper.py already applies this same chain
+  // when building `stop_loss` on the grouped dict, so this is defense-in-depth
+  // for any caller that bypasses it, not the primary fix.
   const entry = num(t.entry_price);
-  const sl = num(t.stop_loss);
+  const sl = num(t.initial_stop_loss ?? t.original_signal?.stop_loss ?? t.stop_loss);
   const exit = num(t.exit_price);
   const riskDistance = Math.abs(entry - sl);
 

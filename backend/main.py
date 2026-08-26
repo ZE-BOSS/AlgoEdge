@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Import API route modules
 from backend.api.routes import (
     admin,
+    analysis,
     auth,
     backtest,
     bot,
@@ -23,10 +24,13 @@ from backend.api.routes import (
     config,
     dashboard,
     llm,
+    logs,
+    fundamentals,
     mt5_test,
     push,
     signals,
     stats,
+    strategy_factory,
     trades,
 )
 from backend.data.database import close_db, init_db
@@ -39,6 +43,20 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Application startup and shutdown events."""
     logger.info("Starting AlgoEdge Backend...")
+
+    # [Phase 13 section G] Attach the log hub to the WebSocket manager. The
+    # loguru sink itself is installed at import time in utils/logger.py, so
+    # records are already being captured into the ring buffer by now; this is
+    # what starts the pump that pushes them to connected clients. It has to
+    # happen here rather than at import because creating the pump task needs a
+    # running event loop.
+    try:
+        from backend.api.websocket import manager as ws_manager
+        from backend.services.log_stream import log_hub
+        log_hub.attach(ws_manager)
+        logger.info("Log stream attached to WebSocket manager")
+    except Exception as e:
+        logger.warning(f"Log stream not attached: {e}")
 
     # 1. Init Database (PostgreSQL on Railway)
     await init_db()
@@ -97,6 +115,15 @@ async def lifespan(app: FastAPI):
         await redis_client.connect()
         redis_ok = True
         logger.info("Redis connected")
+
+        # A backtest cannot survive a process restart, but its Redis status can
+        # (1h TTL). Without this, a client polling after a restart sees a run
+        # still "running", parks on "Stop Backtest", and never starts another.
+        try:
+            from backend.api.routes.backtest import reconcile_orphaned_runs
+            await reconcile_orphaned_runs()
+        except Exception as e:
+            logger.warning(f"Orphaned-run reconciliation skipped: {e}")
     except Exception as e:
         logger.warning(f"Redis not available — skipping: {e}")
 
@@ -166,12 +193,16 @@ app.include_router(backtest.router)
 app.include_router(config.router)
 app.include_router(charts.router)
 app.include_router(llm.router)
+app.include_router(logs.router)
+app.include_router(analysis.router)
+app.include_router(fundamentals.router)
 app.include_router(push.router)
 app.include_router(signals.router)
 app.include_router(bot.router)
 app.include_router(broker.router)
 app.include_router(mt5_test.router)
 app.include_router(dashboard.router)
+app.include_router(strategy_factory.router)  # [Phase 14 Stream 3]
 
 
 # ── Request Logging Middleware ───────────────────────────────────────────────

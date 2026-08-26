@@ -50,3 +50,9 @@ def list_strategies() -> list[str]:
     """Get all registered strategy names."""
     _load_strategies()
     return list(_STRATEGIES.keys())
+
+
+def get_all_strategies() -> dict[str, type[BaseStrategy]]:
+    """Return the full {strategy_id: class} registry dict."""
+    _load_strategies()
+    return dict(_STRATEGIES)

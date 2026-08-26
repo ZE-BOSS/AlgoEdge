@@ -57,6 +57,28 @@ logger.add(
 # )
 
 
+# [Phase 13 section G / V2] WebSocket sink.
+#
+# Until this line existed, the three sinks above were the whole story: stderr
+# and two files. Nothing carried a log record to the frontend, so the Live Logs
+# panel only ever showed the handful of events that bot_service.log_system_event
+# broadcast explicitly — which is why almost everything stayed in the terminal.
+#
+# Installed last so it captures records from every module that imports this one,
+# and imported lazily inside the function to avoid a circular import
+# (services.log_stream imports loguru, which is fine, but services/ generally
+# imports utils/).
+def _install_ws_sink() -> None:
+    try:
+        from backend.services.log_stream import install_sink
+        install_sink(min_level="DEBUG")
+    except Exception as e:  # never let logging setup break startup
+        logger.warning(f"WebSocket log sink not installed: {e}")
+
+
+_install_ws_sink()
+
+
 def get_logger(name: str):
     """Get a logger bound with a module name for context."""
     return logger.bind(module=name)

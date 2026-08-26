@@ -21,6 +21,7 @@ logger = get_logger(__name__)
 # EXECUTION-VIABILITY CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
 
+# [2.11] Default only — the real, user-editable value is RiskParams.min_stop_spread_multiple.
 # A stop must clear the round-trip cost of crossing the spread by this multiple
 # before it is worth taking. At 1.0x the trade is stopped out by the spread
 # alone; 2.0x is the smallest multiple that leaves the position any room to
@@ -28,7 +29,7 @@ logger = get_logger(__name__)
 # (Forensic case: APA emitted 0.45-pip stops on USDCHF, whose spread alone is
 # 1.5-2.5 pips. Those stops are physically untradeable and, because lot size is
 # inversely proportional to stop distance, they produced enormous lots.)
-MIN_STOP_SPREAD_MULTIPLE = 2.0
+_DEFAULT_MIN_STOP_SPREAD_MULTIPLE = 2.0
 
 # Absolute per-asset-class stop floor in PIPS, independent of ATR and of the
 # current spread. This is the backstop for the case where the spread reading is
@@ -47,6 +48,7 @@ MIN_STOP_FLOOR_PIPS: dict[str, float] = {
 }
 _MIN_STOP_FLOOR_DEFAULT_PIPS = 2.0
 
+# [2.1] Default only — the real, user-editable value is RiskParams.max_margin_utilisation_pct.
 # Ceiling on required margin as a percentage of account equity for a SINGLE
 # position. MT5 rejects an order it cannot margin with retcode 10019 (No money),
 # so a lot size above this is not "aggressive", it is un-fillable.
@@ -54,12 +56,13 @@ _MIN_STOP_FLOOR_DEFAULT_PIPS = 2.0
 # notional = 160x account leverage — rejected live, but filled in backtest,
 # which is exactly the backtest/live divergence this guard closes.)
 # 30% leaves headroom for the other concurrent positions the portfolio may hold.
-MAX_MARGIN_UTILISATION_PCT = 30.0
+_DEFAULT_MAX_MARGIN_UTILISATION_PCT = 30.0
 
-# Account leverage assumed when MT5 cannot tell us the real figure (backtests,
-# terminal offline). 1:100 is the common retail/prop default; if the real
-# account is lower-leverage the estimate is optimistic, which is why the live
-# path always prefers mt5.order_calc_margin().
+# [2.4] Fallback ONLY when MT5 cannot tell us the real leverage AND the caller
+# did not supply RiskParams.max_account_leverage either. 1:100 is the common
+# retail/prop default; if the real account is lower-leverage the estimate is
+# optimistic, which is why the live path always prefers mt5.order_calc_margin()
+# and the config path (max_account_leverage) is preferred over this constant.
 FALLBACK_ACCOUNT_LEVERAGE = 100.0
 
 _MT5_SYMBOL_CACHE = {}
@@ -218,6 +221,46 @@ def _infer_digits(point_size: float) -> int:
     return 5
 
 
+def resolve_cross_rate_point_value(profile, use_live_mt5: bool = True) -> tuple[float, str]:
+    """
+    [Task 1.12/1.13] For an FX pair whose quote currency is not USD (see
+    FX_CROSS_CONVERSION), recompute point_value_per_lot from a LIVE MT5 quote
+    on the conversion pair instead of the static rate baked into the profile.
+    Falls back to that static value when MT5 is unreachable or the conversion
+    pair isn't quoted — exactly the same fallback chain get_symbol_info already
+    uses everywhere else, so a live-server outage degrades to "slightly stale"
+    rather than "sizing breaks".
+
+    Returns (point_value_per_lot, source) where source is "MT5_LIVE" or
+    "STATIC_SNAPSHOT", so callers can log/audit which one was used.
+    """
+    from backend.risk.compounding import FX_CROSS_CONVERSION
+
+    conversion = FX_CROSS_CONVERSION.get(profile.symbol.upper())
+    if conversion is None:
+        return profile.point_value_per_lot, "STATIC_SNAPSHOT"  # not a cross pair
+
+    quote_pair, convention = conversion
+
+    if use_live_mt5 and mt5 is not None:
+        try:
+            terminal = mt5.terminal_info()
+            if terminal is not None and terminal.connected:
+                tick = mt5.symbol_info_tick(quote_pair)
+                if tick is not None and tick.bid > 0 and tick.ask > 0:
+                    live_rate = (tick.bid + tick.ask) / 2.0
+                    quote_amount = profile.contract_size * profile.point_size
+                    if convention == "indirect":
+                        value = quote_amount / live_rate
+                    else:
+                        value = quote_amount * live_rate
+                    return value, "MT5_LIVE"
+        except Exception as e:
+            logger.debug(f"[SIZER] {profile.symbol}: live cross-rate lookup on {quote_pair} failed: {e}")
+
+    return profile.point_value_per_lot, "STATIC_SNAPSHOT"
+
+
 def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
     """
     Get lot constraints, tick values and execution constraints for a symbol.
@@ -239,6 +282,11 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
     The last four are only truly known when MT5 is reachable; the fallback
     branches derive `point`/`digits` from the profile's point_size and report
     0 for the two broker-side fields (meaning "unknown", not "no restriction").
+
+    The InstrumentProfile-fallback branch additionally sets
+    `cross_rate_source` ("MT5_LIVE" | "STATIC_SNAPSHOT") when the symbol is a
+    non-USD-quoted FX cross (see resolve_cross_rate_point_value) — absent on
+    every other branch/symbol, so read it with `.get()`, not as a required key.
     """
     now = time.time()
     cache_key = (symbol, use_live_mt5)
@@ -323,12 +371,17 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
         from backend.risk.compounding import get_instrument_profile
         profile = get_instrument_profile(symbol)
         if profile:
+            # [Task 1.12] For a cross-currency FX pair, prefer a live MT5 quote
+            # over the static rate baked into the profile — see
+            # resolve_cross_rate_point_value. A no-op for every non-FX-cross
+            # symbol (commodities/indices/crypto/synthetics/USD-quoted majors).
+            tick_value, cross_rate_source = resolve_cross_rate_point_value(profile, use_live_mt5)
             res = {
                 "volume_min": profile.lot_min,
                 "volume_max": profile.lot_max,
                 "volume_step": profile.lot_step,
                 "contract_size": profile.contract_size,
-                "tick_value": profile.point_value_per_lot,
+                "tick_value": tick_value,
                 "tick_size": profile.point_size,
                 # No broker to ask: `point` is the profile's point_size and
                 # digits follows from it. stops_level/spread are unknown (0) —
@@ -338,6 +391,9 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
                 "point": float(profile.point_size),
                 "spread_points": 0.0,
                 "source": "InstrumentProfile",
+                # [Task 1.12] auditability: was tick_value a live MT5 cross-rate
+                # conversion or the static snapshot baked into the profile?
+                "cross_rate_source": cross_rate_source,
             }
             _symbol_info_cache[cache_key] = (now, res)
             if _frozen is not None:
@@ -378,17 +434,37 @@ def _instrument_type_of(symbol: str) -> str:
     return "FOREX"
 
 
-def minimum_stop_distance(symbol: str, info: dict | None = None, use_live_mt5: bool = True) -> tuple[float, str]:
+def minimum_stop_distance(
+    symbol: str,
+    info: dict | None = None,
+    use_live_mt5: bool = True,
+    min_stop_spread_multiple: float | None = None,
+    global_min_sl_pips: float = 0.0,
+) -> tuple[float, str]:
     """
     Smallest stop distance (in PRICE, not pips) that is physically tradeable for
     this symbol.
 
-        min = max(broker stops_level, spread x MIN_STOP_SPREAD_MULTIPLE, asset-class floor)
+        min = max(broker stops_level, spread x min_stop_spread_multiple,
+                   asset-class floor, global_min_sl_pips)
+
+    [2.11] min_stop_spread_multiple defaults to _DEFAULT_MIN_STOP_SPREAD_MULTIPLE
+    when not supplied — pass RiskParams.min_stop_spread_multiple through from the
+    caller to make it the real, user-editable value.
+
+    [3.5/E3] global_min_sl_pips is RiskParams.min_sl_pips — a portfolio-level
+    backstop floor on top of the asset-class floor above, previously defined
+    on RiskParams but never actually read by this function (0 = disabled,
+    matching "no additional floor").
 
     Returns (distance_in_price, human_readable_reason). Never raises; on total
     failure it returns (0.0, "unknown") so sizing is not blocked by a cost-lookup
     problem.
     """
+    spread_multiple = (
+        min_stop_spread_multiple if min_stop_spread_multiple is not None
+        else _DEFAULT_MIN_STOP_SPREAD_MULTIPLE
+    )
     try:
         if info is None:
             info = get_symbol_info(symbol, use_live_mt5=use_live_mt5)
@@ -419,14 +495,16 @@ def minimum_stop_distance(symbol: str, info: dict | None = None, use_live_mt5: b
 
         floor_pips = MIN_STOP_FLOOR_PIPS.get(_instrument_type_of(symbol), _MIN_STOP_FLOOR_DEFAULT_PIPS)
 
-        spread_price = spread_pips * MIN_STOP_SPREAD_MULTIPLE * pip_size
+        spread_price = spread_pips * spread_multiple * pip_size
         floor_price = floor_pips * pip_size
         costs_stops_price = costs_stops_pips * pip_size
+        global_floor_price = float(global_min_sl_pips or 0.0) * pip_size
 
         candidates = {
             "broker_stops_level": max(broker_price, costs_stops_price),
-            f"spread x{MIN_STOP_SPREAD_MULTIPLE:g}": spread_price,
+            f"spread x{spread_multiple:g}": spread_price,
             "asset_class_floor": floor_price,
+            "global_min_sl_pips": global_floor_price,
         }
         reason, distance = max(candidates.items(), key=lambda kv: kv[1])
         return float(distance), f"{reason} ({distance / pip_size:.2f} pips)"
@@ -442,10 +520,12 @@ def _margin_capped_lots(
     account_balance: float,
     info: dict,
     use_live_mt5: bool = True,
-) -> float:
+    max_margin_utilisation_pct: float | None = None,
+    max_account_leverage: float | None = None,
+) -> tuple[float, float]:
     """
     Clamp `lots` so the position's required margin stays within
-    MAX_MARGIN_UTILISATION_PCT of account equity.
+    max_margin_utilisation_pct of account equity.
 
     Prefers mt5.order_calc_margin() (the broker's own answer, including its
     per-symbol margin rate and any tiered-margin rules). Without MT5 it estimates
@@ -455,13 +535,24 @@ def _margin_capped_lots(
     not attempted — but is enough to stop the pathological 100x-account-notional
     sizes that MT5 rejects live with retcode 10019 (No money).
 
-    Never raises; returns `lots` unchanged if it cannot form an opinion.
+    [2.1/2.4] max_margin_utilisation_pct and max_account_leverage come from
+    RiskParams (real, user-editable settings) — None falls back to the module
+    defaults (_DEFAULT_MAX_MARGIN_UTILISATION_PCT / FALLBACK_ACCOUNT_LEVERAGE)
+    for callers that don't have a config yet. max_account_leverage=0 means
+    "use MT5's own reported leverage" (never the hardcoded fallback).
+
+    Returns (capped_lots, required_margin_dollars). Never raises; returns
+    `(lots, 0.0)` if it cannot form an opinion.
     """
+    margin_pct = (
+        max_margin_utilisation_pct if max_margin_utilisation_pct is not None
+        else _DEFAULT_MAX_MARGIN_UTILISATION_PCT
+    )
     try:
         if lots <= 0 or account_balance <= 0 or entry_price <= 0:
-            return lots
+            return lots, 0.0
 
-        max_margin = account_balance * (MAX_MARGIN_UTILISATION_PCT / 100.0)
+        max_margin = account_balance * (margin_pct / 100.0)
         required = 0.0
         basis = ""
 
@@ -481,9 +572,12 @@ def _margin_capped_lots(
         if required <= 0:
             contract_size = float(info.get("contract_size", 0.0) or 0.0)
             if contract_size <= 0:
-                return lots
-            leverage = FALLBACK_ACCOUNT_LEVERAGE
-            if mt5 is not None:
+                return lots, 0.0
+            # [2.4] Config leverage wins when set (>0); 0 or unset means "ask
+            # MT5"; only the hardcoded FALLBACK_ACCOUNT_LEVERAGE is used when
+            # neither is available.
+            leverage = max_account_leverage if (max_account_leverage or 0) > 0 else 0.0
+            if leverage <= 0 and mt5 is not None:
                 try:
                     acct = mt5.account_info()
                     if acct is not None and getattr(acct, "leverage", 0):
@@ -497,7 +591,7 @@ def _margin_capped_lots(
             basis = f"estimated (notional/{leverage:g}x)"
 
         if required <= max_margin:
-            return lots
+            return lots, required
 
         scale = max_margin / required
         capped = lots * scale
@@ -510,13 +604,54 @@ def _margin_capped_lots(
         logger.warning(
             f"[SIZER] {symbol}: MARGIN CEILING TRIGGERED! {lots} lots would require "
             f"${required:,.2f} margin [{basis}], above the "
-            f"{MAX_MARGIN_UTILISATION_PCT:.0f}% cap of ${max_margin:,.2f} on a "
+            f"{margin_pct:.0f}% cap of ${max_margin:,.2f} on a "
             f"${account_balance:,.2f} account. Clamped to {capped} lots."
         )
-        return capped
+        return capped, required
     except Exception as e:
         logger.debug(f"[SIZER] {symbol}: margin cap check failed: {e}")
-        return lots
+        return lots, 0.0
+
+
+# [I3] Task 0.3 — per-trade sizing diagnostics. calculate_lot_size()'s signature
+# and single-float return are relied on by every caller; rather than change the
+# contract, the internal stages it already computes (pre-cap, post-hard-cap,
+# post-margin-cap) are recorded here and read back by the caller (risk/engine.py)
+# immediately after the call. ContextVar (not a module global) so this is safe
+# under concurrent live + backtest execution in the same process — same pattern
+# as _frozen_symbol_info_var above.
+_last_sizing_diagnostics_var: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "last_sizing_diagnostics", default=None
+)
+
+
+def get_last_sizing_diagnostics() -> dict | None:
+    """The internal stages of the most recent calculate_lot_size() call on this
+    context (thread/async task). None if calculate_lot_size has not run yet."""
+    return _last_sizing_diagnostics_var.get()
+
+
+def _resolved_cost_pips(cost_config: dict | None, field: str, symbol: str, use_live_mt5: bool) -> float:
+    """
+    [2.6] The same explicit-value-wins-else-broker-default resolution
+    backtester/engine.py::resolve_effective_costs uses, duplicated narrowly here
+    so calculate_lot_size can size against the SAME slippage/spread figures that
+    will actually be applied at fill — without importing the backtester module
+    (which would create a circular import: backtester imports position_sizer).
+    """
+    raw = (cost_config or {}).get(field)
+    _unset_tokens = {"", "auto", "default", "broker", "mt5", "none"}
+    is_unset = raw is None or (isinstance(raw, str) and raw.strip().lower() in _unset_tokens)
+    if not is_unset:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            pass
+    try:
+        from backend.risk.broker_costs import get_broker_costs
+        return float(get_broker_costs(symbol, use_live_mt5=use_live_mt5).get(field, 0.0) or 0.0)
+    except Exception:
+        return 0.0
 
 
 def calculate_lot_size(
@@ -529,26 +664,52 @@ def calculate_lot_size(
     # Protects against any future misconfiguration regardless of profile values.
     max_risk_hard_cap_pct: float = 3.0,
     use_live_mt5: bool = True,
+    max_margin_utilisation_pct: float | None = None,
+    max_account_leverage: float | None = None,
+    min_deployable_risk_pct: float = 0.0,
+    min_stop_spread_multiple: float | None = None,
+    cost_config: dict | None = None,
+    global_min_sl_pips: float = 0.0,
 ) -> float:
     """
     Calculate lot size so that if SL is hit, loss = risk_pct% of balance.
-    Formula: Lot = (Balance × Risk%) / (SL_distance × (tick_value / tick_size))
+    Formula: Lot = (Balance × Risk%) / (Effective_SL_distance × (tick_value / tick_size))
+    where Effective_SL_distance = SL_distance + (slippage_pips + spread_pips) × pip_size
+    [2.6] — sizing against the raw stop distance alone understates realised risk,
+    because the actual exit (and the cost model in _calc_pnl) always pays the
+    spread/slippage on top of it.
 
-    Three safety layers, applied in this order:
+    Four safety layers, applied in this order:
       1. MINIMUM STOP DISTANCE — refuse (return 0.0) if the stop is tighter than
-         the broker's stops_level / spread × MIN_STOP_SPREAD_MULTIPLE / the
+         the broker's stops_level / spread × min_stop_spread_multiple / the
          asset-class floor. Such a stop is untradeable live and, being the
          denominator of the sizing formula, is also what produces absurd lots.
       2. HARD RISK CAP — clamp so realised risk can't exceed
          max_risk_hard_cap_pct% of balance even if profile/MT5 values are wrong.
       3. MARGIN CEILING — clamp so required margin stays inside
-         MAX_MARGIN_UTILISATION_PCT of equity (MT5 would otherwise reject the
-         order with retcode 10019, No money).
+         max_margin_utilisation_pct of equity (MT5 would otherwise reject the
+         order with retcode 10019, No money). [2.2] If that clamp would push
+         realised risk below min_deployable_risk_pct, refuse instead of taking
+         a token position.
+      4. [2.5] Never round UP to volume_min — floor to the lot step and refuse
+         (0.0, reason below_broker_min_lot) if that floors below volume_min.
 
     Source: RiskManagement_Spec.md Section 5.1
     """
     risk_amount = account_balance * (risk_pct / 100)
     sl_distance = abs(entry_price - stop_loss_price)
+
+    # [I3] diag accumulates across the function; set on every return so a
+    # caller reading get_last_sizing_diagnostics() right after this call always
+    # sees THIS call's stages, never a stale value from a previous symbol.
+    diag: dict = {
+        "requested_risk_pct": risk_pct,
+        "pre_cap_lots": None,
+        "post_hardcap_lots": None,
+        "post_margin_lots": None,
+        "margin_truncation_pct": None,
+        "refused_reason": None,
+    }
 
     info = get_symbol_info(symbol, use_live_mt5=use_live_mt5)
     tick_value = info.get("tick_value", 1.0)
@@ -557,6 +718,8 @@ def calculate_lot_size(
 
     if tick_size == 0 or tick_value == 0 or sl_distance == 0:
         logger.error(f"[SIZER] {symbol}: Zero tick_size/tick_value/sl_distance — returning 0 lots.")
+        diag["refused_reason"] = "zero_tick_or_distance"
+        _last_sizing_diagnostics_var.set(diag)
         return 0.0
 
     # CROSS-RATE FX SAFETY GUARD
@@ -569,6 +732,8 @@ def calculate_lot_size(
     if source == "DEFAULT":
         if symbol.upper() not in _SAFE_DEFAULTS:
             logger.error(f"[SIZER] {symbol}: No MT5 data and no profile. Refusing to size. source=DEFAULT")
+            diag["refused_reason"] = "no_instrument_profile"
+            _last_sizing_diagnostics_var.set(diag)
             return 0.0
         logger.warning(f"[SIZER] {symbol}: Sizing using DEFAULT fallback! Risk calculations may be inaccurate.")
 
@@ -577,7 +742,10 @@ def calculate_lot_size(
     # traded: MT5 rejects it (retcode 10016, Invalid stops) or the spread alone
     # closes it. Refuse to size rather than emit a huge lot against a fictional
     # stop — the signal is then rejected upstream by the zero-lot check.
-    min_stop_price, min_stop_reason = minimum_stop_distance(symbol, info, use_live_mt5=use_live_mt5)
+    min_stop_price, min_stop_reason = minimum_stop_distance(
+        symbol, info, use_live_mt5=use_live_mt5, min_stop_spread_multiple=min_stop_spread_multiple,
+        global_min_sl_pips=global_min_sl_pips,
+    )
     if min_stop_price > 0 and sl_distance < min_stop_price:
         pip_size = get_pip_size(symbol) or 0.0
         sl_pips = (sl_distance / pip_size) if pip_size > 0 else float("nan")
@@ -587,27 +755,56 @@ def calculate_lot_size(
             f"This stop is untradeable live (spread/stops-level would consume it). "
             f"Refusing to size — returning 0 lots."
         )
+        diag["refused_reason"] = "stop_below_min_viable"
+        _last_sizing_diagnostics_var.set(diag)
         return 0.0
 
     # MT5 tick_value = profit in account currency for 1 tick move of 1 standard lot.
     # value_per_unit_move = how many account-currency dollars 1 full price unit is worth per lot.
     value_per_unit_move = tick_value / tick_size
-    raw_lot = risk_amount / (sl_distance * value_per_unit_move)
 
-    clamped = max(info["volume_min"], min(info["volume_max"], raw_lot))
+    # [2.6] Size against the stop distance PLUS the round-trip cost that will
+    # actually be paid at entry/exit — sizing against the raw stop alone means
+    # realised risk always runs above target by roughly the spread+slippage.
+    pip_size_for_costs = get_pip_size(symbol) or 0.0
+    slippage_pips = _resolved_cost_pips(cost_config, "slippage_pips", symbol, use_live_mt5)
+    spread_pips = _resolved_cost_pips(cost_config, "spread_pips", symbol, use_live_mt5)
+    cost_buffer_price = (slippage_pips + spread_pips) * pip_size_for_costs
+    effective_sl_distance = sl_distance + cost_buffer_price
+    diag["cost_buffer_price"] = cost_buffer_price
+
+    raw_lot = risk_amount / (effective_sl_distance * value_per_unit_move)
+    diag["raw_lot"] = raw_lot  # [I3] before ANY clamp — the pure risk-based answer
+    # [I3] Which broker volume bound (if either) fired, so a caller can tell
+    # "the account's risk% wanted more/less than this symbol's lot_min/lot_max
+    # allows" apart from the two guards below, which only ever see the
+    # already-clamped value and would otherwise misreport this as "none".
+    if raw_lot > info["volume_max"]:
+        diag["broker_volume_clamp"] = "lot_max"
+    elif raw_lot < info["volume_min"]:
+        diag["broker_volume_clamp"] = "lot_min"
+    else:
+        diag["broker_volume_clamp"] = None
+
+    # [2.5] Clamp to volume_max only here — never round/clamp UP to volume_min.
+    # An account whose risk-based lot floors below the broker's minimum cannot
+    # actually take this trade at its intended risk; that must surface as a
+    # refusal (below), not a silent size-up past the risk budget.
     step = info["volume_step"]
-    rounded = round(clamped / step) * step if step > 0 else clamped
-    final_lot = round(rounded, 3)
+    capped_to_max = min(info["volume_max"], raw_lot)
+    final_lot = math.floor(capped_to_max / step) * step if step > 0 else capped_to_max
+    final_lot = round(final_lot, 3)
+    diag["pre_cap_lots"] = final_lot  # [I3] risk-based size before either safety guard
 
     # ── GUARD 2: Hard Risk Cap (safety net) ───────────────────────────────────
     # Calculate actual dollar risk with the final lot, and clamp if it exceeds the cap.
-    actual_risk = final_lot * sl_distance * value_per_unit_move
+    actual_risk = final_lot * effective_sl_distance * value_per_unit_move
     max_risk_dollars = account_balance * (max_risk_hard_cap_pct / 100)
     if actual_risk > max_risk_dollars:
-        # Scale lots down to meet the cap
-        safe_lot = max_risk_dollars / (sl_distance * value_per_unit_move)
-        safe_lot = max(info["volume_min"], safe_lot)
-        safe_lot = round(round(safe_lot / step) * step, 3) if step > 0 else round(safe_lot, 3)
+        # Scale lots down to meet the cap — [2.5] floor, do not clamp up to volume_min.
+        safe_lot = max_risk_dollars / (effective_sl_distance * value_per_unit_move)
+        safe_lot = math.floor(safe_lot / step) * step if step > 0 else safe_lot
+        safe_lot = round(safe_lot, 3)
         logger.warning(
             f"[SIZER] {symbol}: HARD CAP TRIGGERED! "
             f"Calculated lot {final_lot} would risk ${actual_risk:.2f} "
@@ -616,14 +813,41 @@ def calculate_lot_size(
             f"Source was: {source}. Check your InstrumentProfile for this symbol!"
         )
         final_lot = safe_lot
+    diag["post_hardcap_lots"] = final_lot  # [I3] size after Guard 2, before Guard 3
 
     # ── GUARD 3: Margin ceiling ───────────────────────────────────────────────
     # Applied last, on the risk-capped lot, because it can only ever reduce size:
     # a lot the account cannot margin is rejected by MT5 (retcode 10019) no
     # matter how small its stop-loss risk is.
-    final_lot = _margin_capped_lots(
-        symbol, final_lot, entry_price, account_balance, info, use_live_mt5=use_live_mt5
+    _pre_margin_lot = final_lot
+    final_lot, required_margin = _margin_capped_lots(
+        symbol, final_lot, entry_price, account_balance, info, use_live_mt5=use_live_mt5,
+        max_margin_utilisation_pct=max_margin_utilisation_pct,
+        max_account_leverage=max_account_leverage,
     )
+    diag["post_margin_lots"] = final_lot  # [I3]
+    diag["required_margin"] = required_margin
+    if _pre_margin_lot > 0 and final_lot < _pre_margin_lot:
+        diag["margin_truncation_pct"] = round((1.0 - final_lot / _pre_margin_lot) * 100.0, 2)
+
+        # [2.2] If the margin cap truncated realised risk below the deployable
+        # floor, refuse the trade outright rather than take a token position —
+        # this is the fix for crypto pinning at ~$7,500 notional / 0.05-0.4%
+        # risk on every trade regardless of the configured risk_pct.
+        if min_deployable_risk_pct > 0:
+            realised_risk_pct_if_taken = (
+                (final_lot * effective_sl_distance * value_per_unit_move) / account_balance * 100.0
+                if account_balance > 0 else 0.0
+            )
+            if final_lot <= 0 or realised_risk_pct_if_taken < min_deployable_risk_pct:
+                logger.warning(
+                    f"[SIZER] {symbol}: margin ceiling truncates realised risk to "
+                    f"{realised_risk_pct_if_taken:.3f}%, below min_deployable_risk_pct="
+                    f"{min_deployable_risk_pct:.3f}%. Refusing rather than taking a token position."
+                )
+                diag["refused_reason"] = "margin_ceiling_below_min_risk"
+                _last_sizing_diagnostics_var.set(diag)
+                return 0.0
 
     # ── Final validity floor ──────────────────────────────────────────────────
     # Never return a negative lot, and never return one below the broker's
@@ -635,8 +859,11 @@ def calculate_lot_size(
             f"[SIZER] {symbol}: post-cap lot {final_lot} is below volume_min {volume_min} "
             f"(risk cap and/or margin ceiling left no tradeable size). Returning 0 lots."
         )
+        diag["refused_reason"] = "below_broker_min_lot"
+        _last_sizing_diagnostics_var.set(diag)
         return 0.0
 
+    _last_sizing_diagnostics_var.set(diag)  # [I3] success path
     actual_risk = final_lot * sl_distance * value_per_unit_move
     logger.info(
         f"[SIZER] {symbol}: lot={final_lot} | risk=${actual_risk:.2f} "
@@ -673,15 +900,20 @@ def calculate_risk_dollars(
     value_per_unit_move = tick_value / tick_size
     return lots * sl_distance * value_per_unit_move
 
-def kelly_lot_size(
+def kelly_risk_fraction(
     win_rate: float,
     avg_win_r: float,
     avg_loss_r: float,
-    balance: float,
     max_kelly_fraction: float = 0.25,
 ) -> float:
     """
-    Kelly Criterion lot sizing.
+    [2.16] Renamed from kelly_lot_size, which never returned a lot size — it
+    returned a dollar amount (balance * fraction) with no stop distance or
+    instrument in its signature, so it could not have been a lot-sizing
+    function. Still has zero callers; kept as the fraction Kelly's formula
+    actually computes, for a future caller to turn into a risk_pct.
+
+    Kelly Criterion risk fraction.
     f* = (W × B - L) / B
     Uses fractional Kelly (default 25% cap) to reduce volatility.
     Source: RiskManagement_Spec.md Section 5.2
@@ -690,23 +922,60 @@ def kelly_lot_size(
     b = avg_win_r / avg_loss_r if avg_loss_r > 0 else 1
     kelly = (win_rate * b - loss_rate) / b
     fraction = min(kelly, max_kelly_fraction)
-    return balance * max(fraction, 0)
+    return max(fraction, 0.0)
 
-def get_confluence_scaled_risk(base_risk_pct: float, confluence_score: int) -> float:
+def resolve_sizing_base_balance(
+    sizing_basis: str,
+    static_balance: float,
+    live_balance: float,
+    live_equity: float | None = None,
+) -> float:
+    """
+    [4.2/D1] The ONE function that decides what a trade's position sizing is
+    computed against — `RiskParams.sizing_basis`. Before this existed, live
+    PERSONAL accounts silently used `live_balance` (bot_service.py passed the
+    account's live, growing balance as `initial_balance` for any non-prop-firm
+    account) while backtests and prop-firm accounts always used a fixed
+    `static_balance` — a real backtest/live divergence for the majority
+    (personal-account) case, and implicit compounding against the explicit
+    "compounding removed per user request" decision recorded in
+    risk/engine.py's evaluate_signal.
+
+    `STATIC` (default) -> static_balance, never grows/shrinks with P&L.
+    `BALANCE` -> live_balance (closed-trade balance; compounds with realised P&L).
+    `EQUITY`  -> live_equity if supplied, else falls back to live_balance.
+    """
+    if sizing_basis == "BALANCE":
+        return live_balance
+    if sizing_basis == "EQUITY":
+        return live_equity if live_equity is not None else live_balance
+    return static_balance  # STATIC, or any unrecognised value
+
+
+def get_confluence_scaled_risk(
+    base_risk_pct: float,
+    confluence_score: int,
+    tiers: list[tuple[int, float]] | None = None,
+    reject_below_confluence: bool = True,
+) -> float:
     """
     Scales the base risk percentage down if the confluence score is lower than optimal.
-    
-    Tiers (configurable):
-    - Score 80-100: Deploy 100% of base_risk_pct
-    - Score 65-79:  Deploy 75% of base_risk_pct
-    - Score 55-64:  Deploy 50% of base_risk_pct
-    - Score <55:    Rejected (0%)
+
+    [2.10] `tiers` is a list of (score_floor, pct_of_base_risk), evaluated
+    highest-floor-first — pass RiskParams.confluence_risk_tiers through from the
+    caller to make this a real, user-editable setting rather than the hardcoded
+    80/65/55 -> 100/75/50 ladder used when tiers is None.
+
+    A score below every tier's floor deploys 0% when reject_below_confluence is
+    True (the D-3 default: outright rejection). When False, it instead deploys
+    at the LOWEST tier's fraction — i.e. never rejects on confluence alone.
     """
-    if confluence_score >= 80:
-        return base_risk_pct
-    elif confluence_score >= 65:
-        return base_risk_pct * 0.75
-    elif confluence_score >= 55:
-        return base_risk_pct * 0.50
-    else:
+    active_tiers = tiers if tiers else [(80, 100.0), (65, 75.0), (55, 50.0)]
+    ordered = sorted(active_tiers, key=lambda t: t[0], reverse=True)
+    for floor, pct in ordered:
+        if confluence_score >= floor:
+            return base_risk_pct * (pct / 100.0)
+    if reject_below_confluence or not ordered:
         return 0.0
+    lowest_pct = ordered[-1][1]
+    return base_risk_pct * (lowest_pct / 100.0)

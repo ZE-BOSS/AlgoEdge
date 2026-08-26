@@ -607,6 +607,19 @@ Ordered by severity.
 - **Fix:** Return `None` (no signal). A missing structural reference means there is no setup,
   not a setup with an arbitrary stop.
 
+> **[Housekeeping-3] RE-VERIFIED 2026-08-23, against current code (Phase 6/8 landed).** §10.6 (VWAP
+> confluence): **resolved** — Phase 8 replaced the hardcoded value with a real 5-component score.
+> §10.7 (VWAP sl_method/min_sl_pips/target_rr): **resolved**, already wired before this pass
+> (`_resolve_sl_distance`/`_apply_sl_floor` in `strategy_vwap/engine.py` match the fix below exactly;
+> preserved as-is through the Phase 8 v2 rewrite). §10.8 (APA min_sl_pips/min_sl_atr_mult): **resolved**,
+> `_sl_floor_distance` applies the floor at signal-emission time exactly as this section's "ordering
+> subtlety" note requires. §10.9 (NY Retest target_mode/target_rr): **resolved**, `target_mode="rr"` is
+> now the default path. §10.10 (CRT structural TP discarded by grid): **STILL OPEN** — CRT declares
+> `structural_tp`/`structural_tp_rr` in its signal metadata (unchanged), and VWAP v2 (Phase 8) now
+> declares the identical pattern for its own σ-band targets, but neither is actually exempted from the
+> RiskParams TP grid — the product decision this section calls for has still not been made. See
+> `docs/CRT_Strategy_Spec.md`'s own 2026-08 update note and `implementation/TASKS.md` Phase 6/8.
+
 ### 10.6 🟠 `confluence_score` is a hard-coded constant
 - **Where:** `strategy_five/engine.py:364` (85), `strategy_four/engine.py:~216` (88)
 - **What:** Emitted identically on every signal, so any threshold comparison against it is

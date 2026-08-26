@@ -237,5 +237,65 @@ export const saveBrokerStandard = (data) => api.post('/broker/standard', data);
 export const getBrokerStatus = () => api.get('/broker/status');
 export const testBrokerConnection = (data) => api.post('/broker/test', data);
 export const removeBrokerStandard = () => api.delete('/broker/standard');
+// Canonical instrument -> this broker's symbol (task 14.9). `refresh` re-runs
+// discovery against the terminal instead of reading the cached map.
+export const getInstrumentResolution = (refresh = false) =>
+  api.get('/broker/instruments', { params: { refresh } });
+
+// ── Analysis (Claude-powered) ───────────────────────────────────────────────
+
+export const getAnalysisProviders = () => api.get('/analysis/providers');
+// The model catalogue: id, label, context window, real output ceiling, price.
+// Drives the model picker so the choice is made with the tradeoff visible.
+export const getAnalysisModels = () => api.get('/analysis/models');
+// Analysis can take minutes at a 128K ceiling with adaptive thinking on, so it
+// gets its own timeout rather than the client default.
+export const runAnalysis = (data) => api.post('/analysis/run', data, { timeout: 600000 });
+export const getAnalysisHistory = (params) => api.get('/analysis/history', { params });
+export const deleteAnalysis = (id) => api.delete(`/analysis/${id}`);
+
+// ── Logs ────────────────────────────────────────────────────────────────────
+
+export const getLogs = (params) => api.get('/logs', { params });
+export const getLogSessions = () => api.get('/logs/sessions');
+export const getLogFiles = () => api.get('/logs/files');
+// On-disk history is the same endpoint with source=file — there is no separate
+// /logs/file route (this previously pointed at one that does not exist).
+export const getLogFile = (params) => api.get('/logs', { params: { ...params, source: 'file' } });
+export const getLogStats = () => api.get('/logs/stats');
+
+// ── Backtest replay ─────────────────────────────────────────────────────────
+
+export const getReplaySeries = () => api.get('/backtest_result/replay');
+export const getSavedReplaySeries = (backtestId) => api.get(`/backtests/${backtestId}/replay`);
+
+// ── Schema introspection (drives the schema-driven parameter forms) ─────────
+
+export const getParameterSchema = () => api.get('/config/parameter_schema');
+
+// ── Fundamentals (provider-backed: free now, paid later, no code change) ────
+
+export const getFundProviders = () => api.get('/fundamentals/providers');
+export const selectFundProvider = (data) => api.post('/fundamentals/providers/select', data);
+export const getOrderFlow = (params) => api.get('/fundamentals/orderflow', { params });
+export const getOrderBook = (params) => api.get('/fundamentals/orderbook', { params });
+export const getCorrelation = (params) => api.get('/fundamentals/correlation', { params });
+export const getOptionsChain = (params) => api.get('/fundamentals/options', { params });
+export const getGex = (params) => api.get('/fundamentals/gex', { params });
+export const getEconCalendar = (params) => api.get('/fundamentals/calendar', { params });
+export const getFundHealth = () => api.get('/fundamentals/health');
+
+// ── Strategy Factory [Phase 14 Stream 3] ──────────────────────────────────
+
+/** List all registered + generated strategies with status metadata. */
+export const listFactoryStrategies = () => api.get('/strategy-factory/strategies');
+/** Scaffold a new strategy from a spec object. */
+export const generateStrategy = (data) => api.post('/strategy-factory/generate', data);
+/** Activate a generated strategy: commit to dev branch, open GitHub PR. */
+export const activateStrategy = (strategyId, data = {}) =>
+  api.post(`/strategy-factory/activate/${strategyId}`, data);
+/** Delete a generated (non-live) strategy scaffold. */
+export const deleteStrategy = (strategyId) =>
+  api.delete(`/strategy-factory/${strategyId}`);
 
 export default api;

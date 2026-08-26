@@ -88,9 +88,35 @@ async def websocket_handler(websocket: WebSocket, user_id: str, token: str = Non
     Enforces JWT authentication to prevent unauthorized stream interception.
     Source: TradingBot_MasterPlan-2.md Section 6
     """
+    async def _reject(reason: str) -> None:
+        """
+        Refuse the connection in a way the BROWSER can actually read.
+
+        Calling `websocket.close()` before `accept()` makes Starlette answer the
+        HTTP upgrade with 403, and the handshake never becomes a WebSocket. The
+        browser then reports close code **1006 with an empty reason** — the
+        generic "abnormal closure" — and the 4001 and its reason string are lost.
+
+        That mattered: the client's reconnect logic keys off 4001/4003/1008 to
+        decide "this is an auth failure, refresh the token". Receiving 1006 it
+        concluded "network blip", slept, and retried with the SAME expired
+        token — forever. Access tokens last 15 minutes, so every session
+        silently lost its live log stream, replay feed and backtest progress a
+        quarter of an hour after login, and only a page reload brought it back.
+
+        Accepting first and then closing sends a real close frame, so the code
+        and reason survive and the client can act on them.
+        """
+        try:
+            await websocket.accept()
+            await websocket.close(code=4001, reason=reason)
+        except Exception:
+            # Client vanished mid-handshake — nothing to tell it.
+            pass
+
     if not token:
         logger.warning(f"WebSocket connection rejected: Missing token for user {user_id}")
-        await websocket.close(code=4001, reason="Missing token")
+        await _reject("Missing token")
         return
 
     from jose import JWTError, jwt
@@ -102,11 +128,11 @@ async def websocket_handler(websocket: WebSocket, user_id: str, token: str = Non
         token_user_id = payload.get("sub")
         if token_user_id != user_id:
             logger.warning(f"WebSocket connection rejected: Token mismatch for user {user_id}")
-            await websocket.close(code=4001, reason="Token mismatch")
+            await _reject("Token mismatch")
             return
     except JWTError:
         logger.warning(f"WebSocket connection rejected: Invalid/expired token for user {user_id}")
-        await websocket.close(code=4001, reason="Token expired")
+        await _reject("Token expired")
         return
 
     await manager.connect(websocket, user_id)

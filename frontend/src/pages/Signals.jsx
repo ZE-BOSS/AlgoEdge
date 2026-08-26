@@ -2,6 +2,7 @@ import { useState, useEffect, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Zap, CheckCircle, XCircle, ChevronDown, ChevronRight, Image, Activity } from 'lucide-react';
 import { useConnectionStore, useAuthStore } from '../store';
+import AnalyzeButton from '../components/AnalyzeButton';
 import { getSignals, getSignalDetail, getBackendUrl } from '../services/api';
 
 function ConfluenceBar({ score }) {
@@ -202,6 +203,13 @@ export default function Signals() {
       <div className="page-header">
         <h2><Zap size={22} style={{ display: 'inline', marginRight: 8 }} />Signals</h2>
         <p>All generated signals — executed and skipped — with confluence scores</p>
+        <div style={{ marginTop: 8 }}>
+          <AnalyzeButton
+            targetType="signals"
+            compact
+            question="Which gates are blocking the most signals, and are any of them blocking setups that should have traded?"
+          />
+        </div>
       </div>
 
       <div className="filter-tabs" style={{ marginBottom: 16 }}>

@@ -4,6 +4,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap, LayoutDashboard, PlusCircle, MinusCircle } from 'lucide-react';
 import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts } from '../services/api';
 import TradeChart from '../components/TradeChart';
+import BacktestReplay from '../components/BacktestReplay';
+import RunReport from '../components/RunReport';
+import AnalyzeButton from '../components/AnalyzeButton';
+import ParamsPanel from '../components/ParamsPanel';
 import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
 import * as summaryEngine from '../utils/summaryEngine';
@@ -66,6 +70,39 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
   if (strategyId === 'APA_v1') {
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        {/* Retest is now optional. Requiring it filtered OUT the breakouts that
+            worked: on a measured XAUUSD window, 192 setups expired waiting for a
+            retest that never came (price broke and ran), while the 15 that did
+            retest were — by selection — the failing ones, and all were stopped
+            with a median MFE of 0.00R. */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}>
+            <input
+              type="checkbox"
+              checked={!!apa.require_retest}
+              onChange={e => updateApa('require_retest', e.target.checked)}
+              style={{ width: 14, height: 14 }}
+            />
+            Require retest into the Invalidation Zone before entry
+          </label>
+          <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>
+            {apa.require_retest
+              ? 'ON — better entry price, but misses breakouts that run without returning.'
+              : 'OFF (default) — enter on the BOS confirmation. Catches runners; entry price is worse.'}
+            {' '}A rejection at the zone adds confluence either way; it is never required.
+          </div>
+        </div>
+        <div>
+          <label style={{ fontSize: '0.7rem' }}>Rejection Confluence (pts)</label>
+          <input
+            type="number" min="0" max="40"
+            value={apa.rejection_candle_confluence_points ?? 12}
+            onChange={e => updateApa('rejection_candle_confluence_points', +e.target.value)}
+          />
+          <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>
+            Awarded when the retest wicks into the zone and closes back out. 0 to ignore.
+          </div>
+        </div>
         <div><label style={{ fontSize: '0.7rem' }}>Minor Fractal (M)</label><input type="number" value={apa.minor_fractal_m} onChange={e => updateApa('minor_fractal_m', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Major Fractal (M)</label><input type="number" value={apa.major_fractal_m} onChange={e => updateApa('major_fractal_m', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Shoulder Symmetry (× ATR)</label><input type="number" step="0.05" min="0" value={apa.shoulder_symmetry_tolerance_atr} onChange={e => updateApa('shoulder_symmetry_tolerance_atr', +e.target.value)} /></div>
@@ -565,6 +602,17 @@ const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef
                   <div style={{ padding: '8px' }}>
                     {activeChart === 'M15' && <TradeChart group={mergedGroup} timeframe="M15" height={400} />}
                     {activeChart === 'M5' && <TradeChart group={mergedGroup} timeframe="M5" height={400} />}
+                    {/* The analysis carries this trade's markings — the levels
+                        the strategy actually measured — so "was the strategy
+                        implemented correctly here" is answerable per trade. */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                      <AnalyzeButton
+                        targetType="trade"
+                        targetId={mergedGroup.group_id}
+                        compact
+                        question="Did the strategy fire correctly on this trade? Check the entry against the confluences it recorded, and say whether the stop and target placement follow from them."
+                      />
+                    </div>
                   </div>
                 </div>
               ) : mergedGroup.entry_snapshot_b64 ? (
@@ -582,6 +630,17 @@ const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef
 
 const BacktestResults = memo(function BacktestResults({ result, onSave, onDismiss, onClose, isSaving }) {
   const report = result.report || {};
+  // [I1]/[H1]: the engine returns rejection_funnel at the TOP LEVEL of the
+  // result (matching the portfolio route), not nested under `report` — the
+  // panel below read `report.rejection_funnel` and has never had data for a
+  // single-symbol run. Fall back to the old nested path for any already-saved
+  // run whose JSON blob predates this fix.
+  const rejectionFunnel = result.rejection_funnel || report.rejection_funnel || {};
+  const blockedSignals = result.blocked_signals || [];
+  // [7.12-7.17] The six diagnostic panels, as one component shared with live.
+  // Their backing data (rejection_funnel, blocked_signals, sizing_diagnostics)
+  // has been in the response since Phase 0 with nothing rendering it.
+  const runReport = <RunReport result={result} backtestId={result.backtest_id || null} />;
   const grouped = result.grouped_trades || [];
   const eqData = (result.equity_curve || []).map((v, i) => ({ bar: i, equity: v }));
   const initialBalance = result.initial_balance || 10000;
@@ -838,23 +897,17 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       </div>
     )}
 
-    {result.params_snapshot && Object.keys(result.params_snapshot).length > 0 && (
-      <div style={{ marginBottom: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
-        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--purple)', marginBottom: 4 }}>Configuration Parameters</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 4 }}>
-          {Object.entries(result.params_snapshot).map(([k, v]) => (
-            <div key={k} style={{ fontSize: '0.75rem', display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-muted)' }}>{k}:</span>
-              <span style={{ textAlign: 'right', wordBreak: 'break-all', maxWidth: '70%' }}>
-                {typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
+    {/* [7.2/H2] Was a flat dump: nested objects via JSON.stringify and unset
+        fields as the literal string "null". ParamsPanel groups the nesting and
+        folds the unset fields behind a count. */}
+    <ParamsPanel params={result.params_snapshot} />
 
-    {report.rejection_funnel && Object.keys(report.rejection_funnel).length > 0 && (
+    {/* [7.12-7.17] Signal funnel, risk deployment, exit attribution,
+        blocked-signal timeline and cost impact. Shares one component with the
+        live run report per task 7.17. */}
+    <div style={{ marginBottom: 16 }}>{runReport}</div>
+
+    {rejectionFunnel && Object.keys(rejectionFunnel).length > 0 && (
       <div style={{ marginBottom: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
         <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center' }}>
           <Shield size={14} style={{ marginRight: 6, color: 'var(--blue)' }} /> Signal Rejection Funnel
@@ -862,20 +915,20 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>Overview</div>
-            <div style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}><span>Total Evaluated:</span> <strong>{report.rejection_funnel.total_evaluated}</strong></div>
-            <div style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}><span>Approved:</span> <strong style={{ color: 'var(--green)' }}>{report.rejection_funnel.approved}</strong></div>
-            <div style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}><span>Errors:</span> <strong style={{ color: report.rejection_funnel.errors > 0 ? 'var(--red)' : 'var(--text-primary)' }}>{report.rejection_funnel.errors}</strong></div>
+            <div style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}><span>Total Evaluated:</span> <strong>{rejectionFunnel.total_evaluated}</strong></div>
+            <div style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}><span>Approved:</span> <strong style={{ color: 'var(--green)' }}>{rejectionFunnel.approved}</strong></div>
+            <div style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}><span>Errors:</span> <strong style={{ color: rejectionFunnel.errors > 0 ? 'var(--red)' : 'var(--text-primary)' }}>{rejectionFunnel.errors}</strong></div>
           </div>
           <div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>Rejection Breakdown</div>
             <div style={{ maxHeight: 100, overflowY: 'auto', paddingRight: 4 }}>
-              {Object.entries(report.rejection_funnel.strategy_rejections || {}).map(([reason, count]) => (
+              {Object.entries(rejectionFunnel.strategy_rejections || {}).map(([reason, count]) => (
                 <div key={reason} style={{ fontSize: '0.75rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2, borderBottom: '1px solid var(--border)' }}>
                   <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '80%' }} title={reason}>{reason}</span>
                   <span style={{ color: 'var(--yellow)' }}>{count}</span>
                 </div>
               ))}
-              {Object.entries(report.rejection_funnel.risk_rejections || {}).map(([reason, count]) => (
+              {Object.entries(rejectionFunnel.risk_rejections || {}).map(([reason, count]) => (
                 <div key={reason} style={{ fontSize: '0.75rem', display: 'flex', justifyContent: 'space-between', marginBottom: 2, borderBottom: '1px solid var(--border)' }}>
                   <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '80%' }} title={reason}>Risk: {reason}</span>
                   <span style={{ color: 'var(--yellow)' }}>{count}</span>
@@ -884,6 +937,23 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
             </div>
           </div>
         </div>
+        {blockedSignals.length > 0 && (
+          <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+              Blocked Signals ({blockedSignals.length}{blockedSignals.length >= 500 ? '+, capped' : ''}) — every strategy signal that did not become a trade
+            </div>
+            <div style={{ maxHeight: 160, overflowY: 'auto', fontSize: '0.72rem' }}>
+              {blockedSignals.slice(0, 100).map((b, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, padding: '2px 0', borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{(b.time || '').slice(0, 16)}</span>
+                  <span style={{ flexShrink: 0 }}>{b.symbol} {b.direction}</span>
+                  <span style={{ color: 'var(--yellow)', flexShrink: 0 }}>{b.gate}</span>
+                  <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.reason}>{b.reason}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     )}
 
@@ -1254,6 +1324,8 @@ const DEFAULT_FORM = {
     minor_fractal_m: 3, major_fractal_m: 8,
     shoulder_symmetry_tolerance_atr: 0.3, tight_level_threshold_atr: 0.35,
     sl_buffer_atr_mult: 0.5, min_sl_pips: 12.0, min_sl_atr_mult: 1.0,
+    // Retest OFF by default — see the toggle's note and APAParams.require_retest.
+    require_retest: false, rejection_candle_confluence_points: 12,
     invalidation_zone_source: 'right_shoulder',
     session_filter_enabled: true, session_start: '07:00', session_cutoff: '16:00',
   },
@@ -1300,10 +1372,21 @@ const DEFAULT_FORM = {
   risk_per_trade_pct: 0.5, min_rr: 3.0,
   max_daily_drawdown_pct: 3.0, max_weekly_drawdown_pct: 6.0,
   max_concurrent_positions: 3, max_daily_trades: 5,
+  // [3.8/E5] Now editable — see the Advanced panel. 1 = a second setup on the
+  // same symbol is discarded while one is open.
+  max_positions_per_symbol: 1,
+  allow_pyramiding: false, min_bars_between_entries: 0,
   min_sl_pips: 10.0, max_account_leverage: 30.0,
   tp_count: 3, tp1_rr: 1.5, tp2_rr: 3.0, tp3_rr: 5.0, tp4_rr: 10.0, tp5_rr: 15.0,
   tp_splits: '50,30,20',
-  be_trigger_rr: 1.5, be_buffer_pips: 0.0, be_buffer_atr_mult: 0.10,
+  // Both triggers live: a TP fill OR the R-multiple, whichever comes first.
+  // Safe because the thresholds are now SEPARATED (BE/trail at 2.0R, TP1 at
+  // 1.5R). Equal thresholds were the bug — a level touch beats a limit fill, so
+  // BE pre-empted the partial it was meant to follow (0 TPs across 21 legs).
+  // Keeping the R trigger matters: TP_HIT alone would never arm BE at all on a
+  // setup whose TP1 never fills. See backend/core/config_schema.py::be_mode.
+  be_mode: 'EITHER', trail_mode: 'EITHER',
+  be_trigger_rr: 2.0, be_buffer_pips: 0.0, be_buffer_atr_mult: 0.10,
   trail_method_tp1: 'NONE', trail_method_tp2: 'ATR_TRAIL', trail_method_tp3: 'STRUCTURE_TRAIL',
   trail_method_tp4: 'NONE', trail_method_tp5: 'NONE',
   atr_trail_multiplier: 1.5, trail_pips: 15,
@@ -1384,6 +1467,13 @@ export default function Backtester() {
         max_weekly_drawdown_pct: form.max_weekly_drawdown_pct,
         max_positions_per_symbol: form.max_positions_per_symbol || 1,
         max_daily_trades: form.max_daily_trades || 5,
+        // Exit-ladder ordering. Sent explicitly so a saved run records which
+        // rule produced it — the difference between BE-on-touch and BE-on-fill
+        // is the difference between 0 and n take-profits.
+        be_mode: form.be_mode ?? 'TP_HIT',
+        trail_mode: form.trail_mode ?? 'TP_HIT',
+        allow_pyramiding: !!form.allow_pyramiding,
+        min_bars_between_entries: form.min_bars_between_entries ?? 0,
         target_profit_enabled: form.target_profit_enabled,
         max_daily_profit: form.max_daily_profit,
         max_weekly_profit: form.max_weekly_profit,
@@ -1841,6 +1931,70 @@ export default function Backtester() {
               <div><label style={{ fontSize: '0.7rem' }}>Max Weekly Drawdown (%)</label><input type="number" step="0.1" min="0.1" value={form.max_weekly_drawdown_pct} onChange={e => u('max_weekly_drawdown_pct', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Max Daily Trades</label><input type="number" value={form.max_daily_trades} onChange={e => u('max_daily_trades', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Max Open Positions</label><input type="number" value={form.max_concurrent_positions} onChange={e => u('max_concurrent_positions', +e.target.value)} /></div>
+
+              {/* [3.8/E5] Was sent to the backend but had no input — the request
+                  hardcoded `|| 1`, so this was uneditable from the Backtester
+                  even though Settings exposed it for live. It is the single
+                  biggest throttle on a swing strategy: on the measured XAUUSD
+                  APA run it blocked 7 of ~15 setups via
+                  `same_direction_already_open`. */}
+              <div>
+                <label style={{ fontSize: '0.7rem' }}>Max Positions / Symbol</label>
+                <input
+                  type="number" min="1" value={form.max_positions_per_symbol ?? 1}
+                  onChange={e => u('max_positions_per_symbol', +e.target.value)}
+                />
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>
+                  1 = a new setup is discarded while one is open.
+                </div>
+              </div>
+
+              {/* [Part 4 / F-series] The exit ladder's ordering controls. Both
+                  default to TP_HIT so break-even and trailing can only arm AFTER
+                  the take-profit they protect has actually filled — see
+                  config_schema.be_mode for the run that motivated it. */}
+              <div>
+                <label style={{ fontSize: '0.7rem' }}>Break-even arms on</label>
+                <select value={form.be_mode ?? 'EITHER'} onChange={e => u('be_mode', e.target.value)}>
+                  <option value="EITHER">TP fill or R-multiple (recommended)</option>
+                  <option value="TP_HIT">TP fill only</option>
+                  <option value="RR">R-multiple only</option>
+                  <option value="NONE">Never</option>
+                </select>
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>
+                  Keep BE Trigger (R) above TP1 R:R, or BE pre-empts the partial.
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: '0.7rem' }}>Trailing arms on</label>
+                <select value={form.trail_mode ?? 'EITHER'} onChange={e => u('trail_mode', e.target.value)}>
+                  <option value="EITHER">TP fill or R-multiple (recommended)</option>
+                  <option value="TP_HIT">TP fill only</option>
+                  <option value="RR">R-multiple only</option>
+                  <option value="NONE">Never</option>
+                </select>
+              </div>
+
+              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}>
+                  <input
+                    type="checkbox" checked={!!form.allow_pyramiding}
+                    onChange={e => u('allow_pyramiding', e.target.checked)}
+                    style={{ width: 14, height: 14 }}
+                  /> Allow pyramiding
+                </label>
+                {form.allow_pyramiding && (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.7rem', margin: 0 }}>Min bars between entries</label>
+                    <input
+                      type="number" min="0" value={form.min_bars_between_entries ?? 0}
+                      onChange={e => u('min_bars_between_entries', +e.target.value)}
+                      style={{ width: 70, padding: '2px 4px' }}
+                    />
+                  </div>
+                )}
+              </div>
+
               <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center', marginTop: 4 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={form.target_profit_enabled} onChange={e => u('target_profit_enabled', e.target.checked)} style={{ width: 14, height: 14 }} /> Target Profit Halts</label>
                 {form.target_profit_enabled && (
@@ -2006,18 +2160,12 @@ export default function Backtester() {
           <div>Loading backtest details...</div>
         </div>
       )}
-      {isRunning && (
-        <div className="card" style={{ padding: 40, color: 'var(--text-muted)' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div style={{ height: 32, background: 'var(--bg-tertiary)', borderRadius: 4, width: '40%', animation: 'pulse 1.5s infinite ease-in-out' }} />
-            <div style={{ height: 200, background: 'var(--bg-tertiary)', borderRadius: 4, width: '100%', animation: 'pulse 1.5s infinite ease-in-out' }} />
-            <div style={{ display: 'flex', gap: 20 }}>
-              <div style={{ height: 100, background: 'var(--bg-tertiary)', borderRadius: 4, width: '50%', animation: 'pulse 1.5s infinite ease-in-out' }} />
-              <div style={{ height: 100, background: 'var(--bg-tertiary)', borderRadius: 4, width: '50%', animation: 'pulse 1.5s infinite ease-in-out' }} />
-            </div>
-          </div>
-          <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
-        </div>
+      {/* [Phase 13 C.1] The replay chart replaces the skeleton loader that used
+          to occupy this slot. It stays mounted after the run finishes so the
+          same view can be scrubbed, rather than being swapped for a spinner and
+          then thrown away. */}
+      {(isRunning || result) && (
+        <BacktestReplay progress={progress} result={result} isRunning={isRunning} />
       )}
       {result && !isLoadingDetail && !isRunning && <BacktestResults result={result} onSave={handleSave} onDismiss={handleDismiss} onClose={() => setResult(null)} isSaving={isSaving} />}
     </div>

@@ -1,9 +1,10 @@
 import { NavLink, Routes, Route } from 'react-router-dom';
-import { Settings, Sliders, Shield, Wifi, Server } from 'lucide-react';
+import { Settings, Sliders, Shield, Wifi, Server, Sparkles } from 'lucide-react';
 import ConnectionSettings from './Connection';
 import RiskSettings from './Risk';
 import StrategySettings from './Strategy';
 import BrokerSettings from './Broker';
+import AISettings from './AI';
 
 function SettingsNav() {
   const tabs = [
@@ -11,6 +12,7 @@ function SettingsNav() {
     { to: '/settings/broker', label: 'Broker', icon: Server },
     { to: '/settings/strategy', label: 'Strategy', icon: Sliders },
     { to: '/settings/risk', label: 'Risk', icon: Shield },
+    { to: '/settings/ai', label: 'AI', icon: Sparkles },
   ];
 
   return (
@@ -29,7 +31,7 @@ export default function SettingsPage() {
     <>
       <div className="page-header">
         <h2><Settings size={22} style={{ display: 'inline', marginRight: 8 }} />Settings</h2>
-        <p>Configure backend connection, broker credentials, strategy parameters, and risk management</p>
+        <p>Configure backend connection, broker credentials, strategy parameters, risk management, and AI providers</p>
       </div>
 
       <SettingsNav />
@@ -39,6 +41,7 @@ export default function SettingsPage() {
         <Route path="broker" element={<BrokerSettings />} />
         <Route path="strategy" element={<StrategySettings />} />
         <Route path="risk" element={<RiskSettings />} />
+        <Route path="ai" element={<AISettings />} />
       </Routes>
     </>
   );

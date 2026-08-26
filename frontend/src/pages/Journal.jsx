@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, ChevronDown, ChevronRight, Bot, ExternalLink } from 'lucide-react';
 import { getTrades, analyzeTrade } from '../services/api';
 import { useConnectionStore, useAuthStore } from '../store';
+import AnalyzeButton from '../components/AnalyzeButton';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
 
 function MiniChart({ data }) {
@@ -270,6 +271,13 @@ export default function Journal() {
       <div className="page-header">
         <h2><BookOpen size={22} style={{ display: 'inline', marginRight: 8 }} />Trade Journal</h2>
         <p>Complete trade history with AI-powered analysis</p>
+        <div style={{ marginTop: 8 }}>
+          <AnalyzeButton
+            targetType="trades"
+            compact
+            question="Review these closed trades as a series. Where is the edge coming from, where is it leaking, and what does the exit distribution say about trade management?"
+          />
+        </div>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>

@@ -274,6 +274,11 @@ class BacktestRun(Base):
     llm_analysis = Column(Text)
     run_logs = Column(Text)  # JSON serialized logs
     rejection_funnel = Column(JSON, default={})
+    # [Phase 13 section C.7] Continuous per-leg bar series for replay-mode
+    # scrubbing, downsampled to MAX_SERIES_BARS. Distinct from each trade's
+    # own chart_data, which is a +/-30-bar slice and cannot show the run as a
+    # whole. Nullable: runs saved before Phase 13 simply have none.
+    replay_data = Column(Text)  # JSON
     # Computed once at save time (see runner.py) from the full in-memory
     # grouped trades — including original_signal/metadata, which are
     # deliberately stripped before persistence (see BacktestTrade below /
