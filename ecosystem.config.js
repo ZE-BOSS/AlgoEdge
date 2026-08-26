@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: "algoedge-backend",
-      script: "venv\\Scripts\\python.exe",
+      script: ".venv\\Scripts\\python.exe",
       args: "-m uvicorn backend.main:app --host 0.0.0.0 --port 8000",
       cwd: "./",
       interpreter: "none",
