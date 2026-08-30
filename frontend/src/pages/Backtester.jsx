@@ -310,6 +310,23 @@ const SymbolAutocomplete = memo(function SymbolAutocomplete({ value, onChange, o
   );
 });
 
+/**
+ * Reduce a numeric series to at most `limit` points, keeping the first and last.
+ *
+ * A run's equity curve carries one point per bar — 45,000+ on a multi-timeframe
+ * 5,000-candle run. The chart never draws more than 500 of them, and nothing
+ * else reads the full series, so every place that stores or re-derives it should
+ * decimate first.
+ */
+function decimate(series, limit = 500) {
+  if (!Array.isArray(series) || series.length <= limit) return series || [];
+  const step = Math.ceil(series.length / limit);
+  const out = [];
+  for (let i = 0; i < series.length; i += step) out.push(series[i]);
+  if (out[out.length - 1] !== series[series.length - 1]) out.push(series[series.length - 1]);
+  return out;
+}
+
 function fmt(v) {
   if (!v) return '—';
   if (typeof v === 'string' && v.includes('T')) return new Date(v).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -642,7 +659,14 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
   // has been in the response since Phase 0 with nothing rendering it.
   const runReport = <RunReport result={result} backtestId={result.backtest_id || null} />;
   const grouped = result.grouped_trades || [];
-  const eqData = (result.equity_curve || []).map((v, i) => ({ bar: i, equity: v }));
+  // Was recomputed on EVERY render: a 45,000-element `.map()` building 45,000
+  // objects, followed further down by a 45,000-element `.filter()` to downsample
+  // for the chart. Both ran again on every filter, sort, tab and group-by
+  // change. Memoised and decimated once — the chart draws 500 points either way.
+  const eqData = useMemo(
+    () => decimate(result.equity_curve || [], 500).map((v, i) => ({ bar: i, equity: v })),
+    [result.equity_curve],
+  );
   const initialBalance = result.initial_balance || 10000;
 
   const [groupBy, setGroupBy] = useState('Month'); // Default to month
@@ -855,12 +879,9 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     });
   };
 
-  // Downsample equity curve to prevent Recharts from freezing the browser
-  let chartEqData = eqData;
-  if (eqData.length > 500) {
-    const step = Math.ceil(eqData.length / 500);
-    chartEqData = eqData.filter((_, i) => i % step === 0 || i === eqData.length - 1);
-  }
+  // `eqData` is already decimated to <=500 points at the memo above, so the
+  // second full-series filter that used to live here is gone.
+  const chartEqData = eqData;
 
   return (<div className="card" style={{ marginTop: 20 }}>
     <div className="card-header">
@@ -1572,19 +1593,52 @@ export default function Backtester() {
   }, [form]);
 
   // Auto-save result to localStorage (debounced)
+  //
+  // This used to `JSON.stringify(result)` in full. A finished run is 4-8 MB —
+  // a per-bar equity curve (45k+ points on a 5,000-candle multi-timeframe run),
+  // every leg, every grouped trade — and stringify plus localStorage.setItem
+  // are both synchronous on the main thread. Worse, anything over the ~5 MB
+  // quota threw, and the catch block then stringified the WHOLE THING A SECOND
+  // TIME. Two multi-megabyte serialisations back to back is a visible freeze,
+  // and on a large run neither of them could ever succeed.
+  //
+  // localStorage is a convenience here — it repaints the last run on reload
+  // before the server responds — so it only needs enough to render the headline
+  // and the trade list. The heavy series are refetched from the server.
   useEffect(() => {
     const timer = setTimeout(() => {
+      if (!result) {
+        try { localStorage.removeItem(RESULT_STORAGE_KEY); } catch { }
+        return;
+      }
       try {
-        if (result) {
-          localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(result));
-        } else {
-          localStorage.removeItem(RESULT_STORAGE_KEY);
-        }
-      } catch (e) {
-        // If quota exceeded (run_logs can be large), save without logs
+        const slim = {
+          ...result,
+          // Rebuilt from the server on demand; the chart downsamples to 500
+          // points anyway, so keep a decimated curve rather than every bar.
+          equity_curve: decimate(result.equity_curve, 500),
+          // `trades` is the per-leg array; every consumer on this page reads
+          // `grouped_trades`, which already carries the legs it needs.
+          trades: undefined,
+          run_logs: undefined,
+          replay: undefined,
+        };
+        localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(slim));
+      } catch {
+        // Still too large (a portfolio run with hundreds of groups). Drop the
+        // trade list and keep the headline, rather than retrying a full
+        // serialisation that has already been shown not to fit.
         try {
-          const trimmed = { ...result, run_logs: [] };
-          localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(trimmed));
+          localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify({
+            backtest_id: result.backtest_id,
+            initial_balance: result.initial_balance,
+            final_balance: result.final_balance,
+            total_trades: result.total_trades,
+            report: result.report,
+            params_snapshot: result.params_snapshot,
+            grouped_trades: [],
+            equity_curve: [],
+          }));
         } catch { }
       }
     }, 500);
@@ -1623,10 +1677,33 @@ export default function Backtester() {
           setProgress(m);
           if (m.stage === 'complete') {
             if (m.result) {
+              // Legacy path: an older backend still inlines the whole run.
               setResult(m.result);
               if (m.result.run_logs) setEvents(m.result.run_logs);
+              setTimeout(() => setProgress(null), 2000);
+            } else {
+              // The backend now announces completion with a headline envelope
+              // and leaves the body to be fetched. Pushing a finished run
+              // (megabytes: per-bar equity curve, every leg, every group, the
+              // log tail) through one WebSocket frame froze this tab on parse
+              // and re-render, and when the frame was too big to send at all
+              // the backend silently dropped the socket — which is why results
+              // only appeared after a manual page refresh. The refresh worked
+              // because it fetched over REST; so does this.
+              setIsLoadingDetail(true);
+              getLatestBacktestResult()
+                .then(r => {
+                  if (r.data && Object.keys(r.data).length > 0) {
+                    setResult(r.data);
+                    if (r.data.run_logs) setEvents(r.data.run_logs);
+                  }
+                })
+                .catch(() => setBtError('Run finished but its results could not be loaded. Reload to retry.'))
+                .finally(() => {
+                  setIsLoadingDetail(false);
+                  setProgress(null);
+                });
             }
-            setTimeout(() => setProgress(null), 2000);
           }
         } else if (m.type === 'backtest_error') {
           // Backend task failed (e.g. an exception inside the engine) —

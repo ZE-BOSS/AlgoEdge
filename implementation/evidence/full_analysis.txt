@@ -1,0 +1,602 @@
+
+========================================================================================
+0. CORPUS
+========================================================================================
+                               run        strategy symbol      start        end  candles         bal1
+             debug/apa/btcusd.json          APA_v1 BTCUSD 2026-01-01 2026-08-21     5000 25039.229025
+             debug/apa/eurusd.json          APA_v1 EURUSD 2026-01-01 2026-08-21     5000 25145.920000
+             debug/apa/gbpjpy.json          APA_v1 GBPJPY 2026-01-01 2026-08-21     5000 24059.328734
+             debug/apa/nax100.json          APA_v1 NDX100 2026-01-01 2026-08-21     5000 24400.607623
+             debug/apa/spx500.json          APA_v1 SPX500 2026-01-01 2026-08-21     5000 25566.411593
+             debug/apa/xagusd.json          APA_v1 XAGUSD 2026-01-01 2026-08-21     5000 24177.012643
+             debug/apa/xauusd.json          APA_v1 XAUUSD 2026-01-01 2026-08-21     5000 24729.386464
+             debug/apa/xrpusd.json          APA_v1 XRPUSD 2026-01-01 2026-08-21     5000 25000.000000
+debug/biaskeylevelifvg/xauusd.json     BiasIFVG_v1 XAUUSD 2026-01-01 2026-08-21     5000 22786.914557
+             debug/crt/btcusd.json          CRT_v1 BTCUSD 2026-01-01 2026-08-21     5000 25011.864601
+             debug/crt/ndx100.json          CRT_v1 NDX100 2026-01-01 2026-08-21     5000 22572.030031
+             debug/crt/xauusd.json          CRT_v1 XAUUSD 2026-01-01 2026-08-21     5000 26147.345108
+      debug/htffvgflip/xauusd.json   HTFFVGFlip_v1 XAUUSD 2026-01-01 2026-08-21     5000 24385.176549
+    debug/nyopenretest/xauusd.json NYOpenRetest_v1 XAUUSD 2026-01-01 2026-08-21     5000 23634.691011
+            debug/vwap/btcusd.json         VWAP_v1 BTCUSD 2026-01-01 2026-08-21     5000 24249.659987
+            debug/vwap/eurusd.json         VWAP_v1 EURUSD 2026-01-01 2026-08-21     5000 17559.697857
+            debug/vwap/xagusd.json         VWAP_v1 XAGUSD 2026-01-01 2026-08-21     5000 19333.750714
+            debug/vwap/xauusd.json         VWAP_v1 XAUUSD 2026-01-01 2026-08-21     5000 21475.707357
+            debug/vwap/xrpusd.json         VWAP_v1 XRPUSD 2026-01-01 2026-08-21     5000 22880.992634
+
+legs=3888  groups=1326  span 2026-01-02 .. 2026-08-20
+
+========================================================================================
+1. PER-STRATEGY, true R recomputed against entry-time risk (group level)
+========================================================================================
+                      n    win%  exp_R  ...     PF  med_MFE_R  p75_MFE_R
+strategy                                ...                             
+NYOpenRetest_v1    60.0  46.667  0.103  ...  0.845      1.002      2.302
+HTFFVGFlip_v1      48.0  39.583  0.082  ...  0.919      1.093      2.335
+CRT_v1             49.0  48.980  0.023  ...  0.769      1.014      2.394
+VWAP_v1          1034.0  46.518 -0.027  ...  0.752      0.651      1.222
+BiasIFVG_v1        83.0  38.554 -0.079  ...  0.815      0.930      1.834
+APA_v1             52.0  44.231 -0.085  ...  0.762      0.795      2.711
+
+[6 rows x 10 columns]
+
+POOLED: n=1326 win%=45.8 exp_R=-0.0207 tot_R=-27.4 pnl=$-26,844
+
+========================================================================================
+2. EXIT ATTRIBUTION (leg level) — where the money goes and what was left on the table
+========================================================================================
+               legs  share%  med_MFE_R  ...  pct>3R  med_realised_R       pnl$
+exit_reason                             ...                                   
+SL           1534.0   39.45       0.30  ...    0.20           -1.00 -100868.46
+SESSION_END  1388.0   35.70       0.69  ...    1.22            0.14    5189.54
+TRAIL_SL      420.0   10.80       1.83  ...   15.71            1.06   16863.48
+TP1           319.0    8.20       1.41  ...    4.70            1.25   40959.10
+BE_SL         151.0    3.88       1.69  ...   15.89            0.07    -411.58
+TP2            54.0    1.39       2.95  ...   46.30            2.71    8095.82
+TP3            22.0    0.57       3.62  ...   81.82            4.20    3327.82
+
+[7 rows x 8 columns]
+
+========================================================================================
+3. MFE DISTRIBUTION OF ALL GROUPS (what R levels are actually reachable)
+========================================================================================
+all groups MFE_R quantiles:
+0.10    0.02
+0.25    0.28
+0.50    0.71
+0.60    0.91
+0.70    1.19
+0.75    1.37
+0.80    1.61
+0.90    2.44
+0.95    3.23
+0.99    6.17
+
+by strategy, share of groups reaching each R level:
+       strategy    n  >=0.5R  >=1.0R  >=1.5R  >=2.0R  >=2.5R  >=3.0R  >=4.0R  >=5.0R  >=6.0R  >=8.0R  >=10.0R
+         APA_v1   52    65.4    40.4    34.6    28.8    28.8    23.1     5.8     3.8     1.9     1.9      0.0
+    BiasIFVG_v1   83    65.1    48.2    36.1    19.3    14.5    10.8     3.6     2.4     0.0     0.0      0.0
+         CRT_v1   49    59.2    51.0    36.7    28.6    20.4    20.4    12.2     8.2     8.2     2.0      0.0
+  HTFFVGFlip_v1   48    70.8    54.2    37.5    29.2    22.9    16.7    10.4     6.2     4.2     0.0      0.0
+NYOpenRetest_v1   60    65.0    50.0    40.0    30.0    21.7    18.3    11.7    10.0     5.0     1.7      0.0
+        VWAP_v1 1034    59.4    32.1    17.9    10.5     6.3     4.0     1.5     0.8     0.5     0.2      0.1
+            ALL 1326    60.6    35.7    22.1    14.0     9.5     6.9     2.9     1.9     1.1     0.4      0.1
+
+========================================================================================
+4. POOLED SINGLE-TP GRID (dominated by VWAP: 1034/1326 groups)
+========================================================================================
+ TP_R  hit%  SL%  cens%  exp_R@cens=0  exp_R@cens=real  exp_R@cens=-1
+ 0.50  60.6 25.6   13.8        0.0475           0.0128        -0.0905
+ 0.75  47.3 30.0   22.7        0.0545           0.0199        -0.1725
+ 1.00  35.7 33.9   30.3        0.0181           0.0117        -0.2851
+ 1.25  27.9 36.4   35.7       -0.0155           0.0092        -0.3722
+ 1.50  22.1 37.3   40.6       -0.0411           0.0228        -0.4476
+ 1.75  17.7 37.9   44.4       -0.0684           0.0324        -0.5126
+ 2.00  14.0 38.1   47.9       -0.1003           0.0360        -0.5792
+ 2.50   9.5 38.1   52.4       -0.1433           0.0472        -0.6674
+ 3.00   6.9 38.3   54.8       -0.1772           0.0513        -0.7255
+ 4.00   2.9 38.6   58.4       -0.2685           0.0214        -0.8529
+ 5.00   1.9 38.6   59.5       -0.2919           0.0223        -0.8869
+
+========================================================================================
+7. EXIT REASON x STRATEGY (leg share %) — why the grid is censored
+========================================================================================
+exit_reason      BE_SL  SESSION_END    SL   TP1  TP2  TP3  TRAIL_SL
+strategy_id                                                        
+APA_v1             5.2          0.0  55.8  14.9  4.5  3.9      15.6
+BiasIFVG_v1        3.9          0.0  60.9  12.4  3.4  0.9      18.5
+CRT_v1            12.2          0.0  51.0  14.3  6.1  2.7      13.6
+HTFFVGFlip_v1      2.1          0.0  60.7  12.1  4.3  1.4      19.3
+NYOpenRetest_v1   15.0          0.0  53.3  15.0  5.0  2.2       9.4
+VWAP_v1            2.8         45.7  34.6   6.7  0.5  0.1       9.5
+
+leg counts:
+exit_reason      BE_SL  SESSION_END    SL  TP1  TP2  TP3  TRAIL_SL
+strategy_id                                                       
+APA_v1               8            0    86   23    7    6        24
+BiasIFVG_v1          9            0   142   29    8    2        43
+CRT_v1              18            0    75   21    9    4        20
+HTFFVGFlip_v1        3            0    85   17    6    2        27
+NYOpenRetest_v1     27            0    96   27    9    4        17
+VWAP_v1             86         1388  1050  202   15    4       289
+
+========================================================================================
+8. WHAT BREAK-EVEN COSTS — groups that reached B but finished flat or negative
+========================================================================================
+  reached  0.5R: n= 804  finished<=0R:  31.3%   mean true_R +0.471   median MFE beyond 1.16R
+  reached 0.75R: n= 627  finished<=0R:  21.9%   mean true_R +0.698   median MFE beyond 1.43R
+  reached  1.0R: n= 474  finished<=0R:  14.3%   mean true_R +0.951   median MFE beyond 1.74R
+  reached 1.25R: n= 370  finished<=0R:   7.6%   mean true_R +1.196   median MFE beyond 2.05R
+  reached  1.5R: n= 293  finished<=0R:   4.4%   mean true_R +1.371   median MFE beyond 2.36R
+  reached  2.0R: n= 186  finished<=0R:   0.5%   mean true_R +1.702   median MFE beyond 2.98R
+  reached  2.5R: n= 126  finished<=0R:   0.8%   mean true_R +1.943   median MFE beyond 3.30R
+  reached  3.0R: n=  91  finished<=0R:   1.1%   mean true_R +2.081   median MFE beyond 3.58R
+
+  BE_SL legs only: 151  median MFE 1.69 R;  share that had exceeded 2R: 33.8 %
+
+========================================================================================
+9. SESSION-END FORCE CLOSE — the largest single exit bucket after SL
+========================================================================================
+legs=1388 (35.7%)  total pnl=$5,190  median realised R=+0.139  mean=+0.228
+by strategy:
+               legs  med_R  mean_R      pnl$  med_MFE_R  %MFE>1R
+strategy_id                                                     
+VWAP_v1      1388.0  0.139   0.228  5189.537      0.693   28.026
+
+bars held at session-end vs other exits:
+              count   25%   50%   75%     max
+exit_reason                                  
+BE_SL         151.0   7.0  13.0  26.0   153.0
+SESSION_END  1388.0  47.0  55.0  60.0    61.0
+SL           1534.0   5.0  12.0  27.0  1634.0
+TP1           319.0   6.0  14.0  31.5  2382.0
+TP2            54.0   9.8  18.0  29.0   308.0
+TP3            22.0  10.5  24.5  41.0   254.0
+TRAIL_SL      420.0  15.8  30.0  46.2  2415.0
+
+========================================================================================
+10. ENTRY HOUR (stored feed clock, UTC field) — pooled group win rate & expectancy
+========================================================================================
+          n    win%  exp_R      pnl$
+hour                                
+13     81.0  38.272 -0.031 -3138.012
+14    296.0  46.959  0.000 -7268.677
+15    576.0  46.007 -0.039 -8859.268
+16    237.0  48.101  0.005 -3009.938
+17     66.0  45.455 -0.073 -2536.371
+18     28.0  42.857 -0.018  -487.993
+
+========================================================================================
+11. INSTRUMENT x STRATEGY expectancy (true R, group level)
+========================================================================================
+                            n    win%  exp_R      pnl$
+strategy        symbol                                
+APA_v1          BTCUSD    2.0  50.000  0.180    39.229
+                EURUSD    2.0  50.000  0.323   145.920
+                GBPJPY    8.0  50.000  0.117  -940.671
+                NDX100   14.0  35.714 -0.749  -599.392
+                SPX500    5.0  60.000  0.503   566.412
+                XAGUSD   16.0  43.750  0.028  -822.987
+                XAUUSD    5.0  40.000  0.227  -270.614
+BiasIFVG_v1     XAUUSD   83.0  38.554 -0.079 -2213.085
+CRT_v1          BTCUSD   13.0  53.846  0.406    11.865
+                NDX100   19.0  36.842 -0.631 -2427.970
+                XAUUSD   17.0  58.824  0.459  1147.345
+HTFFVGFlip_v1   XAUUSD   48.0  39.583  0.082  -614.823
+NYOpenRetest_v1 XAUUSD   60.0  46.667  0.103 -1365.309
+VWAP_v1         BTCUSD  243.0  48.560 -0.025  -750.340
+                EURUSD  156.0  42.949 -0.046 -7440.302
+                XAGUSD  203.0  46.305 -0.001 -5666.249
+                XAUUSD  222.0  46.847 -0.039 -3524.293
+                XRPUSD  210.0  46.667 -0.027 -2119.007
+
+========================================================================================
+12. BROKER FRICTION vs. THE STOP IT IS BEING CHARGED AGAINST
+========================================================================================
+       strategy symbol   n  spread_pips  slip_pips  round_trip_price  median_SL_price  friction_R  geo_exp_R  cash_exp_R  gap_R  pnl$
+         CRT_v1 BTCUSD  13        22.36  23.266497          68.89299        187.56357       0.367      0.406       0.004 -0.402    12
+         APA_v1 GBPJPY   8        10.00   0.700000           0.11400          0.36186       0.315      0.117      -0.470 -0.587  -941
+         APA_v1 SPX500   5         7.30   3.000000           1.33000          5.25571       0.253      0.503       0.453 -0.050   566
+         CRT_v1 XAUUSD  17        13.90   1.000000           1.59000          7.55500       0.210      0.459       0.270 -0.189  1147
+         APA_v1 BTCUSD   2        22.36  23.266497          68.89299        350.03200       0.197      0.180       0.078 -0.102    39
+         APA_v1 XAGUSD  16        96.00  10.000000           0.11600          0.60526       0.192      0.028      -0.206 -0.234  -823
+NYOpenRetest_v1 XAUUSD  60        13.90   1.000000           1.59000          9.52643       0.167      0.103      -0.091 -0.194 -1365
+         APA_v1 EURUSD   2         1.20   0.400000           0.00020          0.00149       0.135      0.323       0.292 -0.031   146
+        VWAP_v1 XAGUSD 203        96.00  10.000000           0.11600          0.92250       0.126     -0.001      -0.112 -0.111 -5666
+        VWAP_v1 EURUSD 156         1.20   0.400000           0.00020          0.00163       0.123     -0.046      -0.191 -0.145 -7440
+        VWAP_v1 BTCUSD 243        22.36  23.266497          68.89299        568.22357       0.121     -0.025      -0.012  0.013  -750
+        VWAP_v1 XRPUSD 210        10.00   4.123200           0.00182          0.01909       0.096     -0.027      -0.040 -0.013 -2119
+         APA_v1 XAUUSD   5        13.90   1.000000           1.59000         17.44764       0.091      0.227      -0.216 -0.443  -271
+        VWAP_v1 XAUUSD 222        13.90   1.000000           1.59000         25.53393       0.062     -0.039      -0.064 -0.025 -3524
+  HTFFVGFlip_v1 XAUUSD  48        13.90   1.000000           1.59000         25.94607       0.061      0.082      -0.051 -0.133  -615
+    BiasIFVG_v1 XAUUSD  83        13.90   1.000000           1.59000         28.48679       0.056     -0.079      -0.107 -0.028 -2213
+         CRT_v1 NDX100  19        11.12   4.000000           1.91200         44.61071       0.043     -0.631      -0.511  0.119 -2428
+         APA_v1 NDX100  14        11.12   4.000000           1.91200         76.11139       0.025     -0.749      -0.171  0.577  -599
+
+  friction_R = (spread + 2x slippage) / median stop distance = the fraction of ONE R
+               handed to the broker on every single round trip, before the market moves.
+  geo_exp_R  = expectancy measured on price alone (costs excluded).
+  cash_exp_R = realised P&L / (1% of 25k). gap_R = cash - geo = all-in realised drag.
+
+========================================================================================
+13. SAME, POOLED PER STRATEGY
+========================================================================================
+       strategy    n  wtd_friction_R  geo_exp_R  cash_exp_R  gap_R
+NYOpenRetest_v1   60           0.167      0.103      -0.091 -0.194
+  HTFFVGFlip_v1   48           0.061      0.082      -0.051 -0.133
+         CRT_v1   49           0.187      0.023      -0.104 -0.126
+         APA_v1   52           0.160     -0.085      -0.145 -0.059
+        VWAP_v1 1034           0.104     -0.027      -0.075 -0.049
+    BiasIFVG_v1   83           0.056     -0.079      -0.107 -0.028
+
+========================================================================================
+14. STOP DISTANCE IN R-TERMS OF FRICTION — how wide must a stop be to be tradeable?
+========================================================================================
+For friction to cost less than 10% of one R, the stop must be >= 10 x round-trip cost.
+  BTCUSD   round-trip   68.89299   median stop used  549.61307  (  8.0x cost)   min viable stop @10x =  688.92994
+  EURUSD   round-trip    0.00020   median stop used    0.00163  (  8.2x cost)   min viable stop @10x =    0.00200
+  GBPJPY   round-trip    0.11400   median stop used    0.36186  (  3.2x cost)   min viable stop @10x =    1.14000
+  NDX100   round-trip    1.91200   median stop used   46.16643  ( 24.1x cost)   min viable stop @10x =   19.12000
+  SPX500   round-trip    1.33000   median stop used    5.25571  (  4.0x cost)   min viable stop @10x =   13.30000
+  XAGUSD   round-trip    0.11600   median stop used    0.87400  (  7.5x cost)   min viable stop @10x =    1.16000
+  XAUUSD   round-trip    1.59000   median stop used   22.26786  ( 14.0x cost)   min viable stop @10x =   15.90000
+  XRPUSD   round-trip    0.00182   median stop used    0.01909  ( 10.5x cost)   min viable stop @10x =    0.01825
+
+========================================================================================
+15. HOLDING TIME vs SWAP — is overnight financing material?
+========================================================================================
+  BTCUSD   median hold    1.6h  swap_long      -42  swap_short      -42 /lot/day   share held >24h:  0.0%
+  EURUSD   median hold    2.7h  swap_long  -13.472  swap_short    0.107 /lot/day   share held >24h:  0.0%
+  GBPJPY   median hold    4.8h  swap_long  -2580.6  swap_short  -4427.8 /lot/day   share held >24h: 37.5%
+  NDX100   median hold    0.5h  swap_long -37.291199999999996  swap_short -5.760000000000001 /lot/day   share held >24h:  0.0%
+  SPX500   median hold    0.9h  swap_long -13.46925  swap_short -3.6630000000000003 /lot/day   share held >24h:  0.0%
+  XAGUSD   median hold    3.4h  swap_long    -89.2  swap_short     3.55 /lot/day   share held >24h:  1.5%
+  XAUUSD   median hold    2.4h  swap_long -107.151  swap_short  -46.917 /lot/day   share held >24h:  5.8%
+  XRPUSD   median hold    3.4h  swap_long      -20  swap_short      -20 /lot/day   share held >24h:  0.0%
+
+========================================================================================
+16. NET EXPECTANCY AFTER FRICTION — 'which risk:reward is better', per strategy
+========================================================================================
+
+--- APA_v1  n=52  friction: spread 0.122R + modelled slippage 0.038R = 0.160R/round trip
+ TP_R  hit%  cens%  gross_R  net_R(spread only)  net_R(all-in)
+ 0.50  65.4   11.5   0.0962             -0.0257        -0.0639
+ 0.75  55.8   15.4   0.1298              0.0080        -0.0302
+ 1.00  40.4   23.1   0.0385             -0.0834        -0.1216
+ 1.25  36.5   25.0   0.0721             -0.0497        -0.0879
+ 1.50  34.6   26.9   0.1346              0.0128        -0.0254
+ 1.75  32.7   28.8   0.1875              0.0657         0.0275
+ 2.00  28.8   30.8   0.1731              0.0512         0.0130
+ 2.50  28.8   30.8   0.3173              0.1955         0.1573
+ 3.00  23.1   36.5   0.2885              0.1666         0.1284
+ 4.00   5.8   53.8  -0.1731             -0.2949        -0.3331
+ 5.00   3.8   55.8  -0.2115             -0.3334        -0.3716
+    best all-in TP = 2.5R -> +0.157R   (spread-only best = 2.5R -> +0.196R)
+
+--- BiasIFVG_v1  n=83  friction: spread 0.049R + modelled slippage 0.007R = 0.056R/round trip
+ TP_R  hit%  cens%  gross_R  net_R(spread only)  net_R(all-in)
+ 0.50  65.1    0.0  -0.0241             -0.0729        -0.0799
+ 0.75  59.0    1.2   0.0452             -0.0036        -0.0106
+ 1.00  48.2    1.2  -0.0241             -0.0729        -0.0799
+ 1.25  41.0    1.2  -0.0663             -0.1151        -0.1221
+ 1.50  36.1    3.6  -0.0602             -0.1090        -0.1161
+ 1.75  30.1    9.6  -0.0753             -0.1241        -0.1311
+ 2.00  19.3   19.3  -0.2289             -0.2777        -0.2847
+ 2.50  14.5   24.1  -0.2530             -0.3018        -0.3088
+ 3.00  10.8   27.7  -0.2892             -0.3380        -0.3450
+ 4.00   3.6   34.9  -0.4699             -0.5187        -0.5257
+ 5.00   2.4   36.1  -0.4940             -0.5428        -0.5498
+    best all-in TP = 0.75R -> -0.011R   (spread-only best = 0.75R -> -0.004R)
+
+--- CRT_v1  n=49  friction: spread 0.105R + modelled slippage 0.082R = 0.187R/round trip
+ TP_R  hit%  cens%  gross_R  net_R(spread only)  net_R(all-in)
+ 0.50  59.2   22.4   0.1122              0.0071        -0.0748
+ 0.75  57.1   24.5   0.2449              0.1398         0.0578
+ 1.00  51.0   26.5   0.2857              0.1806         0.0986
+ 1.25  42.9   32.7   0.2908              0.1857         0.1037
+ 1.50  36.7   34.7   0.2653              0.1602         0.0782
+ 1.75  30.6   38.8   0.2296              0.1245         0.0425
+ 2.00  28.6   40.8   0.2653              0.1602         0.0782
+ 2.50  20.4   49.0   0.2041              0.0990         0.0170
+ 3.00  20.4   49.0   0.3061              0.2010         0.1190
+ 4.00  12.2   53.1   0.1429              0.0377        -0.0442
+ 5.00   8.2   57.1   0.0612             -0.0439        -0.1259
+    best all-in TP = 3.0R -> +0.119R   (spread-only best = 3.0R -> +0.201R)
+
+--- HTFFVGFlip_v1  n=48  friction: spread 0.054R + modelled slippage 0.008R = 0.061R/round trip
+ TP_R  hit%  cens%  gross_R  net_R(spread only)  net_R(all-in)
+ 0.50  70.8    0.0   0.0625              0.0089         0.0012
+ 0.75  62.5    0.0   0.0938              0.0402         0.0325
+ 1.00  54.2    0.0   0.0833              0.0298         0.0221
+ 1.25  45.8    0.0   0.0312             -0.0223        -0.0300
+ 1.50  37.5    4.2  -0.0208             -0.0744        -0.0821
+ 1.75  31.2    8.3  -0.0573             -0.1109        -0.1186
+ 2.00  29.2   10.4  -0.0208             -0.0744        -0.0821
+ 2.50  22.9   16.7  -0.0312             -0.0848        -0.0925
+ 3.00  16.7   22.9  -0.1042             -0.1577        -0.1654
+ 4.00  10.4   29.2  -0.1875             -0.2411        -0.2488
+ 5.00   6.2   33.3  -0.2917             -0.3452        -0.3529
+    best all-in TP = 0.75R -> +0.033R   (spread-only best = 0.75R -> +0.040R)
+
+--- NYOpenRetest_v1  n=60  friction: spread 0.146R + modelled slippage 0.021R = 0.167R/round trip
+ TP_R  hit%  cens%  gross_R  net_R(spread only)  net_R(all-in)
+ 0.50  65.0    1.7  -0.0083             -0.1542        -0.1752
+ 0.75  56.7    3.3   0.0250             -0.1209        -0.1419
+ 1.00  50.0    6.7   0.0667             -0.0792        -0.1002
+ 1.25  43.3    6.7   0.0417             -0.1042        -0.1252
+ 1.50  40.0   10.0   0.1000             -0.0459        -0.0669
+ 1.75  35.0   11.7   0.0792             -0.0667        -0.0877
+ 2.00  30.0   15.0   0.0500             -0.0959        -0.1169
+ 2.50  21.7   23.3  -0.0083             -0.1542        -0.1752
+ 3.00  18.3   26.7   0.0000             -0.1459        -0.1669
+ 4.00  11.7   33.3  -0.0833             -0.2292        -0.2502
+ 5.00  10.0   35.0  -0.0500             -0.1959        -0.2169
+    best all-in TP = 1.5R -> -0.067R   (spread-only best = 1.5R -> -0.046R)
+
+--- VWAP_v1  n=1034  friction: spread 0.063R + modelled slippage 0.041R = 0.104R/round trip
+ TP_R  hit%  cens%  gross_R  net_R(spread only)  net_R(all-in)
+ 0.50  59.4   16.0   0.0503             -0.0128        -0.0542
+ 0.75  44.2   26.9   0.0423             -0.0208        -0.0622
+ 1.00  32.1   36.0   0.0019             -0.0612        -0.1025
+ 1.25  24.0   42.5  -0.0358             -0.0989        -0.1403
+ 1.50  17.9   48.1  -0.0721             -0.1352        -0.1765
+ 1.75  13.7   51.8  -0.1040             -0.1671        -0.2084
+ 2.00  10.5   55.0  -0.1335             -0.1966        -0.2379
+ 2.50   6.3   59.3  -0.1871             -0.2502        -0.2916
+ 3.00   4.0   61.3  -0.2282             -0.2913        -0.3327
+ 4.00   1.5   63.6  -0.2911             -0.3542        -0.3956
+ 5.00   0.8   64.3  -0.3104             -0.3736        -0.4149
+    best all-in TP = 0.5R -> -0.054R   (spread-only best = 0.5R -> -0.013R)
+
+========================================================================================
+17. HOW MUCH OF MFE EACH EXIT ACTUALLY CAPTURES
+========================================================================================
+               legs  med_MFE_R  med_realised_R  capture%
+exit_reason                                             
+BE_SL         151.0       1.69            0.07      5.34
+SESSION_END  1332.0       0.71            0.18     27.26
+SL           1140.0       0.44           -1.00   -229.85
+TP1           319.0       1.41            1.25     91.99
+TP2            54.0       2.95            2.71     92.91
+TP3            22.0       3.62            4.20     97.16
+TRAIL_SL      420.0       1.83            1.06     58.95
+
+trailing capture by MFE bucket (TRAIL_SL legs only):
+               legs  med_MFE_R  med_realised_R  capture%
+bucket                                                  
+(0.0, 1.0]     40.0       0.81            0.41     48.42
+(1.0, 1.5]     86.0       1.27            0.76     60.57
+(1.5, 2.0]    116.0       1.76            1.09     62.65
+(2.0, 3.0]    112.0       2.41            1.35     58.73
+(3.0, 5.0]     52.0       3.36            2.04     61.11
+(5.0, 100.0]   14.0       6.04            3.05     47.77
+
+========================================================================================
+18. IS THE CONFLUENCE SCORE PREDICTIVE?
+========================================================================================
+                  count   min    50%    max   std
+strategy                                         
+APA_v1             52.0  70.0   85.0  100.0  9.22
+BiasIFVG_v1        83.0  65.0   80.0  100.0  6.81
+CRT_v1             49.0  90.0   90.0   90.0  0.00
+HTFFVGFlip_v1      48.0  85.0  100.0  100.0  5.96
+NYOpenRetest_v1    60.0  92.0   92.0   92.0  0.00
+VWAP_v1          1034.0  80.0   80.0   80.0  0.00
+
+(only strategies whose score actually varies)
+                                 n    win%  exp_R
+strategy      bucket                             
+APA_v1        (64.999, 80.0]  18.0  44.444  0.043
+              (83.0, 93.0]    26.0  46.154  0.138
+              (93.0, 100.0]    8.0  37.500 -1.099
+BiasIFVG_v1   (64.999, 80.0]  72.0  34.722 -0.186
+              (80.0, 83.0]     3.0  66.667  1.060
+              (83.0, 93.0]     7.0  71.429  0.671
+              (93.0, 100.0]    1.0   0.000 -1.000
+HTFFVGFlip_v1 (83.0, 93.0]    13.0  23.077 -0.369
+              (93.0, 100.0]   35.0  45.714  0.249
+
+========================================================================================
+19. DIRECTION AND MONTH STABILITY (is any of this a single lucky window?)
+========================================================================================
+                               n    win%  exp_R
+strategy        direction                      
+APA_v1          BUY         27.0  37.037 -0.423
+                SELL        25.0  52.000  0.279
+BiasIFVG_v1     BUY         44.0  40.909 -0.043
+                SELL        39.0  35.897 -0.119
+CRT_v1          BUY         29.0  55.172  0.174
+                SELL        20.0  40.000 -0.197
+HTFFVGFlip_v1   BUY         26.0  34.615  0.035
+                SELL        22.0  45.455  0.138
+NYOpenRetest_v1 BUY         26.0  38.462 -0.200
+                SELL        34.0  52.941  0.334
+VWAP_v1         BUY        510.0  42.157 -0.086
+                SELL       524.0  50.763  0.031
+
+monthly pooled expectancy:
+             n  exp_R      pnl$
+month                          
+2026-01  173.0  0.082  1407.585
+2026-02  143.0 -0.177 -5384.319
+2026-03  185.0 -0.045 -4365.990
+2026-04  186.0 -0.100 -4957.802
+2026-05  171.0 -0.001 -4462.925
+2026-06  175.0  0.013 -1906.722
+2026-07  184.0 -0.023 -6145.791
+2026-08  109.0  0.117 -1028.308
+
+========================================================================================
+16b. FRICTION PER STRATEGY (all six, the two cut off above included)
+========================================================================================
+       strategy    n  spread_R  slip_R  total_friction_R
+         CRT_v1   49     0.105   0.082             0.187
+NYOpenRetest_v1   60     0.146   0.021             0.167
+         APA_v1   52     0.122   0.038             0.160
+        VWAP_v1 1034     0.063   0.041             0.104
+  HTFFVGFlip_v1   48     0.054   0.008             0.061
+    BiasIFVG_v1   83     0.049   0.007             0.056
+
+========================================================================================
+20. FIXED TP vs TRAILING vs HYBRID — measured capture of 60%% applied to the runner
+========================================================================================
+
+APA_v1           n=  52  friction 0.160R   as-traded -0.085R (3TP 1.5/3/5 50/30/20 BE@1.5)
+   best FIXED  TP=2.5R                      -> net +0.157R
+   best TRAIL  arm@0.5R, 60% capture         -> net +0.479R
+   best HYBRID TP1=0.5R w=40% trail arm@0.5R -> net +0.262R
+
+BiasIFVG_v1      n=  83  friction 0.056R   as-traded -0.079R (3TP 1.5/3/5 50/30/20 BE@1.5)
+   best FIXED  TP=0.75R                      -> net -0.011R
+   best TRAIL  arm@0.5R, 60% capture         -> net +0.325R
+   best HYBRID TP1=0.5R w=40% trail arm@0.5R -> net +0.163R
+
+CRT_v1           n=  49  friction 0.187R   as-traded +0.023R (3TP 1.5/3/5 50/30/20 BE@1.5)
+   best FIXED  TP=3R                      -> net +0.119R
+   best TRAIL  arm@0.5R, 60% capture         -> net +0.589R
+   best HYBRID TP1=0.75R w=40% trail arm@0.5R -> net +0.373R
+
+HTFFVGFlip_v1    n=  48  friction 0.061R   as-traded +0.082R (3TP 1.5/3/5 50/30/20 BE@1.5)
+   best FIXED  TP=0.75R                      -> net +0.032R
+   best TRAIL  arm@0.5R, 60% capture         -> net +0.575R
+   best HYBRID TP1=0.5R w=40% trail arm@0.5R -> net +0.346R
+
+NYOpenRetest_v1  n=  60  friction 0.167R   as-traded +0.103R (3TP 1.5/3/5 50/30/20 BE@1.5)
+   best FIXED  TP=1.5R                      -> net -0.067R
+   best TRAIL  arm@0.5R, 60% capture         -> net +0.455R
+   best HYBRID TP1=0.5R w=40% trail arm@0.5R -> net +0.203R
+
+VWAP_v1          n=1034  friction 0.104R   as-traded -0.027R (3TP 1.5/3/5 50/30/20 BE@1.5)
+   best FIXED  TP=0.5R                      -> net -0.054R
+   best TRAIL  arm@0.5R, 60% capture         -> net +0.146R
+   best HYBRID TP1=0.5R w=40% trail arm@0.5R -> net +0.066R
+
+ALL              n=1326  friction 0.102R   as-traded -0.021R (3TP 1.5/3/5 50/30/20 BE@1.5)
+   best FIXED  TP=0.75R                      -> net -0.047R
+   best TRAIL  arm@0.5R, 60% capture         -> net +0.222R
+   best HYBRID TP1=0.5R w=40% trail arm@0.5R -> net +0.112R
+
+========================================================================================
+21. HYBRID GRID, POOLED EX-VWAP (the five low-frequency strategies together)
+========================================================================================
+n=292  friction=0.110R   runner trailed from 1.0R at 60% capture
+w_TP1     0.4     0.5     0.6     0.7     0.8     1.0
+TP1_R                                                
+0.50   0.2108  0.1636  0.1165  0.0694  0.0223 -0.0720
+0.75   0.2039  0.1679  0.1319  0.0959  0.0599 -0.0121
+1.00   0.1519  0.1208  0.0898  0.0588  0.0277 -0.0343
+1.25   0.0846  0.0616  0.0387  0.0157 -0.0072 -0.0531
+1.50   0.0526  0.0370  0.0213  0.0057 -0.0099 -0.0412
+2.00  -0.0492 -0.0564 -0.0637 -0.0709 -0.0781 -0.0925
+
+same five strategies as traded today: +0.001R   cash -7,344 over 292 trades
+
+========================================================================================
+22. WHAT A STOP-DISTANCE FLOOR WOULD DO — reject trades whose stop is < N x round-trip cost
+========================================================================================
+  N= 0x  kept  1326/1326 (100.0%)  geo_exp_R -0.0207  cash $  -26,844  cash/trade $ -20.24
+  N= 4x  kept  1195/1326 ( 90.1%)  geo_exp_R -0.0248  cash $  -24,288  cash/trade $ -20.33
+  N= 6x  kept  1013/1326 ( 76.4%)  geo_exp_R -0.0146  cash $  -15,024  cash/trade $ -14.83
+  N= 8x  kept   814/1326 ( 61.4%)  geo_exp_R -0.0174  cash $  -11,194  cash/trade $ -13.75
+  N=10x  kept   649/1326 ( 48.9%)  geo_exp_R +0.0191  cash $   -3,504  cash/trade $  -5.40
+  N=12x  kept   519/1326 ( 39.1%)  geo_exp_R +0.0116  cash $   -4,797  cash/trade $  -9.24
+  N=15x  kept   363/1326 ( 27.4%)  geo_exp_R +0.0422  cash $      415  cash/trade $   1.14
+  N=20x  kept   195/1326 ( 14.7%)  geo_exp_R -0.0328  cash $   -3,187  cash/trade $ -16.34
+
+========================================================================================
+23. VALIDATING THE 60%-CAPTURE TRAIL MODEL AGAINST WHAT ACTUALLY HAPPENED
+========================================================================================
+ for groups that reached X, compare the model's prediction to their real outcome today
+  reached  0.5R  n= 804  mean MFE 1.59R   model 0.60xMFE = +0.957R   actually realised +0.471R
+  reached 0.75R  n= 627  mean MFE 1.87R   model 0.60xMFE = +1.121R   actually realised +0.698R
+  reached  1.0R  n= 474  mean MFE 2.19R   model 0.60xMFE = +1.314R   actually realised +0.951R
+  reached  1.5R  n= 293  mean MFE 2.79R   model 0.60xMFE = +1.671R   actually realised +1.371R
+  reached  2.0R  n= 186  mean MFE 3.40R   model 0.60xMFE = +2.039R   actually realised +1.702R
+  reached  3.0R  n=  91  mean MFE 4.39R   model 0.60xMFE = +2.633R   actually realised +2.081R
+
+========================================================================================
+24. TRAIL SENSITIVITY — capture ratio is the one assumption; here is the whole range
+========================================================================================
+ capture  arm_R  APA_v1  BiasIFVG_v1  CRT_v1  HTFFVGFlip_v1  NYOpenRetest_v1  VWAP_v1    ALL
+     0.4   0.50   0.189        0.082   0.269          0.266            0.136   -0.019  0.029
+     0.4   0.75   0.110        0.019   0.265          0.161            0.049   -0.100 -0.049
+     0.4   1.00  -0.018       -0.128   0.202          0.047           -0.009   -0.172 -0.128
+     0.4   1.50  -0.066       -0.283   0.070         -0.162           -0.123   -0.263 -0.228
+     0.5   0.50   0.334        0.204   0.429          0.421            0.295    0.063  0.126
+     0.5   0.75   0.250        0.136   0.424          0.310            0.203   -0.026  0.040
+     0.5   1.00   0.109       -0.020   0.355          0.189            0.139   -0.109 -0.050
+     0.5   1.50   0.054       -0.190   0.206         -0.041            0.013   -0.218 -0.167
+     0.6   0.50   0.479        0.325   0.589          0.575            0.455    0.146  0.222
+     0.6   0.75   0.389        0.254   0.583          0.459            0.357    0.047  0.128
+     0.6   1.00   0.235        0.088   0.508          0.330            0.287   -0.046  0.029
+     0.6   1.50   0.174       -0.096   0.341          0.080            0.149   -0.172 -0.105
+     0.7   0.50   0.624        0.447   0.749          0.730            0.614    0.229  0.319
+     0.7   0.75   0.529        0.372   0.742          0.609            0.511    0.120  0.217
+     0.7   1.00   0.362        0.197   0.662          0.472            0.434    0.017  0.107
+     0.7   1.50   0.294       -0.002   0.477          0.200            0.285   -0.127 -0.044
+
+  (as traded today, same groups: APA_v1 -0.245, BiasIFVG_v1 -0.134, CRT_v1 -0.164, HTFFVGFlip_v1 +0.021, NYOpenRetest_v1 -0.064, VWAP_v1 -0.131)
+
+========================================================================================
+25. VWAP SESSION-END: what the 5-hour force-flat is doing
+========================================================================================
+  VWAP legs 3034, session-end 1388 (45.7%), max bars_held 61 (M5 -> 5.1h)
+  session-end legs: median MFE 0.69R, median realised +0.14R, 59% closed positive, total $5,190
+
+  of the session-end legs, how far had they got when the clock ran out:
+mfe_R
+(0.0, 0.25]     158
+(0.25, 0.5]     269
+(0.5, 0.75]     318
+(0.75, 1.0]     224
+(1.0, 1.5]      251
+(1.5, 2.0]       76
+(2.0, 100.0]     62
+
+  bars held distribution for VWAP by exit reason:
+              count   50%   max
+exit_reason                    
+BE_SL          86.0  15.0  50.0
+SESSION_END  1388.0  55.0  61.0
+SL           1050.0  11.0  59.0
+TP1           202.0  14.0  57.0
+TP2            15.0  18.0  51.0
+TP3             4.0  28.0  38.0
+TRAIL_SL      289.0  26.0  59.0
+
+========================================================================================
+26. THE FULL PROPOSAL, SCORED — every configuration side by side (net of friction)
+========================================================================================
+                             configuration    APA  BiasIFVG    CRT  HTFFVGFlip  NYOpenRetest   VWAP  POOLED
+as traded (3TP 1.5/3/5, 50/30/20, BE@1.5R) -0.245    -0.134 -0.164       0.021        -0.064 -0.131  -0.123
+                            single TP 1.5R -0.025    -0.116  0.078      -0.082        -0.067 -0.177  -0.143
+                            single TP 1.0R -0.122    -0.080  0.099       0.022        -0.100 -0.103  -0.084
+                           single TP 0.75R -0.030    -0.011  0.058       0.032        -0.142 -0.062  -0.047
+            pure trail, arm 1.0R, cap 0.50  0.109    -0.020  0.355       0.189         0.139 -0.109  -0.050
+           pure trail, arm 0.75R, cap 0.50  0.250     0.136  0.424       0.310         0.203 -0.026   0.040
+           pure trail, arm 0.75R, cap 0.60  0.389     0.254  0.583       0.459         0.357  0.047   0.128
+     hybrid TP1 0.75R @40%, trail 60% rest  0.222     0.148  0.373       0.289         0.157  0.003   0.058
+      hybrid TP1 1.0R @50%, trail 50% rest -0.006    -0.050  0.227       0.105         0.019 -0.106  -0.067
+
+========================================================================================
+27. TESTING PHASE-14 PART B3 ('MFE is ~0R; entries are wrong immediately') AT CORPUS SCALE
+========================================================================================
+B3 measured 5 APA trades in one window. Here is every group in the corpus.
+
+                      n  median_MFE_R  mean_MFE_R  %MFE<0.1R  %reach_0.5R  %reach_1R  %reach_2R
+strategy                                                                                       
+APA_v1             52.0          0.79        1.49      17.31        65.38      40.38      28.85
+BiasIFVG_v1        83.0          0.93        1.29      10.84        65.06      48.19      19.28
+CRT_v1             49.0          1.01        1.65      26.53        59.18      51.02      28.57
+HTFFVGFlip_v1      48.0          1.09        1.61      10.42        70.83      54.17      29.17
+NYOpenRetest_v1    60.0          1.00        1.65      13.33        65.00      50.00      30.00
+VWAP_v1          1034.0          0.65        0.92      13.06        59.38      32.11      10.54
+
+Stopped-out legs only - the 'stopped on bar 1 with no favourable tick' signature:
+                 SL_legs  median_bars  %stopped<=3bars  %stopped<=3bars_AND_MFE<0.1R  median_MFE_R
+strategy_id                                                                                       
+APA_v1              86.0         13.0            20.93                         13.95          0.35
+BiasIFVG_v1        142.0         23.5             2.11                          0.00          0.44
+CRT_v1              75.0          3.0            56.00                         44.00          0.02
+HTFFVGFlip_v1       85.0         39.0             7.06                          3.53          0.53
+NYOpenRetest_v1     96.0          6.0            37.50                         18.75          0.23
+VWAP_v1           1050.0         11.0            18.00                         12.38          0.26

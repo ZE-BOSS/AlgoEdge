@@ -5,6 +5,7 @@ Backtest run, save/dismiss, load, delete endpoints.
 Source: TradingBot_MasterPlan-2.md Section 6 — REST API
 """
 
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -40,6 +41,47 @@ from backend.services.log_stream import log_hub  # noqa: E402
 
 USER_BACKTEST_STATE = {}  # Fallback in-memory persistence: user_id -> state
 router = APIRouter(prefix="/api", tags=["backtest"])
+
+
+def _completion_envelope(result: dict) -> dict:
+    """
+    The `stage="complete"` WebSocket message: headline figures only.
+
+    A finished run is megabytes — a per-bar equity curve, every leg, every
+    grouped trade with its chart slices, and up to 2,000 log lines. Pushing that
+    through one WebSocket frame blocked the browser's main thread on parse and
+    re-render, and when the frame was too large to send at all
+    `ConnectionManager.broadcast_to_user` swallowed the error and dropped the
+    socket — leaving the UI showing "complete" with no results until the user
+    refreshed the page.
+
+    So the socket carries the fact and the headline; the client fetches the body
+    from `GET /api/backtest/result/latest`, which is exactly what a refresh
+    already did.
+    """
+    report = result.get("report") or {}
+    return {
+        "type": "backtest_progress",
+        "stage": "complete",
+        "pct": 100,
+        # `result_ready` tells the client to fetch. It is a separate flag rather
+        # than "result is absent" so an older client that only looks for
+        # `result` degrades to its existing refresh behaviour instead of
+        # misreading an empty payload as an empty run.
+        "result_ready": True,
+        "backtest_id": result.get("backtest_id"),
+        "log_session_id": result.get("log_session_id"),
+        "summary": {
+            "total_trades": result.get("total_trades", 0),
+            "total_signals": result.get("total_signals", 0),
+            "initial_balance": result.get("initial_balance"),
+            "final_balance": result.get("final_balance"),
+            "win_rate": report.get("win_rate", 0),
+            "profit_factor": report.get("profit_factor", 0),
+            "total_pnl": report.get("total_pnl", 0),
+            "max_drawdown_pct": report.get("max_drawdown_pct", 0),
+        },
+    }
 
 
 def _filter_run_logs(logs: list[dict], cap: int = 2000) -> list[dict]:
@@ -484,24 +526,43 @@ async def run_backtest_endpoint(
             return USER_BACKTEST_STATE.get(current_user.id, initial_state.copy())
 
         await _save_state(initial_state)
+        progress = None
+        progress_pump = None
         try:
             import time as _time
 
             from backend.api.websocket import manager as ws_manager
             from backend.backtester.runner import run_backtest
             from backend.mt5.data_fetcher import DataFetcher, DataFetchError
+            from backend.services.backtest_progress import BacktestProgress
             from backend.services.bot_service import bot_service
 
             bt_start = _time.time()
             logger.info(f"═══ BACKTEST START ═══ {req.symbol} | user={current_user.email}")
             bot_service.log_system_event(f"Backtest started: {req.symbol}", category="BACKTEST")
 
-            try:
-                current_state = await _get_state()
-                current_state["progress"] = {"stage": "Fetching historical data...", "pct": 5}
-                await _save_state(current_state)
-            except Exception as _e:
-                logger.warning(f"[BACKTEST] Could not update progress state: {_e}")
+            # ── One owner for the whole 0-100 scale ───────────────────────
+            # Before this, three separate places wrote absolute percentages to
+            # the same WebSocket channel — this loop (10→90), the "Finalizing"
+            # step (95), and `run_backtest` itself (0→10→70→100). The bar went
+            # backwards and the UI saw "complete" before the result existed.
+            # Now every phase reports 0.0-1.0 into a slice of one scale.
+            async def _persist_progress(p: dict):
+                st = await _get_state()
+                st["progress"] = p
+                await _save_state(st)
+
+            progress = BacktestProgress(
+                current_user.id, ws_manager.broadcast_to_user, _persist_progress,
+            )
+            progress_pump = asyncio.create_task(progress.pump())
+
+            PH_FETCH = progress.phase(0, 8, "Fetching historical data...")
+            PH_SIGNALS = progress.phase(8, 55, "Generating signals...")
+            PH_SIM = progress.phase(55, 92, "Simulating trades...")
+            PH_REPORT = progress.phase(92, 99, "Building report...")
+
+            await PH_FETCH.set(0.0)
 
             # NOTE: Engine is built first so we can call get_required_timeframes()
             # before deciding which data to fetch. Data fetch happens below.
@@ -652,6 +713,9 @@ async def run_backtest_endpoint(
 
                 replay.leg_start(req.symbol, total_bars=max(0, len(primary_times) - 300))
 
+                # Data is in hand; hand the scale over to signal generation.
+                await PH_FETCH.set(1.0)
+
                 # ── Hoisted per-loop work ────────────────────────────────
                 # Everything below used to be recomputed on EVERY bar. On a
                 # 5,000-bar run that is thousands of redundant pandas/parse
@@ -690,19 +754,21 @@ async def run_backtest_endpoint(
                         await asyncio.sleep(0)
                         last_yield_time = time.monotonic()
 
-                    if i % 600 == 0:
-                        pct = int((i / len(primary_times)) * 80) + 10
+                    # Progress: report EVERY bar into the phase (a float
+                    # assignment) and let the reporter's own pump decide how
+                    # often that reaches the socket. The old `i % 600` gate gave
+                    # eight updates across a 5,000-bar run — visibly a bar that
+                    # sits on one number and then jumps.
+                    PH_SIGNALS.note(i / len(primary_times))
+
+                    # The cancellation check reads shared state, so it stays on
+                    # a stride — but a much shorter one, so cancelling a long
+                    # run does not take 600 bars to be noticed.
+                    if i % 200 == 0:
                         current_state = await _get_state()
                         if current_state.get("status") == "cancelled":
                             bot_service.log_system_event("Backtest cancelled by user", category="BACKTEST")
                             raise Exception("Backtest Cancelled")
-                        current_state["progress"] = {"stage": "Running simulation...", "pct": pct}
-                        await _save_state(current_state)
-                        try:
-                            asyncio.create_task(ws_manager.broadcast_to_user(current_user.id, {
-                                "type": "backtest_progress", "stage": "Running simulation...", "pct": pct
-                            }))
-                        except: pass
 
                     current_time = primary_times[i]
                     is_warmup = _warmup_cutoff is not None and current_time < _warmup_cutoff
@@ -899,9 +965,7 @@ async def run_backtest_endpoint(
             }
 
 
-            current_state = await _get_state()
-            current_state["progress"] = {"stage": "Finalizing backtest...", "pct": 95}
-            await _save_state(current_state)
+            await PH_SIGNALS.set(1.0)
             results = await run_backtest(
                 user_id=current_user.id,
                 strategy_id=req.strategy_id,
@@ -914,7 +978,11 @@ async def run_backtest_endpoint(
                 candles_m5=candles_m5_idx,
                 save_mode="DISCARD",
                 strategy=engine,  # [Phase 14 B2.3] enables on_position_bar hook
+                # The simulation is the longest part of a run and used to report
+                # nothing at all — the bar sat on 95% for its whole duration.
+                progress_phase=PH_SIM,
             )
+            await PH_REPORT.set(0.0)
 
             report = results.get("report")
             elapsed = (_time.time() - bt_start) * 1000
@@ -1023,31 +1091,31 @@ async def run_backtest_endpoint(
                 logger.warning(f"[replay] series attach failed (chart only, run unaffected): {e}")
 
             sanitized = _sanitize(response)
-            
+
             current_state = await _get_state()
             current_state["status"] = "complete"
             current_state["progress"] = {"stage": "complete", "pct": 100}
             current_state["result"] = sanitized
-            
-            # Create a stripped payload for the frontend to prevent UI freezing
-            import copy
-            ws_payload = copy.deepcopy(sanitized)
-            if "grouped_trades" in ws_payload:
-                for t in ws_payload["grouped_trades"]:
-                    t.pop("chart_data", None)
-                    t.pop("chart_data_h1", None)
-                    t.pop("chart_data_m15", None)
-                    t.pop("chart_data_m5", None)
-            # Same reasoning as the per-trade chart_data above: the replay
-            # series is megabytes and the client already has it from the live
-            # stream. It stays in saved state, fetched via /replay when needed.
-            ws_payload.pop("replay", None)
-            
-            # Send the run logs immediately as part of the WS payload
-            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
-            
-            # Now save to state (which writes to Redis and might block)
+
+            # Persist BEFORE announcing. The announcement now tells the client
+            # to fetch the result, so publishing first opened a race where the
+            # fetch could arrive before the state it is fetching existed.
             await _save_state(current_state)
+
+            # Announce completion with a SMALL envelope, not the run itself.
+            #
+            # This used to `copy.deepcopy` the whole sanitized result (megabytes
+            # — a per-bar equity curve, every leg, every group, 2,000 log lines)
+            # and push it through one WebSocket frame. Three consequences, all
+            # of which were reported as symptoms:
+            #   * the deepcopy blocked the event loop at the worst moment;
+            #   * the frame froze the browser on JSON.parse plus a full re-render;
+            #   * when the send failed, `broadcast_to_user` swallowed the
+            #     exception and dropped the socket, so the result never arrived
+            #     and only a page refresh (which fetches over REST) showed it.
+            # The client now pulls the body over the same REST route the refresh
+            # used, which is the path already known to work.
+            await ws_manager.broadcast_to_user(current_user.id, _completion_envelope(sanitized))
             
         except Exception as e:
             current_state = await _get_state()
@@ -1070,6 +1138,12 @@ async def run_backtest_endpoint(
                 await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
             except: pass
         finally:
+            # Stop the progress pump before the session closes, so a cancelled
+            # or failed run cannot leave a task broadcasting stale percentages.
+            if progress is not None:
+                progress.close()
+            if progress_pump is not None:
+                progress_pump.cancel()
             log_hub.end_session(log_session_id)
 
     background_tasks.add_task(_run_backtest_task)
@@ -1125,6 +1199,8 @@ async def run_portfolio_backtest_endpoint(
             return USER_BACKTEST_STATE.get(current_user.id, initial_state.copy())
 
         await _save_state(initial_state)
+        progress = None
+        progress_pump = None
         try:
             import asyncio
             import time as _time
@@ -1135,7 +1211,25 @@ async def run_portfolio_backtest_endpoint(
             from backend.core.config_schema import InstrumentSettings, UserConfigV2
             from backend.mt5.data_fetcher import DataFetcher, DataFetchError
             from backend.strategies.registry import get_strategy
+            from backend.services.backtest_progress import BacktestProgress
             from backend.services.bot_service import bot_service
+
+            # One owner for the 0-100 scale — see the single-symbol route for
+            # the collision this replaces.
+            async def _persist_progress(p: dict):
+                st = await _get_state()
+                st["progress"] = p
+                await _save_state(st)
+
+            progress = BacktestProgress(
+                current_user.id, ws_manager.broadcast_to_user, _persist_progress,
+            )
+            progress_pump = asyncio.create_task(progress.pump())
+            # Per-symbol signal generation shares 0-60; the global simulation,
+            # which is the long phase, gets 60-92 of its own.
+            PH_SYMBOLS = progress.phase(0, 60, "Preparing symbols...")
+            PH_GLOBAL = progress.phase(60, 92, "Running global portfolio simulation...")
+            PH_REPORT = progress.phase(92, 99, "Building report...")
 
             bt_start = _time.time()
             logger.info(f"═══ PORTFOLIO BACKTEST START ═══ {sym_list} | user={current_user.email}")
@@ -1269,13 +1363,15 @@ async def run_portfolio_backtest_endpoint(
                 slot_key = sym_cfg.slot_id or f"{sym}::{strat_id}"
                 symbol_map[slot_key] = sym
 
-                pct_base = int((sym_idx / total_symbols) * 80)
-                current_state = await _get_state()
-                current_state["progress"] = {"stage": f"Fetching {sym} ({sym_idx + 1}/{total_symbols})...", "pct": pct_base}
-                await _save_state(current_state)
-                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", **current_state["progress"]})
+                _sym_phase = progress.phase(
+                    60 * sym_idx / total_symbols,
+                    60 * (sym_idx + 1) / total_symbols,
+                    f"Fetching {sym} ({sym_idx + 1}/{total_symbols})...",
+                )
+                await _sym_phase.set(0.0)
 
                 # Check for cancellation
+                current_state = await _get_state()
                 if current_state.get("status") == "cancelled":
                     raise Exception("Portfolio Backtest Cancelled")
 
@@ -1380,21 +1476,16 @@ async def run_portfolio_backtest_endpoint(
                         await asyncio.sleep(0)
                         _last_yield = time.monotonic()
 
-                    if i % 600 == 0:
+                    # Report every bar into this symbol's slice of the scale;
+                    # the reporter's pump decides how often that reaches the
+                    # socket. The old `i % 600` gate produced a handful of
+                    # updates for an entire symbol.
+                    _sym_phase.note(i / len(primary_times))
+
+                    if i % 200 == 0:
                         cur_state = await _get_state()
                         if cur_state.get("status") == "cancelled":
                             raise Exception("Portfolio Backtest Cancelled")
-                        
-                        # Add progress update here for portfolio backtest
-                        pct_within = i / len(primary_times)
-                        pct = int(((sym_idx + pct_within) / total_symbols) * 80)
-                        cur_state["progress"] = {"stage": f"Simulating {sym} ({sym_idx + 1}/{total_symbols})...", "pct": pct}
-                        await _save_state(cur_state)
-                        try:
-                            asyncio.create_task(ws_manager.broadcast_to_user(current_user.id, {
-                                "type": "backtest_progress", **cur_state["progress"]
-                            }))
-                        except: pass
 
                     current_time = primary_times[i]
                     is_warmup = _warmup_cutoff is not None and current_time < _warmup_cutoff
@@ -1523,10 +1614,8 @@ async def run_portfolio_backtest_endpoint(
                 except: pass
 
             # ── 3. Run Global Simulation ──
-            current_state = await _get_state()
-            current_state["progress"] = {"stage": "Running global portfolio simulation...", "pct": 85}
-            await _save_state(current_state)
-            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", **current_state["progress"]})
+            await PH_SYMBOLS.set(1.0)
+            await PH_GLOBAL.set(0.0)
 
             portfolio_engine = PortfolioBacktestEngine(merged_risk_config)
 
@@ -1538,7 +1627,9 @@ async def run_portfolio_backtest_endpoint(
                 portfolio_data_m15,
                 portfolio_data_m5,
                 symbol_map,  # [12.8]
+                PH_GLOBAL.note,
             )
+            await PH_REPORT.set(0.0)
 
             # ── Sanitize and broadcast results ──
             import numpy as _np
@@ -1651,29 +1742,17 @@ async def run_portfolio_backtest_endpoint(
             # what /backtest_result/trade/{group_id}/chart reads from on demand.
             current_state["result"] = sanitized
 
-            # Stripped copy for the WS broadcast itself. Previously this
-            # endpoint broadcast `sanitized` directly, with every trade's
-            # chart_data / chart_data_m15 / chart_data_m5 embedded — for a
-            # multi-symbol portfolio run with hundreds of grouped trades,
-            # each carrying up to ~500 candles per timeframe, this is exactly
-            # the "tremendous load" the on-demand chart endpoint exists to
-            # avoid. Mirror the /backtest endpoint's pattern: strip the heavy
-            # fields from what actually goes over the wire.
-            import copy
-            ws_payload = copy.deepcopy(sanitized)
-            if "grouped_trades" in ws_payload:
-                for t in ws_payload["grouped_trades"]:
-                    if isinstance(t, dict):
-                        t.pop("chart_data", None)
-                        t.pop("chart_data_m15", None)
-                        t.pop("chart_data_m5", None)
-            # Same reasoning as the per-trade chart_data above — the client
-            # already received this series live; it is refetched from saved
-            # state via /replay rather than pushed again at completion.
-            ws_payload.pop("replay", None)
-
-            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
+            # Persist BEFORE announcing — the announcement tells the client to
+            # fetch, so the state it fetches must already exist.
             await _save_state(current_state)
+
+            # Headline-only completion envelope. Stripping chart_data was not
+            # enough: a portfolio run's equity curve, legs, grouped trades and
+            # log tail are still megabytes in one WebSocket frame, which is what
+            # froze the browser and — when the send failed silently inside
+            # `broadcast_to_user` — left the UI on "complete" with no results
+            # until the page was refreshed. See `_completion_envelope`.
+            await ws_manager.broadcast_to_user(current_user.id, _completion_envelope(sanitized))
 
         except Exception as e:
             import traceback
@@ -1690,6 +1769,12 @@ async def run_portfolio_backtest_endpoint(
             from backend.services.bot_service import bot_service
             bot_service.log_system_event(f"Portfolio backtest failed: {e!s}", category="BACKTEST", level="ERROR")
         finally:
+            # Stop the pump before the session closes, so a failed or cancelled
+            # run cannot leave a task broadcasting stale percentages.
+            if progress is not None:
+                progress.close()
+            if progress_pump is not None:
+                progress_pump.cancel()
             log_hub.end_session(log_session_id)
 
     background_tasks.add_task(_run_portfolio_task)

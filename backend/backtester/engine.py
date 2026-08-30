@@ -687,6 +687,7 @@ class BacktestEngine(CostModelMixin):
         candles_m15: pd.DataFrame = None,
         candles_m5: pd.DataFrame = None,
         strategy: Any = None,
+        progress_cb: Any = None,
     ) -> dict[str, Any]:
         """Run a backtest on historical candles with pre-generated signals.
 
@@ -695,6 +696,13 @@ class BacktestEngine(CostModelMixin):
                 `on_position_bar` hook is called once per closed bar per open
                 position, enabling strategy-side in-trade invalidation logic
                 (e.g. APA's head-level hard exit).
+            progress_cb: Optional `callable(fraction: float)` invoked
+                periodically with this run's 0.0-1.0 completion. This method is
+                executed under `asyncio.to_thread`, so the callback MUST NOT
+                await or perform I/O — see `services/backtest_progress.py`,
+                whose `_Phase.note` is written to be exactly that. Without it
+                the simulation — the longest part of a run — reported nothing
+                at all and the bar sat still from 95% to 100%.
         """
         self._strategy = strategy  # stored so close-path notify_outcome can call it
         balance = initial_balance
@@ -788,7 +796,20 @@ class BacktestEngine(CostModelMixin):
                 swing_cache[i] = points
 
 
-        for i in range(len(candles)):
+        # Progress is reported on a bar-count stride rather than elapsed time
+        # because this loop cannot call time.monotonic() cheaply enough per bar
+        # to be worth it; ~200 notes across a run is smooth and the stride
+        # adapts to run length. The callback only assigns a float.
+        _total_bars = len(candles)
+        _progress_stride = max(1, _total_bars // 200)
+
+        for i in range(_total_bars):
+            if progress_cb is not None and i % _progress_stride == 0:
+                try:
+                    progress_cb(i / _total_bars)
+                except Exception:
+                    progress_cb = None  # a broken reporter must never stop a run
+
             current_time = time_arr[i]
             current_time_dt = dt_arr[i]
             current_price = closes_arr[i]
