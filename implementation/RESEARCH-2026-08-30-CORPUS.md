@@ -401,3 +401,124 @@ applied to CRT's C2 trigger and NY Open Retest's retest, and reconsidered for AP
   Bias IFVG n=83. Instrument-level rows go down to n=2. Only VWAP (n=1,034) supports a confident
   per-instrument conclusion. The stop-distance floor in §2.1 is the one recommendation whose
   evidence base is the whole corpus rather than a slice of it.
+
+---
+
+## 9. Can fundamentals alone be a strategy?
+
+Asked directly, so answered directly: **no — with one exception, and for a
+reason that is not about fundamentals in general but about what this broker
+actually sends.**
+
+### 9.1 What I could and could not test
+
+This session runs in a sandbox with no MT5 terminal and an allow-listed network.
+Every live fetch was refused at the proxy, not by the venue:
+
+```
+forexfactory calendar    403 (host not on the allow-list)
+cboe SPX / SPY chains    403
+yahoo options SPY        403
+```
+
+That is an environment limit and says nothing about your setup — and it is not
+the weekend either. So §9.2–9.5 are read from the code, the recorded provider
+behaviour, and the corpus. `scripts/check_fundamentals.py` (added here) answers
+the live half on your own terminal in one command; run it in session, not on a
+Sunday, and section 1 of its output is the finding that matters most.
+
+### 9.2 The load-bearing fact: you do not have order flow
+
+`PHASE-13` Part J.2 recorded it and `data/orderflow.py` carries it in code: on
+the Deriv feed, `last` is **0.0 on every tick** and `volume` / `volume_real` are
+**0 on every tick**. It is a quote feed, not a trade feed. There is no traded
+size and no aggressor.
+
+The module handles this correctly — it falls back to a tick rule on the mid and
+labels the output `classification: "quote_rule"`, `volume_is_tick_count: true`,
+with a caveat string that travels into the UI. But handling it honestly does not
+create the data. What "order flow" computes here is:
+
+| Reads as | Actually is |
+|---|---|
+| Cumulative Volume Delta | Count of quote up-ticks minus down-ticks |
+| Delta divergence | Price/mid-momentum divergence |
+| Absorption | A high-tick-count, low-range bar |
+| Volume profile / VPOC | **Time**-at-price, not volume-at-price |
+| Order book / DOM | Empty — Deriv does not publish depth on CFDs |
+
+None of that is institutional positioning. CVD on a quote feed is a momentum
+series computed from the same price the technical strategies already read, so as
+a *signal* it is largely redundant with what the engines have. As a *strategy on
+its own* it has no independent information to offer.
+
+This is the single most important thing to know before investing further in the
+order-flow track, and it should be settled by running the script above before
+any more is built on top of it.
+
+### 9.3 What each capability can honestly support
+
+| Capability | Standalone strategy? | Honest role |
+|---|---|---|
+| **Calendar** (ForexFactory) | **Yes, narrowly** | The only genuine fundamental in the stack. Event-driven trading around scheduled releases is a real, testable strategy class. |
+| **GEX** (CBOE/Yahoo) | No | Real and well-published, but it is a *regime* signal (positive gamma → mean-reverting, negative → trending). It gives no entry level and no stop. And it exists for `SPX`/`SPY`, not for the `SPX500` CFD you trade — the mapping is approximate. |
+| **Order flow** (MT5) | No | See §9.2 — the input does not exist on this feed. |
+| **Order book** (MT5) | No | Returns nothing. Broker limitation. |
+| **Correlation** (own bars) | No | A portfolio risk input, never an entry signal. It is already wired as one (`portfolio_governor.py`). |
+
+### 9.4 The one that could stand alone, and what it needs
+
+A **calendar-driven event strategy** is buildable and does not depend on the
+broken feed. But "fundamentals alone" still cannot place a trade: a calendar
+entry has no price level, so it has no stop, so it cannot be sized. What is
+actually required is:
+
+1. Event time, impact tier, and **actual vs. forecast vs. previous** — the
+   ForexFactory weekly JSON carries the first two; the third arrives only at
+   release, which means a live path, not a backtest one. **This is why the
+   strategy cannot be validated on the existing corpus** and needs its own
+   forward-collection period first.
+2. A price-based trigger — a breakout of the pre-release range is the
+   conventional one, and it supplies the stop the calendar cannot.
+3. A cost check. Event spreads widen sharply, and §2 of this document is the
+   reason to care: at a friction of 0.10–0.19R in normal conditions, a spread
+   that triples during a release eats the whole trade.
+
+So the honest shape is: **the calendar chooses the moment, price action chooses
+the trade.** That is a fundamentals-led strategy, not a fundamentals-only one,
+and I would not describe it as anything else.
+
+### 9.5 Where fundamentals are actually worth the most here — and the corpus says why
+
+The instinct is to use fundamentals to find more trades. The corpus says the
+opposite is where the value is.
+
+These strategies are **not signal-limited, they are cost-limited**. Three of six
+are positive on price and negative in cash (§1), and friction runs 0.056R to
+0.187R per round trip (§2). In that regime, the value of a filter is not that it
+improves the trades it keeps — it is that **every trade it removes hands back
+that friction**. VWAP alone took 1,034 trades at −0.027R; removing its worst
+third saves roughly 0.10R × 340 trades of pure cost before any selection
+benefit is counted.
+
+That is a much stronger argument for `FundamentalGate` (Stage 14.12) than
+"fundamentals add alpha", and it changes the design:
+
+- Build it as a **veto and a size modifier**, not a trigger. `MarketContext`
+  and `market_context_size_modifier()` already exist for exactly this
+  (Stage 9.4); what is missing is the last-mile wiring into the engines.
+- Score it on **trades removed per unit of expectancy retained**, not on hit
+  rate. A gate that cuts 40% of trades and leaves expectancy flat is a clear
+  win here; measured against hit rate it would look like it did nothing.
+- The calendar is the one input worth gating on first, because it is the only
+  one whose data is real. A blackout around high-impact releases is cheap to
+  implement, cheap to test, and directly targets the widened-spread case that
+  §2 shows the book cannot afford.
+
+**Recommendation:** do not build a fundamentals strategy. Run
+`scripts/check_fundamentals.py` in session to settle §9.2 on your own terminal;
+then wire the calendar as a `FundamentalGate` veto, and park GEX and order flow
+until the feed question is answered. If the answer is that the feed is
+quote-only — which the recorded evidence says it is — then the order-flow track
+should be re-scoped to what it honestly is (a momentum and time-at-price study)
+or shelved.

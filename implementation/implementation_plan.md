@@ -1,3 +1,6 @@
+> **Superseded 2026-08-30 — see [`MASTER-PLAN.md`](MASTER-PLAN.md).** The note below points at
+> `TASKS.md`, which is itself superseded by that same file.
+
 > **[Housekeeping-4] STATUS UPDATE 2026-08-23** — this doc predates and was superseded by
 > `implementation/MASTER-IMPLEMENTATION-PLAN.md` Part 14 / Phase 12. Per-item status:
 > - **Phase 4** (per-strategy risk fields) — **mostly superseded**. §4.1 (missing fields on strategy
@@ -24,6 +27,15 @@
 >   See `implementation/TASKS.md` Phase 12 for the full, verified implementation record.
 
 # AlgoEdge — Implementation Plan (Phase 4–7)
+
+> ## SUPERSEDED — 2026-08-30
+>
+> **This file is history. The live plan and status is [`MASTER-PLAN.md`](MASTER-PLAN.md).**
+>
+> Its "Phase 4-7" was a third numbering scheme for work that `TASKS.md` also numbered, differently.
+> Its Phase 7 (`InstrumentSlot`) was expanded and delivered as Stage 12; its Phase 4 per-strategy
+> risk fields as Stage 12.2.
+
 
 ## Background
 

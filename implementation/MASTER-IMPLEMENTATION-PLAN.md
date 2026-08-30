@@ -1,5 +1,18 @@
 # AlgoEdge — Master Diagnosis & Implementation Plan
 
+> ## PARTIALLY SUPERSEDED — 2026-08-30
+>
+> **Part 3 ("Fix plan (phased)") and Part 13 ("Revised execution sequence") are retired.** Their
+> Phase 0-7 numbering collided with `TASKS.md`'s Phase 0-14 — the same word and the same numbers
+> for different work. Both are replaced by the single Stage scheme in
+> [`MASTER-PLAN.md`](MASTER-PLAN.md), which also recovers six items those parts carried that no
+> task list ever scheduled.
+>
+> **The rest of this document remains current reference material** — in particular Part 11's
+> 70-entry defect register and the specs in Parts 4, 5, 8, 9 and 14. Read it for detail; read
+> `MASTER-PLAN.md` for what to do next.
+
+
 **Date:** 2026-08-22
 **Scope:** trade-frequency collapse · crypto risk under-deployment · hard-filter register · cost model ·
 backtest-result UI · RR-triggered BE/trailing · implementation-folder reconciliation · VWAP upgrade ·

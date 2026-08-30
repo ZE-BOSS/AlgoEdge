@@ -1,5 +1,19 @@
 # AlgoEdge — Master Task List
 
+> ## SUPERSEDED — 2026-08-30
+>
+> **This file is history. The live plan and status is [`MASTER-PLAN.md`](MASTER-PLAN.md).**
+>
+> It was merged into that file because three documents were each numbering the same work
+> differently: this file's "Phase 0-14", `MASTER-IMPLEMENTATION-PLAN.md`'s "Phase 0-7" (Parts 3
+> and 13), and `implementation_plan.md`'s "Phase 4-7". Same word, same numbers, different work —
+> Phase 3 meant "exit architecture" in one and "config plumbing" in another.
+>
+> The merge also corrected drift in both directions. Six items marked open here are in fact built
+> (14.9, 14.10, 14.13, 14.14, and partially 13.13, 14.12), and six items that no phase here ever
+> scheduled were recovered from the coarse plan. Do not work from this file.
+
+
 > **Update 2026-08-23.** Phase 7 (the backtest-result UI) and the frontend halves of
 > Phase 3 and Phase 12 are now built, along with the replay engine and fundamentals UI
 > that Part 6 of the master plan dropped. Task 10.5 is closed — and closing it exposed a
