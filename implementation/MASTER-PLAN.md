@@ -48,7 +48,7 @@ superseded by this file outright.
 
 ## Where things stand
 
-**189 line items across 18 stages: 135 done, 7 partial, 41 open, 3 not doing, 3 awaiting a
+**190 line items across 18 stages: 136 done, 9 partial, 39 open, 3 not doing, 3 awaiting a
 decision.** (Some lines cover a contiguous range — `1.1–1.4`, `2.1–2.3` — where the original
 tasks share one outcome, so the line count is lower than the 215 checkboxes `TASKS.md` carried.)
 
@@ -396,23 +396,41 @@ lose. The gap is friction — 0.056R to 0.187R per round trip, up to 0.37R on in
 instrument pairings. **The book is cost-limited, not signal-limited.** Nothing else on this
 plan is worth as much as fixing that.
 
-- [ ] **15.1** `[RECOVERED]` **Cost sanity assertions in `risk/broker_costs.py`.** Assert
-  `spread_pips < 20` for FX and `< 30` for metals, log loudly on violation. *This was item 1.8
-  of the coarse plan's Phase 1 and appeared on no task list. It would have caught the two
-  values this corpus flagged: XAGUSD at 96 pips and XAUUSD at 13.9 — which between them carry
-  524 of 1,326 groups. Verify both against `symbol_info` before treating their friction as real.*
-- [ ] **15.2** `[D-10]` **Stop-distance floor as a multiple of round-trip cost.** Replace
-  `min_stop_spread_multiple = 2.0` with `min_stop >= N × (spread + 2 × slippage)`, default 10×,
-  rejecting with a named reason so it appears in the funnel. *Measured on the corpus: −$26,844 →
-  −$3,504 at 10× keeping 49% of trades; +$415 at 15% keeping 27%. Changes no strategy logic.*
+- [x] **15.1** `[RECOVERED]` **Per-trade friction diagnostic — shipped.** The coarse plan asked
+  for a hard assertion (`spread_pips < 20` FX, `< 30` metals). On inspection that is already
+  implemented, better, as `_clamp_spread`'s per-symbol sane bands — and XAGUSD (5–150) and
+  XAUUSD (1–20) both pass theirs deliberately. Tightening them from here would be guessing at
+  values only your terminal can settle. Shipped the useful half instead: `calculate_lot_size`
+  now records `round_trip_cost_R` and `stop_cost_cover` into `sizing_diagnostics` on **every**
+  trade. That is the number the whole corpus turned out to hinge on and nothing recorded it —
+  the cost model knew the spread, the sizer knew the stop, and no one divided one by the other.
+  It reaches the trade record and RunReport's Cost Impact panel, so 15.2's multiple can be
+  chosen from your own histogram rather than my threshold.
+- [ ] **15.1b** Verify XAGUSD's 96-pip and XAUUSD's 13.9-pip spreads against live `symbol_info`.
+  *Between them they carry 524 of the corpus's 1,326 groups; if either is a points-read-as-pips
+  error, the friction on those symbols is overstated.*
+- [~] **15.2** `[D-10]` **Economic stop floor — mechanism shipped, default off.**
+  `RiskParams.min_stop_cost_multiple` requires `stop >= N × (spread + 2 × slippage)`, so N reads
+  as "the broker takes at most 1/N of one R". Threaded through `minimum_stop_distance`,
+  `calculate_lot_size`, `RiskEngine`, both backtest request models and `bot_service`; it names
+  itself in the rejection reason, so it shows in the funnel. **Defaults to 0.0 (disabled)** —
+  turning it on rejects trades that are taken today, which is D-10's call, not a default to
+  change underneath you. *Verified against the corpus's own XAGUSD numbers: its median stop
+  covers 8× its round trip, so 6× accepts it and 10× rejects it, exactly as §2.1 measured.*
+  **What remains is your decision on the value.**
 - [ ] **15.3** `[D-9]` **Trailing-first exits.** `tp_count = 1`, `trail_method_tp1 = ATR_TRAIL`,
   `trail_mode = RR`, `trail_trigger_rr = 0.75`, `trail_require_be_first = False`, `be_mode = NONE`.
   *Every field already exists from Stage 5 — this is a default change plus a test, not new code.
   Measured: +0.15R/trade pooled at the pessimistic 40% capture, +0.2R to +0.43R on the five
   low-frequency strategies. Break-even at 1.5R is insuring a 4.4% event.*
-- [ ] **15.4** `[D-11]` **Rebase `min_rr`.** It gates on `blended_rr`, and your saved config blends
-  to 2.41–2.65 against `min_rr = 3` — **every signal is rejected before sizing right now.**
-  Surface `blended_rr` in the form so the interaction is visible before a run, not after.
+- [~] **15.4** `[D-11]` **`min_rr` can no longer fail silently — the rebase itself is still yours.**
+  `RiskEngine` now checks at construction whether the configured TP ladder can ever satisfy
+  `min_rr`, and logs the arithmetic and the fix when it cannot. Your saved config —
+  TP 1.5/3/5 at 50/30/20 with `min_rr = 3` — blends to **2.65** and therefore rejects every
+  signal before sizing, with a funnel indistinguishable from a market that produced no setups.
+  *Verified: fires on that exact config, silent at `min_rr = 2.0` and for the single-TP proposal,
+  and honours `tp_volume_pcts` over `tp_splits` the way `MultiTPManager` does.* **Choosing the
+  new value is D-11; surfacing `blended_rr` in the form is still open.**
 - [ ] **15.5** **Make the confluence score real, or stop scaling risk by it.** CRT emits 90 on
   every trade, NY Open Retest 92, VWAP 80 — zero variance across 1,143 groups. `get_confluence_scaled_risk`
   is scaling by a constant on half the book. Where the score does vary it is inconsistent: APA's
