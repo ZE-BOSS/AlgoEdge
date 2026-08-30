@@ -754,6 +754,7 @@ class BotService:
                                         "max_account_leverage": getattr(config.risk, "max_account_leverage", None),
                                         "min_deployable_risk_pct": getattr(config.risk, "min_deployable_risk_pct", 0.0),
                                         "min_stop_spread_multiple": getattr(config.risk, "min_stop_spread_multiple", None),
+                                        "min_stop_cost_multiple": getattr(config.risk, "min_stop_cost_multiple", 0.0),
                                         "confluence_risk_tiers": getattr(config.risk, "confluence_risk_tiers", None),
                                         "reject_below_confluence": getattr(config.risk, "reject_below_confluence", True),
                                         "post_split_risk_tolerance_pct": getattr(config.risk, "post_split_risk_tolerance_pct", 5.0),

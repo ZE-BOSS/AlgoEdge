@@ -168,6 +168,7 @@ class BacktestRequest(BaseModel):
     max_margin_utilisation_pct: float | None = None
     min_deployable_risk_pct: float | None = None
     min_stop_spread_multiple: float | None = None
+    min_stop_cost_multiple: float | None = None
     confluence_risk_tiers: list[tuple[int, float]] | None = None
     reject_below_confluence: bool | None = None
     post_split_risk_tolerance_pct: float | None = None
@@ -281,6 +282,7 @@ class PortfolioBacktestRequest(BaseModel):
     max_margin_utilisation_pct: float | None = None
     min_deployable_risk_pct: float | None = None
     min_stop_spread_multiple: float | None = None
+    min_stop_cost_multiple: float | None = None
     confluence_risk_tiers: list[tuple[int, float]] | None = None
     reject_below_confluence: bool | None = None
     post_split_risk_tolerance_pct: float | None = None
@@ -936,6 +938,7 @@ async def run_backtest_endpoint(
                         "max_margin_utilisation_pct": req.max_margin_utilisation_pct,
                         "min_deployable_risk_pct": req.min_deployable_risk_pct,
                         "min_stop_spread_multiple": req.min_stop_spread_multiple,
+                        "min_stop_cost_multiple": req.min_stop_cost_multiple,
                         "confluence_risk_tiers": req.confluence_risk_tiers,
                         "reject_below_confluence": req.reject_below_confluence,
                         "post_split_risk_tolerance_pct": req.post_split_risk_tolerance_pct,
@@ -1295,6 +1298,7 @@ async def run_portfolio_backtest_endpoint(
                         "max_margin_utilisation_pct": req.max_margin_utilisation_pct,
                         "min_deployable_risk_pct": req.min_deployable_risk_pct,
                         "min_stop_spread_multiple": req.min_stop_spread_multiple,
+                        "min_stop_cost_multiple": req.min_stop_cost_multiple,
                         "confluence_risk_tiers": req.confluence_risk_tiers,
                         "reject_below_confluence": req.reject_below_confluence,
                         "post_split_risk_tolerance_pct": req.post_split_risk_tolerance_pct,
