@@ -184,6 +184,7 @@ class PortfolioBacktestEngine(CostModelMixin):
         portfolio_data_m15: dict[str, pd.DataFrame] = None,
         portfolio_data_m5: dict[str, pd.DataFrame] = None,
         symbol_map: dict[str, str] | None = None,
+        progress_cb: Any = None,
     ) -> dict[str, Any]:
         """
         [12.8/Part14] `portfolio_data`/`portfolio_signals` are keyed by a
@@ -306,7 +307,19 @@ class PortfolioBacktestEngine(CostModelMixin):
         
         breach_days = set()
         
-        for current_time in global_timeline:
+        # [17.2] Portfolio runs previously reported NOTHING during the global
+        # simulation — the UI sat at 85% for the whole thing, the same symptom
+        # B4/B5 fixed on the single-symbol path. Fire ~200 times regardless of
+        # timeline length; the caller rate-limits, so over-supply is free.
+        _n_steps = len(global_timeline)
+        _prog_stride = max(1, _n_steps // 200)
+
+        for _step_i, current_time in enumerate(global_timeline):
+            if progress_cb is not None and (_step_i % _prog_stride) == 0:
+                try:
+                    progress_cb(_step_i, _n_steps)
+                except Exception:
+                    pass
             current_timestamp = float(current_time)
             
             # 1. Update floating equity and check limits

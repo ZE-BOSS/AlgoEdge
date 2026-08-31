@@ -1,0 +1,60 @@
+
+========================================================================
+HTFFVGFlip_v1
+  --- XAUUSD: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+  --- US Tech 100: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+  --- EURUSD: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+
+========================================================================
+APA_v1
+  --- XAUUSD: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+  --- US Tech 100: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+  --- EURUSD: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+
+========================================================================
+BiasIFVG_v1
+  --- XAUUSD: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+  --- US Tech 100: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+  --- EURUSD: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+
+========================================================================
+CRT_v1
+  --- XAUUSD: 0 signals from 11600 bars, 11600 candidates
+      gate                              eval    pass   pass%  blocked
+      session_filter                   11600    1397   12.0%    10203
+      session_trade_cap                11600   11600  100.0%        0  <- never blocks (dead)
+  --- US Tech 100: 0 signals from 11600 bars, 11600 candidates
+      gate                              eval    pass   pass%  blocked
+      session_filter                   11600    1386   11.9%    10214
+      session_trade_cap                11600   11600  100.0%        0  <- never blocks (dead)
+  --- EURUSD: 0 signals from 11600 bars, 11600 candidates
+      gate                              eval    pass   pass%  blocked
+      session_filter                   11600    1331   11.5%    10269
+      session_trade_cap                11600   11600  100.0%        0  <- never blocks (dead)
+
+========================================================================
+NYOpenRetest_v1
+  --- XAUUSD: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+  --- US Tech 100: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+  --- EURUSD: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+
+========================================================================
+VWAP_v1
+  --- XAUUSD: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+  --- US Tech 100: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)
+  --- EURUSD: 0 signals from 11600 bars, 0 candidates
+      (no gate reached — strategy returns before its first instrumented gate)

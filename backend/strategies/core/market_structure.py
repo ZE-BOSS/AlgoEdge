@@ -141,7 +141,7 @@ class MarketStructureDetector:
                         self._last_bos_level = curr_sh
                         self._last_bos_index = high_swings[-1]["bar_idx"]
                         self.trend = "BULLISH"
-                        logger.info(f"ChoCH fired: BULLISH | Broken level: {curr_sh} | BOS count: 1")
+                        logger.debug(f"ChoCH fired: BULLISH | Broken level: {curr_sh} | BOS count: 1")
                 else:
                     # BOS validation: must close above the most recent swing high, and this
                     # must be a genuinely new swing — dedupe by bar-index identity rather than
@@ -160,7 +160,7 @@ class MarketStructureDetector:
                             "index": high_swings[-1]["index"],
                             "count": self.consecutive_bos,
                         })
-                        logger.info(f"BOS fired: BULLISH | Broken level: {curr_sh} | BOS count: {self.consecutive_bos} | Trend Confirmed: {self.trend_confirmed}")
+                        logger.debug(f"BOS fired: BULLISH | Broken level: {curr_sh} | BOS count: {self.consecutive_bos} | Trend Confirmed: {self.trend_confirmed}")
 
             # Check downside break (BEARISH intent)
             elif latest_close < curr_sl:
@@ -174,7 +174,7 @@ class MarketStructureDetector:
                         self._last_bos_level = curr_sl
                         self._last_bos_index = low_swings[-1]["bar_idx"]
                         self.trend = "BEARISH"
-                        logger.info(f"ChoCH fired: BEARISH | Broken level: {curr_sl} | BOS count: 1")
+                        logger.debug(f"ChoCH fired: BEARISH | Broken level: {curr_sl} | BOS count: 1")
                 else:
                     # BOS validation: must close below the most recent swing low, deduped by
                     # bar-index identity (see comment in the BULLISH branch above).
@@ -191,7 +191,7 @@ class MarketStructureDetector:
                             "index": low_swings[-1]["index"],
                             "count": self.consecutive_bos,
                         })
-                        logger.info(f"BOS fired: BEARISH | Broken level: {curr_sl} | BOS count: {self.consecutive_bos} | Trend Confirmed: {self.trend_confirmed}")
+                        logger.debug(f"BOS fired: BEARISH | Broken level: {curr_sl} | BOS count: {self.consecutive_bos} | Trend Confirmed: {self.trend_confirmed}")
 
 
         return self._result(last_bos, last_choch)

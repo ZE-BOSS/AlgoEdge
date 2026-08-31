@@ -33,6 +33,7 @@ __pycache__/
 .venv/
 venv/
 venv_win/
+venv_win/*
 venv_win/Scripts/
 env/
 
@@ -89,3 +90,8 @@ coverage/
 # =========================
 *.bak
 *.tmp
+# Research run logs — high-volume, regenerable, not worth versioning.
+# The DATA (cache/*.npz, results_*/*.json) and the reports ARE kept.
+research/data/*.log
+research/data/*.out
+research/data/__pycache__/

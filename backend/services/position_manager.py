@@ -574,19 +574,13 @@ class PositionManager:
                 if trail_method != "NONE" and be_gate_ok and trail_mode != "NONE":
                     if trail_mode not in ("RR", "TP_HIT", "EITHER"):
                         trail_mode = "RR"
-                    if trail_mode != "RR" and not getattr(self, '_warned_trail_mode_live', False):
-                        # [5.5] TP_HIT/EITHER trail activation needs a
-                        # sibling-TP-closed signal the way the BE cascade has —
-                        # live doesn't have that wired for trailing yet.
-                        # Falling back to the RR condition rather than never
-                        # activating at all; documented gap, not silent.
-                        logger.warning(
-                            f"[TRAIL] trail_mode={trail_mode} is not yet implemented in live "
-                            f"position management (TP_HIT trail activation needs a per-TP-close "
-                            f"signal not currently wired here) — falling back to the RR condition "
-                            f"(trail_trigger_rr/trail_activation_rr) for this and future ticks."
-                        )
-                        self._warned_trail_mode_live = True
+                    # [L1] TP_HIT / EITHER activation is now wired: the trail
+                    # cascade below (mirroring the BE cascade) sets
+                    # `trail_activated` on every surviving sibling once a
+                    # qualifying TP level closes, and the check immediately
+                    # below already honours that flag. The old
+                    # "not yet implemented, falling back to RR" warning has been
+                    # removed rather than left to cry wolf.
 
                     if pos and getattr(pos, 'trail_activated', False):
                         current_rr = 999.0
@@ -700,6 +694,41 @@ class PositionManager:
                                     alive_pos.be_applied = True
                                     modifications_made = True
                                     logger.info(f"Cascade BE (triggered by TP{trigger_pos.tp_level}): {alive_pos.mt5_ticket} -> {new_sl}")
+
+            # ── [L1] TP_HIT trail-activation cascade ─────────────────────
+            # Mirrors the break-even cascade directly above. A position cannot
+            # see its siblings on its own tick, so `trail_mode="TP_HIT"` (and
+            # the TP_HIT half of "EITHER") had no way to fire in live trading
+            # and silently degraded to the RR condition.
+            #
+            # Rule: once the LOWEST closed TP level for a group reaches
+            # `trail_trigger_tp_level`, every still-open sibling is marked
+            # trail_activated. The per-position check above then treats that as
+            # the activation condition, exactly as the backtester does.
+            _trail_mode_cascade = getattr(risk, 'trail_mode', 'EITHER')
+            _trail_trigger_level = getattr(risk, 'trail_trigger_tp_level', 1) or 1
+            if _trail_mode_cascade in ("TP_HIT", "EITHER"):
+                for parent_id, positions in trades_map.items():
+                    closed_levels = [
+                        sp.tp_level for sp in positions
+                        if sp.mt5_ticket not in mt5_tickets
+                        and sp.status in ("CLOSED", "RECONCILE_FAILED")
+                        and sp.tp_level is not None
+                    ]
+                    if not closed_levels or min(closed_levels) > _trail_trigger_level:
+                        continue
+                    for alive_pos in positions:
+                        if alive_pos.mt5_ticket not in mt5_tickets:
+                            continue
+                        if getattr(alive_pos, 'trail_activated', False):
+                            continue
+                        alive_pos.trail_activated = True
+                        modifications_made = True
+                        logger.info(
+                            f"[TRAIL] Cascade activation (TP{min(closed_levels)} closed, "
+                            f"trigger level {_trail_trigger_level}): "
+                            f"{alive_pos.mt5_ticket} trail armed."
+                        )
 
             if modifications_made:
                 await session.commit()

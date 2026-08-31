@@ -1,0 +1,129 @@
+285 cells | window 238-242 days
+
+========================================================================================================
+Deriv  —  FIXED RR ACROSS THE BOOK (no per-cell selection)
+========================================================================================================
+    RR  cells  trades     total P&L     expR      WR  profitable  meanDD%  worstDD%  dayDD%
+  1:  2    147   14572      $-70,570  -0.0964   34.0%      40/147     17.22     56.84    1.72
+  1:  3    147   14572      $-36,354  -0.1034   26.0%      42/147     19.27     59.21    1.85
+  1:  4    147   14572       $-4,149  -0.0862   21.4%      54/147     21.31     58.93    1.93
+  1:  5    147   14572       $-3,236  -0.1012   18.3%      49/147     23.02     59.94    1.97
+
+  PER-STRATEGY (fixed RR, total P&L)
+    strategy                    1:2          1:3          1:4          1:5   trades   best
+    APA                     $-2,639      $+3,739        $+966         $+98     1875    1:3
+    BiasIFVG                $-1,443      $-6,022      $-4,700      $-8,374     1671    1:2
+    CRT                    $-35,345     $-34,644     $-28,306     $-23,523     2167    1:5
+    DriftJumpAlpha         $+28,881     $+56,406     $+74,347     $+78,849     1595    1:5
+    HTFFVGFlip              $-2,308      $-2,748        $+561        $-382      256    1:4
+    NYOpenRetest           $-33,179     $-31,790     $-33,883     $-36,894     2767    1:3
+    VWAP                   $-24,537     $-21,296     $-13,135     $-13,010     4241    1:5
+
+  CELLS WITH n>=30 AND PROFITABLE — by RR
+    1:2   33 cells, total $+70,266
+    1:3   32 cells, total $+121,646
+    1:4   41 cells, total $+159,364
+    1:5   38 cells, total $+173,031
+
+========================================================================================================
+FundedNext  —  FIXED RR ACROSS THE BOOK (no per-cell selection)
+========================================================================================================
+    RR  cells  trades     total P&L     expR      WR  profitable  meanDD%  worstDD%  dayDD%
+  1:  2    138    9417      $-75,490  -0.1045   33.0%      42/138     14.12     69.21    1.52
+  1:  3    138    9417      $-80,634  -0.1094   24.9%      46/138     16.35     69.81    1.55
+  1:  4    138    9417      $-90,165  -0.1197   20.1%      47/138     18.36     69.43    1.58
+  1:  5    138    9417      $-99,471  -0.1359   17.0%      47/138     20.06     74.49    1.59
+
+  PER-STRATEGY (fixed RR, total P&L)
+    strategy                    1:2          1:3          1:4          1:5   trades   best
+    APA                     $-9,477      $-7,428      $-7,002      $-4,118     1350    1:5
+    BiasIFVG                $-6,149      $-1,458      $-7,377     $-10,569     1086    1:3
+    CRT                    $-18,730     $-21,925     $-19,869     $-22,779     1205    1:2
+    HTFFVGFlip              $-1,312      $-1,398         $-20        $-426      202    1:4
+    NYOpenRetest           $-13,520     $-14,927     $-23,038     $-27,165     2211    1:2
+    VWAP                   $-26,303     $-33,498     $-32,860     $-34,414     3363    1:2
+
+  CELLS WITH n>=30 AND PROFITABLE — by RR
+    1:2   32 cells, total $+28,338
+    1:3   35 cells, total $+39,557
+    1:4   35 cells, total $+42,434
+    1:5   36 cells, total $+56,267
+
+========================================================================================================
+TOP CELLS AT FIXED 1:3  (n>=30)
+========================================================================================================
+broker     symbol              strategy                P&L    ret%    n     WR    PF    DD%  dayDD%  Sharpe
+Deriv      Crash 1000 Index    DriftJumpAlpha     $+55,963   559.6  514  35.8%  1.58  22.72   21.53    2.65
+Deriv      US Tech 100         NYOpenRetest        $+7,845    78.5  133  36.8%  1.71   7.84    1.79    3.86
+Deriv      Volatility 75 Index VWAP                $+7,836    78.4  240  33.3%  1.36  14.78    2.13    1.98
+Deriv      Crash 500 Index     CRT                 $+6,427    64.3  220  33.2%  1.34  13.52    1.92    1.73
+FundedNext NDX100              NYOpenRetest        $+5,810    58.1  109  36.7%  1.68  10.59    1.60    3.70
+Deriv      Germany 40          VWAP                $+5,315    53.1  167  32.3%  1.40  13.53    1.67    2.21
+FundedNext USOUSD              BiasIFVG            $+5,179    51.8   57  43.9%  2.34   5.85    1.53    5.86
+Deriv      ETHUSD              BiasIFVG            $+4,906    49.1   75  42.7%  1.87   9.27    3.97    4.00
+Deriv      Crash 300 Index     DriftJumpAlpha      $+4,517    45.2  554  28.2%  1.11  36.07    6.35    0.66
+Deriv      Crash 500 Index     APA                 $+4,310    43.1  104  34.6%  1.55   6.40    4.18    3.00
+FundedNext UKOUSD              BiasIFVG            $+2,963    29.6   53  37.7%  1.82   4.96    1.99    3.97
+Deriv      XRPUSD              APA                 $+2,820    28.2  116  33.6%  1.33  17.87    2.81    2.04
+Deriv      Volatility 75 Index APA                 $+2,180    21.8  113  31.0%  1.27  16.08    3.53    1.50
+Deriv      Hong Kong 50        BiasIFVG            $+2,075    20.7   42  38.1%  1.72   6.21    1.33    3.63
+Deriv      Jump 100 Index      APA                 $+2,024    20.2  135  28.9%  1.21  11.14    3.84    1.14
+
+  WORST 5
+Deriv      Netherlands 25      VWAP                $-5,115   -51.1  164  18.3%  0.48  51.15
+Deriv      XPTUSD              VWAP                $-5,356   -53.6  169  26.0%  0.60  59.21
+FundedNext NTH25               VWAP                $-5,619   -56.2  162  15.4%  0.45  56.49
+FundedNext XPTUSD              CRT                 $-6,124   -61.2   56  19.6%  0.18  61.24
+FundedNext XPTUSD              VWAP                $-6,812   -68.1  169  26.0%  0.47  69.81
+
+========================================================================================================
+TOP CELLS AT FIXED 1:5  (n>=30)
+========================================================================================================
+broker     symbol              strategy                P&L    ret%    n     WR    PF    DD%  dayDD%  Sharpe
+Deriv      Crash 1000 Index    DriftJumpAlpha     $+80,262   802.6  514  26.1%  1.61  37.03   29.40    2.52
+Deriv      Volatility 75 Index VWAP               $+15,328   153.3  240  25.0%  1.52  16.37    2.73    2.13
+Deriv      Crash 500 Index     CRT                $+11,869   118.7  220  24.5%  1.48  16.71    2.66    1.98
+Deriv      US Tech 100         NYOpenRetest        $+8,944    89.4  133  25.6%  1.68  10.64    2.00    2.91
+FundedNext USOUSD              BiasIFVG            $+8,673    86.7   57  36.8%  2.81   7.73    1.89    6.58
+FundedNext NDX100              NYOpenRetest        $+7,862    78.6  109  26.6%  1.75  10.84    1.93    3.15
+Deriv      ETHUSD              BiasIFVG            $+6,904    69.0   75  32.0%  1.98  11.07    4.33    3.78
+FundedNext UKOUSD              BiasIFVG            $+5,093    50.9   53  34.0%  2.23   5.99    1.95    4.42
+Deriv      Germany 40          VWAP                $+5,001    50.0  167  21.6%  1.34  17.65    1.60    1.59
+Deriv      XRPUSD              APA                 $+4,988    49.9  116  28.4%  1.50  22.54    4.89    2.31
+FundedNext BTCUSD              APA                 $+4,370    43.7   85  27.1%  1.61  18.18    3.20    2.75
+Deriv      XAUUSD              VWAP                $+4,077    40.8  169  21.3%  1.29  13.32    1.49    1.32
+FundedNext GER30               VWAP                $+3,730    37.3  161  21.1%  1.28  15.06    1.51    1.30
+Deriv      Crash 500 Index     BiasIFVG            $+3,600    36.0  123  22.0%  1.35  28.02    3.30    1.61
+FundedNext UKOUSD              VWAP                $+3,527    35.3  169  20.1%  1.26  19.15    1.36    1.24
+
+  WORST 5
+Deriv      XPTUSD              CRT                 $-5,079   -50.8   51  11.8%  0.27  52.62
+Deriv      Netherlands 25      VWAP                $-5,532   -55.3  164  17.1%  0.42  55.32
+FundedNext XPTUSD              CRT                 $-6,572   -65.7   56   8.9%  0.15  65.72
+FundedNext NTH25               VWAP                $-6,732   -67.3  162   8.6%  0.30  67.32
+FundedNext XPTUSD              VWAP                $-7,103   -71.0  169  16.6%  0.50  74.49
+
+========================================================================================================
+SHARED INSTRUMENTS — Deriv vs FundedNext, fixed 1:3
+========================================================================================================
+instrument             Deriv   FundedNext       winner
+AUDUSD               $-3,974        $-361   FundedNext
+BTCUSD                 $-602      $-1,430        Deriv
+ETHUSD                 $-429      $-3,436        Deriv
+EURGBP               $-6,427      $-6,780        Deriv
+EURUSD               $-6,665      $-2,992   FundedNext
+GBPJPY               $-7,669      $-6,798   FundedNext
+GBPUSD               $-5,321      $-5,235   FundedNext
+GER30                $+4,827          $+5        Deriv
+HK50                 $-3,670      $-2,656   FundedNext
+NDX100               $+8,443      $+3,840        Deriv
+NTH25               $-12,601     $-13,444        Deriv
+SPX500               $-1,325        $+766   FundedNext
+USDCHF               $-7,443      $-4,528   FundedNext
+USDJPY               $-8,202      $-1,937   FundedNext
+XAGUSD                 $-688      $-2,625        Deriv
+XAUUSD               $-3,299      $-4,441        Deriv
+XPTUSD              $-12,533     $-22,739        Deriv
+XRPUSD               $-5,187      $-4,285   FundedNext
+TOTAL               $-72,767     $-79,075
+  Deriv wins 9/18

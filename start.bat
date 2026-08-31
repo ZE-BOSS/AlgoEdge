@@ -23,9 +23,20 @@ set MT5_EXE=C:\Program Files\MetaTrader 5\terminal64.exe
 set MT5_WAIT=8
 
 :: Detect venv directory (support both naming conventions)
+:: Existence alone is not enough: the committed "venv" directory is a LINUX
+:: venv (pyvenv.cfg points at /usr/bin) that still contains a Windows
+:: python.exe, so `if exist` passes and the interpreter then dies with
+:: "No Python at '/usr/bin\python.exe'". Probe each candidate by actually
+:: RUNNING it, and take the first one that works.
 set VENV_DIR=
-if exist "venv\Scripts\python.exe" set VENV_DIR=venv
-if exist ".venv\Scripts\python.exe" set VENV_DIR=.venv
+for %%V in (venv_win .venv venv) do (
+    if not defined VENV_DIR (
+        if exist "%%V\Scripts\python.exe" (
+            "%%V\Scripts\python.exe" -c "import sys" >nul 2>&1
+            if not errorlevel 1 set VENV_DIR=%%V
+        )
+    )
+)
 
 :: ── Pre-flight Checks ────────────────────────────────────────
 

@@ -403,6 +403,12 @@ class BiasIFVGEngine(BaseStrategy):
         return ["H4", "M15", "M5"]
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
+        # [T1.3] Open a confluence-telemetry record for this bar.
+        # No-op unless self.gates.enabled (live default is off).
+        self.begin_candidate(
+            symbol, timeframe,
+            bar_time=candles.index[-1] if candles is not None and len(candles) else None,
+        )
         self._init_state(symbol)
         state = self.state[symbol]
         
@@ -579,7 +585,7 @@ class BiasIFVGEngine(BaseStrategy):
 
             if state["status"] == "AWAIT_IFVG_CLOSE":
                 # Session filter blocks entries, but doesn't delete active setup
-                if not self._is_within_session(current_time):
+                if not self.gate("session_filter", self._is_within_session(current_time)):
                     return None
                     
                 if state["trades_today"] >= self.params.max_trades_per_day:
@@ -628,7 +634,7 @@ class BiasIFVGEngine(BaseStrategy):
                     # key silently swung the stop distance (and therefore the position
                     # size) by ~80x with no log line. A missing swing reference means
                     # there is no setup, not a setup with an arbitrary stop.
-                    if not swing_valid:
+                    if not self.gate("swing_valid", swing_valid):
                         self.log_event(
                             f"[{symbol}] IFVG inversion confirmed but m5_swing_point is missing — "
                             f"no structural stop reference, discarding setup (no signal).",
@@ -666,7 +672,7 @@ class BiasIFVGEngine(BaseStrategy):
 
                     # Hard day-stop rule (unconditional halves only — see
                     # _can_trade_today's docstring).
-                    if not self._can_trade_today(state):
+                    if not self.gate("daily_trade_cap", self._can_trade_today(state)):
                         self.log_event(
                             f"[{symbol}] Setup rejected by hard day-stop rule "
                             f"(wins={state.get('wins_today', 0)}, losses={state.get('losses_today', 0)}).",
@@ -746,7 +752,7 @@ class BiasIFVGEngine(BaseStrategy):
                         color="rgba(16,185,129,0.9)", target_rr=target_rr,
                     )
 
-                    return TradeSignal(
+                    return self._tag_signal(TradeSignal(
                         strategy_id="BiasIFVG_v1",
                         symbol=symbol,
                         direction=state["bias"],
@@ -767,6 +773,6 @@ class BiasIFVGEngine(BaseStrategy):
                             # [V1] Chart geometry — see strategies/core/markings.py.
                             **mk.as_metadata(),
                         }
-                    )
+                    ))
 
         return None

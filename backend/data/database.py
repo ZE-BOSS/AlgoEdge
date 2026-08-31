@@ -71,7 +71,14 @@ async def init_db():
             "ALTER TABLE backtest_runs ADD COLUMN rejection_funnel TEXT;",
             "ALTER TABLE backtest_runs ADD COLUMN sortino_ratio FLOAT;",
             "ALTER TABLE backtest_runs ADD COLUMN expectancy_r FLOAT;",
+            # Excursion-in-R columns. mae_pips/mfe_pips already existed but were
+            # NULL on every row because trade_grouper never propagated them;
+            # these three land alongside that fix.
+            "ALTER TABLE backtest_trades ADD COLUMN mae_r FLOAT;",
+            "ALTER TABLE backtest_trades ADD COLUMN mfe_r FLOAT;",
+            "ALTER TABLE backtest_trades ADD COLUMN risk_pips FLOAT;",
             "ALTER TABLE backtest_trades ADD COLUMN chart_data TEXT;",
+            "ALTER TABLE backtest_trades ADD COLUMN chart_data_h1 TEXT;",
             "ALTER TABLE backtest_trades ADD COLUMN chart_data_m15 TEXT;",
             "ALTER TABLE backtest_trades ADD COLUMN chart_data_m5 TEXT;",
             "ALTER TABLE backtest_trades ADD COLUMN smc_data TEXT;",

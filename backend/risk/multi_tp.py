@@ -31,6 +31,35 @@ def _is_sell(direction: str) -> bool:
     return direction.upper() in _SELL_DIRECTIONS
 
 
+def slot_overrides_from_config(instrument_slots) -> dict[str, dict]:
+    """[17.1] Build the per-slot TP override maps from InstrumentSlot entries.
+
+    Returns the two keys that `MultiTPManager` reads, ready to merge into a
+    risk_config dict:
+
+        {"tp1_rr_overrides_by_slot": {...}, "tp_count_overrides_by_slot": {...}}
+
+    Shared by the live path (bot_service) and the backtest routes so both
+    resolve a symbol's R:R identically — the parity that matters most here is
+    that a backtested target and a live target come from the same code.
+    Slots with `tp1_rr=None` are skipped, preserving "None = inherit".
+    """
+    rr: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    for slot in (instrument_slots or []):
+        sym = getattr(slot, "symbol", "") or ""
+        sid = getattr(slot, "strategy_id", "") or ""
+        if not sym:
+            continue
+        key = f"{sym.upper()}|{sid}"
+        if getattr(slot, "tp1_rr", None) is not None:
+            rr[key] = float(slot.tp1_rr)
+        if getattr(slot, "tp_count", None) is not None:
+            counts[key] = int(slot.tp_count)
+    return {"tp1_rr_overrides_by_slot": rr,
+            "tp_count_overrides_by_slot": counts}
+
+
 @dataclass
 class TPLevel:
     level: int          # 1, 2, 3, 4, or 5
@@ -86,6 +115,16 @@ class MultiTPManager:
         # by the caller assembling risk_config (backtest.py routes).
         self.tp1_rr_overrides_by_strategy: dict[str, float] = config.get("tp1_rr_overrides_by_strategy", {}) or {}
 
+        # [17.1] Per-SLOT TP1 R:R — keyed "SYMBOL|strategy_id", so the same
+        # symbol running two strategies can carry two different targets, and the
+        # same strategy can use a different target per symbol. Strictly more
+        # specific than tp1_rr_overrides_by_strategy above and takes priority.
+        # Populated from InstrumentSlot.tp1_rr (live) and from the per-symbol
+        # backtest request (backtest), so both paths resolve identically.
+        self.tp1_rr_overrides_by_slot: dict[str, float] = config.get("tp1_rr_overrides_by_slot", {}) or {}
+        self.tp_count_overrides_by_slot: dict[str, int] = config.get("tp_count_overrides_by_slot", {}) or {}
+
+
         # [2.13] Diagnostics from the most recent calculate_tp_levels() call —
         # requested vs. actually placed TP count, so a caller can tell "the
         # strategy asked for 3 TPs but only 2 fit the risk cap" apart from a
@@ -113,6 +152,25 @@ class MultiTPManager:
         # Callers (engine.py) can read this immediately after calling
         # calculate_tp_levels() to produce a clearer rejection reason. Reset on every call.
         self._last_overshoot_reason: str | None = None
+
+    @staticmethod
+    def slot_key(symbol: str, strategy_id: str) -> str:
+        """Canonical key for the per-slot override maps."""
+        return f"{(symbol or '').upper()}|{strategy_id or ''}"
+
+    def resolve_tp1_rr(self, symbol: str, strategy_id: str) -> float:
+        """TP1 R:R for this symbol+strategy pair, most specific override first."""
+        key = self.slot_key(symbol, strategy_id)
+        if key in self.tp1_rr_overrides_by_slot:
+            return float(self.tp1_rr_overrides_by_slot[key])
+        return float(self.tp1_rr_overrides_by_strategy.get(strategy_id, self.tp1_rr))
+
+    def resolve_tp_count(self, symbol: str, strategy_id: str) -> int:
+        """TP count for this symbol+strategy pair, per-slot override first."""
+        key = self.slot_key(symbol, strategy_id)
+        if key in self.tp_count_overrides_by_slot:
+            return int(self.tp_count_overrides_by_slot[key])
+        return int(self.tp_count)
 
     def calculate_tp_levels(
         self,
@@ -153,7 +211,10 @@ class MultiTPManager:
         # setups want a much tighter TP1 than the global default), resolved
         # through normal per-strategy param lookup rather than a hardcoded
         # strategy_id branch.
-        tp1_rr_used = self.tp1_rr_overrides_by_strategy.get(strategy_id, self.tp1_rr)
+        # [17.1] Resolution is now slot -> strategy -> global, so a per-symbol
+        # target wins over a per-strategy one. `symbol` was already a parameter
+        # here; only the lookup changed.
+        tp1_rr_used = self.resolve_tp1_rr(symbol, strategy_id)
 
         rr_multipliers = [tp1_rr_used, self.tp2_rr, self.tp3_rr, self.tp4_rr, self.tp5_rr]
         tp_prices = [entry + (risk * rr * sign) for rr in rr_multipliers]
@@ -163,7 +224,7 @@ class MultiTPManager:
             tp_prices[4] = liquidity_target
 
         # How many TPs the user wants (clamped 1–5)
-        active_count = max(1, min(self.tp_count, 5))
+        active_count = max(1, min(self.resolve_tp_count(symbol, strategy_id), 5))
         # [2.13] default; overwritten on every success path below, left as-is
         # (0 placed) if the function returns [] for any reason.
         self.last_tp_levels_requested = active_count
@@ -177,7 +238,13 @@ class MultiTPManager:
                 volume_pct=1.0,
                 tp_price=tp_prices[0],
                 volume=total_volume,
-                trail_method=None,
+                # [T2.3] Was hardcoded `None`, which made trailing structurally
+                # impossible on this path no matter what the user configured —
+                # the Phase 5 fix only reached the `active_count == 1` branch
+                # below, not this one. Both single-TP paths must read the same
+                # configured method or the two disagree depending on
+                # multi_position_mode.
+                trail_method=self.trail_methods[0] if self.trail_methods else None,
                 deferred=False,
             )
             if not self._validate_tp(tp, entry, direction):

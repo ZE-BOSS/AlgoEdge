@@ -5,6 +5,13 @@ Backtest run, save/dismiss, load, delete endpoints.
 Source: TradingBot_MasterPlan-2.md Section 6 — REST API
 """
 
+# [T2.1 fix] asyncio is used at several points in this module (notably the
+# off-loop _sanitize and json.dumps calls). It was only ever imported inside
+# nested function scopes, so the module-level uses raised
+# "name 'asyncio' is not defined" AFTER the simulation had already finished —
+# the run completed, logged its P&L, then failed during finalisation and the
+# result was discarded. Imported once, here, where every scope can see it.
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -39,6 +46,40 @@ MAX_SIGNALS_PER_RUN = 5000
 from backend.services.log_stream import log_hub  # noqa: E402
 
 USER_BACKTEST_STATE = {}  # Fallback in-memory persistence: user_id -> state
+
+
+def _redis_safe_state(state):
+    """
+    State minus the megabyte payloads, for the Redis mirror.
+
+    [T2.1] chart_data / smc_data / replay / run_logs are re-derivable and are
+    served from the in-memory copy by their own endpoints. Writing them into
+    Redis made every SET a multi-hundred-MB serialise-and-write that could time
+    out — and a failed SET left a STALE percentage pinned in Redis for the key's
+    full 3600s TTL, which is one of the three causes of the "stuck at 95%" bug.
+
+    Memory remains the source of truth; Redis only has to answer "is it done,
+    and what were the headline numbers" after a process restart.
+    """
+    if not isinstance(state, dict):
+        return state
+    out = dict(state)
+    res = out.get("result")
+    if isinstance(res, dict):
+        res = {k: v for k, v in res.items() if k != "replay"}
+        heavy = ("chart_data", "chart_data_h1", "chart_data_m15",
+                 "chart_data_m5", "smc_data")
+        for key in ("grouped_trades", "trades"):
+            rows = res.get(key)
+            if isinstance(rows, list):
+                res[key] = [
+                    {k: v for k, v in t.items() if k not in heavy}
+                    if isinstance(t, dict) else t
+                    for t in rows
+                ]
+        res["run_logs"] = []
+        out["result"] = res
+    return out
 router = APIRouter(prefix="/api", tags=["backtest"])
 
 
@@ -78,7 +119,12 @@ class BacktestRequest(BaseModel):
     symbol: str
     start_date: str | None = None
     end_date: str | None = None
-    candle_count: int = 5000
+    # Raised from 5000 after measuring the live terminal (build 6140,
+    # maxbars=100000): a 50,000-bar M5 request is served in full and reaches
+    # back ~8.5 months, which is the window the optimization work needs.
+    # M1 history is much shorter (~7 weeks) — prefer M5 as the primary TF
+    # for long runs.
+    candle_count: int = 50000
     initial_balance: float = 10000.0
     risk_config: dict[str, Any] = {}
     prop_firm: dict[str, Any] = {}
@@ -117,7 +163,16 @@ class BacktestRequest(BaseModel):
     # ── Risk Safety Cap ──
     max_risk_hard_cap_pct: float = 3.0  # Absolute safety cap from PropFirmParams
     # ── Multi-Strategy Filters ──
-    session_filter_enabled: bool = True
+    # None = use the strategy's measured default (see strategy_defaults.py).
+    # Explicit True/False still wins.
+    session_filter_enabled: bool | None = None
+    # [L1-opt] Per-bar replay animation. On by default so the UI is
+    # unchanged, but it is measurably expensive: the streamer retains a
+    # dict per bar and emits WebSocket batches throughout the run. Measured
+    # on APA/BTCUSD at 50k bars, the API loop cost ~1,005s against ~335s for
+    # the same work without it. An automated sweep has no viewer, so it can
+    # turn this off and get the run itself rather than the animation.
+    replay_enabled: bool = True
     manual_bias_overrides: dict[str, Any] = {}
     # ── [Phase 2 sizing-truth] typed, optional — None resolves to the
     # RiskParams default inside risk/engine.py & position_sizer.py, so these
@@ -192,6 +247,13 @@ class PortfolioSymbolConfig(BaseModel):
     # portfolio_engine.py::run()'s symbol_map parameter). Unset = the route
     # derives one automatically from symbol+strategy_id.
     slot_id: str | None = None
+    # [17.1] Per-row take-profit R:R and count. None = inherit the portfolio-wide
+    # value. This is what makes a portfolio backtest able to give DriftJumpAlpha
+    # on Crash 1000 a 1:3 target while BiasIFVG on USOUSD runs 1:5 in the SAME
+    # run — research/16 measured those as materially different optima, and a
+    # single shared tp1_rr could not express it.
+    tp1_rr: float | None = None
+    tp_count: int | None = None
 
 
 class PortfolioBacktestRequest(BaseModel):
@@ -199,7 +261,12 @@ class PortfolioBacktestRequest(BaseModel):
     symbols: list[PortfolioSymbolConfig]
     start_date: str | None = None
     end_date: str | None = None
-    candle_count: int = 5000
+    # Raised from 5000 after measuring the live terminal (build 6140,
+    # maxbars=100000): a 50,000-bar M5 request is served in full and reaches
+    # back ~8.5 months, which is the window the optimization work needs.
+    # M1 history is much shorter (~7 weeks) — prefer M5 as the primary TF
+    # for long runs.
+    candle_count: int = 50000
     initial_balance: float = 10000.0
     prop_firm: dict[str, Any] = {}
     # ── Risk Params (shared across portfolio) ──
@@ -234,7 +301,16 @@ class PortfolioBacktestRequest(BaseModel):
     trail_pips: float = 15.0
     # ── Risk Safety Cap ──
     max_risk_hard_cap_pct: float = 3.0  # Absolute safety cap from PropFirmParams
-    session_filter_enabled: bool = True
+    # None = use the strategy's measured default (see strategy_defaults.py).
+    # Explicit True/False still wins.
+    session_filter_enabled: bool | None = None
+    # [L1-opt] Per-bar replay animation. On by default so the UI is
+    # unchanged, but it is measurably expensive: the streamer retains a
+    # dict per bar and emits WebSocket batches throughout the run. Measured
+    # on APA/BTCUSD at 50k bars, the API loop cost ~1,005s against ~335s for
+    # the same work without it. An automated sweep has no viewer, so it can
+    # turn this off and get the run itself rather than the animation.
+    replay_enabled: bool = True
     # ── [Phase 2 sizing-truth] — see BacktestRequest above for field meanings.
     max_margin_utilisation_pct: float | None = None
     min_deployable_risk_pct: float | None = None
@@ -328,7 +404,7 @@ async def reconcile_orphaned_runs() -> int:
                         "it did not finish. Run it again."
                     ),
                 }
-                await redis_client.redis.set(key, json.dumps(state), ex=3600)
+                await redis_client.redis.set(key, json.dumps(_redis_safe_state(state), default=str), ex=3600)
                 cleared += 1
             except Exception:
                 continue
@@ -422,7 +498,7 @@ async def stop_backtest_endpoint(current_user: User = Depends(get_current_user))
                 import asyncio
 
                 import redis.exceptions
-                await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
+                await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(_redis_safe_state(state), default=str), ex=3600)
             except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
                 logger.warning(f"[API] Redis set cancel failed: {e}")
         return {"message": "Backtest cancelled"}
@@ -460,17 +536,38 @@ async def run_backtest_endpoint(
         }
         
         async def _save_state(state):
+            # Memory is the source of truth and is updated synchronously, so a
+            # slow or failing Redis can never make a finished run look unfinished.
             USER_BACKTEST_STATE[current_user.id] = state
             if HAS_REDIS and redis_client and redis_client.redis:
                 try:
                     import asyncio
 
                     import redis.exceptions
-                    await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
+                    # [T2.1] json.dumps of a finished run walks every trade's
+                    # chart_data plus the replay series — hundreds of MB of pure
+                    # Python work. Doing it inline blocked the event loop, so
+                    # /backtest_status could not be served and the UI froze at
+                    # whatever percentage was last written. Serialise in a
+                    # thread, and strip the heavy payloads first.
+                    payload = await asyncio.to_thread(
+                        json.dumps, _redis_safe_state(state), default=str
+                    )
+                    await redis_client.redis.set(
+                        f"backtest_state:{current_user.id}", payload, ex=3600
+                    )
                 except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
                     logger.warning(f"[BACKTEST] Failed to save state to Redis: {e}")
 
         async def _get_state():
+            # [T2.1] Memory FIRST, matching /backtest_status. This used to read
+            # Redis first, so during the finalisation window the two disagreed:
+            # if the last Redis SET failed (oversized payload / timeout) the
+            # Redis copy stayed pinned at the old percentage for its full 3600s
+            # TTL while memory already said "complete".
+            cached = USER_BACKTEST_STATE.get(current_user.id)
+            if cached is not None:
+                return cached
             if HAS_REDIS and redis_client and redis_client.redis:
                 try:
                     import asyncio
@@ -481,7 +578,7 @@ async def run_backtest_endpoint(
                         return json.loads(data)
                 except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
                     logger.warning(f"[BACKTEST] Failed to get state from Redis: {e}")
-            return USER_BACKTEST_STATE.get(current_user.id, initial_state.copy())
+            return initial_state.copy()
 
         await _save_state(initial_state)
         try:
@@ -555,6 +652,30 @@ async def run_backtest_endpoint(
                     if hasattr(config.ny_open_retest, k):
                         setattr(config.ny_open_retest, k, v)
                         
+            # [T2.7/T3.5] Session enablement is a strategy-level parameter, and the
+            # ablation gave three different verdicts: remove it for HTFFVGFlip
+            # (-0.170 contribution, actively harmful), loosen it for CRT (+0.009
+            # while discarding 88.2% of candidates), keep it for VWAP (+0.064) and
+            # BiasIFVG (+0.126). Applied here unless the request set it explicitly.
+            try:
+                from backend.strategies.strategy_defaults import get_strategy_defaults
+                _sd = get_strategy_defaults(req.strategy_id)
+                if "session_filter_enabled" in _sd and req.session_filter_enabled is None:
+                    _target = {
+                        "APA_v1": "apa", "VWAP_v1": "vwap", "CRT_v1": "crt",
+                        "BiasIFVG_v1": "bias_ifvg", "HTFFVGFlip_v1": "htf_fvg_flip",
+                        "NYOpenRetest_v1": "ny_open_retest",
+                    }.get(req.strategy_id)
+                    _blk = getattr(config, _target, None) if _target else None
+                    if _blk is not None and hasattr(_blk, "session_filter_enabled"):
+                        _blk.session_filter_enabled = _sd["session_filter_enabled"]
+                        logger.info(
+                            f"[BACKTEST] {req.strategy_id}: session_filter_enabled="
+                            f"{_sd['session_filter_enabled']} (measured strategy default)"
+                        )
+            except Exception as _e:
+                logger.warning(f"[BACKTEST] strategy session default not applied: {_e}")
+
             config.instrument_settings = [InstrumentSettings(symbol=req.symbol, strategy_id=req.strategy_id)]
             
             strategy_id = req.strategy_id
@@ -563,6 +684,19 @@ async def run_backtest_endpoint(
             engine_class = get_strategy(strategy_id)
             engine = engine_class(config)
             engine.is_backtesting = True
+            # [B7] Record per-gate telemetry for backtests.
+            #
+            # `GateRecorder` defaults to enabled=False so live trading pays
+            # nothing for it, and until now NOTHING on this route turned it on —
+            # only `ablation.run_recording_pass` did, which the route cannot
+            # reach. The consequence was that `rejection_funnel.strategy_rejections`
+            # came back `{}` for every run ever saved, and every trade carried the
+            # single lumped confluence tag `base_structure`. The 49 `self.gate(...)`
+            # call sites across the engines recorded nothing.
+            #
+            # A backtest is offline and already CPU-bound, so the recorder's cost
+            # is irrelevant here; `engine.py` picks the data up on completion.
+            engine.gates.enabled = True
 
             # ── Dynamic timeframe dispatch ───────────────────────────────────────
             # Ask the engine which timeframes it actually needs instead of always
@@ -628,7 +762,8 @@ async def run_backtest_endpoint(
             # [Phase 13 section C.3] Replay stream. Announces one leg (this is
             # the single-symbol route) so the frontend can build its chart
             # before any bars arrive, then feeds it the Phase-1 bar walk.
-            replay = ReplayStreamer(ws_manager, current_user.id, mode="single")
+            replay = ReplayStreamer(ws_manager, current_user.id, mode="single",
+                                   enabled=bool(getattr(req, "replay_enabled", True)))
             replay.init([{
                 "slot_id": req.symbol,
                 "symbol": req.symbol,
@@ -691,7 +826,13 @@ async def run_backtest_endpoint(
                         last_yield_time = time.monotonic()
 
                     if i % 600 == 0:
-                        pct = int((i / len(primary_times)) * 80) + 10
+                        # [T2.1] Was `* 80 + 10`, which put signal generation at
+                        # 10-90% and left the ENTIRE trade simulation crammed
+                        # into the jump from 90 to 95 with no events at all —
+                        # the "hangs at 95%" symptom. Signal generation is the
+                        # cheaper half; give it 15-35 and let the simulation
+                        # report across 35-90.
+                        pct = int((i / len(primary_times)) * 20) + 15
                         current_state = await _get_state()
                         if current_state.get("status") == "cancelled":
                             bot_service.log_system_event("Backtest cancelled by user", category="BACKTEST")
@@ -858,6 +999,15 @@ async def run_backtest_endpoint(
                 # on every saved grouped_trade).
                 "strategy_id": req.strategy_id,
                 # [2.15] Per-strategy TP1 RR override — see DriftJumpAlphaParams.tp1_rr_override.
+                # [17.1] Single-symbol runs resolve through the same slot map as
+                # live, so a backtest and a live trade on the same symbol+strategy
+                # read their target from identical code.
+                "tp1_rr_overrides_by_slot": {
+                    f"{req.symbol.upper()}|{req.strategy_id}": req.tp1_rr
+                },
+                "tp_count_overrides_by_slot": {
+                    f"{req.symbol.upper()}|{req.strategy_id}": req.tp_count
+                },
                 "tp1_rr_overrides_by_strategy": (
                     {req.strategy_id: req.strategy_params["tp1_rr_override"]}
                     if req.strategy_params.get("tp1_rr_override") is not None else {}
@@ -898,9 +1048,77 @@ async def run_backtest_endpoint(
                 **req.risk_config,
             }
 
+            # ── Per-strategy exit defaults ────────────────────────────────
+            # Trailing / break-even used to be one global setting for all seven
+            # strategies. Measurement says that cannot be right: the 15-cell
+            # trailing sweep improved 10 cells and made 5 WORSE, with nearly all
+            # the gain in NYOpenRetest (+1,765 PnL) while DriftJumpAlpha lost
+            # 1,299 on Crash 1000. So the unit is the strategy.
+            #
+            # Applied only where the request left the field unset, so anything
+            # the user explicitly chose still wins.
+            from backend.strategies.strategy_defaults import (
+                get_strategy_defaults, get_strategy_evidence,
+            )
+            _sdefaults = get_strategy_defaults(req.strategy_id)
+            _applied = {}
+            for _k, _v in _sdefaults.items():
+                if _k == "session_filter_enabled":
+                    continue  # lives on the strategy params object, applied below
+                if getattr(req, _k, None) is None and _k not in (req.risk_config or {}):
+                    merged_risk_config[_k] = _v
+                    _applied[_k] = _v
+            if _applied:
+                logger.info(
+                    f"[BACKTEST] Applied {req.strategy_id} exit defaults: {_applied} "
+                    f"| {get_strategy_evidence(req.strategy_id)}"
+                )
+            merged_risk_config["_strategy_defaults_applied"] = _applied
 
             current_state = await _get_state()
-            current_state["progress"] = {"stage": "Finalizing backtest...", "pct": 95}
+            # [T2.1] The simulation reports its own progress across 35-90 via
+            # this callback. Previously the bar jumped straight to 95 here and
+            # then sat there for the whole simulation with nothing emitted.
+            #
+            # [B4] `run_backtest` hands the engine to `asyncio.to_thread`, so
+            # this callback runs on a WORKER THREAD. `asyncio.create_task()`
+            # requires a running loop in the calling thread and raises
+            # `RuntimeError: no running event loop` there — which the old bare
+            # `except Exception: pass` swallowed, so not one progress frame was
+            # ever broadcast during a simulation. The bar sat at 35 until the
+            # thread returned and then jumped to 100.
+            #
+            # Capture the loop here (we are still on it) and hand work back to
+            # it with `run_coroutine_threadsafe`, which is the thread-safe entry
+            # point. Failures are logged rather than silently dropped.
+            _loop = asyncio.get_running_loop()
+            _last_sim_emit = [0.0]
+
+            def _sim_progress(done: int, total: int):
+                import time as _t
+                now = _t.monotonic()
+                if now - _last_sim_emit[0] < 0.25:
+                    return
+                _last_sim_emit[0] = now
+                pct = min(90, 35 + int(55 * (done / total)) if total else 35)
+                payload = {"stage": "Simulating trades...", "pct": pct}
+                try:
+                    # [B5] Keep the polled status endpoint in step with the
+                    # WebSocket. This used to write only the process-local dict,
+                    # so `GET /api/backtest/status` — which reads the Redis-backed
+                    # state — saw nothing move and the UI needed a manual refresh.
+                    state = USER_BACKTEST_STATE.setdefault(current_user.id, {})
+                    state["progress"] = payload
+                    asyncio.run_coroutine_threadsafe(
+                        _save_state({**state, "progress": payload}), _loop)
+                    asyncio.run_coroutine_threadsafe(
+                        ws_manager.broadcast_to_user(
+                            current_user.id, {"type": "backtest_progress", **payload}),
+                        _loop)
+                except Exception as _e:
+                    logger.warning(f"[BACKTEST] progress emit failed: {_e}")
+
+            current_state["progress"] = {"stage": "Simulating trades...", "pct": 35}
             await _save_state(current_state)
             results = await run_backtest(
                 user_id=current_user.id,
@@ -914,6 +1132,9 @@ async def run_backtest_endpoint(
                 candles_m5=candles_m5_idx,
                 save_mode="DISCARD",
                 strategy=engine,  # [Phase 14 B2.3] enables on_position_bar hook
+                progress_cb=_sim_progress,
+                # [B6] H1 context for the trade viewer's higher-timeframe pane.
+                candles_h1=indexed_by_tf.get("H1"),
             )
 
             report = results.get("report")
@@ -1022,26 +1243,36 @@ async def run_backtest_endpoint(
             except Exception as e:
                 logger.warning(f"[replay] series attach failed (chart only, run unaffected): {e}")
 
-            sanitized = _sanitize(response)
-            
+            # [T2.1] _sanitize recursively walks every bar of every trade's
+            # chart_data, chart_data_m15, chart_data_m5 and smc_data plus the
+            # replay series. On a large run that is tens of millions of Python
+            # objects — seconds to minutes of solid CPU. Run it in a thread so
+            # the event loop keeps answering /backtest_status.
+            sanitized = await asyncio.to_thread(_sanitize, response)
+
             current_state = await _get_state()
             current_state["status"] = "complete"
             current_state["progress"] = {"stage": "complete", "pct": 100}
             current_state["result"] = sanitized
             
-            # Create a stripped payload for the frontend to prevent UI freezing
-            import copy
-            ws_payload = copy.deepcopy(sanitized)
+            # Create a stripped payload for the frontend to prevent UI freezing.
+            #
+            # [T2.1] This used to deepcopy the whole sanitized result and then
+            # delete the heavy keys from the copy — i.e. duplicate hundreds of
+            # MB purely to throw most of it away, synchronously, on the event
+            # loop. Build the trimmed view directly instead: shallow-copy each
+            # trade dict without the chart keys and share everything else.
+            _HEAVY = ("chart_data", "chart_data_h1", "chart_data_m15", "chart_data_m5")
+            ws_payload = {k: v for k, v in sanitized.items() if k != "replay"}
             if "grouped_trades" in ws_payload:
-                for t in ws_payload["grouped_trades"]:
-                    t.pop("chart_data", None)
-                    t.pop("chart_data_h1", None)
-                    t.pop("chart_data_m15", None)
-                    t.pop("chart_data_m5", None)
-            # Same reasoning as the per-trade chart_data above: the replay
-            # series is megabytes and the client already has it from the live
-            # stream. It stays in saved state, fetched via /replay when needed.
-            ws_payload.pop("replay", None)
+                ws_payload["grouped_trades"] = [
+                    {k: v for k, v in t.items() if k not in _HEAVY}
+                    if isinstance(t, dict) else t
+                    for t in ws_payload["grouped_trades"]
+                ]
+            # (replay is already excluded above — it is megabytes and the
+            # client already has it from the live stream; it stays in saved
+            # state and is fetched via /replay when needed.)
             
             # Send the run logs immediately as part of the WS payload
             await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
@@ -1109,7 +1340,7 @@ async def run_portfolio_backtest_endpoint(
             if HAS_REDIS and redis_client and redis_client.redis:
                 try:
                     import redis.exceptions
-                    await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(state), ex=3600)
+                    await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(_redis_safe_state(state), default=str), ex=3600)
                 except Exception as e:
                     logger.warning(f"[PORTFOLIO_BT] Redis save failed: {e}")
 
@@ -1194,6 +1425,17 @@ async def run_portfolio_backtest_endpoint(
                     for sym_cfg in req.symbols
                     if sym_cfg.strategy_params.get("tp1_rr_override") is not None
                 },
+                # [17.1] Per-ROW (symbol+strategy) R:R and TP count. More
+                # specific than the per-strategy map above and takes priority,
+                # so one portfolio run can hold several different targets.
+                "tp1_rr_overrides_by_slot": {
+                    f"{sym_cfg.symbol.upper()}|{sym_cfg.strategy_id}": sym_cfg.tp1_rr
+                    for sym_cfg in req.symbols if sym_cfg.tp1_rr is not None
+                },
+                "tp_count_overrides_by_slot": {
+                    f"{sym_cfg.symbol.upper()}|{sym_cfg.strategy_id}": sym_cfg.tp_count
+                    for sym_cfg in req.symbols if sym_cfg.tp_count is not None
+                },
                 # [Phase 2 sizing-truth] only merged when explicitly set — None
                 # left out so risk/engine.py's own default resolution applies.
                 **{
@@ -1249,7 +1491,8 @@ async def run_portfolio_backtest_endpoint(
             # one chart — the exact aliasing the "independent legs" principle
             # forbids. Announced up front so every tab exists before the first
             # bar arrives, and the tab strip doesn't reflow mid-run.
-            replay = ReplayStreamer(ws_manager, current_user.id, mode="portfolio")
+            replay = ReplayStreamer(ws_manager, current_user.id, mode="portfolio",
+                                   enabled=bool(getattr(req, "replay_enabled", True)))
             replay.init([
                 {
                     "slot_id": c.slot_id or f"{c.symbol}::{c.strategy_id}",
@@ -1309,6 +1552,7 @@ async def run_portfolio_backtest_endpoint(
                 engine_class = get_strategy(strat_id)
                 strategy_engine = engine_class(config)
                 strategy_engine.is_backtesting = True
+                strategy_engine.gates.enabled = True  # [B7] see the single-symbol path
 
                 required_tfs = strategy_engine.get_required_timeframes()
                 sorted_tfs = sorted(required_tfs, key=lambda t: TF_MINUTES.get(t, 999))
@@ -1530,6 +1774,35 @@ async def run_portfolio_backtest_endpoint(
 
             portfolio_engine = PortfolioBacktestEngine(merged_risk_config)
 
+            # [17.2] Progress during the global simulation. This is the same
+            # thread-crossing problem as B4: `run` executes inside
+            # `asyncio.to_thread`, so `asyncio.create_task` would raise
+            # "no running event loop" and be swallowed. Capture the loop here
+            # (still on it) and hand work back with run_coroutine_threadsafe.
+            _pf_loop = asyncio.get_running_loop()
+            _pf_last_emit = [0.0]
+
+            def _pf_progress(done: int, total: int):
+                import time as _t
+                now = _t.monotonic()
+                if now - _pf_last_emit[0] < 0.25:
+                    return
+                _pf_last_emit[0] = now
+                # global simulation occupies the 85-98 band
+                pct = min(98, 85 + int(13 * (done / total))) if total else 85
+                payload = {"stage": "Running global portfolio simulation...", "pct": pct}
+                try:
+                    state = USER_BACKTEST_STATE.setdefault(current_user.id, {})
+                    state["progress"] = payload
+                    asyncio.run_coroutine_threadsafe(
+                        _save_state({**state, "progress": payload}), _pf_loop)
+                    asyncio.run_coroutine_threadsafe(
+                        ws_manager.broadcast_to_user(
+                            current_user.id, {"type": "backtest_progress", **payload}),
+                        _pf_loop)
+                except Exception as _e:
+                    logger.warning(f"[PORTFOLIO_BT] progress emit failed: {_e}")
+
             results = await asyncio.to_thread(
                 portfolio_engine.run,
                 portfolio_data,
@@ -1538,6 +1811,7 @@ async def run_portfolio_backtest_endpoint(
                 portfolio_data_m15,
                 portfolio_data_m5,
                 symbol_map,  # [12.8]
+                _pf_progress,
             )
 
             # ── Sanitize and broadcast results ──
@@ -2242,8 +2516,26 @@ async def save_backtest_from_client(
 
     report = data.get("report", {})
     
-    start_date = datetime.now(timezone.utc).replace(tzinfo=None)
-    end_date = datetime.now(timezone.utc).replace(tzinfo=None)
+    # [B8] Default the stored range to what the run actually REQUESTED, not to
+    # "now". A zero-trade run has no trades to derive dates from, so both ends
+    # collapsed to the save timestamp — which is why 9 of the 57 saved runs show
+    # start_date == end_date == the moment Save was clicked, losing the one piece
+    # of context needed to reproduce them. The requested window is right there in
+    # the payload; use it, and only refine from the trades when there are any.
+    _req_params = data.get("params_snapshot") or data.get("risk_config") or {}
+
+    def _parse_req_date(key):
+        raw = _req_params.get(key) if isinstance(_req_params, dict) else None
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).replace(tzinfo=None)
+        except (ValueError, TypeError):
+            return None
+
+    _now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start_date = _parse_req_date("start_date") or _now
+    end_date = _parse_req_date("end_date") or _now
     trades = data.get("grouped_trades", data.get("trades", []))
     if trades:
         try:
@@ -2287,11 +2579,20 @@ async def save_backtest_from_client(
         title=(data.get("title") or "").strip() or data.get("symbol", "Volatility 75 Index"),
         start_date=start_date,
         end_date=end_date,
-        params_snapshot=json.dumps({
-            **data.get("risk_config", {}),
-            "bias_stats": report.get("bias_stats", {}),
-            "confluence_stats": report.get("confluence_stats", {})
-        }),
+        # params_snapshot records the RUN CONFIGURATION only. bias_stats and
+        # confluence_stats used to be stuffed in here as well, which is why the
+        # dedicated columns below were empty on every saved run: this path
+        # simply never passed them to the model, so SQLAlchemy applied its
+        # `default={}`. Analysis code reads the columns, not the blob, so all
+        # 57 historical runs looked like they had no analytics at all.
+        params_snapshot=json.dumps(data.get("risk_config", {})),
+        # The three analytics columns, now actually populated on this path.
+        # runner.py's server-side save has always set these correctly; the
+        # client "Save" button path had not, and the client path is the one
+        # that produced every saved run.
+        rejection_funnel=data.get("rejection_funnel", report.get("rejection_funnel", {})) or {},
+        bias_stats=report.get("bias_stats", {}) or {},
+        confluence_stats=report.get("confluence_stats", {}) or {},
         notes=data.get("notes", ""),
         total_trades=data.get("total_trades", report.get("total_trades", 0)),
         win_rate=data.get("win_rate", report.get("win_rate", 0)),
@@ -2390,9 +2691,13 @@ async def save_backtest_from_client(
             trail_method=t.get("trail_method"),
             mae_pips=t.get("mae_pips"),
             mfe_pips=t.get("mfe_pips"),
+            mae_r=t.get("mae_r"),
+            mfe_r=t.get("mfe_r"),
+            risk_pips=t.get("risk_pips"),
             confluence_score=t.get("confluence_score"),
             strategy_id=t.get("strategy_id", t.get("strategy", run.strategy_id)),
             chart_data=json.dumps(t.get("chart_data", [])),
+            chart_data_h1=json.dumps(t.get("chart_data_h1", [])),
             chart_data_m15=json.dumps(t.get("chart_data_m15", [])),
             chart_data_m5=json.dumps(t.get("chart_data_m5", [])),
             tp1_price=t.get("tp1_price"),

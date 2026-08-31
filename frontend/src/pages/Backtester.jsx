@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from '
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap, LayoutDashboard, PlusCircle, MinusCircle } from 'lucide-react';
-import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts } from '../services/api';
+import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts, getStrategyDefaults } from '../services/api';
 import TradeChart from '../components/TradeChart';
 import BacktestReplay from '../components/BacktestReplay';
 import RunReport from '../components/RunReport';
@@ -370,6 +370,19 @@ function LiveLogPanel({ events, setEvents }) {
   </div>);
 }
 
+// [17.3] Extract a human message from an axios/FastAPI failure. FastAPI puts
+// the reason in `detail`; without this the UI showed nothing at all when a
+// request was rejected (e.g. the 400 "a backtest is already running"), so a
+// run would silently fail to start with no feedback at all.
+function httpErrorMessage(e) {
+  return (
+    e?.response?.data?.detail ||
+    e?.response?.data?.message ||
+    e?.message ||
+    'Request failed'
+  );
+}
+
 function SaveModal({ result, form, isPortfolio, portfolioSymbols, onClose, onSuccess }) {
   const defaultTitle = isPortfolio
     ? `Portfolio (${portfolioSymbols?.length || 0} symbols) — ${new Date().toLocaleDateString()}`
@@ -628,6 +641,209 @@ const GroupedTradeRow = memo(function GroupedTradeRow({ group, index, measureRef
     </tbody>);
 });
 
+/**
+ * [L1] Per-strategy exit defaults.
+ *
+ * Trailing, break-even and session gating used to be one global setting applied
+ * to all seven strategies. Measurement says that is wrong in both directions:
+ * the 15-cell trailing sweep improved 10 cells and made 5 WORSE (nearly all the
+ * gain in NYOpenRetest, +1,765 PnL, while DriftJumpAlpha lost 1,299 on Crash
+ * 1000), and session-gate contribution ranged from -0.170 (HTFFVGFlip, actively
+ * harmful) to +0.126 (BiasIFVG, the best gate in the study).
+ *
+ * So these are shipped per strategy and applied automatically. The panel exists
+ * so it is visible WHY a strategy trails and another does not — the user should
+ * not have to touch these to get the measured-best behaviour.
+ */
+const TRAIL_LABEL = {
+  NONE: 'Off', ATR_TRAIL: 'ATR', FIXED_PIPS: 'Fixed pips',
+  STRUCTURE_TRAIL: 'Structure', PCT_TRAIL: 'Percent',
+};
+
+function StrategyDefaultsPanel({ strategyId, defaults, evidence }) {
+  if (!strategyId) return null;
+  const d = defaults || {};
+  const has = Object.keys(d).length > 0;
+
+  const trailOn = d.trail_method_tp1 && d.trail_method_tp1 !== 'NONE';
+  const rows = [
+    ['Trailing', trailOn
+      ? `${TRAIL_LABEL[d.trail_method_tp1] || d.trail_method_tp1} @ ${d.trail_trigger_rr}R (×${d.atr_trail_multiplier})`
+      : 'Off'],
+    ['Break-even', d.be_mode ? `${d.be_mode}${d.be_trigger_rr ? ` @ ${d.be_trigger_rr}R` : ''}` : '—'],
+    ['Session filter', d.session_filter_enabled === false ? 'Disabled (measured)'
+      : d.session_filter_enabled === true ? 'Enabled (measured)' : 'Strategy default'],
+  ];
+
+  return (
+    <div style={{
+      margin: '10px 0 14px', padding: 12, borderRadius: 'var(--radius-sm)',
+      background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.3)',
+    }}>
+      <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--purple)', marginBottom: 8 }}>
+        ━ Strategy Defaults — {strategyId}
+      </div>
+      {!has ? (
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+          No measured defaults for this strategy yet — global settings apply.
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            {rows.map(([k, v]) => (
+              <div key={k}>
+                <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{k}</div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>{v}</div>
+              </div>
+            ))}
+          </div>
+          {evidence && (
+            <div style={{ marginTop: 8, fontSize: '0.68rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              <strong>Why:</strong> {evidence}
+            </div>
+          )}
+          <div style={{ marginTop: 6, fontSize: '0.65rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+            Applied automatically. Anything you set below overrides them for this run.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * [T2.2] Why did this run produce no trades?
+ *
+ * Every zero-trade run has a reason recorded in `rejection_funnel`, but nothing
+ * rendered it, so the result page was simply blank. The most common cause by
+ * far was the position sizer refusing every signal because `min_sl_pips` (a
+ * single global value applied to every asset class) exceeded the strategy's
+ * typical stop on that symbol — it logs at ERROR level and returns 0 lots, so
+ * the run "completes" with nothing in it.
+ */
+function EmptyResultDiagnostic({ funnel, blocked }) {
+  const strat = funnel.strategy_rejections || {};
+  const risk = funnel.risk_rejections || {};
+  const fill = funnel.fill_rejections || {};
+  const gateStats = funnel.gate_stats || {};
+  const evaluated = funnel.total_evaluated ?? funnel.candidates_evaluated ?? 0;
+  const approved = funnel.approved ?? 0;
+  const errors = funnel.errors ?? 0;
+  const sum = o => Object.values(o || {}).reduce((a, b) => a + (b || 0), 0);
+
+  const rows = [
+    ['Strategy rejected', sum(strat), strat],
+    ['Risk engine rejected', sum(risk), risk],
+    ['Rejected at fill', sum(fill), fill],
+  ].filter(r => r[1] > 0);
+
+  let topCause = null, topN = 0, topKind = '';
+  for (const [kind, obj] of [['risk', risk], ['strategy', strat], ['fill', fill]]) {
+    for (const [k, v] of Object.entries(obj || {})) {
+      if (v > topN) { topN = v; topCause = k; topKind = kind; }
+    }
+  }
+  if (!topCause) {
+    const gates = Object.entries(gateStats)
+      .map(([k, g]) => [k, g.blocked_candidates || 0])
+      .sort((a, b) => b[1] - a[1]);
+    if (gates.length && gates[0][1] > 0) { topCause = gates[0][0]; topN = gates[0][1]; topKind = 'gate'; }
+  }
+
+  const ADVICE = {
+    stop_below_min_viable:
+      "The stop was inside the minimum viable distance, so the sizer returned 0 lots. Lower Min SL (pips) — it applies to every asset class, and 10 pips is large for a low-volatility pair like EURGBP.",
+    min_sl_pips:
+      "Min SL (pips) is rejecting the strategy's natural stop. Lower it, or set a per-asset-class value.",
+    insufficient_rr:
+      "TP is too close relative to SL for the configured Min RR. Lower Min RR or widen the TP multiple.",
+    session_filter:
+      "The session filter excluded every candidate. Widen the session window, or disable it for this strategy.",
+    session_exclusion:
+      "The session filter excluded every candidate. Widen the session window, or disable it for this strategy.",
+  };
+  const advice = ADVICE[topCause]
+    || (topKind === 'gate'
+      ? 'The "' + topCause + '" confluence blocked every candidate. Loosen it, or disable it to see what it was costing.'
+      : 'Open the Run Report panel below for the full rejection breakdown.');
+
+  return (
+    <div style={{
+      margin: '12px 0', padding: 16, borderRadius: 'var(--radius-sm)',
+      background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.35)',
+    }}>
+      <div style={{ fontWeight: 700, color: 'var(--yellow)', marginBottom: 8 }}>
+        No trades were placed in this run
+      </div>
+
+      {evaluated > 0 ? (
+        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: '0.78rem', lineHeight: 1.9 }}>
+          <div>Signals evaluated: <strong>{evaluated}</strong></div>
+          {rows.map(([label, n, obj]) => (
+            <div key={label} style={{ paddingLeft: 12 }}>
+              &#9500;&#9472; {label}: <strong>{n}</strong>
+              <span style={{ color: 'var(--text-muted)' }}>
+                {'  ('}
+                {Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 3)
+                  .map(([k, v]) => k + ': ' + v).join(', ')}
+                {')'}
+              </span>
+            </div>
+          ))}
+          {errors > 0 && (
+            <div style={{ paddingLeft: 12 }}>&#9500;&#9472; Errors: <strong>{errors}</strong></div>
+          )}
+          <div style={{ paddingLeft: 12 }}>&#9492;&#9472; Approved: <strong>{approved}</strong></div>
+        </div>
+      ) : (
+        <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+          The strategy emitted no signals at all in this window — nothing reached the risk engine.
+          {Object.keys(gateStats).length > 0 && ' The confluence breakdown below shows which gate stopped them.'}
+        </div>
+      )}
+
+      {topCause && (
+        <div style={{
+          marginTop: 12, padding: 10, borderRadius: 'var(--radius-xs)',
+          background: 'rgba(0,0,0,0.25)', fontSize: '0.82rem',
+        }}>
+          <strong style={{ color: 'var(--yellow)' }}>Most likely cause:</strong>{' '}
+          <code>{topCause}</code> ({topN} candidates)
+          <div style={{ marginTop: 6, color: 'var(--text-secondary)' }}>{advice}</div>
+        </div>
+      )}
+
+      {Object.keys(gateStats).length > 0 && (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+            Confluence breakdown ({Object.keys(gateStats).length} gates)
+          </summary>
+          <div style={{ marginTop: 8, fontFamily: "'JetBrains Mono',monospace", fontSize: '0.72rem' }}>
+            {Object.entries(gateStats)
+              .sort((a, b) => (b[1].blocked_candidates || 0) - (a[1].blocked_candidates || 0))
+              .map(([name, g]) => (
+                <div key={name} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span style={{ color: g.blocked_candidates ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                    {name}{g.blocked_candidates ? '' : '  (never blocks)'}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)' }}>
+                    {g.evaluated} eval &middot; {(100 * (g.pass_rate ?? 0)).toFixed(1)}% pass &middot; {g.blocked_candidates || 0} blocked
+                  </span>
+                </div>
+              ))}
+          </div>
+        </details>
+      )}
+
+      {blocked?.length > 0 && (
+        <div style={{ marginTop: 10, fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+          {blocked.length} individual blocked signal{blocked.length === 1 ? '' : 's'} recorded — see the Run Report panel.
+        </div>
+      )}
+    </div>
+  );
+}
+
 const BacktestResults = memo(function BacktestResults({ result, onSave, onDismiss, onClose, isSaving }) {
   const report = result.report || {};
   // [I1]/[H1]: the engine returns rejection_funnel at the TOP LEVEL of the
@@ -876,6 +1092,14 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         )}
       </div>
     </div>
+    {/* [T2.2] Empty-result diagnosis.
+        A run with 0 trades used to render a blank results card with no
+        explanation, which is what "the backtest just produces nothing" was.
+        The rejection funnel has the answer; this surfaces it and names the
+        single most likely cause. */}
+    {grouped.length === 0 && (
+      <EmptyResultDiagnostic funnel={rejectionFunnel} blocked={blockedSignals} result={result} />
+    )}
     {filteredStats.tradeCount > 0 && filteredStats.tradeCount < LOW_SAMPLE_TRADE_THRESHOLD && (
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '10px 14px',
@@ -1389,6 +1613,9 @@ const DEFAULT_FORM = {
   be_trigger_rr: 2.0, be_buffer_pips: 0.0, be_buffer_atr_mult: 0.10,
   trail_method_tp1: 'NONE', trail_method_tp2: 'ATR_TRAIL', trail_method_tp3: 'STRUCTURE_TRAIL',
   trail_method_tp4: 'NONE', trail_method_tp5: 'NONE',
+  // The R-multiple at which RR-mode trailing arms. Was never in this form at
+  // all, so the backend silently used its own default of 1.0.
+  trail_trigger_rr: 2.0,
   atr_trail_multiplier: 1.5, trail_pips: 15,
   compounding_enabled: false,
   prop_firm: {
@@ -1439,6 +1666,9 @@ export default function Backtester() {
           symbol: s.symbol,
           strategy_id: s.strategy_id,
           strategy_params: buildPortfolioStrategyParams(s.strategy_id, form),
+          // [17.1] null = inherit the portfolio-wide tp1_rr. Sent only when the
+          // row actually sets one, matching the backend's "None = inherit".
+          tp1_rr: s.tp1_rr ?? null,
         })),
         start_date: form.start_date || undefined,
         end_date: form.end_date || undefined,
@@ -1452,6 +1682,14 @@ export default function Backtester() {
         tp_splits: form.tp_splits,
         be_trigger_rr: form.be_trigger_rr,
         be_buffer_pips: form.be_buffer_pips,
+        // [T2.3] trail_method_tp1 was absent from this payload while tp2-tp5
+        // were sent. With tp_count=1 that meant the ONLY leg had no trail
+        // method, MultiTPManager fell back to "NONE", and RiskEngine's
+        // `if trail_method and ...` guard short-circuited every tick. Measured
+        // result: trail_method NULL on 3,528/3,528 saved trades and zero
+        // TRAIL_SL exits in the entire book.
+        trail_method_tp1: form.trail_method_tp1,
+        trail_trigger_rr: form.trail_trigger_rr,
         trail_method_tp2: form.trail_method_tp2,
         trail_method_tp3: form.trail_method_tp3,
         trail_method_tp4: form.trail_method_tp4,
@@ -1487,6 +1725,8 @@ export default function Backtester() {
       });
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['backtests'] }),
+    // [17.3] Without this an HTTP rejection never reached the user.
+    onError: (e) => setBtError(httpErrorMessage(e)),
   });
 
 
@@ -1593,6 +1833,17 @@ export default function Backtester() {
 
   // Load defaults from user's live config (only on first load if no saved config)
   const { data: userCfg } = useQuery({ queryKey: ['config'], queryFn: () => getConfig().then(r => r.data), enabled: status === 'ONLINE' && isAuth });
+
+  // [L1] Measured per-strategy exit/session defaults. Cached indefinitely —
+  // they are compiled-in constants derived from the Phase 3 sweeps, not user
+  // state, so refetching them is pure noise.
+  const { data: strategyDefaultsResp } = useQuery({
+    queryKey: ['strategy-defaults'],
+    queryFn: () => getStrategyDefaults().then(r => r.data),
+    enabled: isAuth,
+    staleTime: Infinity,
+  });
+  const allStrategyDefaults = strategyDefaultsResp?.strategy_defaults || {};
   useEffect(() => {
       if (userCfg?.config && !configLoaded) {
         const c = userCfg.config;
@@ -1717,7 +1968,9 @@ export default function Backtester() {
     onSuccess: res => {
       // Background task started, result will be pushed via WebSocket or polling
       queryClient.invalidateQueries({ queryKey: ['backtests'] });
-    }
+    },
+    // [17.3] Without this an HTTP rejection never reached the user.
+    onError: (e) => setBtError(httpErrorMessage(e)),
   });
 
   const handleSave = () => {
@@ -1853,6 +2106,19 @@ export default function Backtester() {
                         <option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option>
                       </select>
                     </div>
+                    {/* [17.1] Per-row R:R. Research 16 measured the optimum as
+                        symbol-and-strategy specific (Crash 1000 wants 1:3,
+                        USOUSD wants 1:5), so a portfolio run needs a target per
+                        row, not one shared value. Blank = inherit the global. */}
+                    <div style={{ width: 96 }}>
+                      <label style={{ fontSize: '0.7rem' }} title="Take-profit R:R for this row only. Leave blank to use the global TP1 R:R.">R:R</label>
+                      <input
+                        type="number" step="0.1" min="0.1"
+                        placeholder={`${form.tp1_rr}`}
+                        value={item.tp1_rr ?? ''}
+                        onChange={e => updatePortfolioSymbol(idx, 'tp1_rr', e.target.value === '' ? null : +e.target.value)}
+                      />
+                    </div>
                     <button className="btn btn-icon btn-ghost" style={{ color: 'var(--red)', marginBottom: 2 }} onClick={() => removePortfolioSymbol(idx)} disabled={portfolioSymbols.length <= 1}><MinusCircle size={16} /></button>
                   </div>
                 ))}
@@ -1917,7 +2183,23 @@ export default function Backtester() {
 
           <button className="btn btn-secondary btn-sm" onClick={() => setShowAdvanced(!showAdvanced)} style={{ width: '100%' }}><Settings2 size={14} /> {showAdvanced ? 'Hide' : 'Show'} Advanced Parameters</button>
           {showAdvanced && (<div style={{ display: 'grid', gap: 14, padding: 14, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>Strategy Engines</div>
+            {/* ── PER-STRATEGY (measured defaults) ─────────────────────────
+                One panel per selected strategy, so a portfolio run listing
+                several strategies shows each one's own exit profile rather than
+                a single global setting that is wrong for most of them. */}
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--purple)' }}>
+              ━ Per-Strategy Exits &amp; Sessions
+            </div>
+            {selectedStrats.map(strat => (
+              <StrategyDefaultsPanel
+                key={`sd-${strat}`}
+                strategyId={strat}
+                defaults={allStrategyDefaults[strat]?.defaults}
+                evidence={allStrategyDefaults[strat]?.evidence}
+              />
+            ))}
+
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)' }}>━ Strategy Engine Parameters</div>
             {selectedStrats.map(strat => (
               <div key={strat} style={{ marginBottom: 12 }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 600, marginBottom: 4, color: 'var(--text-muted)' }}>{strat}</div>
@@ -1925,7 +2207,10 @@ export default function Backtester() {
               </div>
             ))}
 
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--yellow)' }}>━ Circuit Breakers</div>
+            {/* ── ACCOUNT-LEVEL (global) ───────────────────────────────────
+                Position sizing, drawdown caps and concurrency are properties of
+                the ACCOUNT, not of a strategy, so they stay global. */}
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--yellow)' }}>━ Account Risk — Circuit Breakers</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
               <div><label style={{ fontSize: '0.7rem' }}>Max Daily Drawdown (%)</label><input type="number" step="0.1" min="0.1" value={form.max_daily_drawdown_pct} onChange={e => u('max_daily_drawdown_pct', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Max Weekly Drawdown (%)</label><input type="number" step="0.1" min="0.1" value={form.max_weekly_drawdown_pct} onChange={e => u('max_weekly_drawdown_pct', +e.target.value)} /></div>
@@ -2028,7 +2313,9 @@ export default function Backtester() {
                 return null;
               })()}
             </div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--purple)' }}>━ Break-Even</div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--purple)' }}>
+              ━ Break-Even <span style={{ fontWeight: 400, fontSize: '0.65rem', color: 'var(--text-muted)' }}>— overridden per strategy above unless you change it here</span>
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
               <div><label style={{ fontSize: '0.7rem' }}>BE Trigger (R)</label><input type="number" step="0.1" value={form.be_trigger_rr} onChange={e => u('be_trigger_rr', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>BE Buffer (pips)</label><input type="number" step="0.5" value={form.be_buffer_pips} onChange={e => u('be_buffer_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Keep at 0. A non-zero pip buffer can place the break-even stop beyond the market, where it fills as fabricated profit.</div></div>
@@ -2039,23 +2326,30 @@ export default function Backtester() {
               <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={form.min_sl_pips} onChange={e => u('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Portfolio-wide stop floor applied by the position sizer. 0 disables.</div></div>
               <div><label style={{ fontSize: '0.7rem' }}>Max Account Leverage (×)</label><input type="number" step="1" min="0" value={form.max_account_leverage} onChange={e => u('max_account_leverage', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Caps notional exposure so a tiny stop cannot size into the 100×+ positions MT5 rejects outright.</div></div>
             </div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--red)' }}>━ Trailing Stops</div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--red)' }}>
+              ━ Trailing Stops <span style={{ fontWeight: 400, fontSize: '0.65rem', color: 'var(--text-muted)' }}>— overridden per strategy above unless you change it here</span>
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {[1, 2, 3, 4, 5].filter(n => n <= form.tp_count).map(n => (
                 <div key={n}>
                   <label style={{ fontSize: '0.7rem' }}>TP{n} Trail</label>
-                  {n === 1 ? (
-                    // TP1 is never trailed — the backend request models only
-                    // accept trail_method_tp2..tp5, and MultiTPManager hardcodes
-                    // trail_methods[0] to None, so this is not user-configurable.
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '6px 0' }}>
-                      Never trails
-                    </div>
-                  ) : (
-                    <select value={form[`trail_method_tp${n}`]} onChange={e => u(`trail_method_tp${n}`, e.target.value)}>{TRAIL_METHODS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select>
-                  )}
+                  {/* TP1 is now configurable like every other level. The old
+                      "Never trails" placeholder was based on a stale claim: the
+                      backend request models DO accept trail_method_tp1 and pass
+                      it into the risk config, and MultiTPManager reads
+                      trail_methods[0] from it. The only thing missing was this
+                      control and the payload field — which is why no backtest
+                      has ever trailed. */}
+                  <select value={form[`trail_method_tp${n}`]} onChange={e => u(`trail_method_tp${n}`, e.target.value)}>{TRAIL_METHODS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select>
                 </div>
               ))}
+              <div>
+                <label style={{ fontSize: '0.7rem' }}>Trail Start (R)</label>
+                <input type="number" step="0.1" min="0" value={form.trail_trigger_rr} onChange={e => u('trail_trigger_rr', +e.target.value)} />
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                  RR mode: trailing arms once the trade reaches this R-multiple, measured from the original stop. TP_HIT mode: arms when TP1 closes.
+                </div>
+              </div>
               <div><label style={{ fontSize: '0.7rem' }}>ATR Multiplier</label><input type="number" step="0.1" value={form.atr_trail_multiplier} onChange={e => u('atr_trail_multiplier', +e.target.value)} /></div>
               <div><label style={{ fontSize: '0.7rem' }}>Fixed Trail Pips</label><input type="number" value={form.trail_pips} onChange={e => u('trail_pips', +e.target.value)} /></div>
             </div>
@@ -2143,7 +2437,31 @@ export default function Backtester() {
           </div>
           {(isRunning || progress) && <ProgressBar progress={progress} />}
           {mutation.isError && <div style={{ color: 'var(--red)', fontSize: '0.8rem' }}>Error: {mutation.error?.response?.data?.detail || mutation.error?.message || 'Failed'}</div>}
-          {btError && <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginTop: 6 }}>Backtest failed: {btError}</div>}
+          {btError && (
+            <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginTop: 6 }}>
+              Backtest failed: {btError}
+              {/* [17.3] Bug B2 recovery. A stale "running" flag rejects every
+                  subsequent request for up to an hour. `handleStop` already
+                  clears it, but the Stop button only renders while isRunning
+                  is true — and a 400 makes the mutation fail, so isRunning goes
+                  false and the button vanishes exactly when it is needed. This
+                  surfaces the same action on the error itself. */}
+              {/already running/i.test(String(btError)) && (
+                <div style={{ marginTop: 6 }}>
+                  <button
+                    className="btn btn-sm"
+                    onClick={async () => { await handleStop(); setBtError(null); }}
+                    title="Clears the stuck 'running' flag left by a backtest whose client or server died mid-run."
+                  >
+                    Clear stuck run
+                  </button>
+                  <span style={{ color: 'var(--text-dim)', marginLeft: 8 }}>
+                    A previous run did not finish cleanly. Clearing lets you start again.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

@@ -104,6 +104,12 @@ class CRTEngine(BaseStrategy):
         return state["ms_detector"].get_bias()
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
+        # [T1.3] Open a confluence-telemetry record for this bar.
+        # No-op unless self.gates.enabled (live default is off).
+        self.begin_candidate(
+            symbol, timeframe,
+            bar_time=candles.index[-1] if candles is not None and len(candles) else None,
+        )
         if not self.is_backtesting:
             self.run_logs = []
 
@@ -126,10 +132,10 @@ class CRTEngine(BaseStrategy):
             state["c2_trigger"] = None
 
         max_trades = self.params.max_trades_per_session if getattr(self, 'params', None) else SPEC_DEFAULTS['max_trades_per_session']
-        if state["trades_today"] >= max_trades:
+        if not self.gate("session_trade_cap", state["trades_today"] < max_trades):
             return None
 
-        in_session = self._is_within_session(dt, symbol)
+        in_session = self.gate("session_filter", self._is_within_session(dt, symbol))
 
         if timeframe == htf:
             # ── Bar-time deduplication (live mode) ──────────────────────────────
@@ -177,7 +183,7 @@ class CRTEngine(BaseStrategy):
                 c2_close = float(current_bar['close'])
 
                 # Check for ambiguous intrabar double sweep
-                if c2_high > c1_high and c2_low < c1_low:
+                if not self.gate("c2_not_ambiguous", not (c2_high > c1_high and c2_low < c1_low)):
                     self.log_event("Ambiguous C2 (swept both sides of C1). Invalidating and setting new C1.")
                     state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
                     return None
@@ -190,13 +196,17 @@ class CRTEngine(BaseStrategy):
                 # (254/900 evaluations on the forensic NDX log, the single largest
                 # rejection category); now configurable via bias_neutral_mode.
                 bias_neutral_mode = getattr(self.params, "bias_neutral_mode", "REDUCED_SIZE") if getattr(self, 'params', None) else "BLOCK"
-                if bias == "NEUTRAL" and bias_neutral_mode == "BLOCK":
+                if not self.gate("htf_bias_confirmed", not (bias == "NEUTRAL" and bias_neutral_mode == "BLOCK"),
+                                  detail=f"bias={bias}"):
                     self.log_event("HTF bias is NEUTRAL (no confirmed trend) — BLOCK mode, skipping C2 evaluation, setting new C1 candidate.")
                     state["c1"] = {"high": float(current_bar['high']), "low": float(current_bar['low'])}
                     return None
 
                 valid_bullish = (c2_low < c1_low < c2_close < c1_high)
                 valid_bearish = c2_high > c1_high and (c1_low < c2_close < c1_high)
+                # The core CRT confluence: C2 sweeps C1's extreme then closes
+                # back inside the range.
+                self.gate("c2_sweep_and_reclaim", valid_bullish or valid_bearish)
 
                 # A NEUTRAL bias no longer hard-fails the direction match when
                 # bias_neutral_mode allows it through — the C2 sweep's own direction
@@ -422,7 +432,7 @@ class CRTEngine(BaseStrategy):
                         ),
                     )
 
-                    return TradeSignal(
+                    return self._tag_signal(TradeSignal(
                         strategy_id="CRT_v1",
                         symbol=symbol,
                         direction=direction,
@@ -456,7 +466,7 @@ class CRTEngine(BaseStrategy):
                             # [V1] Chart geometry — see strategies/core/markings.py.
                             **mk.as_metadata(),
                         }
-                    )
+                    ))
 
         return None
 

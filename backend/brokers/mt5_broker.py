@@ -191,6 +191,25 @@ class MT5Broker(BaseBroker):
         logger.info("Disconnecting MT5...")
         self._intentional_disconnect = True
         self._last_method = None
+
+        # Cancel the auto-reconnect daemon.
+        #
+        # _reconnect_loop is a `while True` task created with
+        # asyncio.create_task and was never cancelled anywhere. Uvicorn's
+        # graceful shutdown waits for outstanding tasks, so the process hung
+        # forever on "Waiting for background tasks to complete" — every
+        # --reload cycle wedged the dev server, and `pm2 restart` on the VPS
+        # blocked until pm2's kill_timeout SIGKILLed it. Cancelling here (and
+        # awaiting the CancelledError) lets shutdown actually complete.
+        task = getattr(self, "_reconnect_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._reconnect_task = None
+
         if mt5 and self.connected:
             await asyncio.get_event_loop().run_in_executor(self._executor, mt5.shutdown)
         self.connected = False
@@ -290,6 +309,25 @@ class MT5Broker(BaseBroker):
         logger.info("Disconnecting MT5...")
         self._intentional_disconnect = True
         self._last_method = None
+
+        # Cancel the auto-reconnect daemon.
+        #
+        # _reconnect_loop is a `while True` task created with
+        # asyncio.create_task and was never cancelled anywhere. Uvicorn's
+        # graceful shutdown waits for outstanding tasks, so the process hung
+        # forever on "Waiting for background tasks to complete" — every
+        # --reload cycle wedged the dev server, and `pm2 restart` on the VPS
+        # blocked until pm2's kill_timeout SIGKILLed it. Cancelling here (and
+        # awaiting the CancelledError) lets shutdown actually complete.
+        task = getattr(self, "_reconnect_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._reconnect_task = None
+
         if mt5 and self.connected:
             await asyncio.get_event_loop().run_in_executor(self._executor, mt5.shutdown)
         self.connected = False

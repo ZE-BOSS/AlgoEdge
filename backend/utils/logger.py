@@ -5,6 +5,7 @@ Structured logging with loguru.
 All modules import `logger` from here for consistent formatting.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -13,11 +14,25 @@ from loguru import logger
 # Remove default handler
 logger.remove()
 
-# Console output — colored, human-readable
+# Console output — colored, human-readable.
+#
+# [L1-opt] Level now comes from LOG_LEVEL (default INFO) instead of being
+# hardcoded to DEBUG.
+#
+# The hardcoded DEBUG was a measured bottleneck, not just noise. Every
+# `logger.debug(...)` was formatted, ANSI-colorized and written to stderr —
+# and the backtest engine emits debug lines per position event
+# ("[ENGINE] Position opened", "[BREAKEVEN] buffer inputs", one risk-decision
+# JSON per signal). Over a 50,000-bar run that is hundreds of thousands of
+# colorized writes to a captured stderr pipe, which dominated the run.
+#
+# The .env already said LOG_LEVEL=INFO; the sink simply ignored it. Set
+# LOG_LEVEL=DEBUG to get the old behaviour back when actually debugging.
+_CONSOLE_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logger.add(
     sys.stderr,
     format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> | <level>{message}</level>",
-    level="DEBUG",
+    level=_CONSOLE_LEVEL,
     colorize=True,
 )
 

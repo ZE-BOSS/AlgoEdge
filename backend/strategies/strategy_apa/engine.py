@@ -257,7 +257,40 @@ class APAEngine(BaseStrategy):
             round(pattern.get("head", {}).get("price", 0.0), 6),
         )
 
+    @staticmethod
+    def _zone_rejected_now(c: dict, latest) -> bool:
+        """
+        Did THIS candle reject the candidate's invalidation zone?
+
+        A rejection is a wick into the zone with the body closing back out on the
+        trade's side — the same test the AWAIT_RETEST branch performs, lifted out
+        so it no longer depends on having gone through the retest state machine.
+
+        [T2.7] Extracted as part of fixing the require_retest /
+        require_rejection_candle interlock that made APA unable to emit a signal.
+        """
+        iz_top = c.get("invalidation_zone_top")
+        iz_bottom = c.get("invalidation_zone_bottom")
+        if iz_top is None or iz_bottom is None:
+            # Without a zone there is nothing to reject; do not block on a
+            # condition that cannot be evaluated.
+            return True
+        try:
+            if c.get("direction") == "SELL":
+                # Bearish: wick pushed up into the zone, body closed back below it.
+                return bool(latest["high"] >= iz_bottom and latest["close"] < iz_bottom)
+            # Bullish: wick dipped into the zone, body closed back above it.
+            return bool(latest["low"] <= iz_top and latest["close"] > iz_top)
+        except (KeyError, TypeError):
+            return True
+
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
+        # [T1.3] Open a confluence-telemetry record for this bar.
+        # No-op unless self.gates.enabled (live default is off).
+        self.begin_candidate(
+            symbol, timeframe,
+            bar_time=candles.index[-1] if candles is not None and len(candles) else None,
+        )
         self._init_state(symbol)
         state = self.state[symbol]
         candidates: list = state["candidates"]
@@ -510,10 +543,10 @@ class APAEngine(BaseStrategy):
                     still_fresh.append(c)
                 candidates[:] = still_fresh
 
-            if not candidates:
+            if not self.gate("has_candidate_zone", bool(candidates)):
                 return None
 
-            if not self._is_within_session(current_time, symbol):
+            if not self.gate("session_filter", self._is_within_session(current_time, symbol)):
                 return None
 
             # Step 3: Wait for candle BODY to enter the Invalidation Zone.
@@ -523,7 +556,9 @@ class APAEngine(BaseStrategy):
                 iz_top, iz_bottom = c["invalidation_zone_top"], c["invalidation_zone_bottom"]
                 body_top = max(latest["open"], latest["close"])
                 body_bottom = min(latest["open"], latest["close"])
-                if body_bottom <= iz_top and body_top >= iz_bottom:
+                _iz_touch = body_bottom <= iz_top and body_top >= iz_bottom
+                self.gate("retest_into_invalidation_zone", _iz_touch)
+                if _iz_touch:
                     c["status"] = "AWAIT_CONFIRMATION"
                     c["retest_at_entry_bar"] = ebi
                     c["retest_occurred"] = True
@@ -568,18 +603,36 @@ class APAEngine(BaseStrategy):
                 if c["status"] != "AWAIT_CONFIRMATION":
                     continue
 
-                # [Phase 14 B3.4] Rejection-candle gate: if the param is on and
-                # the zone has not yet been rejected (close-back-out not yet
-                # seen), skip this candidate for now. It stays AWAIT_CONFIRMATION
-                # and will be re-evaluated on every subsequent bar until it
-                # either rejects or the candidate expires via retest_max_age_bars.
+                # ── Rejection-candle gate ────────────────────────────────
+                #
+                # [T2.7] REWIRED. This used to read `c["retest_rejected"]`, which
+                # is ONLY ever assigned inside the AWAIT_RETEST branch. With
+                # `require_retest` defaulting False that branch never runs, the
+                # flag stayed False forever, and `require_rejection_candle`
+                # (default True) therefore blocked 100% of candidates:
+                # measured 0 passes out of 1,388 evaluations across four symbols,
+                # which is why APA emitted ZERO signals from 78,800 candidates.
+                #
+                # Two individually reasonable defaults combined into a condition
+                # the strategy could never satisfy.
+                #
+                # The rejection idea itself is sound — only its wiring was broken.
+                # `_zone_rejected_now()` evaluates it directly from the current
+                # candle against the candidate's invalidation zone, so it works
+                # whether or not the retest state machine was used. The stored
+                # flag is still honoured (a rejection seen on an earlier bar
+                # still counts) and is updated here so downstream confluence
+                # scoring and the chart markings see it.
                 _require_reject = getattr(self.params, "require_rejection_candle", False)
-                if _require_reject and not c.get("retest_rejected", False):
-                    # Check if this bar itself provides the rejection (same bar
-                    # as the IZ touch): if so, c["retest_rejected"] is already
-                    # True from the AWAIT_RETEST block above and we fall through.
-                    # Otherwise we skip until the rejection comes.
-                    continue
+                if _require_reject:
+                    _rejected_now = c.get("retest_rejected", False) or self._zone_rejected_now(c, latest)
+                    if _rejected_now:
+                        c["retest_rejected"] = True
+                    if not self.gate("rejection_candle", _rejected_now):
+                        # No close-back-out yet. Stay in AWAIT_CONFIRMATION and
+                        # re-check next bar until it rejects or the candidate
+                        # ages out via retest_max_age_bars.
+                        continue
 
                 pattern = c["pattern"]
                 direction = c["direction"]
@@ -587,11 +640,11 @@ class APAEngine(BaseStrategy):
                 head_price = c["invalidation_head"]
 
                 # Hard invalidation: body closes back beyond the Head level
-                if direction == "SELL" and min(latest["open"], latest["close"]) > head_price:
-                    candidates.remove(c)
-                    self.log_event(f"[{symbol}] Pattern invalidated — body closed beyond Head.", category="APA")
-                    continue
-                if direction == "BUY" and max(latest["open"], latest["close"]) < head_price:
+                _head_ok = not (
+                    (direction == "SELL" and min(latest["open"], latest["close"]) > head_price)
+                    or (direction == "BUY" and max(latest["open"], latest["close"]) < head_price)
+                )
+                if not self.gate("head_not_breached", _head_ok):
                     candidates.remove(c)
                     self.log_event(f"[{symbol}] Pattern invalidated — body closed beyond Head.", category="APA")
                     continue
@@ -600,24 +653,20 @@ class APAEngine(BaseStrategy):
                 # Rules 1–4 have been validated through the state machine
 
                 entry = latest["close"]
-                if sl is None:
+                if not self.gate("sl_present", sl is not None):
                     candidates.remove(c)
                     continue
 
                 # ── Validate SL is on the correct side of entry ──
-                if direction == "SELL" and sl <= entry:
+                _sl_side_ok = not (
+                    (direction == "SELL" and sl <= entry)
+                    or (direction == "BUY" and sl >= entry)
+                )
+                if not self.gate("sl_correct_side", _sl_side_ok):
                     candidates.remove(c)
                     self.log_event(
-                        f"[{symbol}] SELL SL ({sl:.5f}) <= entry ({entry:.5f}) — "
-                        f"SL on wrong side, dropping candidate.",
-                        category="APA",
-                    )
-                    continue
-                if direction == "BUY" and sl >= entry:
-                    candidates.remove(c)
-                    self.log_event(
-                        f"[{symbol}] BUY SL ({sl:.5f}) >= entry ({entry:.5f}) — "
-                        f"SL on wrong side, dropping candidate.",
+                        f"[{symbol}] {direction} SL ({sl:.5f}) on wrong side of entry "
+                        f"({entry:.5f}) — dropping candidate.",
                         category="APA",
                     )
                     continue
@@ -647,7 +696,7 @@ class APAEngine(BaseStrategy):
                     tp = entry + sl_distance  # TP1 = 1R
 
                 # Final sanity: SL and TP must not be equal
-                if abs(tp - sl) < 1e-10:
+                if not self.gate("tp_sl_not_degenerate", abs(tp - sl) >= 1e-10):
                     candidates.remove(c)
                     self.log_event(
                         f"[{symbol}] SL ({sl:.5f}) == TP ({tp:.5f}) — degenerate, dropping candidate.",
@@ -758,7 +807,7 @@ class APAEngine(BaseStrategy):
                     structure_atr=c.get("structure_atr"),
                 )
 
-                return TradeSignal(
+                return self._tag_signal(TradeSignal(
                     strategy_id="APA_v1",
                     symbol=symbol,
                     direction=direction,
@@ -792,7 +841,7 @@ class APAEngine(BaseStrategy):
                         # [V1] Chart geometry — see strategies/core/markings.py.
                         **mk.as_metadata(),
                     },
-                )
+                ))
 
         return None
 

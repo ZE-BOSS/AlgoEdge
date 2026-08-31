@@ -19,7 +19,13 @@ router = APIRouter(prefix="/api", tags=["charts"])
 async def get_chart_data(
     symbol: str,
     timeframe: str,
-    count: int = Query(500, le=5000),
+    # The old `le=5000` was self-imposed, not a broker limit. Measured against
+    # the live terminal (build 6140, maxbars=100000): copy_rates_from_pos
+    # returns a full 50,000 bars for XAUUSD / Crash 300 / US Tech 100 on M1, M5
+    # and M15. M5 at 50k reaches back ~8.5 months and M15 reaches ~2 years,
+    # which is what makes a full-history chart possible on a live call.
+    # Ceiling is the terminal's own maxbars, which is itself user-configurable.
+    count: int = Query(1000, ge=1, le=100000),
 ):
     """Get historical OHLCV data for chart rendering."""
     logger.info(f"Chart data request: {symbol} {timeframe} count={count}")

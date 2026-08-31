@@ -160,6 +160,37 @@ async def list_strategies(current_user: User = Depends(get_current_user)):
     return {"strategies": items, "total": len(items)}
 
 
+@router.get("/strategy-defaults")
+async def get_all_strategy_defaults(current_user: User = Depends(get_current_user)):
+    """
+    Per-strategy exit/session defaults, with the measurement behind each.
+
+    Trailing, break-even and session gating used to be one global setting for
+    all seven strategies. The Phase 3 study showed that cannot be right — the
+    trailing sweep improved 10 of 15 cells and made 5 worse, and the session
+    ablation ranged from -0.170 to +0.126 depending on strategy. The frontend
+    reads this so the parameter panel can show the measured-best values for
+    whichever strategy is selected, per strategy rather than per account.
+    """
+    from backend.strategies.strategy_defaults import STRATEGY_DEFAULTS, OVERRIDABLE
+
+    out = {}
+    for sid, cfg in STRATEGY_DEFAULTS.items():
+        out[sid] = {
+            "defaults": {k: v for k, v in cfg.items() if k != "evidence"},
+            "evidence": cfg.get("evidence", ""),
+        }
+    return {
+        "strategy_defaults": out,
+        "overridable_fields": sorted(OVERRIDABLE),
+        "note": (
+            "These are DEFAULTS, not constraints. An explicit value in the request "
+            "always wins. Fields outside `overridable_fields` (position sizing, "
+            "drawdown caps, concurrency) remain account-level."
+        ),
+    }
+
+
 @router.post("/generate")
 async def generate_strategy(
     req: GenerateRequest,

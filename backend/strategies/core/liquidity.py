@@ -131,7 +131,7 @@ class LiquidityMapper:
                     if latest["high"] >= pool["level"] + min_sweep_depth and latest["close"] < pool["level"]:
                         recent_sweep = {"type": "BSL", "level": pool["level"]}
                         pool["swept"] = True
-                        logger.info(f"BSL Sweep detected at {pool['level']} (wick depth {latest['high'] - pool['level']:.5f})")
+                        logger.debug(f"BSL Sweep detected at {pool['level']} (wick depth {latest['high'] - pool['level']:.5f})")
                 else:
                     if latest["high"] >= pool["level"] + min_sweep_depth and latest["close"] < pool["level"]:
                         logger.debug(f"BSL Sweep condition met at {pool['level']}, but pool was already marked swept. Skipping.")
@@ -143,7 +143,7 @@ class LiquidityMapper:
                     if latest["low"] <= pool["level"] - min_sweep_depth and latest["close"] > pool["level"]:
                         recent_sweep = {"type": "SSL", "level": pool["level"]}
                         pool["swept"] = True
-                        logger.info(f"SSL Sweep detected at {pool['level']} (wick depth {pool['level'] - latest['low']:.5f})")
+                        logger.debug(f"SSL Sweep detected at {pool['level']} (wick depth {pool['level'] - latest['low']:.5f})")
                 else:
                     if latest["low"] <= pool["level"] - min_sweep_depth and latest["close"] > pool["level"]:
                         logger.debug(f"SSL Sweep condition met at {pool['level']}, but pool was already marked swept. Skipping.")

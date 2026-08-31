@@ -293,7 +293,27 @@ class APAParams:
     """
 
     # ── Phase 14 B3.4 — Rejection-candle entry gate ──────────────────────────
-    require_rejection_candle: bool = True
+    #
+    # [L1] CHANGED True -> False (2026-08-28), on measurement.
+    #
+    # Two things were wrong here, and they compounded:
+    #
+    # 1. WIRING (fixed in engine.py). The gate read `retest_rejected`, which is
+    #    only ever assigned inside the AWAIT_RETEST branch. `require_retest`
+    #    defaults False, so that branch never runs and the flag stayed False
+    #    forever. Measured: rejection_candle passed 0 of 1,388 evaluations across
+    #    four symbols — APA emitted ZERO signals from 78,800 candidates and had
+    #    been doing so silently. The engine now evaluates rejection directly from
+    #    the current candle (`_zone_rejected_now`), independent of retest state.
+    #
+    # 2. SELECTIVITY. With the wiring fixed the gate works, but it is brutal:
+    #    it passes 1.06% (3 of 283) and yields 3 signals over 20,000 M15 bars.
+    #    A strategy cannot be evaluated, tuned or trusted on three trades.
+    #
+    # So the default is now False: APA produces a measurable population again,
+    # and the (now functional) rejection filter can be switched on and ablated
+    # like any other confluence once there is a baseline to compare against.
+    require_rejection_candle: bool = False
     """
     [Phase 14 B3.4] When True, a signal only fires after a candle wicks into the
     Invalidation Zone AND closes back out on the trade's side — a close-out of the

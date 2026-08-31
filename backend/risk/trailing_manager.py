@@ -89,7 +89,16 @@ class TrailingManager:
                 logger.debug(f"Trail [{method}] BUY TP{tp_level}: SL {current_sl:.5f} -> {new_sl:.5f}")
                 return new_sl
         else:
-            if current_sl > 0 and new_sl < current_sl - step:
+            # [17.5] `current_sl == 0` means the SELL has NO protective stop yet.
+            # This branch required `current_sl > 0`, so an unprotected short was
+            # never given a trailing stop at all — while live
+            # (position_manager._calculate_trailing_sl) uses
+            # `current_sl == 0.0 or ...` and does protect it. Differential
+            # testing found this as the only genuine behavioural difference
+            # between the two implementations; aligning to the live (safer)
+            # behaviour, since declining to protect an unprotected position is
+            # never the better choice.
+            if (current_sl == 0 or new_sl < current_sl - step):
                 logger.debug(f"Trail [{method}] SELL TP{tp_level}: SL {current_sl:.5f} -> {new_sl:.5f}")
                 return new_sl
 

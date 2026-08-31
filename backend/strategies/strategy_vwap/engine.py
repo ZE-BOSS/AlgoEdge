@@ -490,6 +490,10 @@ class VWAPEngine(BaseStrategy):
         if timeframe != self.params.entry_timeframe:
             return None
 
+        # [T1.3] Open a confluence-telemetry record for this bar. No-op when
+        # `self.gates.enabled` is False (the live default).
+        self.begin_candidate(symbol, timeframe, bar_time=candles.index[-1] if len(candles) else None)
+
         self._init_state(symbol)
         state = self.state[symbol]
 
@@ -518,9 +522,9 @@ class VWAPEngine(BaseStrategy):
         time_str = self._et_time_str(current_time)
 
         # Guard rails
-        if state["trades_today"] >= self.params.max_trades_per_day:
+        if not self.gate("daily_trade_cap", state["trades_today"] < self.params.max_trades_per_day):
             return None
-        if state["losses_today"] >= self.params.max_losses_per_day:
+        if not self.gate("daily_loss_cap", state["losses_today"] < self.params.max_losses_per_day):
             return None
 
         latest = candles.iloc[-1]
@@ -553,7 +557,12 @@ class VWAPEngine(BaseStrategy):
             state["entry_setup"] = None
             state["trigger_bar_idx"] = None
 
-            if self._is_in_exclusion(time_str):
+            # Second exclusion check, on the ENTRY bar rather than the trigger
+            # bar. Instrumented under the same gate name as the trigger-side
+            # check — otherwise disabling `session_exclusion` for an ablation
+            # left this one still enforcing, and the ablation silently measured
+            # nothing (signal count unchanged at 14 -> 14).
+            if not self.gate("session_exclusion", not self._is_in_exclusion(time_str)):
                 return None
 
             entry = latest["open"]
@@ -675,7 +684,7 @@ class VWAPEngine(BaseStrategy):
                     basis="return to VWAP" if setup == "BAND_REVERSION" else f"+{sigma2}σ band",
                 )
 
-            return TradeSignal(
+            return self._tag_signal(TradeSignal(
                 strategy_id="VWAP_v1",
                 symbol=symbol,
                 direction=direction,
@@ -704,10 +713,10 @@ class VWAPEngine(BaseStrategy):
                     # smc_data build and the replay chart's overlay layer.
                     **mk.as_metadata(),
                 },
-            )
+            ))
 
         # ── Session exclusion check ──────────────────────────────────────
-        if self._is_in_exclusion(time_str):
+        if not self.gate("session_exclusion", not self._is_in_exclusion(time_str)):
             return None
 
         # ── Bias: price vs VWAP ──────────────────────────────────────────
@@ -752,10 +761,20 @@ class VWAPEngine(BaseStrategy):
             inside_band = (not bands_enabled) or std_now <= 0 or (distance_now <= max_dist_sigma * std_now)
             requires_convergence = getattr(self.params, "pullback_requires_convergence", True)
 
-            if not already_taken and inside_band and volume_ok:
+            # [T1.3] Each condition is recorded independently rather than as
+            # one fused `and`, so the ablation study can rank them separately.
+            _g_first   = self.gate("pullback_first_only", not already_taken)
+            _g_band    = self.gate("pullback_inside_band", inside_band)
+            _g_vol     = self.gate("volume_confirmation", volume_ok)
+            if _g_first and _g_band and _g_vol:
+                _g_bias  = self.gate("vwap_bias_side", price_above_vwap or price_below_vwap)
+                _g_slope = self.gate("vwap_slope_aligned",
+                                     (price_above_vwap and vwap_rising) or (price_below_vwap and vwap_falling))
+                _g_mom   = self.gate("momentum_aligned",
+                                     (price_above_vwap and momentum_up) or (price_below_vwap and momentum_down))
                 if price_above_vwap and vwap_rising and momentum_up:
                     is_pullback_candle = (converging if requires_convergence else (latest["close"] < latest["open"]))
-                    if is_pullback_candle:
+                    if self.gate("pullback_convergence", is_pullback_candle):
                         state["pending_entry"] = True
                         state["trigger_bar_idx"] = current_time
                         state["entry_direction"] = "BUY"
@@ -772,7 +791,7 @@ class VWAPEngine(BaseStrategy):
                         return None
                 elif price_below_vwap and vwap_falling and momentum_down:
                     is_pullback_candle = (converging if requires_convergence else (latest["close"] > latest["open"]))
-                    if is_pullback_candle:
+                    if self.gate("pullback_convergence", is_pullback_candle):
                         state["pending_entry"] = True
                         state["trigger_bar_idx"] = current_time
                         state["entry_direction"] = "SELL"
@@ -804,12 +823,24 @@ class VWAPEngine(BaseStrategy):
             min_wick_pct = getattr(self.params, "reversion_min_rejection_wick_pct", 0.50) or 0.50
             total_range = latest["high"] - latest["low"]
 
-            if slope_is_flat and volume_ok and total_range > 0:
+            _g_flat = self.gate("reversion_slope_flat", slope_is_flat)
+            _g_rvol = self.gate("volume_confirmation", volume_ok)
+            if _g_flat and _g_rvol and total_range > 0:
                 # Closed beyond the UPPER band → expect reversion DOWN → SELL.
-                if latest["close"] >= upper_band and (not requires_trend_neutral or momentum_flat or momentum_down):
+                # Recorded for its own sake — how often price even reaches the
+                # band is the denominator for every other reversion stat.
+                self.gate("reversion_beyond_band",
+                          latest["close"] >= upper_band or latest["close"] <= lower_band)
+                if latest["close"] >= upper_band and self.gate(
+                    "reversion_trend_neutral",
+                    (not requires_trend_neutral or momentum_flat or momentum_down),
+                ):
                     upper_wick = latest["high"] - max(latest["open"], latest["close"])
                     rejection_ok = (not requires_rejection) or (upper_wick / total_range >= min_wick_pct)
-                    if rejection_ok:
+                    # The "wick rejection" confluence, recorded with the actual
+                    # wick fraction so its predictive value is measurable.
+                    if self.gate("wick_rejection", rejection_ok,
+                                 detail=f"wick_pct={upper_wick / total_range:.3f}"):
                         state["pending_entry"] = True
                         state["trigger_bar_idx"] = current_time
                         state["entry_direction"] = "SELL"
@@ -825,10 +856,14 @@ class VWAPEngine(BaseStrategy):
                         )
                         return None
                 # Closed beyond the LOWER band → expect reversion UP → BUY.
-                elif latest["close"] <= lower_band and (not requires_trend_neutral or momentum_flat or momentum_up):
+                elif latest["close"] <= lower_band and self.gate(
+                    "reversion_trend_neutral",
+                    (not requires_trend_neutral or momentum_flat or momentum_up),
+                ):
                     lower_wick = min(latest["open"], latest["close"]) - latest["low"]
                     rejection_ok = (not requires_rejection) or (lower_wick / total_range >= min_wick_pct)
-                    if rejection_ok:
+                    if self.gate("wick_rejection", rejection_ok,
+                                 detail=f"wick_pct={lower_wick / total_range:.3f}"):
                         state["pending_entry"] = True
                         state["trigger_bar_idx"] = current_time
                         state["entry_direction"] = "BUY"

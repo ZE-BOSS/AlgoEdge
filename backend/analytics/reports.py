@@ -262,13 +262,33 @@ def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | 
             # already renders as "FVG: Yes/No" / "Liquidity Sweep: Yes/No" —
             # so the breakdown reflects more than one flat bucket.
             breakdown = {}
-            if original_signal.get("has_fvg"):
-                breakdown["fvg"] = 1
-            if original_signal.get("has_liquidity_sweep"):
-                breakdown["liquidity_sweep"] = 1
-            pattern = original_signal.get("pattern")
-            if pattern and pattern not in ("N/A", None):
-                breakdown[f"pattern_{pattern}".lower().replace(" ", "_")] = 1
+
+            # [T1.4] Preferred source: the confluence tags recorded by the
+            # GateRecorder. `confluence_tags` is a flat list of every gate the
+            # candidate PASSED, captured on the group before _slim_sub_trades
+            # strips original_signal, so unlike the fallbacks below it survives
+            # persistence. This is what finally makes `by_confirmation` say
+            # something — every one of the 3,528 previously saved trades carried
+            # the single tag "base_structure" because the code below reads
+            # fields that had already been stripped.
+            tags = t.get("confluence_tags")
+            if not tags:
+                tags = metadata.get("confluence_tags")
+            if not tags:
+                tags = (t.get("gate_vector") and
+                        [k for k, v in t["gate_vector"].items() if v]) or None
+            if tags:
+                for tag in tags:
+                    breakdown[str(tag)] = 1
+
+            if not breakdown:
+                if original_signal.get("has_fvg"):
+                    breakdown["fvg"] = 1
+                if original_signal.get("has_liquidity_sweep"):
+                    breakdown["liquidity_sweep"] = 1
+                pattern = original_signal.get("pattern")
+                if pattern and pattern not in ("N/A", None):
+                    breakdown[f"pattern_{pattern}".lower().replace(" ", "_")] = 1
             if not breakdown and score >= 40:
                 breakdown["base_structure"] = 40
             

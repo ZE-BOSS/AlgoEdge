@@ -38,6 +38,21 @@ export default function RiskSettings() {
     tp4_rr: 10.0,
     tp5_rr: 15.0,
     tp_splits: '50,30,20',
+    // [T2.3] These three were missing from live Risk settings entirely, which
+    // is the live-trading half of the bug that left trail_method NULL on
+    // 3,528/3,528 backtest trades: with tp_count=1 the ONLY leg had no trail
+    // method, so RiskEngine's `if trail_method and ...` guard short-circuited
+    // on every tick and no position ever trailed.
+    trail_method_tp1: 'NONE',
+    trail_mode: 'EITHER',
+    trail_trigger_rr: 2.0,
+    trail_activation_rr: 2.0,   // legacy alias, kept in sync by `update`
+    // [17.6] Previously absent from this defaults block, so they were dropped
+    // from the saved payload entirely and could never be set from the UI.
+    trail_trigger_tp_level: 1,
+    trail_require_be_first: false,
+    be_trigger_tp_level: 1,
+    be_spread_multiple: 2.0,
     trail_method_tp2: 'ATR_TRAIL',
     trail_method_tp3: 'STRUCTURE_TRAIL',
     trail_method_tp4: 'ATR_TRAIL',
@@ -50,7 +65,11 @@ export default function RiskSettings() {
     atr_trail_multiplier_tp5: 1.5,
     trail_pips: 15,
     trail_pct: 0.5,
-    trail_activation_rr: 1.5,
+    // [17.7] `trail_activation_rr: 1.5` was declared a SECOND time here.
+    // JS object literals are last-wins, so it silently overrode the 2.0 set
+    // above and shipped defaults where the UI showed 2.0R while the engine
+    // (which reads trail_activation_rr) armed at 1.5R. Removed; the single
+    // declaration beside trail_trigger_rr is now authoritative.
     trail_step_pips: 5.0,
     trail_structure_bars: 3,
     compounding_enabled: false,
@@ -133,7 +152,20 @@ export default function RiskSettings() {
     },
   });
 
-  const update = (key, val) => setConfig({ ...config, [key]: val });
+  const update = (key, val) => {
+    // `trail_activation_rr` is the legacy name for the same threshold. The
+    // engine prefers `trail_trigger_rr`, but config_schema warns when the two
+    // disagree ("the UI shows one number while the engine uses another"), so
+    // keep them in lockstep rather than emitting a warning on every save.
+    // [17.7] Sync BOTH ways. This previously only handled trail_trigger_rr,
+    // so editing the "Trail Activation (RR)" control left trail_trigger_rr
+    // stale and the two disagreed again.
+    if (key === 'trail_trigger_rr' || key === 'trail_activation_rr') {
+      setConfig({ ...config, trail_trigger_rr: val, trail_activation_rr: val });
+      return;
+    }
+    setConfig({ ...config, [key]: val });
+  };
 
   const riskWarnings = [];
   if (config.risk_per_trade_pct > config.max_risk_hard_cap_pct) riskWarnings.push(`Risk Per Trade (${config.risk_per_trade_pct}%) > Max Risk Hard Cap (${config.max_risk_hard_cap_pct}%)`);
@@ -240,6 +272,105 @@ export default function RiskSettings() {
 
       <div className="card">
         <div className="card-header"><span className="card-title">Trailing Stops</span></div>
+
+        {/* [T2.3] Trail activation. Without these, RR-mode trailing had no
+            trigger and TP1 had no method, so a single-TP position that ran to
+            3R and reversed went all the way back to its original stop. */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16,
+          padding: 12, marginBottom: 16, borderRadius: 'var(--radius-sm)',
+          background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.25)',
+        }}>
+          <div>
+            <label>Trail Trigger Mode</label>
+            <select value={config.trail_mode} onChange={e => update('trail_mode', e.target.value)}>
+              <option value="RR">RR — at an R-multiple</option>
+              <option value="TP_HIT">TP_HIT — when TP1 closes</option>
+              <option value="EITHER">Either, whichever first</option>
+              <option value="NONE">Never trail</option>
+            </select>
+          </div>
+          <div>
+            <label>Trail Start (R)</label>
+            <input
+              type="number" step="0.1" min="0"
+              value={config.trail_trigger_rr}
+              onChange={e => update('trail_trigger_rr', +e.target.value)}
+              disabled={config.trail_mode === 'TP_HIT' || config.trail_mode === 'NONE'}
+            />
+          </div>
+          {/* [17.6] These four existed in the schema and were read by the
+              engine, but had no control anywhere in the UI — so they could only
+              ever hold their defaults, and a user had no way to see or change
+              behaviour that was actively affecting live positions. */}
+          <div>
+            <label>Trail Start (TP level)</label>
+            <select
+              value={config.trail_trigger_tp_level ?? 1}
+              onChange={e => update('trail_trigger_tp_level', +e.target.value)}
+              disabled={config.trail_mode === 'RR' || config.trail_mode === 'NONE'}
+            >
+              {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>TP{n} closes</option>)}
+            </select>
+            <small style={{ color: 'var(--text-dim)' }}>Which TP closing arms the trail (TP_HIT / Either modes).</small>
+          </div>
+          <div>
+            <label>Require Break-even First</label>
+            <select
+              value={config.trail_require_be_first ? 'yes' : 'no'}
+              onChange={e => update('trail_require_be_first', e.target.value === 'yes')}
+              disabled={config.trail_mode === 'NONE'}
+            >
+              <option value="no">No — trail as soon as it triggers</option>
+              <option value="yes">Yes — only after break-even is set</option>
+            </select>
+            <small style={{ color: 'var(--text-dim)' }}>Stops the trail arming while the position can still lose.</small>
+          </div>
+          <div>
+            <label>Break-even Trigger (TP level)</label>
+            <select
+              value={config.be_trigger_tp_level ?? 1}
+              onChange={e => update('be_trigger_tp_level', +e.target.value)}
+              disabled={config.be_mode === 'RR' || config.be_mode === 'NONE'}
+            >
+              {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>TP{n} closes</option>)}
+            </select>
+            <small style={{ color: 'var(--text-dim)' }}>Which TP closing moves the stop to break-even.</small>
+          </div>
+          <div>
+            <label>Break-even Spread Multiple</label>
+            <input
+              type="number" step="0.5" min="0"
+              value={config.be_spread_multiple ?? 2.0}
+              onChange={e => update('be_spread_multiple', +e.target.value)}
+              disabled={config.be_mode === 'NONE'}
+            />
+            <small style={{ color: 'var(--text-dim)' }}>Break-even sits this many spreads above entry, so it cannot close at a loss.</small>
+          </div>
+          <div>
+            <label>TP1 Trail Method</label>
+            <select value={config.trail_method_tp1} onChange={e => update('trail_method_tp1', e.target.value)}>
+              <option value="NONE">None</option>
+              <option value="ATR_TRAIL">ATR Trail</option>
+              <option value="FIXED_PIPS">Fixed Pips</option>
+              <option value="STRUCTURE_TRAIL">Structure Trail</option>
+              <option value="PCT_TRAIL">Percentage Trail</option>
+            </select>
+            {config.trail_method_tp1 === 'ATR_TRAIL' && (
+              <div style={{ marginTop: 8 }}>
+                <label>ATR Multiplier</label>
+                <input type="number" step="0.1" value={config.atr_trail_multiplier_tp1} onChange={e => update('atr_trail_multiplier_tp1', +e.target.value)} />
+              </div>
+            )}
+          </div>
+          <div style={{ gridColumn: '1 / -1', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+            <strong>RR</strong> arms the trail once the position reaches this R-multiple, measured
+            from the ORIGINAL stop. <strong>TP_HIT</strong> arms it when TP1 closes — which never
+            fires on a single-TP setup, so leave it on RR or Either if <code>tp_count = 1</code>.
+            TP1 must have a trail method other than None or nothing trails at all.
+          </div>
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <div>
             <label>TP2 Trail Method</label>
@@ -312,7 +443,9 @@ export default function RiskSettings() {
           <div><label>ATR Multiplier</label><input type="number" step="0.1" value={config.atr_trail_multiplier} onChange={e => update('atr_trail_multiplier', +e.target.value)} /></div>
           <div><label>Fixed Trail Pips</label><input type="number" value={config.trail_pips} onChange={e => update('trail_pips', +e.target.value)} /></div>
           <div><label>Trail % (for PCT_TRAIL)</label><input type="number" step="0.1" value={config.trail_pct} onChange={e => update('trail_pct', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>% of price as trail distance</div></div>
-          <div><label>Trail Activation (RR)</label><input type="number" step="0.1" value={config.trail_activation_rr} onChange={e => update('trail_activation_rr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Start trailing after this R</div></div>
+          {/* [17.7] Removed: a second control for the same setting as
+              "Trail Start (R)" above. Two inputs writing one value let a user
+              set them to different numbers, and only one of them synced. */}
           <div><label>Trail Step (Pips)</label><input type="number" step="0.5" value={config.trail_step_pips} onChange={e => update('trail_step_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Minimum SL hop distance</div></div>
           <div><label>Structure Swing Bars</label><input type="number" value={config.trail_structure_bars} onChange={e => update('trail_structure_bars', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Left/Right bars for structure</div></div>
         </div>

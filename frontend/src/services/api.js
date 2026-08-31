@@ -289,6 +289,13 @@ export const getFundHealth = () => api.get('/fundamentals/health');
 
 /** List all registered + generated strategies with status metadata. */
 export const listFactoryStrategies = () => api.get('/strategy-factory/strategies');
+
+// [L1] Per-strategy exit/session defaults, derived from the Phase 3 measurements.
+// Trailing and session gating are NOT account-level settings: the trailing sweep
+// improved 10 of 15 cells and made 5 worse, and session-gate contribution ranged
+// from -0.170 to +0.126 by strategy. The Backtester reads this so the panel shows
+// the measured-best values for whichever strategy is selected.
+export const getStrategyDefaults = () => api.get('/strategy-factory/strategy-defaults');
 /** Scaffold a new strategy from a spec object. */
 export const generateStrategy = (data) => api.post('/strategy-factory/generate', data);
 /** Activate a generated strategy: commit to dev branch, open GitHub PR. */

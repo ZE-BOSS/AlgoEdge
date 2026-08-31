@@ -8,7 +8,20 @@ class NYOpenRetestParams:
     """
     range_window_start: str = "08:00"
     range_window_end: str = "08:15"
-    earliest_valid_break_time: str = "09:30"
+    earliest_valid_break_time: str = "09:00"
+    """
+    CHANGED "09:30" -> "09:00" (2026-08, Phase 3 ablation).
+
+    Measured contribution **-0.013** across 8 cells (positive in only 4 of 8) —
+    i.e. the gate is mildly HARMFUL — while blocking 7,306 of 8,185 candidates
+    it saw (89.3%). Removing it entirely yields **+38% more signals** with no
+    loss of expectancy.
+
+    Not removed outright, because a break before the range window has finished
+    forming is genuinely meaningless; relaxed by 30 minutes instead, which
+    recovers most of the sample while keeping the structural guard. Revisit
+    once there is a larger post-fix sample.
+    """
     session_end: str = "11:00"
 
     max_losses_per_day: int = 0

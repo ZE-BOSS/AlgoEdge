@@ -5,6 +5,7 @@ FastAPI application entry point.
 All routes registered, DB initialized, CORS configured for remote frontend access.
 """
 
+import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
@@ -150,6 +151,34 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down AlgoEdge Backend...")
+
+    # Disconnect the broker FIRST. Its disconnect() cancels the MT5
+    # auto-reconnect daemon, which is an infinite `while True` task. Without
+    # this, uvicorn's graceful shutdown waits on that task forever and the
+    # process hangs on "Waiting for background tasks to complete" — wedging
+    # every --reload cycle in dev and blocking `pm2 restart` in production
+    # until pm2's kill_timeout force-kills it.
+    try:
+        from backend.brokers.factory import BrokerFactory
+        # Read the singleton directly rather than calling get_broker(), which
+        # would CONSTRUCT a broker during shutdown if none was ever created.
+        active_broker = BrokerFactory._broker_instance
+        if active_broker is not None:
+            await active_broker.disconnect()
+    except Exception as e:
+        logger.warning(f"Broker disconnect during shutdown failed (continuing): {e}")
+
+    # The log pump is the other infinite background task; same hang, same fix.
+    try:
+        from backend.services.log_stream import log_hub
+        stop = getattr(log_hub, "stop", None)
+        if callable(stop):
+            res = stop()
+            if asyncio.iscoroutine(res):
+                await res
+    except Exception as e:
+        logger.warning(f"Log hub stop during shutdown failed (continuing): {e}")
+
     try:
         from backend.data.redis_client import redis_client
         await redis_client.disconnect()

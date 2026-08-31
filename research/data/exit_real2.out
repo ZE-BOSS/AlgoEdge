@@ -1,0 +1,27 @@
+real trades loaded: 7,463
+
+matched to MT5 bars: 7,463   skipped: 0
+
+============================================================================
+EXIT METHOD, APPLIED TO YOUR REAL STRATEGY ENTRIES
+============================================================================
+method                    n     expR      totR      WR     PF    maxDD
+ACTUAL (as traded)     7463  -0.1800   -1343.5   35.8%   0.72   1407.5
+fixed_TP_only          7463  +0.0634    +473.0   22.1%   1.07    704.5
+BE_at_1R               7463  +0.0620    +462.3   27.3%   1.11    606.2
+user_ladder            7463  +0.0528    +394.1   40.7%   1.09    568.3
+loose_ladder           7463  +0.0586    +437.1   32.5%   1.09    631.1
+tight_ladder           7463  +0.0660    +492.8   41.1%   1.12    466.9
+step_1R_behind         7463  +0.0619    +461.6   36.2%   1.09    590.2
+
+============================================================================
+BEST LADDER PER STRATEGY (vs what actually happened)
+============================================================================
+strategy                 n    actual       best ladder      expR     lift
+APA_v1                1236   -0.1775     fixed_TP_only   +0.0057  +0.1832
+BiasIFVG_v1           1108   -0.1935    step_1R_behind   +0.0181  +0.2116
+CRT_v1                 890   -0.3758      tight_ladder   +0.0521  +0.4279
+DriftJumpAlpha_v1      696   +0.2492      loose_ladder   +0.3117  +0.0625
+HTFFVGFlip_v1          183   -0.0851    step_1R_behind   -0.0163  +0.0688
+NYOpenRetest_v1       1164   -0.3313          BE_at_1R   +0.0655  +0.3968
+VWAP_v1               2186   -0.1590     fixed_TP_only   +0.1239  +0.2829

@@ -101,6 +101,8 @@ async def run_backtest(
     candles_m5: pd.DataFrame = None,
     title: str | None = None,
     strategy: Any = None,
+    progress_cb: Any = None,
+    candles_h1: pd.DataFrame = None,
 ) -> dict[str, Any]:
     """
     Execute a backtest and optionally persist results to PostgreSQL.
@@ -130,7 +132,7 @@ async def run_backtest(
     import asyncio
     results = await asyncio.to_thread(
         engine.run, candles, signals, initial_balance, candles_m15, candles_m5,
-        strategy,
+        strategy, progress_cb, candles_h1,
     )
 
     # Broadcast: engine complete
@@ -245,6 +247,9 @@ async def run_backtest(
                     trail_method=trade_data.get("trail_method"),
                     mae_pips=trade_data.get("mae_pips"),
                     mfe_pips=trade_data.get("mfe_pips"),
+                    mae_r=trade_data.get("mae_r"),
+                    mfe_r=trade_data.get("mfe_r"),
+                    risk_pips=trade_data.get("risk_pips"),
                     confluence_score=trade_data.get("confluence_score"),
                     session=trade_data.get("entry_session", "UNKNOWN"),
                     strategy_id=trade_data.get("strategy_id", trade_data.get("strategy", strategy_id)),
@@ -262,6 +267,7 @@ async def run_backtest(
                     # to key off, since the frontend reads
                     # group.sub_trades[0].entry_confirmations etc.
                     chart_data=json.dumps(trade_data.get("chart_data") or [], default=_json_default),
+                    chart_data_h1=json.dumps(trade_data.get("chart_data_h1") or [], default=_json_default),
                     chart_data_m15=json.dumps(trade_data.get("chart_data_m15") or [], default=_json_default),
                     chart_data_m5=json.dumps(trade_data.get("chart_data_m5") or [], default=_json_default),
                     sub_trades=json.dumps(_slim_sub_trades(trade_data.get("sub_trades")), default=_json_default),

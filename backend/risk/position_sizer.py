@@ -48,6 +48,50 @@ MIN_STOP_FLOOR_PIPS: dict[str, float] = {
 }
 _MIN_STOP_FLOOR_DEFAULT_PIPS = 2.0
 
+# [T2.2] Per (symbol, driver) tally of minimum-stop refusals, so a run that
+# rejects every signal logs once with a running count rather than once per
+# signal. Reset per process; purely diagnostic.
+_MIN_STOP_REFUSAL_COUNTS: dict[tuple[str, str], int] = {}
+
+
+def resolve_global_min_sl_pips(value, symbol: str) -> float:
+    """
+    Resolve RiskParams.min_sl_pips for THIS symbol.
+
+    A single scalar applied to every asset class is what produced two separate
+    failures in the saved book:
+
+      * EURGBP: ATR-derived stops sit near 8 pips against a global floor of 10,
+        so the sizer refused 100% of its signals and the run returned 0 trades
+        with no explanation.
+      * Netherlands 25 / EURGBP / XPTUSD: median forward excursion of 0.47R,
+        0.73R and 0.94R — the stop was wider than the instrument's typical move,
+        so those setups could not reach 1R even when correct. They are the three
+        worst instruments in the book.
+
+    So `min_sl_pips` now also accepts a mapping keyed by asset class:
+
+        {"FOREX": 4, "INDEX": 3, "CRYPTO": 20, "COMMODITY": 8, "SYNTHETIC": 5}
+
+    with an optional "DEFAULT" key. A plain number keeps the old behaviour
+    exactly, so nothing that passes a scalar changes.
+    """
+    if value is None:
+        return 0.0
+    if isinstance(value, dict):
+        cls = _instrument_type_of(symbol)
+        for key in (cls, "DEFAULT", "default"):
+            if key in value:
+                try:
+                    return float(value[key] or 0.0)
+                except (TypeError, ValueError):
+                    return 0.0
+        return 0.0
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
 # [2.1] Default only — the real, user-editable value is RiskParams.max_margin_utilisation_pct.
 # Ceiling on required margin as a percentage of account equity for a SINGLE
 # position. MT5 rejects an order it cannot margin with retcode 10019 (No money),
@@ -439,7 +483,7 @@ def minimum_stop_distance(
     info: dict | None = None,
     use_live_mt5: bool = True,
     min_stop_spread_multiple: float | None = None,
-    global_min_sl_pips: float = 0.0,
+    global_min_sl_pips: float | dict[str, float] | None = 0.0,
 ) -> tuple[float, str]:
     """
     Smallest stop distance (in PRICE, not pips) that is physically tradeable for
@@ -498,7 +542,9 @@ def minimum_stop_distance(
         spread_price = spread_pips * spread_multiple * pip_size
         floor_price = floor_pips * pip_size
         costs_stops_price = costs_stops_pips * pip_size
-        global_floor_price = float(global_min_sl_pips or 0.0) * pip_size
+        # Resolve per asset class — a scalar still behaves exactly as before.
+        _global_pips = resolve_global_min_sl_pips(global_min_sl_pips, symbol)
+        global_floor_price = _global_pips * pip_size
 
         candidates = {
             "broker_stops_level": max(broker_price, costs_stops_price),
@@ -749,12 +795,29 @@ def calculate_lot_size(
     if min_stop_price > 0 and sl_distance < min_stop_price:
         pip_size = get_pip_size(symbol) or 0.0
         sl_pips = (sl_distance / pip_size) if pip_size > 0 else float("nan")
-        logger.error(
-            f"[SIZER] {symbol}: SL distance {sl_distance:.6f} ({sl_pips:.2f} pips) is below the "
-            f"minimum viable stop {min_stop_price:.6f} — driver: {min_stop_reason}. "
-            f"This stop is untradeable live (spread/stops-level would consume it). "
-            f"Refusing to size — returning 0 lots."
-        )
+        # [T2.2] WARNING, not ERROR.
+        #
+        # Refusing to size is a normal, correct rejection — the signal is
+        # dropped upstream by the zero-lot check and the run continues. Logging
+        # it at ERROR made a routine filter look like a crash, which is exactly
+        # why "the backtest just ends without producing a result" was
+        # misdiagnosed for so long: an EURGBP run legitimately rejected 100% of
+        # its signals against a 10-pip global floor and emitted a wall of red.
+        #
+        # Rate-limited per symbol+driver: one full explanation, then a periodic
+        # count. A run that rejects every signal used to emit one line per
+        # signal, which is its own denial-of-service on the log stream.
+        _key = (symbol, min_stop_reason)
+        _n = _MIN_STOP_REFUSAL_COUNTS.get(_key, 0) + 1
+        _MIN_STOP_REFUSAL_COUNTS[_key] = _n
+        if _n == 1 or _n % 100 == 0:
+            logger.warning(
+                f"[SIZER] {symbol}: SL distance {sl_distance:.6f} ({sl_pips:.2f} pips) is below "
+                f"the minimum viable stop {min_stop_price:.6f} — driver: {min_stop_reason}. "
+                f"This stop is untradeable live (spread/stops-level would consume it). "
+                f"Refusing to size — returning 0 lots."
+                + (f"  [{_n} refusals so far for this symbol/driver]" if _n > 1 else "")
+            )
         diag["refused_reason"] = "stop_below_min_viable"
         _last_sizing_diagnostics_var.set(diag)
         return 0.0

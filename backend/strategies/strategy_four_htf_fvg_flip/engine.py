@@ -207,6 +207,12 @@ class HTFFVGFlipEngine(BaseStrategy):
         return [self.params.htf_timeframe, self.params.entry_confirmation_tf]
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
+        # [T1.3] Open a confluence-telemetry record for this bar.
+        # No-op unless self.gates.enabled (live default is off).
+        self.begin_candidate(
+            symbol, timeframe,
+            bar_time=candles.index[-1] if candles is not None and len(candles) else None,
+        )
         self._init_state(symbol)
         state = self.state[symbol]
         
@@ -342,7 +348,7 @@ class HTFFVGFlipEngine(BaseStrategy):
             # 5. Wait for inversion close
             if state["status"] == "AWAIT_INVERSION_CLOSE":
                 # Only block new trades outside session; do not reset state mid-setup
-                if not self._is_within_session(current_time):
+                if not self.gate("session_filter", self._is_within_session(current_time)):
                     return None
                     
                 fvg = state["m5_fvg"]
@@ -484,7 +490,7 @@ class HTFFVGFlipEngine(BaseStrategy):
                         color="rgba(16,185,129,0.9)", target_rr=rr,
                     )
 
-                    return TradeSignal(
+                    return self._tag_signal(TradeSignal(
                         strategy_id="HTFFVGFlip_v1",
                         symbol=symbol,
                         direction=state["bias"],
@@ -503,6 +509,6 @@ class HTFFVGFlipEngine(BaseStrategy):
                             # [V1] Chart geometry — see strategies/core/markings.py.
                             **mk.as_metadata(),
                         }
-                    )
+                    ))
 
         return None

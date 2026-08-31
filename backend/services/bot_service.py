@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from backend.risk.multi_tp import slot_overrides_from_config
 from backend.services.profit_tracker import profit_tracker
 from backend.utils.logger import get_logger
 
@@ -545,6 +546,30 @@ class BotService:
                                     else:
                                         logger.warning(f"[{symbol}] slot {slot.slot_id}: strategy_params_override key '{_k}' not found on {strategy_id} params — ignored")
                             self.engines[slot.slot_id] = new_engine
+                            # [T3.5] Session gating is a per-strategy verdict, not a global
+                            # one: the ablation measured -0.170 for HTFFVGFlip (actively
+                            # harmful) through +0.126 for BiasIFVG (best in the study).
+                            # Applied here so live matches the backtester.
+                            try:
+                                from backend.strategies.strategy_defaults import get_strategy_defaults
+                                _sd_live = get_strategy_defaults(strategy_id)
+                                if "session_filter_enabled" in _sd_live:
+                                    _blk_name = {
+                                        "APA_v1": "apa", "VWAP_v1": "vwap", "CRT_v1": "crt",
+                                        "BiasIFVG_v1": "bias_ifvg",
+                                        "HTFFVGFlip_v1": "htf_fvg_flip",
+                                        "NYOpenRetest_v1": "ny_open_retest",
+                                    }.get(strategy_id)
+                                    _blk = getattr(config, _blk_name, None) if _blk_name else None
+                                    if _blk is not None and hasattr(_blk, "session_filter_enabled"):
+                                        _blk.session_filter_enabled = _sd_live["session_filter_enabled"]
+                                        logger.info(
+                                            f"[LIVE] {strategy_id}: session_filter_enabled="
+                                            f"{_sd_live['session_filter_enabled']} (measured default)"
+                                        )
+                            except Exception as _e:
+                                logger.warning(f"[LIVE] session default not applied: {_e}")
+
                             self.engines[slot.slot_id].strategy_id = strategy_id
                             self._log_event(f"[{symbol}] Instantiated {strategy_id} Engine (slot {slot.slot_id})", "INFO", "BOT")
 
@@ -699,6 +724,13 @@ class BotService:
                                         "tp5_rr": config.risk.tp5_rr,
                                         "tp_count": config.risk.tp_count,
                                         "tp_splits": config.risk.tp_splits,
+                                        # [17.1] Per-symbol/per-strategy R:R.
+                                        # Built from InstrumentSlot.tp1_rr by the
+                                        # same helper the backtest routes use, so
+                                        # a target measured in a backtest is the
+                                        # target actually traded live.
+                                        **slot_overrides_from_config(
+                                            getattr(config, "instrument_slots", None)),
                                         "multi_position_mode": True,
 
                                         "max_daily_drawdown_pct": config.risk.max_daily_drawdown_pct,
@@ -787,6 +819,47 @@ class BotService:
                                         ),
                                     }
 
+                                    # ── Per-strategy exit defaults (LIVE) ────────────────
+                                    # Same registry the backtester uses, applied to the live
+                                    # risk config so live and backtest cannot diverge — a
+                                    # strategy trailed in backtest but not live (or the
+                                    # reverse) would make every backtest result unusable as a
+                                    # prediction of live behaviour.
+                                    #
+                                    # Only fills fields the user left at the RiskParams
+                                    # default; an explicit setting always wins. See
+                                    # backend/strategies/strategy_defaults.py for the
+                                    # measurement behind each value.
+                                    try:
+                                        from backend.strategies.strategy_defaults import (
+                                            get_strategy_defaults, get_strategy_evidence,
+                                        )
+                                        from backend.core.config_schema import RiskParams as _RP
+                                        _sd = get_strategy_defaults(strategy_id)
+                                        _base = _RP()
+                                        _applied = {}
+                                        for _k, _v in _sd.items():
+                                            if _k == "session_filter_enabled":
+                                                continue  # strategy params, applied at engine build
+                                            # "User did not change it" == still equal to the
+                                            # shipped RiskParams default.
+                                            if hasattr(_base, _k) and getattr(config.risk, _k, None) == getattr(_base, _k):
+                                                risk_config[_k] = _v
+                                                _applied[_k] = _v
+                                        if _applied and not getattr(self, "_logged_sdefaults", set()) & {strategy_id}:
+                                            if not hasattr(self, "_logged_sdefaults"):
+                                                self._logged_sdefaults = set()
+                                            self._logged_sdefaults.add(strategy_id)
+                                            self._log_event(
+                                                f"[{symbol}] {strategy_id}: applied measured exit defaults "
+                                                f"{_applied} — {get_strategy_evidence(strategy_id)}",
+                                                category="RISK",
+                                            )
+                                    except Exception as _e:
+                                        logger.warning(
+                                            f"[LIVE] strategy exit defaults not applied for "
+                                            f"{strategy_id}: {_e}"
+                                        )
 
                                     # Cache RiskEngine across scan cycles — only rebuild when key settings change.
                                     # MultiTPManager/BreakevenManager/TrailingManager are expensive to construct;

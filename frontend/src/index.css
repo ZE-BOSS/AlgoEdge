@@ -336,11 +336,33 @@ body {
   min-width: 0;
 }
 
-.card table,
+/* `display: block` on a <table> was the cause of the "saved backtests list
+   stays shrunk on a wide screen" bug. A block-level table stops being a table
+   box: its rows get wrapped in an ANONYMOUS table box that shrink-wraps to
+   content width, so `table { width: 100% }` no longer reaches the thing that
+   actually paints, and the table sits narrow at the left of a full-width card.
+
+   Horizontal scrolling belongs to the WRAPPER, not the table — .table-wrapper
+   already sets overflow-x: auto, so the table only needs to be told it may
+   not be narrower than its container. .table-scroll is a plain div and can
+   keep display: block. */
+.card table {
+  width: 100%;
+  min-width: 100%;
+}
+
 .table-scroll {
   display: block;
   max-width: 100%;
   overflow-x: auto;
+}
+
+/* Any table NOT already inside a .table-wrapper still needs a scroll box, so
+   give the wrapper role to the card itself for those cases. */
+.card > table {
+  display: block;
+  overflow-x: auto;
+  min-width: 0;
 }
 
 .card pre,

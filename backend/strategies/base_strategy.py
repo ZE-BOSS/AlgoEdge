@@ -41,6 +41,11 @@ from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# [L1-opt] Cap on per-run in-memory strategy logs. A 50,000-bar run that logs
+# once per bar would otherwise hold 50k dicts purely to be discarded, and the
+# same list is serialised into the saved run.
+_MAX_BACKTEST_RUN_LOGS = 5000
+
 class BaseStrategy:
     """
     Interface that all strategies must implement.
@@ -78,12 +83,57 @@ class BaseStrategy:
         # here; the default None means no filtering applies.
         self.fundamental_gates = None
 
+        # ── [T1.3] Confluence telemetry ──────────────────────────────────
+        # Disabled by default, so live trading pays nothing for it: with
+        # enabled=False, `gate()` is just `return bool(passed)`.
+        # The ablation harness constructs the strategy and then sets
+        # `strategy.gates.enabled = True` (optionally with disabled_gates).
+        from backend.strategies.gate_recorder import GateRecorder
+        self.gates = GateRecorder(enabled=False)
+
+    # ── gate helpers ─────────────────────────────────────────────────────
+    def gate(self, name: str, passed: Any, detail: str | None = None) -> bool:
+        """
+        Record a confluence outcome and return it.
+
+        Call sites change minimally — `if not cond: return None` becomes
+        `if not self.gate("name", cond): return None` — so instrumenting an
+        engine does not move its control flow.
+        """
+        return self.gates.gate(name, passed, detail)
+
+    def begin_candidate(self, symbol: str, timeframe: str, bar_index: int = -1, bar_time: Any = None) -> None:
+        """Open a new candidate record at the top of on_bar()."""
+        self.gates.begin(symbol, timeframe, bar_index, bar_time)
+
+    def _tag_signal(self, signal: "TradeSignal | None") -> "TradeSignal | None":
+        """
+        Attach gate telemetry to an outgoing signal.
+
+        Strategies return `self._tag_signal(sig)` instead of `sig` so the
+        engine receives `metadata.passed_gates`, `metadata.gate_vector` and
+        `metadata.confluence_tags`. Returns the signal unchanged when
+        telemetry is off, so this is safe to leave in the live path.
+        """
+        if signal is None:
+            return None
+        if self.gates.enabled:
+            self.gates.emitted(signal)
+            try:
+                signal.metadata = {**(signal.metadata or {}), **self.gates.metadata_for_signal()}
+            except Exception:
+                pass
+        return signal
+
     def log_event(self, message: str, level: str = "INFO", category: str = "STRATEGY"):
         from datetime import datetime, timezone
         from backend.services.bot_service import bot_service
         
-        # Terminal logging
-        if level == "DEBUG":
+        # Terminal logging.
+        # [L1-opt] During a backtest, strategy INFO chatter goes to DEBUG so the
+        # loguru sink can filter it out before formatting/writing. Warnings and
+        # errors still surface at full volume.
+        if level == "DEBUG" or (self.is_backtesting and level == "INFO"):
             logger.debug(f"[{category}] {message}")
         elif level == "WARN":
             logger.warning(f"[{category}] {message}")
@@ -93,13 +143,34 @@ class BaseStrategy:
             logger.info(f"[{category}] {message}")
             
         if self.is_backtesting:
-            self.run_logs.append({
-                "time": datetime.now(timezone.utc).isoformat(),
-                "level": level,
-                "category": category,
-                "message": message
-            })
-            if level != "DEBUG":
+            # [L1-opt] Backtest logging was a measured bottleneck, not a nuisance.
+            # Profiling DriftJumpAlpha over 2,200 bars: loguru `_log` accounted
+            # for 11.4 s of 64 s (18%), with `TextIOWrapper.write` and
+            # `_pickle.Pickler.dump` beneath it — the pickling is bot_service
+            # marshalling each record for the WebSocket queue.
+            #
+            # A backtest emits tens of thousands of INFO lines that nobody reads
+            # live; the run log is what the user actually reviews afterwards. So
+            # keep the in-memory run_logs (bounded below) and forward only
+            # WARN/ERROR to bot_service, instead of every INFO line.
+            if len(self.run_logs) < _MAX_BACKTEST_RUN_LOGS:
+                self.run_logs.append({
+                    "time": datetime.now(timezone.utc).isoformat(),
+                    "level": level,
+                    "category": category,
+                    "message": message
+                })
+            elif len(self.run_logs) == _MAX_BACKTEST_RUN_LOGS:
+                self.run_logs.append({
+                    "time": datetime.now(timezone.utc).isoformat(),
+                    "level": "WARN",
+                    "category": category,
+                    "message": (
+                        f"[run log truncated at {_MAX_BACKTEST_RUN_LOGS} entries — "
+                        f"further messages suppressed for this run]"
+                    ),
+                })
+            if level in ("WARN", "ERROR"):
                 bot_service.log_system_event(message, level, f"BT-{category}")
         else:
             bot_service.log_system_event(message, level, category)

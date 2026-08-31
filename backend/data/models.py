@@ -324,6 +324,12 @@ class BacktestTrade(Base):
     trail_method = Column(String(30))
     mae_pips = Column(Float)
     mfe_pips = Column(Float)
+    # Excursion in R (multiples of the initial stop distance). Pips are not
+    # comparable across symbols, so these are the fields the confluence study
+    # ranks on: "does this setup actually reach 1R / 2R, and how often?"
+    mae_r = Column(Float)
+    mfe_r = Column(Float)
+    risk_pips = Column(Float)
     confluence_score = Column(Integer)
     session = Column(String(20))
     strategy_id = Column(String(50))
@@ -331,6 +337,13 @@ class BacktestTrade(Base):
     
     # Chart & SMC Data
     chart_data = Column(Text)
+    # [B6] H1 context slice for the trade viewer's higher-timeframe pane.
+    # The save paths were wired to write this before the column existed,
+    # which made every save raise
+    # "'chart_data_h1' is an invalid keyword argument for BacktestTrade"
+    # AFTER the run had already completed — the run finished, reported its
+    # P&L, then failed to persist.
+    chart_data_h1 = Column(Text)
     chart_data_m15 = Column(Text)
     chart_data_m5 = Column(Text)
     smc_data = Column(Text)

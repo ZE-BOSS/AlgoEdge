@@ -17,14 +17,23 @@ httpx
 python-multipart
 
 # ── Data & Analysis ──────────────────────────────────────────
-pandas
-numpy
+# pandas is pinned below 3.0: the 3.0.x wheels ship unsigned .pyd binaries that
+# Windows Smart App Control (enforced on the workstation) blocks with "DLL load
+# failed while importing timestamps: An Application Control policy has blocked
+# this file", which takes the whole backend down at import time. 3.0 is also a
+# breaking major the codebase has not been migrated to.
+pandas>=2.2,<3.0
+numpy>=1.26,<3.0
 smartmoneyconcepts
 
 scipy
 
 # ── Database (PostgreSQL) ────────────────────────────────────
 sqlalchemy
+# SQLAlchemy's async engine requires greenlet. Same Smart App Control block
+# as pandas above: greenlet 3.5.x binaries are refused, and the failure only
+# surfaces at first DB call as "the greenlet library is required".
+greenlet>=3.0,<3.2
 alembic
 asyncpg
 psycopg2-binary

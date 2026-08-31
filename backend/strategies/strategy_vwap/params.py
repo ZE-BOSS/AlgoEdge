@@ -70,7 +70,25 @@ class VWAPParams:
     vwap_band_lookback: int = 0
     """[8.1] 0 = bands computed since the session anchor (matching the VWAP line itself); >0 = a rolling N-bar lookback instead. 0 is the doc-faithful default."""
 
-    entry_mode: Literal["PULLBACK_TO_VALUE", "BAND_REVERSION", "BOTH"] = "BOTH"
+    entry_mode: Literal["PULLBACK_TO_VALUE", "BAND_REVERSION", "BOTH"] = "PULLBACK_TO_VALUE"
+    """
+    CHANGED "BOTH" -> "PULLBACK_TO_VALUE" (2026-08, Phase 3).
+
+    BAND_REVERSION (Setup 2) is measurably dead code. Across the 46-cell sweep
+    `reversion_beyond_band` passed **296 of 14,793 evaluations (2.0%)** — price
+    almost never closes beyond the configured sigma on these instruments — and
+    the three confluences inside the branch (`reversion_slope_flat`,
+    `reversion_trend_neutral`, `wick_rejection`) therefore blocked **zero**
+    candidates between them. `wick_rejection` was evaluated just 110 times in
+    the entire study.
+
+    So the setup is not weak, it is UNREACHABLE, and it costs a per-bar ATR
+    computation, band arithmetic and wick-ratio maths on every one of those
+    bars to produce almost nothing.
+
+    Set to "BOTH" (and widen `reversion_min_sigma`) if you want to study it —
+    but it needs to fire often enough to be measurable first.
+    """
     """[8.1] Which setup(s) are active. PULLBACK_TO_VALUE = trend continuation (v1's setup, now with band/convergence/volume gates). BAND_REVERSION = new mean-reversion-to-VWAP setup (8.4). BOTH = either may fire."""
 
     pullback_requires_convergence: bool = True

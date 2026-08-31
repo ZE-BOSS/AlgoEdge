@@ -71,7 +71,7 @@ def _resolve_symbol_candles(candles: Any, symbol: str):
         return candles.get(symbol)
     return candles
 
-def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = None, candles_m5: Any = None) -> list[dict]:
+def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = None, candles_m5: Any = None, candles_h1: Any = None) -> list[dict]:
     """Group trades by group_id for combined P&L display, extracting chart data for frontend."""
     from collections import OrderedDict
     groups = OrderedDict()
@@ -187,6 +187,65 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
              if st.get("trail_applied") and st.get("trail_method")),
             (sub_trades[0].get("trail_method") if sub_trades else None),
         )
+        # [T1.4] Confluence tags, captured HERE — before runner.py's
+        # _slim_sub_trades drops `original_signal` and `metadata` from the
+        # persisted legs. reports.py used to read those stripped fields, which
+        # is why `by_confirmation` contained exactly one bucket
+        # ("base_structure") across all 3,528 saved trades. Copying the flat
+        # tag list onto the group makes it survive persistence.
+        _tags, _vec = None, None
+        for st in sub_trades:
+            _md = (st.get("original_signal") or {}).get("metadata") or st.get("metadata") or {}
+            if not _tags and _md.get("confluence_tags"):
+                _tags = list(_md["confluence_tags"])
+            if not _vec and _md.get("gate_vector"):
+                _vec = dict(_md["gate_vector"])
+            if _tags and _vec:
+                break
+        if _tags:
+            g["confluence_tags"] = _tags
+        if _vec:
+            g["gate_vector"] = _vec
+
+        # Maximum Adverse / Favourable Excursion, rolled up from the legs.
+        #
+        # The engine computes these correctly per position (engine.py ~912/941)
+        # but they were never copied onto the group, and BOTH save paths read
+        # them off the group (runner.py `trade_data.get("mae_pips")`,
+        # backtest.py `t.get("mae_pips")`). Result: mae_pips/mfe_pips were NULL
+        # on 100% of 3,528 saved trades — computed, then dropped one step short
+        # of persistence.
+        #
+        # Legs of a group share one entry and one initial stop, so the group's
+        # excursion is the widest any leg saw.
+        _mae = [st.get("mae_pips") for st in sub_trades if st.get("mae_pips") is not None]
+        _mfe = [st.get("mfe_pips") for st in sub_trades if st.get("mfe_pips") is not None]
+        g["mae_pips"] = max(_mae) if _mae else None
+        g["mfe_pips"] = max(_mfe) if _mfe else None
+
+        # Excursion expressed in R (multiples of the initial stop distance).
+        # Pips are not comparable across symbols — 10 pips on EURGBP and 10 pips
+        # on XAUUSD are entirely different risks — so R is the unit that makes
+        # "how far did this setup actually run?" answerable across the book.
+        # This is the field the confluence study needs: P(MFE >= 1R), median
+        # MFE per confluence, etc.
+        _entry = g.get("entry_price")
+        _sl = g.get("stop_loss")
+        _pip = None
+        try:
+            from backend.risk.position_sizer import get_pip_size
+            _pip = get_pip_size(g.get("symbol"))
+        except Exception:
+            _pip = None
+        if _entry and _sl and _pip:
+            _risk_pips = abs(float(_entry) - float(_sl)) / _pip
+            if _risk_pips > 0:
+                g["risk_pips"] = _risk_pips
+                if g["mae_pips"] is not None:
+                    g["mae_r"] = g["mae_pips"] / _risk_pips
+                if g["mfe_pips"] is not None:
+                    g["mfe_r"] = g["mfe_pips"] / _risk_pips
+
         # Propagate balance_before/after and net_pnl from sub_trades.
         # NOTE: raw trade dicts from portfolio_engine.py never carry a
         # "balance_before" key at all, so sub_trades[0].get("balance_before")
@@ -275,17 +334,45 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
         else:
             g["planned_rr"] = None
 
-        # PnL in R-multiples: net_pnl divided by risk_amount
-        # risk_amount = volume × risk_dist × pip_value (approximate using first sub-trade's volume)
+        # PnL in R-multiples.
+        #
+        # This used to be `g["pnl_r"] = g["realized_rr"]`, and realized_rr is
+        # computed purely from PRICE movement — (exit - entry) / risk_dist. It
+        # ignores spread, commission, slippage and swap entirely. For a
+        # break-even exit the stop sits at (or just past) entry, so price-R is a
+        # small POSITIVE number while the cash PnL is NEGATIVE, because the
+        # round-trip costs were still paid.
+        #
+        # Measured on the saved book: 186 trades had sign(pnl) != sign(pnl_r),
+        # every one of them a BE_SL exit. In aggregate the 227 BE_SL trades were
+        # -$1,632.40 of realised cash but +11.82 R. Since expectancy_r is the
+        # metric strategies get ranked on, this systematically flattered any
+        # strategy that hits break-even often.
+        #
+        # Correct definition: realised cash PnL divided by the cash that was
+        # genuinely at risk at entry (volume x initial stop distance x contract
+        # value). realized_rr is kept as-is — it is legitimately a price metric
+        # and the UI labels it as such.
+        g["pnl_r"] = None
         if risk_dist > 0 and sub_trades:
-            first_vol = sub_trades[0].get("volume", 0)
-            if first_vol > 0:
-                # Approximate: pnl_r = realized_rr (already volume-weighted)
-                g["pnl_r"] = g["realized_rr"]
-            else:
+            try:
+                from backend.risk.position_sizer import calculate_risk_dollars
+                risk_cash = sum(
+                    calculate_risk_dollars(
+                        st.get("volume", 0.0) or 0.0,
+                        entry_p,
+                        sl_p,
+                        g.get("symbol", ""),
+                    )
+                    for st in sub_trades
+                )
+                if risk_cash > 0:
+                    g["risk_cash"] = round(risk_cash, 4)
+                    g["pnl_r"] = round(g["net_pnl"] / risk_cash, 4)
+            except Exception:
+                # Never let an R calculation break grouping; leaving pnl_r None
+                # is honest, and downstream already handles None.
                 g["pnl_r"] = None
-        else:
-            g["pnl_r"] = None
 
         # ── Extract Chart Data and SMC Zones ──
         # Resolve the right candle set for THIS group's symbol. For a
@@ -338,6 +425,16 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
                 g["chart_data"] = _extract_chart_data(group_candles, entry_time, exit_time, 30, 15)
                 g["chart_data_m15"] = _extract_chart_data(group_candles_m15, entry_time, exit_time, 20, 5)
                 g["chart_data_m5"] = _extract_chart_data(group_candles_m5, entry_time, exit_time, 30, 10)
+
+                # [B6] H1 context slice. `chart_data_h1` is a column on
+                # BacktestTrade and is read by the trade viewer, but nothing ever
+                # built it — empty on 3,528/3,528 saved trades because H1 candles
+                # were never passed this far. Less padding than M15: one H1 bar
+                # already covers four M15 bars, so 12/3 spans a similar window.
+                # _extract_chart_data returns [] for None input, so this is safe
+                # for strategies that never request H1.
+                group_candles_h1 = _resolve_symbol_candles(candles_h1, g.get("symbol"))
+                g["chart_data_h1"] = _extract_chart_data(group_candles_h1, entry_time, exit_time, 12, 3)
                 
                 # ── Chart markings -> smc_data (see strategies/core/markings.py) ──
                 # [V1] Until 2026-08-23 this filter only knew "OB"/"FVG"/"STRUCTURE",

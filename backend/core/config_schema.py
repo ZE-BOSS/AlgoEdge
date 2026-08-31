@@ -810,6 +810,22 @@ class InstrumentSlot:
     max_trades_per_day: int | None = None
     max_positions_per_symbol: int | None = None
     max_losses_per_day: int | None = None
+    tp1_rr: float | None = None
+    """[17.1] Per-slot take-profit R:R — i.e. per symbol AND per strategy.
+
+    Measurement (research/16, 285 cells / 23,989 trades) showed R:R is the
+    single largest determinant of a cell's outcome, and that the best value is
+    NOT uniform: DriftJumpAlpha on Crash 1000 wants 1:3 (halves drawdown
+    37%->23% for a fifth of the return), BiasIFVG on USOUSD wants 1:5, and on
+    FundedNext higher R:R is monotonically WORSE while on Deriv it is better.
+    A single global `tp1_rr` cannot express any of that.
+
+    Resolution order (first non-None wins):
+        slot.tp1_rr -> tp1_rr_overrides_by_strategy[strategy_id] -> risk.tp1_rr
+
+    None = inherit, the same convention as every other field on this class."""
+    tp_count: int | None = None
+    """[17.1] Per-slot take-profit count. None = inherit `risk.tp_count`."""
     strategy_params_override: dict = field(default_factory=dict)
     """
     Sparse per-field overrides merged onto the resolved strategy's own Params
@@ -929,9 +945,36 @@ class UserConfig:
         filtered_data = {k: v for k, v in data.items() if k in known_fields}
         
         config = cls(**filtered_data)
-        config.risk = RiskParams(**risk_data)
+        config.risk = RiskParams(**_sync_trail_rr_aliases(risk_data))
         return config
 
+
+
+def _sync_trail_rr_aliases(risk_data: dict) -> dict:
+    """[17.4] Keep `trail_trigger_rr` and `trail_activation_rr` in agreement.
+
+    These are two names for one setting: the UI shows `trail_trigger_rr`, the
+    engine reads `trail_activation_rr`. Nothing propagated between them, so
+    saving "trail at 1R" from the UI left the engine still arming at 2.0 — the
+    trail behaved differently from what the user configured, silently. The
+    existing validator only WARNED about the mismatch; a warning does not stop a
+    live position trailing from the wrong level.
+
+    Whichever key the caller actually supplied wins. If both are supplied and
+    disagree, `trail_trigger_rr` (the one a user can actually see and edit) is
+    authoritative and is copied onto `trail_activation_rr`.
+    """
+    if not isinstance(risk_data, dict):
+        return risk_data
+    has_trigger = "trail_trigger_rr" in risk_data
+    has_activation = "trail_activation_rr" in risk_data
+    if has_trigger and not has_activation:
+        risk_data["trail_activation_rr"] = risk_data["trail_trigger_rr"]
+    elif has_activation and not has_trigger:
+        risk_data["trail_trigger_rr"] = risk_data["trail_activation_rr"]
+    elif has_trigger and has_activation:
+        risk_data["trail_activation_rr"] = risk_data["trail_trigger_rr"]
+    return risk_data
 
 
 @dataclass 
@@ -976,7 +1019,7 @@ class UserConfigV2(UserConfig):
             known = {f.name for f in dataclasses.fields(dataclass_type)}
             return {k: v for k, v in data_dict.items() if k in known}
 
-        config.risk = RiskParams(**filter_kwargs(RiskParams, risk_data))
+        config.risk = RiskParams(**filter_kwargs(RiskParams, _sync_trail_rr_aliases(risk_data)))
         config.drift_jump_alpha = DriftJumpAlphaParams(**filter_kwargs(DriftJumpAlphaParams, drift_jump_alpha_data))
         config.crt = CRTParams(**filter_kwargs(CRTParams, crt_data))
         config.htf_fvg_flip = HTFFVGFlipParams(**filter_kwargs(HTFFVGFlipParams, htf_fvg_flip_data))

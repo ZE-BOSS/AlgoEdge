@@ -473,6 +473,23 @@ class CostModelMixin:
     `self._init_cost_model()` from __init__.
     """
 
+    # [18.2] Backtest-only exits that LIVE CANNOT PRODUCE.
+    #
+    # The engine can close a position with SESSION_END or TIME_LIMIT. Nothing in
+    # backend/services/ implements either, so live simply holds those positions.
+    # Measured on the 7,463-trade sweep: 925 trades (12.4%) exited this way,
+    # carrying $36,076 of booked profit at averages of +0.471R (SESSION_END) and
+    # +1.855R (TIME_LIMIT) — far better than the book's -0.180R. The backtest was
+    # therefore systematically optimistic, and concentrated in its best non-TP
+    # exits.
+    #
+    # Default False so a backtest describes what live will actually do. Set
+    # `simulate_backtest_only_exits=True` to restore the old behaviour, and
+    # expect the result to be unreachable in live until live implements them.
+    @property
+    def _backtest_only_exits(self) -> bool:
+        return bool(self.risk_config.get("simulate_backtest_only_exits", False))
+
     def _init_cost_model(self) -> None:
         self._cost_cache: dict[str, dict[str, Any]] = {}
         # Snapshot of everything actually used, surfaced in the run results so a
@@ -687,6 +704,8 @@ class BacktestEngine(CostModelMixin):
         candles_m15: pd.DataFrame = None,
         candles_m5: pd.DataFrame = None,
         strategy: Any = None,
+        progress_cb: Any = None,
+        candles_h1: pd.DataFrame = None,
     ) -> dict[str, Any]:
         """Run a backtest on historical candles with pre-generated signals.
 
@@ -788,7 +807,22 @@ class BacktestEngine(CostModelMixin):
                 swing_cache[i] = points
 
 
-        for i in range(len(candles)):
+        _n_bars = len(candles)
+        # [B5] Fire the callback ~200 times per run whatever the bar count.
+        # The old `(i & 0x3FF) == 0` was a fixed stride of 1024 bars, so a
+        # 5,000-bar run — the size the whole sweep used — reported four or five
+        # times in total, and the caller's rate limit then dropped some of
+        # those. The bar moved in four steps and looked frozen between them.
+        # The caller still rate-limits, so an over-supply of ticks costs
+        # nothing; an under-supply cannot be recovered.
+        _prog_stride = max(1, _n_bars // 200)
+        for i in range(_n_bars):
+            if progress_cb is not None and (i % _prog_stride) == 0:
+                try:
+                    progress_cb(i, _n_bars)
+                except Exception:
+                    pass
+
             current_time = time_arr[i]
             current_time_dt = dt_arr[i]
             current_price = closes_arr[i]
@@ -847,7 +881,8 @@ class BacktestEngine(CostModelMixin):
                 is_crashboom = "CRASH" in symbol_upper or "BOOM" in symbol_upper
                 
                 limit_hit = False
-                if is_crashboom and pos["bars_held"] >= 400:
+                if (self._backtest_only_exits
+                        and is_crashboom and pos["bars_held"] >= 400):
                     limit_hit = True
                         
                 if limit_hit:
@@ -885,7 +920,8 @@ class BacktestEngine(CostModelMixin):
                             if _entry_secs is not None else et.date()
                         )
                         pos["_entry_et_date"] = _entry_et_date
-                    if time_str >= hard_close_time or et.date() > _entry_et_date:
+                    if self._backtest_only_exits and (
+                            time_str >= hard_close_time or et.date() > _entry_et_date):
                         pos["exit_price"] = _apply_exit_slippage(
                             pos["direction"], current_price, pos.get("symbol", ""),
                             self._costs_for(pos.get("symbol", ""))["exit_slippage_pips"],
@@ -1354,7 +1390,43 @@ class BacktestEngine(CostModelMixin):
         self.equity_curve.append(balance)
 
         # Group trades by group_id for combined P&L display
-        grouped_trades = group_trades(self.trades, candles, candles_m15, candles_m5)
+        grouped_trades = group_trades(self.trades, candles, candles_m15, candles_m5, candles_h1)
+
+        # ── [T1.3] Merge strategy-side gate telemetry into the funnel ──────
+        # `rejection_funnel["strategy_rejections"]` is populated from
+        # `sig.metadata.passed_gates`, but a candidate the STRATEGY rejects
+        # never becomes a signal and so never reaches this engine at all — the
+        # branch that fills it could only ever fire for a signal that was
+        # emitted while flagged as failed, which no strategy does. The result
+        # was a permanently empty strategy-rejection breakdown.
+        #
+        # The GateRecorder on the strategy holds the real counts, so pull them
+        # across here. Everything is guarded: a strategy without telemetry
+        # enabled contributes nothing and behaves exactly as before.
+        try:
+            _gates = getattr(self._strategy, "gates", None)
+            if _gates is not None and getattr(_gates, "enabled", False):
+                _gates.finish()
+                _blocks = _gates.strategy_rejections()
+                if _blocks:
+                    sr = self.rejection_funnel.setdefault("strategy_rejections", {})
+                    for _name, _n in _blocks.items():
+                        sr[_name] = sr.get(_name, 0) + _n
+                _summary = _gates.summary()
+                self.rejection_funnel["gate_stats"] = _summary.get("gates", {})
+                self.rejection_funnel["candidates_evaluated"] = _summary.get("candidates_recorded", 0)
+                self.rejection_funnel["candidates_blocked"] = _summary.get("candidates_blocked", 0)
+                if _summary.get("disabled_gates"):
+                    # Marks the run as an ABLATION run, so it can never be
+                    # mistaken for a baseline in the saved results.
+                    self.rejection_funnel["disabled_gates"] = _summary["disabled_gates"]
+                logger.info(
+                    f"[ENGINE] Gate telemetry: {_summary.get('candidates_recorded', 0)} candidates, "
+                    f"{_summary.get('candidates_blocked', 0)} blocked. "
+                    f"Top blockers: {list(_blocks.items())[:3]}"
+                )
+        except Exception as e:
+            logger.warning(f"[ENGINE] Gate telemetry merge failed (run unaffected): {e}")
 
         report = generate_risk_report(grouped_trades, initial_balance=initial_balance)
         report.rejection_funnel = self.rejection_funnel

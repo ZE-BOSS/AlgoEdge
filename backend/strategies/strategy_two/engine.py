@@ -39,31 +39,97 @@ SPEC_DEFAULTS = {
     "jump_entry_percentile_threshold": 95.0,
 }
 
+def _true_range(h: np.ndarray, lo: np.ndarray, c: np.ndarray) -> np.ndarray:
+    """
+    True range as a plain float array.
+
+    The first bar has no previous close, so two of the three TR components are
+    NaN there. The pandas form this replaces used
+    `pd.concat([...], axis=1).max(axis=1)`, and DataFrame.max **skips NaN** — so
+    TR[0] came out as plain `high - low`, not NaN. `np.maximum` propagates NaN
+    instead, which shifted the first valid rolling value by one bar (caught by
+    an equivalence test: ATR index 13 was a number before and NaN after).
+    Seeding slot 0 with `high - low` reproduces the original exactly.
+    """
+    prev_c = np.empty_like(c)
+    prev_c[0] = np.nan
+    prev_c[1:] = c[:-1]
+    tr = np.maximum(h - lo, np.maximum(np.abs(h - prev_c), np.abs(lo - prev_c)))
+    if tr.size:
+        tr[0] = h[0] - lo[0]
+    return tr
+
+
+def _rolling_mean(a: np.ndarray, period: int) -> np.ndarray:
+    """
+    Trailing rolling mean, NaN-padded for the first `period-1` slots — the same
+    shape and alignment `Series.rolling(period).mean()` produces.
+
+    NaN-aware via cumulative sums over a zero-filled copy, so a leading NaN in
+    the true range propagates exactly as pandas does.
+    """
+    n = a.size
+    out = np.full(n, np.nan, dtype=float)
+    if n < period:
+        return out
+    valid = ~np.isnan(a)
+    filled = np.where(valid, a, 0.0)
+    csum = np.concatenate(([0.0], np.cumsum(filled)))
+    ccnt = np.concatenate(([0], np.cumsum(valid)))
+    win_sum = csum[period:] - csum[:-period]
+    win_cnt = ccnt[period:] - ccnt[:-period]
+    # A window containing any NaN is NaN in pandas' default (min_periods=period).
+    res = np.where(win_cnt == period, win_sum / period, np.nan)
+    out[period - 1:] = res
+    return out
+
+
 def calculate_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    high_low = df['high'] - df['low']
-    high_close = np.abs(df['high'] - df['close'].shift())
-    low_close = np.abs(df['low'] - df['close'].shift())
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    return tr.rolling(window=period).mean()
+    """
+    [L1-opt] Vectorised. The previous form built three intermediate Series, then
+    `pd.concat(..., axis=1).max(axis=1)` — a full DataFrame construction and a
+    row-wise max — on EVERY bar of EVERY backtest, over the whole 500-bar
+    window, for one trailing value. Same arithmetic, no pandas object churn.
+    """
+    h = df['high'].to_numpy(dtype=float, copy=False)
+    lo = df['low'].to_numpy(dtype=float, copy=False)
+    c = df['close'].to_numpy(dtype=float, copy=False)
+    return pd.Series(_rolling_mean(_true_range(h, lo, c), period), index=df.index)
 
 def calculate_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """Calculate ADX (Average Directional Index) using pandas."""
-    # Compute +DM and -DM
-    up_move = df['high'] - df['high'].shift(1)
-    down_move = df['low'].shift(1) - df['low']
-    
+    """
+    ADX (Average Directional Index).
+
+    [L1-opt] Vectorised. The pandas form constructed ~8 intermediate Series and
+    ran four separate `.rolling()` passes per call, and this is called once per
+    bar over the full 500-bar window for a single trailing value. Identical
+    arithmetic on numpy arrays; the only Series built is the returned one.
+    """
+    h = df['high'].to_numpy(dtype=float, copy=False)
+    lo = df['low'].to_numpy(dtype=float, copy=False)
+    c = df['close'].to_numpy(dtype=float, copy=False)
+
+    up_move = np.empty_like(h)
+    up_move[0] = np.nan
+    up_move[1:] = h[1:] - h[:-1]
+
+    down_move = np.empty_like(lo)
+    down_move[0] = np.nan
+    down_move[1:] = lo[:-1] - lo[1:]
+
     plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
     minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-    
-    tr = calculate_atr(df, 1) # True range
-    atr = tr.rolling(window=period).mean()
-    
-    plus_di = 100 * (pd.Series(plus_dm, index=df.index).rolling(window=period).mean() / atr)
-    minus_di = 100 * (pd.Series(minus_dm, index=df.index).rolling(window=period).mean() / atr)
-    
-    dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
-    adx = dx.rolling(window=period).mean()
-    return adx
+
+    # `calculate_atr(df, 1)` is the raw true range (a 1-period mean of itself),
+    # then smoothed over `period` — preserved exactly.
+    atr = _rolling_mean(_rolling_mean(_true_range(h, lo, c), 1), period)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        plus_di = 100.0 * (_rolling_mean(plus_dm, period) / atr)
+        minus_di = 100.0 * (_rolling_mean(minus_dm, period) / atr)
+        dx = 100.0 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+
+    return pd.Series(_rolling_mean(dx, period), index=df.index)
 
 @register_strategy("DriftJumpAlpha_v1")
 class DriftJumpAlphaEngine(BaseStrategy):
@@ -95,19 +161,16 @@ class DriftJumpAlphaEngine(BaseStrategy):
         self.cooldown_until: datetime | None = None
 
     def log_event(self, message: str, level: str = "INFO", category: str = "DJA"):
-        """Intercept logs and send to bot_service."""
-        from datetime import timezone
-        if self.is_backtesting:
-            self.run_logs.append({
-                "time": datetime.now(timezone.utc).isoformat(),
-                "level": level,
-                "category": category,
-                "message": message
-            })
-            if level != "DEBUG":
-                bot_service.log_system_event(message, level, f"BT-{category}")
-        else:
-            bot_service.log_system_event(message, level, category)
+        """
+        Delegate to BaseStrategy.log_event, keeping only the DJA category default.
+
+        [L1-opt] This used to be a full copy of the base implementation, which
+        meant it bypassed the base class's backtest fast path and kept fanning
+        every INFO line out to bot_service. Profiling showed the override alone
+        costing 5.4 s of 26.7 s (20%) on a 2,200-bar run — the base class had
+        already been fixed, and this shadowed the fix.
+        """
+        super().log_event(message, level=level, category=category)
 
     async def initialize(self):
         logger.info("DriftJumpAlphaEngine initialized")
@@ -175,10 +238,18 @@ class DriftJumpAlphaEngine(BaseStrategy):
         """
         DriftJumpAlpha Setup A (Drift) + Setup B (Jump Entry) evaluation.
         """
+        # [T1.3] Open a confluence-telemetry record for this bar.
+        # No-op unless self.gates.enabled (live default is off).
+        # Placed AFTER the docstring — inserting before it would demote the
+        # docstring to a plain no-op string expression and lose __doc__.
+        self.begin_candidate(
+            symbol, timeframe,
+            bar_time=candles.index[-1] if candles is not None and len(candles) else None,
+        )
         if timeframe != "M5":
             return None
             
-        if "CRASH" not in symbol.upper():
+        if not self.gate("crash_symbol_only", "CRASH" in symbol.upper()):
             return None # HARD CRASH ONLY FILTER
             
         if not self.is_backtesting:
@@ -188,7 +259,10 @@ class DriftJumpAlphaEngine(BaseStrategy):
             return None
 
         current_bar = candles.iloc[-1]
-        self.log_event(f"[{symbol}] Evaluating new {timeframe} bar: close={current_bar['close']}")
+        # [L1-opt] This fired on EVERY bar — 50,000 formatted log records for a
+        # full run, each one hitting loguru and (previously) bot_service. It says
+        # nothing a reader needs. Removed rather than downgraded: the gate
+        # telemetry now records what actually happened on each bar.
 
         # ── Spec §1 risk guardrails ─────────────────────────────────────────
         # Daily reset (trades_today / daily_risk_used_pct)
@@ -207,13 +281,14 @@ class DriftJumpAlphaEngine(BaseStrategy):
             self.cooldown_until = None
 
         max_trades_per_day = getattr(self.params, 'max_trades_per_day', 6) if self.params else 6
-        if self.trades_today >= max_trades_per_day:
+        if not self.gate("daily_trade_cap", self.trades_today < max_trades_per_day):
             self.log_event(f"[{symbol}] max_trades_per_day ({max_trades_per_day}) reached. Blocking entries.")
             return None
 
         max_daily_risk_pct = getattr(self.params, 'max_daily_risk_pct', 4.0) if self.params else 4.0
         risk_per_trade_pct = getattr(getattr(self.config, 'risk', None), 'risk_per_trade_pct', 1.0)
-        if self.daily_risk_used_pct + risk_per_trade_pct > max_daily_risk_pct:
+        if not self.gate("daily_risk_cap",
+                         self.daily_risk_used_pct + risk_per_trade_pct <= max_daily_risk_pct):
             self.log_event(f"[{symbol}] max_daily_risk_pct ({max_daily_risk_pct}%) would be exceeded. Blocking entries.")
             return None
 
@@ -277,12 +352,11 @@ class DriftJumpAlphaEngine(BaseStrategy):
             if getattr(self, 'bars_since_jump', 999999) != 999999:
                 self.bars_since_jump += 1
             
-        if getattr(self, 'bars_since_jump', 999999) < 5:
-            self.log_event(f"In 5-bar jump cooldown ({self.bars_since_jump} bars).")
+        if not self.gate("jump_cooldown", getattr(self, 'bars_since_jump', 999999) >= 5):
+            # [L1-opt] Was an INFO log on every cooldown bar. The gate records it.
             return None
             
         gap_pct = self.compute_gap_percentile(self.bars_since_jump)
-        self.log_event(f"Gap percentile computed: {gap_pct:.1f}%")
         
         if gap_pct >= SPEC_DEFAULTS['flatten_all_at_percentile']:
             self.log_event(f"Gap percentile {gap_pct:.1f}% >= threshold {SPEC_DEFAULTS['flatten_all_at_percentile']}. Blocking entries.")
@@ -315,14 +389,14 @@ class DriftJumpAlphaEngine(BaseStrategy):
                     reward = abs(entry_price - tp)
                     rrr = reward / risk if risk > 0 else 0.0
                     min_rrr = getattr(self.params, 'min_rrr_to_accept_trade', 1.5) if self.params else 1.5
-                    if rrr < min_rrr:
+                    if not self.gate("min_rrr_jump", rrr >= min_rrr, detail=f"rrr={rrr:.2f}"):
                         self.log_event(f"[{symbol}] Setup B RRR {rrr:.2f} < min_rrr_to_accept_trade {min_rrr}. Discarding signal.")
                         return None
 
                     self.trades_today += 1
                     self.daily_risk_used_pct += risk_per_trade_pct
 
-                    return TradeSignal(
+                    return self._tag_signal(TradeSignal(
                         strategy_id="DriftJumpAlpha_v1",
                         symbol=symbol,
                         direction="SELL",
@@ -342,7 +416,7 @@ class DriftJumpAlphaEngine(BaseStrategy):
                             "reason": f"Jump SELL. Gap: {gap_pct:.1f}%",
                             "aggregate_max_lots_per_symbol": getattr(self.params, 'aggregate_max_lots_per_symbol', 0.0)
                         }
-                    )
+                    ))
             
         # ---------------------------------------------------------
         # SETUP A: DRIFT CONTINUATION (BUY)
@@ -387,7 +461,8 @@ class DriftJumpAlphaEngine(BaseStrategy):
                 # regime_active is left as computed from the EMA-separation
                 # check above — the setup is allowed through, at reduced size.
 
-        if not regime_active:
+        if not self.gate("drift_regime_active", regime_active,
+                         detail=f"adx={adx_val if pd.notna(adx_val) else float('nan'):.1f}"):
             # Do NOT clear post_jump_regime_reset here — this branch fires on
             # essentially every bar right after a jump (regime is typically inactive
             # post-jump), which previously reset the flag before its own confirmation
@@ -397,7 +472,7 @@ class DriftJumpAlphaEngine(BaseStrategy):
             return None
             
         if self.post_jump_regime_reset:
-            if current_bar['close'] < current_bar['ema_fast']:
+            if not self.gate("post_jump_ema_reclaim", current_bar['close'] >= current_bar['ema_fast']):
                 self.log_event("Waiting for price to cross above Fast EMA to reset regime after jump.")
                 return None
             self.post_jump_regime_reset = False
@@ -407,7 +482,8 @@ class DriftJumpAlphaEngine(BaseStrategy):
         dist_to_fast = abs(current_bar['close'] - current_bar['ema_fast'])
         max_dist = SPEC_DEFAULTS['pullback_max_distance_atr_multiple'] * atr_val
         
-        if dist_to_fast > max_dist:
+        if not self.gate("pullback_within_atr", dist_to_fast <= max_dist,
+                         detail=f"dist_atr={dist_to_fast / atr_val:.2f}" if atr_val else None):
             return None
             
         # M6 Confirmation
@@ -453,7 +529,7 @@ class DriftJumpAlphaEngine(BaseStrategy):
         reward = abs(tp - entry_price)
         rrr = reward / risk if risk > 0 else 0.0
         min_rrr = getattr(self.params, 'min_rrr_to_accept_trade', 1.5) if self.params else 1.5
-        if rrr < min_rrr:
+        if not self.gate("min_rrr_drift", rrr >= min_rrr, detail=f"rrr={rrr:.2f}"):
             self.log_event(f"[{symbol}] Setup A RRR {rrr:.2f} < min_rrr_to_accept_trade {min_rrr}. Discarding signal.")
             return None
 
@@ -482,7 +558,7 @@ class DriftJumpAlphaEngine(BaseStrategy):
             }
         )
         
-        return sig
+        return self._tag_signal(sig)
 
     async def on_tick(self, symbol: str, tick: dict[str, Any]) -> None:
         pass

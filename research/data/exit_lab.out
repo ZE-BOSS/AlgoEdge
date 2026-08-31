@@ -1,0 +1,164 @@
+==============================================================================
+PART 1 — regime: does this symbol trend? (Hurst on M15 close)
+  >0.55 trending -> trailing should help
+  <0.45 mean-reverting -> trailing should HURT; use a fixed target
+==============================================================================
+  Crash 1000 Index       H=0.513  random walk
+  Crash 300 Index        H=0.504  random walk
+  Crash 500 Index        H=0.491  random walk
+  Volatility 75 Index    H=0.511  random walk
+  XAUUSD                 H=0.483  random walk
+  US Tech 100            H=0.488  random walk
+  US SP 500              H=0.476  random walk
+  EURUSD                 H=0.492  random walk
+  GBPUSD                 H=0.495  random walk
+  BTCUSD                 H=0.508  random walk
+  XAGUSD                 H=0.484  random walk
+  Germany 40             H=0.497  random walk
+
+==============================================================================
+PART 2 — exit method comparison  (stop 1.0xATR, target 5.0R)
+  every entry, both directions, real bar paths, stop-before-target
+==============================================================================
+
+--- Crash 1000 Index   (cost 0.069 R/trade, H=0.51)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only       15158  +0.1117  +1693.7   19.7%   1.13   1403.8    1.21
+    BE_at_1R            15158  +0.1250  +1894.1   13.7%   1.23   1062.3    1.78
+    user_ladder         15158  +0.1569  +2378.6   36.5%   1.29    809.8    2.94
+    loose_ladder        15158  +0.1418  +2149.4   27.9%   1.23    971.0    2.21
+    tight_ladder        15158  +0.1749  +2651.5   36.5%   1.32    669.0    3.96
+    step_1R_behind      15158  +0.1589  +2408.7   36.0%   1.23    885.4    2.72
+    => best by expectancy: tight_ladder
+
+--- Crash 300 Index   (cost 0.074 R/trade, H=0.50)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only       15158  -0.0247   -375.1   17.5%   0.97   1353.6   -0.28
+    BE_at_1R            15158  -0.0031    -46.6   11.1%   0.99    960.4   -0.05
+    user_ladder         15158  +0.0247   +374.4   34.9%   1.05    712.8    0.53
+    loose_ladder        15158  +0.0112   +170.2   25.6%   1.02    925.9    0.18
+    tight_ladder        15158  +0.0424   +643.2   34.9%   1.08    597.6    1.08
+    step_1R_behind      15158  +0.0197   +298.9   34.5%   1.03    840.8    0.36
+    => best by expectancy: tight_ladder
+
+--- Crash 500 Index   (cost 0.049 R/trade, H=0.49)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only       15158  +0.0058    +88.4   17.6%   1.01    943.0    0.09
+    BE_at_1R            15158  +0.0272   +412.7   49.5%   1.05    765.1    0.54
+    user_ladder         15158  +0.0601   +910.6   49.5%   1.11    613.0    1.49
+    loose_ladder        15158  +0.0314   +475.8   40.6%   1.05    834.9    0.57
+    tight_ladder        15158  +0.0754  +1142.9   49.5%   1.14    463.8    2.46
+    step_1R_behind      15158  +0.0486   +736.4   34.2%   1.07    730.7    1.01
+    => best by expectancy: tight_ladder
+
+--- Volatility 75 Index   (cost 0.081 R/trade, H=0.51)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only       15158  -0.0484   -733.0   17.2%   0.95   1102.0   -0.67
+    BE_at_1R            15158  -0.0719  -1089.2    9.8%   0.87   1104.9   -0.99
+    user_ladder         15158  -0.0768  -1163.8   32.6%   0.86   1169.8   -0.99
+    loose_ladder        15158  -0.0761  -1152.9   24.1%   0.88   1185.3   -0.97
+    tight_ladder        15158  -0.0604   -915.1   32.6%   0.89    932.2   -0.98
+    step_1R_behind      15158  -0.0732  -1109.0   33.4%   0.90   1130.3   -0.98
+    => best by expectancy: fixed_TP_only
+
+--- XAUUSD   (cost 0.062 R/trade, H=0.48)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only       10064  -0.0251   -252.7   17.3%   0.97   1028.0   -0.25
+    BE_at_1R            10064  -0.0073    -73.5   10.8%   0.99    601.5   -0.12
+    user_ladder         10064  -0.0164   -165.1   33.3%   0.97    467.9   -0.35
+    loose_ladder        10064  -0.0279   -280.4   24.1%   0.96    800.6   -0.35
+    tight_ladder        10064  +0.0025    +24.8   33.3%   1.00    302.2    0.08
+    step_1R_behind      10064  -0.0208   -209.1   33.2%   0.97    672.5   -0.31
+    => best by expectancy: tight_ladder
+
+--- US Tech 100   (cost 0.020 R/trade, H=0.49)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only       10094  +0.0168   +169.8   17.3%   1.02    590.2    0.29
+    BE_at_1R            10094  +0.0229   +231.0   49.4%   1.04    318.1    0.73
+    user_ladder         10094  +0.0183   +184.2   49.4%   1.04    215.8    0.85
+    loose_ladder        10094  +0.0182   +183.9   39.8%   1.03    324.6    0.57
+    tight_ladder        10094  +0.0265   +267.5   49.4%   1.05    157.5    1.70
+    step_1R_behind      10094  +0.0251   +253.5   33.5%   1.04    282.8    0.90
+    => best by expectancy: tight_ladder
+
+--- US SP 500   (cost 0.047 R/trade, H=0.48)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only       10094  -0.0379   -382.3   16.9%   0.96    889.7   -0.43
+    BE_at_1R            10094  -0.0348   -351.1   49.2%   0.93    662.9   -0.53
+    user_ladder         10094  -0.0269   -271.4   49.2%   0.95    599.2   -0.45
+    loose_ladder        10094  -0.0340   -343.0   39.8%   0.95    712.1   -0.48
+    tight_ladder        10094  -0.0083    -83.6   49.2%   0.98    388.3   -0.22
+    step_1R_behind      10094  -0.0215   -217.1   33.4%   0.97    580.0   -0.37
+    => best by expectancy: tight_ladder
+
+--- EURUSD   (cost 0.207 R/trade, H=0.49)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only       10644  -0.2548  -2711.6   15.9%   0.75   2736.2   -0.99
+    BE_at_1R            10644  -0.2354  -2505.4    9.1%   0.65   2509.5   -1.00
+    user_ladder         10644  -0.2142  -2280.4   33.2%   0.66   2286.9   -1.00
+    loose_ladder        10644  -0.2656  -2826.5   21.9%   0.65   2839.0   -1.00
+    tight_ladder        10644  -0.1775  -1888.9   33.2%   0.72   1892.8   -1.00
+    step_1R_behind      10644  -0.2432  -2588.3   32.5%   0.70   2609.6   -0.99
+    => best by expectancy: tight_ladder
+
+--- GBPUSD   (cost 0.169 R/trade, H=0.50)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only       10644  -0.2686  -2859.3   15.0%   0.73   2912.6   -0.98
+    BE_at_1R            10644  -0.2400  -2554.8    8.3%   0.62   2585.5   -0.99
+    user_ladder         10644  -0.1911  -2033.9   33.0%   0.69   2059.4   -0.99
+    loose_ladder        10644  -0.2303  -2450.8   22.5%   0.68   2481.8   -0.99
+    tight_ladder        10644  -0.1399  -1488.8   33.0%   0.77   1515.4   -0.98
+    step_1R_behind      10644  -0.2141  -2278.6   32.6%   0.73   2311.6   -0.99
+    => best by expectancy: tight_ladder
+
+--- BTCUSD   (cost 0.092 R/trade, H=0.51)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only       15150  -0.0593   -898.4   17.2%   0.93   1234.3   -0.73
+    BE_at_1R            15150  -0.0597   -904.4   10.4%   0.89    973.6   -0.93
+    user_ladder         15150  -0.0630   -954.4   33.3%   0.89    973.9   -0.98
+    loose_ladder        15150  -0.0664  -1005.4   24.0%   0.90   1057.3   -0.95
+    tight_ladder        15150  -0.0405   -613.7   33.3%   0.93    637.9   -0.96
+    step_1R_behind      15150  -0.0657   -995.7   33.3%   0.91   1051.6   -0.95
+    => best by expectancy: tight_ladder
+
+--- XAGUSD   (cost 0.155 R/trade, H=0.48)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only       10064  -0.1102  -1109.4   17.4%   0.88   1465.6   -0.76
+    BE_at_1R            10064  -0.1033  -1039.2   10.8%   0.83   1178.6   -0.88
+    user_ladder         10064  -0.1063  -1069.8   33.2%   0.82   1153.8   -0.93
+    loose_ladder        10064  -0.1156  -1163.8   24.4%   0.84   1302.8   -0.89
+    tight_ladder        10064  -0.0913   -919.2   33.2%   0.85    999.4   -0.92
+    step_1R_behind      10064  -0.1021  -1027.9   33.4%   0.87   1153.9   -0.89
+    => best by expectancy: tight_ladder
+
+--- Germany 40   (cost 0.251 R/trade, H=0.50)
+    method                  n     expR     totR      WR     PF    maxDD  ret/DD
+    fixed_TP_only        9972  -0.2424  -2417.1   16.8%   0.77   2454.5   -0.98
+    BE_at_1R             9972  -0.2275  -2269.0   10.2%   0.68   2274.9   -1.00
+    user_ladder          9972  -0.2256  -2249.6   33.0%   0.66   2254.3   -1.00
+    loose_ladder         9972  -0.2248  -2241.9   23.9%   0.71   2242.9   -1.00
+    tight_ladder         9972  -0.2063  -2057.2   33.0%   0.69   2069.2   -0.99
+    step_1R_behind       9972  -0.2268  -2262.0   33.3%   0.73   2264.5   -1.00
+    => best by expectancy: tight_ladder
+
+==============================================================================
+PART 3 — averaged across symbols
+==============================================================================
+  method               mean expR   symbols won
+  fixed_TP_only          -0.0781         0/12   <-- baseline
+  BE_at_1R               -0.0673        10/12
+  user_ladder            -0.0550        10/12
+  loose_ladder           -0.0698         7/12
+  tight_ladder           -0.0335        11/12
+  step_1R_behind         -0.0596        10/12
+
+  trailing lift vs fixed TP, split by regime:
+C:\Users\ikchr\Documents\AlgoEdge\venv_win\Lib\site-packages\numpy\_core\fromnumeric.py:3824: RuntimeWarning: Mean of empty slice
+  return _methods._mean(a, axis=axis, dtype=dtype,
+C:\Users\ikchr\Documents\AlgoEdge\venv_win\Lib\site-packages\numpy\_core\_methods.py:142: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+    BE_at_1R           trending +nan (n=0)   non-trending +0.0108 (n=12)
+    user_ladder        trending +nan (n=0)   non-trending +0.0231 (n=12)
+    loose_ladder       trending +nan (n=0)   non-trending +0.0083 (n=12)
+    tight_ladder       trending +nan (n=0)   non-trending +0.0446 (n=12)
+    step_1R_behind     trending +nan (n=0)   non-trending +0.0185 (n=12)

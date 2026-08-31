@@ -44,6 +44,12 @@ class NYOpenRetestEngine(BaseStrategy):
         return ["M15", "M5"]
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
+        # [T1.3] Open a confluence-telemetry record for this bar.
+        # No-op unless self.gates.enabled (live default is off).
+        self.begin_candidate(
+            symbol, timeframe,
+            bar_time=candles.index[-1] if candles is not None and len(candles) else None,
+        )
         self._init_state(symbol)
         state = self.state[symbol]
         
@@ -85,13 +91,14 @@ class NYOpenRetestEngine(BaseStrategy):
         # 2. Break and Retest on M5
         elif timeframe == "M5":
             # Session expiration check
-            if time_str >= self.params.session_end and state["status"] not in ["MARK_RANGE", "DONE"]:
+            if not self.gate("session_not_ended",
+                             not (time_str >= self.params.session_end and state["status"] not in ["MARK_RANGE", "DONE"])):
                 state["status"] = "DONE"
                 self.log_event(f"[{symbol}] Session ended, stopping for the day.", category="NY_OPEN")
                 return None
                 
             if state["status"] == "AWAIT_BREAK":
-                if time_str < self.params.earliest_valid_break_time:
+                if not self.gate("earliest_break_time", time_str >= self.params.earliest_valid_break_time):
                     return None
                     
                 if latest["close"] > state["range_high"]:
@@ -114,10 +121,11 @@ class NYOpenRetestEngine(BaseStrategy):
                 if (state["bias"] == "BUY" and latest["low"] <= state["range_mid"]) or (state["bias"] == "SELL" and latest["high"] >= state["range_mid"]):
                     triggered = True
                     
+                self.gate("retest_of_range_mid", triggered)
                 if triggered:
                     entry = state["range_mid"]
                     breakout_extreme = state.get("breakout_extreme")
-                    if breakout_extreme is None:
+                    if not self.gate("breakout_extreme_known", breakout_extreme is not None):
                         # Safety guard: state is incomplete, skip this bar
                         return None
                     
@@ -256,7 +264,7 @@ class NYOpenRetestEngine(BaseStrategy):
                     )
 
                     state["status"] = "DONE"
-                    return TradeSignal(
+                    return self._tag_signal(TradeSignal(
                         strategy_id="NYOpenRetest_v1",
                         symbol=symbol,
                         direction=state["bias"],
@@ -284,6 +292,6 @@ class NYOpenRetestEngine(BaseStrategy):
                             # [V1] Chart geometry — see strategies/core/markings.py.
                             **mk.as_metadata(),
                         }
-                    )
+                    ))
 
         return None
