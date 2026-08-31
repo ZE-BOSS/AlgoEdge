@@ -307,19 +307,21 @@ class PortfolioBacktestEngine(CostModelMixin):
         
         breach_days = set()
         
-        # [17.2] Portfolio runs previously reported NOTHING during the global
-        # simulation — the UI sat at 85% for the whole thing, the same symptom
-        # B4/B5 fixed on the single-symbol path. Fire ~200 times regardless of
-        # timeline length; the caller rate-limits, so over-supply is free.
-        _n_steps = len(global_timeline)
-        _prog_stride = max(1, _n_steps // 200)
+        # Progress reporting. This loop runs under `asyncio.to_thread`, so
+        # `progress_cb` must not await or do I/O — see
+        # `services/backtest_progress._Phase.note`, which is a float assignment.
+        # Without this the global simulation, the longest phase of a portfolio
+        # run, reported nothing and the bar sat on 85% until completion.
+        _tl_total = len(global_timeline) or 1
+        _tl_stride = max(1, _tl_total // 200)
 
-        for _step_i, current_time in enumerate(global_timeline):
-            if progress_cb is not None and (_step_i % _prog_stride) == 0:
+        for _tl_i, current_time in enumerate(global_timeline):
+            if progress_cb is not None and _tl_i % _tl_stride == 0:
                 try:
-                    progress_cb(_step_i, _n_steps)
+                    progress_cb(_tl_i / _tl_total)
                 except Exception:
-                    pass
+                    progress_cb = None  # a broken reporter must never stop a run
+
             current_timestamp = float(current_time)
             
             # 1. Update floating equity and check limits

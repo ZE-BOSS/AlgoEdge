@@ -705,6 +705,10 @@ class BacktestEngine(CostModelMixin):
         candles_m5: pd.DataFrame = None,
         strategy: Any = None,
         progress_cb: Any = None,
+        # [merge] H1 context for the trade viewer's higher-timeframe pane
+        # (bug B3). origin/dev never carried this parameter; dropping it would
+        # silently reintroduce that bug. Sits AFTER progress_cb so the runner's
+        # positional call binds correctly.
         candles_h1: pd.DataFrame = None,
     ) -> dict[str, Any]:
         """Run a backtest on historical candles with pre-generated signals.
@@ -714,6 +718,13 @@ class BacktestEngine(CostModelMixin):
                 `on_position_bar` hook is called once per closed bar per open
                 position, enabling strategy-side in-trade invalidation logic
                 (e.g. APA's head-level hard exit).
+            progress_cb: Optional `callable(fraction: float)` invoked
+                periodically with this run's 0.0-1.0 completion. This method is
+                executed under `asyncio.to_thread`, so the callback MUST NOT
+                await or perform I/O — see `services/backtest_progress.py`,
+                whose `_Phase.note` is written to be exactly that. Without it
+                the simulation — the longest part of a run — reported nothing
+                at all and the bar sat still from 95% to 100%.
         """
         self._strategy = strategy  # stored so close-path notify_outcome can call it
         balance = initial_balance
@@ -807,21 +818,19 @@ class BacktestEngine(CostModelMixin):
                 swing_cache[i] = points
 
 
-        _n_bars = len(candles)
-        # [B5] Fire the callback ~200 times per run whatever the bar count.
-        # The old `(i & 0x3FF) == 0` was a fixed stride of 1024 bars, so a
-        # 5,000-bar run — the size the whole sweep used — reported four or five
-        # times in total, and the caller's rate limit then dropped some of
-        # those. The bar moved in four steps and looked frozen between them.
-        # The caller still rate-limits, so an over-supply of ticks costs
-        # nothing; an under-supply cannot be recovered.
-        _prog_stride = max(1, _n_bars // 200)
-        for i in range(_n_bars):
-            if progress_cb is not None and (i % _prog_stride) == 0:
+        # Progress is reported on a bar-count stride rather than elapsed time
+        # because this loop cannot call time.monotonic() cheaply enough per bar
+        # to be worth it; ~200 notes across a run is smooth and the stride
+        # adapts to run length. The callback only assigns a float.
+        _total_bars = len(candles)
+        _progress_stride = max(1, _total_bars // 200)
+
+        for i in range(_total_bars):
+            if progress_cb is not None and i % _progress_stride == 0:
                 try:
-                    progress_cb(i, _n_bars)
+                    progress_cb(i / _total_bars)
                 except Exception:
-                    pass
+                    progress_cb = None  # a broken reporter must never stop a run
 
             current_time = time_arr[i]
             current_time_dt = dt_arr[i]

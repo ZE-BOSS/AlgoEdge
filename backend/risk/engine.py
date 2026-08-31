@@ -45,6 +45,17 @@ class RiskEngine:
         # Risk params
         self.risk_pct = config.get("risk_per_trade_pct", 1.0)
         self.min_rr = config.get("min_rr", 3.0)
+        # [15.4] `min_rr` gates on blended_rr (task 5.7) — the VOLUME-WEIGHTED RR
+        # across the TP ladder, not the last TP's RR. Those two numbers differ a
+        # lot, and the difference can make a config that looks reasonable reject
+        # 100% of signals with nothing to distinguish it from "the market gave no
+        # setups".
+        #
+        # Concretely: TP 1.5/3/5 at 50/30/20 blends to 2.65, so a min_rr of 3
+        # refuses every signal ever generated, before sizing. That is exactly the
+        # shipped default combination. Checked once here rather than left to be
+        # inferred from an empty funnel.
+        self._warn_if_rr_unreachable()
         self.sl_buffer_pips = config.get("sl_buffer_pips", 5.0)
         self.compounding_enabled = config.get("compounding_enabled", False)
         # [Phase 2 sizing-truth] real, user-editable settings that used to be
@@ -53,6 +64,10 @@ class RiskEngine:
         self.max_account_leverage = config.get("max_account_leverage")
         self.min_deployable_risk_pct = config.get("min_deployable_risk_pct", 0.0)
         self.min_stop_spread_multiple = config.get("min_stop_spread_multiple")
+        # [15.2] Economic stop floor: stop >= N x (spread + 2 x slippage).
+        # 0 = disabled, which is the shipped default — see the field's
+        # docstring in core/config_schema.py for the measurement behind it.
+        self.min_stop_cost_multiple = config.get("min_stop_cost_multiple", 0.0)
         self.confluence_risk_tiers = config.get("confluence_risk_tiers")
         self.reject_below_confluence = config.get("reject_below_confluence", True)
         self.post_split_risk_tolerance_pct = config.get("post_split_risk_tolerance_pct", 5.0)
@@ -84,6 +99,46 @@ class RiskEngine:
         # Both live and backtest modes use MT5 data when available, with
         # InstrumentProfile as fallback — so use_live_mt5 is always True.
         # self.is_backtesting is now populated earlier
+
+
+    def _warn_if_rr_unreachable(self) -> None:
+        """
+        Log loudly when `min_rr` cannot be satisfied by the configured TP ladder.
+
+        Best-effort and never raises: it reads the same config keys MultiTPManager
+        does and reproduces its blend, so a config shape this does not recognise
+        simply produces no warning rather than a wrong one.
+        """
+        try:
+            cfg = self.config
+            tp_count = int(cfg.get("tp_count", 1) or 1)
+            rrs = [float(cfg.get(f"tp{i}_rr", 0.0) or 0.0) for i in range(1, tp_count + 1)]
+            if not rrs or max(rrs) <= 0:
+                return
+
+            weights = cfg.get("tp_volume_pcts") or cfg.get("tp_splits")
+            if isinstance(weights, str):
+                weights = [float(x) for x in weights.split(",") if x.strip()]
+            if not weights:
+                weights = [100.0 / tp_count] * tp_count
+            weights = [float(w) for w in weights][:tp_count]
+            total = sum(weights) or 1.0
+            blended = sum((w / total) * rr for w, rr in zip(weights, rrs))
+
+            if blended < float(self.min_rr):
+                # f-string, not %-args: this project logs through loguru, which
+                # does not do %-style interpolation — the placeholders would be
+                # printed literally and the numbers lost.
+                logger.error(
+                    f"[RISK] min_rr={float(self.min_rr):.2f} can NEVER be met by this TP "
+                    f"ladder: TPs {rrs} at volumes {weights} blend to {blended:.2f}. Every "
+                    f"signal will be rejected with 'insufficient_rr' before sizing, and the "
+                    f"rejection funnel will look identical to a market that produced no "
+                    f"setups. Either lower min_rr below {blended:.2f}, raise the TP RRs, or "
+                    f"shift volume towards the further targets."
+                )
+        except Exception as e:
+            logger.debug(f"[RISK] RR feasibility check skipped: {e}")
 
     def evaluate_signal(
         self,
@@ -344,6 +399,7 @@ class RiskEngine:
             min_stop_spread_multiple=self.min_stop_spread_multiple,
             cost_config=self.config,
             global_min_sl_pips=self.min_sl_pips,
+            min_stop_cost_multiple=self.min_stop_cost_multiple,
         )
         # [I3] internal stages of the call just made — read back immediately so no
         # other sizing call on this context can overwrite it first.

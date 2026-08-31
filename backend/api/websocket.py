@@ -46,7 +46,19 @@ class ConnectionManager:
         for ws in self.active.get(user_id, []):
             try:
                 await ws.send_json(message)
-            except Exception:
+            except Exception as e:
+                # This used to be a bare `except Exception: pass`. A send that
+                # failed — most often an oversized frame — silently dropped the
+                # connection and left the client waiting for a message that
+                # would never arrive, with nothing in the logs to say so. That
+                # is precisely the failure mode behind "the backtest finishes
+                # but I have to refresh to see the results", and it cost a long
+                # time to find because it was invisible. Log it.
+                logger.warning(
+                    f"WebSocket send failed (user={user_id}, "
+                    f"type={message.get('type', '?')}): {type(e).__name__}: {e} "
+                    f"— dropping this connection"
+                )
                 dead.append(ws)
         # Clean up dead connections
         if dead and user_id in self.active:

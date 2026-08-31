@@ -483,14 +483,20 @@ def minimum_stop_distance(
     info: dict | None = None,
     use_live_mt5: bool = True,
     min_stop_spread_multiple: float | None = None,
+    # [merge] Keep BOTH sides: the widened type (a per-symbol dict, resolved by
+    # resolve_global_min_sl_pips) came from this branch; min_stop_cost_multiple
+    # is origin/dev's Stage 15 economic stop floor. They are independent gates
+    # and both are wanted.
     global_min_sl_pips: float | dict[str, float] | None = 0.0,
+    min_stop_cost_multiple: float = 0.0,
 ) -> tuple[float, str]:
     """
     Smallest stop distance (in PRICE, not pips) that is physically tradeable for
-    this symbol.
+    this symbol — and, optionally, that is worth trading at all.
 
         min = max(broker stops_level, spread x min_stop_spread_multiple,
-                   asset-class floor, global_min_sl_pips)
+                   asset-class floor, global_min_sl_pips,
+                   round_trip_cost x min_stop_cost_multiple)
 
     [2.11] min_stop_spread_multiple defaults to _DEFAULT_MIN_STOP_SPREAD_MULTIPLE
     when not supplied — pass RiskParams.min_stop_spread_multiple through from the
@@ -500,6 +506,35 @@ def minimum_stop_distance(
     backstop floor on top of the asset-class floor above, previously defined
     on RiskParams but never actually read by this function (0 = disabled,
     matching "no additional floor").
+
+    [Stage 15.2] min_stop_cost_multiple is an ECONOMIC floor rather than a
+    physical one, and it is the difference that matters. Every candidate above
+    answers "will the broker accept this stop"; this one answers "can this stop
+    pay for the round trip". It requires
+
+        stop >= min_stop_cost_multiple x (spread + 2 x slippage)
+
+    so the multiple is read directly as "the fraction of one R the broker takes
+    is at most 1/N".
+
+    Why it exists, measured on the Jan-Aug 2026 corpus (1,326 trade groups —
+    see implementation/RESEARCH-2026-08-30-CORPUS.md §2): the round trip
+    consumed 0.056R to 0.187R per trade by strategy, and up to 0.37R on
+    individual pairings. Three strategies were PROFITABLE measured on price and
+    lost money in cash; the whole gap was friction. Rejecting signals whose stop
+    fell below 10x the round trip took the book from -$26,844 to -$3,504 while
+    keeping 49% of the trades, and 15x reached +$415 — with no change to any
+    strategy's logic.
+
+    The existing `min_stop_spread_multiple` looks similar and is not: it
+    defaults to 2.0, counts the spread only, and ignores slippage entirely. Two
+    times the spread means the broker takes roughly half of every R, which is a
+    physical-tradability check being mistaken for an economic one.
+
+    **Defaults to 0.0 (disabled)** — the same convention as
+    `max_cluster_risk_pct` and `global_min_sl_pips`. Turning it on rejects
+    signals that are currently taken, so it is a deliberate choice, not a
+    silent default change.
 
     Returns (distance_in_price, human_readable_reason). Never raises; on total
     failure it returns (0.0, "unknown") so sizing is not blocked by a cost-lookup
@@ -526,11 +561,13 @@ def minimum_stop_distance(
         #    module, so a module-level import here would be circular).
         spread_pips = 0.0
         costs_stops_pips = 0.0
+        slippage_pips = 0.0
         try:
             from backend.risk.broker_costs import get_broker_costs
             costs = get_broker_costs(symbol, use_live_mt5=use_live_mt5)
             spread_pips = float(costs.get("spread_pips", 0.0) or 0.0)
             costs_stops_pips = float(costs.get("stops_level_pips", 0.0) or 0.0)
+            slippage_pips = float(costs.get("slippage_pips", 0.0) or 0.0)
         except Exception as e:
             logger.debug(f"[SIZER] {symbol}: broker cost lookup failed in min-stop check: {e}")
             # Fall back to whatever the raw symbol info knows about the spread.
@@ -552,6 +589,17 @@ def minimum_stop_distance(
             "asset_class_floor": floor_price,
             "global_min_sl_pips": global_floor_price,
         }
+
+        # [Stage 15.2] The economic floor. Spread is paid once, slippage on both
+        # entry and exit — so the round trip is spread + 2 x slippage, which is
+        # exactly the quantity the corpus measured against each strategy's stop.
+        cost_multiple = float(min_stop_cost_multiple or 0.0)
+        if cost_multiple > 0:
+            round_trip_pips = spread_pips + 2.0 * slippage_pips
+            candidates[f"round_trip_cost x{cost_multiple:g}"] = (
+                round_trip_pips * cost_multiple * pip_size
+            )
+
         reason, distance = max(candidates.items(), key=lambda kv: kv[1])
         return float(distance), f"{reason} ({distance / pip_size:.2f} pips)"
     except Exception as e:
@@ -716,6 +764,7 @@ def calculate_lot_size(
     min_stop_spread_multiple: float | None = None,
     cost_config: dict | None = None,
     global_min_sl_pips: float = 0.0,
+    min_stop_cost_multiple: float = 0.0,
 ) -> float:
     """
     Calculate lot size so that if SL is hit, loss = risk_pct% of balance.
@@ -791,7 +840,35 @@ def calculate_lot_size(
     min_stop_price, min_stop_reason = minimum_stop_distance(
         symbol, info, use_live_mt5=use_live_mt5, min_stop_spread_multiple=min_stop_spread_multiple,
         global_min_sl_pips=global_min_sl_pips,
+        min_stop_cost_multiple=min_stop_cost_multiple,
     )
+    # [15.1] Record what this trade's round trip costs as a fraction of its own
+    # R, on EVERY trade, whether or not the economic floor above is switched on.
+    #
+    # This is the number the Jan-Aug 2026 corpus turned out to hinge on: three
+    # strategies were profitable measured on price and lost money in cash, and
+    # the entire gap was here. It was invisible at the time because nothing
+    # recorded it — the cost model knew the spread, the sizer knew the stop, and
+    # no one ever divided one by the other.
+    #
+    # Recording it unconditionally means `min_stop_cost_multiple` can be chosen
+    # from a histogram of your own runs rather than from someone else's
+    # threshold. RunReport's Cost Impact panel is where it surfaces.
+    try:
+        from backend.risk.broker_costs import get_broker_costs
+        _c = get_broker_costs(symbol, use_live_mt5=use_live_mt5)
+        _pip = get_pip_size(symbol) or 0.0
+        _round_trip_price = (
+            float(_c.get("spread_pips", 0.0) or 0.0)
+            + 2.0 * float(_c.get("slippage_pips", 0.0) or 0.0)
+        ) * _pip
+        if sl_distance > 0 and _round_trip_price > 0:
+            diag["round_trip_cost_price"] = _round_trip_price
+            diag["round_trip_cost_R"] = _round_trip_price / sl_distance
+            diag["stop_cost_cover"] = sl_distance / _round_trip_price
+    except Exception as e:
+        logger.debug(f"[SIZER] {symbol}: friction diagnostic unavailable: {e}")
+
     if min_stop_price > 0 and sl_distance < min_stop_price:
         pip_size = get_pip_size(symbol) or 0.0
         sl_pips = (sl_distance / pip_size) if pip_size > 0 else float("nan")

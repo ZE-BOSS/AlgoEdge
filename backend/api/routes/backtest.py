@@ -1094,13 +1094,16 @@ async def run_backtest_endpoint(
             _loop = asyncio.get_running_loop()
             _last_sim_emit = [0.0]
 
-            def _sim_progress(done: int, total: int):
+            # [merge] The engines now hand a single float fraction (0-1), the
+            # signature origin/dev standardised on. Adapted rather than keeping
+            # the old (done, total) pair so the route matches both engines.
+            def _sim_progress(fraction: float):
                 import time as _t
                 now = _t.monotonic()
                 if now - _last_sim_emit[0] < 0.25:
                     return
                 _last_sim_emit[0] = now
-                pct = min(90, 35 + int(55 * (done / total)) if total else 35)
+                pct = min(90, 35 + int(55 * max(0.0, min(1.0, fraction))))
                 payload = {"stage": "Simulating trades...", "pct": pct}
                 try:
                     # [B5] Keep the polled status endpoint in step with the
@@ -1782,14 +1785,15 @@ async def run_portfolio_backtest_endpoint(
             _pf_loop = asyncio.get_running_loop()
             _pf_last_emit = [0.0]
 
-            def _pf_progress(done: int, total: int):
+            # [merge] fraction signature, as above.
+            def _pf_progress(fraction: float):
                 import time as _t
                 now = _t.monotonic()
                 if now - _pf_last_emit[0] < 0.25:
                     return
                 _pf_last_emit[0] = now
                 # global simulation occupies the 85-98 band
-                pct = min(98, 85 + int(13 * (done / total))) if total else 85
+                pct = min(98, 85 + int(13 * max(0.0, min(1.0, fraction))))
                 payload = {"stage": "Running global portfolio simulation...", "pct": pct}
                 try:
                     state = USER_BACKTEST_STATE.setdefault(current_user.id, {})

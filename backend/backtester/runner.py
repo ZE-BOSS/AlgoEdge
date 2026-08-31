@@ -101,47 +101,86 @@ async def run_backtest(
     candles_m5: pd.DataFrame = None,
     title: str | None = None,
     strategy: Any = None,
+    # [merge] origin/dev renamed this to `progress_phase` and passed
+    # `progress_phase.note`. Kept as `progress_cb` because the route on this
+    # branch supplies a plain callable; the SIGNATURE both sides settled on is
+    # the same either way — one float fraction, no I/O, safe across the
+    # to_thread boundary. backend/services/backtest_progress.py remains
+    # available for a later switch to phase objects.
     progress_cb: Any = None,
+    # candles_h1 is the H1 context the trade viewer's higher-timeframe pane
+    # reads (bug B3). origin/dev never carried it; dropping it would silently
+    # reintroduce that bug.
     candles_h1: pd.DataFrame = None,
 ) -> dict[str, Any]:
     """
     Execute a backtest and optionally persist results to PostgreSQL.
     save_mode: "FULL", "SUMMARY", "DISCARD"
     Source: RiskManagement_Spec.md Section 7.3
+
+    progress_phase:
+        Optional `services/backtest_progress._Phase`. When supplied, this
+        function reports its own 0.0-1.0 completion into that phase and emits
+        NO absolute percentages and NO `stage="complete"` of its own — the
+        caller owns the scale.
+
+        This parameter exists because the two behaviours used to collide. Both
+        API routes drive the bar to 95% and then call this function, which
+        broadcast 0 -> 10 -> 70 on the same channel and, on the
+        `save_mode="DISCARD"` path those routes use, a `stage="complete"`,
+        `pct=100` **before the route had assembled the result**. The frontend
+        keys "the run is finished" off that stage, so it cleared the progress
+        bar while the real payload was still being built — which is why results
+        appeared only after a manual page refresh.
     """
-    # Broadcast: starting
-    await _broadcast_progress(user_id, {
-        "stage": "starting",
-        "symbol": symbol,
-        "total_candles": len(candles),
-        "total_signals": len(signals),
-        "pct": 0,
-    })
+    _owned_scale = progress_phase is None
+
+    if _owned_scale:
+        # Standalone caller (no scale owner): keep the original behaviour.
+        await _broadcast_progress(user_id, {
+            "stage": "starting",
+            "symbol": symbol,
+            "total_candles": len(candles),
+            "total_signals": len(signals),
+            "pct": 0,
+        })
 
     engine = BacktestEngine(risk_config)
 
-    # Broadcast: running engine
-    await _broadcast_progress(user_id, {
-        "stage": "running",
-        "pct": 10,
-        "message": f"Processing {len(candles)} candles with {len(signals)} signals...",
-    })
+    if _owned_scale:
+        await _broadcast_progress(user_id, {
+            "stage": "running",
+            "pct": 10,
+            "message": f"Processing {len(candles)} candles with {len(signals)} signals...",
+        })
+    else:
+        await progress_phase.set(
+            0.0, f"Simulating {len(signals)} signals over {len(candles)} bars..."
+        )
 
     # Run CPU-bound engine in a thread pool so it doesn't block the event loop
-    # (without this, ALL other API requests hang until the backtest finishes)
+    # (without this, ALL other API requests hang until the backtest finishes).
+    # `progress_phase.note` is a pure assignment, which is what makes it safe to
+    # hand across the thread boundary — the caller's pump task does the I/O.
     import asyncio
     results = await asyncio.to_thread(
         engine.run, candles, signals, initial_balance, candles_m15, candles_m5,
-        strategy, progress_cb, candles_h1,
+        strategy,
+        progress_cb,
+        candles_h1,
     )
 
-    # Broadcast: engine complete
-    await _broadcast_progress(user_id, {
-        "stage": "engine_complete",
-        "pct": 70,
-        "total_trades": results["total_trades"],
-        "message": f"Engine complete — {results['total_trades']} trades simulated",
-    })
+    if _owned_scale:
+        await _broadcast_progress(user_id, {
+            "stage": "engine_complete",
+            "pct": 70,
+            "total_trades": results["total_trades"],
+            "message": f"Engine complete — {results['total_trades']} trades simulated",
+        })
+    else:
+        await progress_phase.set(
+            1.0, f"Simulated {results['total_trades']} trades — building report..."
+        )
 
     # Format all trade timestamps to ISO strings
     for trade in results.get("trades", []):
@@ -151,11 +190,17 @@ async def run_backtest(
             trade["exit_time_iso"] = _epoch_to_iso(trade["exit_time"])
 
     if save_mode == "DISCARD":
-        await _broadcast_progress(user_id, {
-            "stage": "complete",
-            "pct": 100,
-            "message": "Backtest complete — results ready for review",
-        })
+        if _owned_scale:
+            # Only a caller that owns no scale of its own may declare the run
+            # complete here. When a route owns the scale it emits
+            # `stage="complete"` itself, WITH the result attached — announcing
+            # completion before the payload exists is what forced a manual
+            # refresh to see the trades.
+            await _broadcast_progress(user_id, {
+                "stage": "complete",
+                "pct": 100,
+                "message": "Backtest complete — results ready for review",
+            })
         logger.info("Backtest completed — results discarded")
         
         asyncio.create_task(_broadcast_notification(
@@ -167,11 +212,12 @@ async def run_backtest(
         return results
 
     # Persist to database
-    await _broadcast_progress(user_id, {
-        "stage": "saving",
-        "pct": 80,
-        "message": "Saving results to database...",
-    })
+    if _owned_scale:
+        await _broadcast_progress(user_id, {
+            "stage": "saving",
+            "pct": 80,
+            "message": "Saving results to database...",
+        })
 
     backtest_id = results["backtest_id"]
     report = results["report"]
@@ -274,11 +320,12 @@ async def run_backtest(
                 )
                 session.add(bt_trade)
 
-    await _broadcast_progress(user_id, {
-        "stage": "complete",
-        "pct": 100,
-        "message": f"Backtest saved — {report.total_trades} trades, PnL: ${report.total_pnl:.2f}",
-    })
+    if _owned_scale:
+        await _broadcast_progress(user_id, {
+            "stage": "complete",
+            "pct": 100,
+            "message": f"Backtest saved — {report.total_trades} trades, PnL: ${report.total_pnl:.2f}",
+        })
 
     logger.info(f"Backtest saved: {backtest_id} ({save_mode})")
     

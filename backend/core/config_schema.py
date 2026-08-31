@@ -161,6 +161,30 @@ class RiskParams:
     is tradeable (MIN_STOP_SPREAD_MULTIPLE, formerly a module constant in
     position_sizer.py). At 1.0x the trade is stopped out by the spread alone.
     """
+    min_stop_cost_multiple: float = 0.0
+    """
+    [15.2] Reject a signal unless its stop is at least this many round trips
+    wide: stop >= N x (spread + 2 x slippage). Read the multiple as "the broker
+    takes at most 1/N of one R".
+
+    This is an ECONOMIC floor, where min_stop_spread_multiple above is a
+    PHYSICAL one. That one asks whether the broker will accept the stop; this
+    one asks whether the stop can pay for the trade. They are easy to confuse
+    and they are not the same question — 2x the spread, the current default of
+    the other, hands the broker roughly half of every R.
+
+    Measured on the Jan-Aug 2026 corpus (1,326 trade groups; see
+    implementation/RESEARCH-2026-08-30-CORPUS.md §2): friction ran 0.056R to
+    0.187R per round trip by strategy and up to 0.37R on individual pairings,
+    and three strategies were profitable on price while losing money in cash.
+    Applying this floor at 10x took the book from -$26,844 to -$3,504 keeping
+    49% of trades; 15x reached +$415 keeping 27%; 20x over-filtered. So 10-15
+    is the useful band.
+
+    0.0 = disabled, and that is the default deliberately: switching it on
+    rejects signals that are taken today, which is your call to make, not a
+    default to change underneath you.
+    """
     confluence_risk_tiers: list[tuple[int, float]] = field(
         default_factory=lambda: [(80, 100.0), (65, 75.0), (55, 50.0)]
     )
