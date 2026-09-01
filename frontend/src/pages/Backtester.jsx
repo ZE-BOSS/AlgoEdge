@@ -1872,35 +1872,90 @@ export default function Backtester() {
         try { localStorage.removeItem(RESULT_STORAGE_KEY); } catch { }
         return;
       }
-      try {
-        const slim = {
-          ...result,
-          // Rebuilt from the server on demand; the chart downsamples to 500
-          // points anyway, so keep a decimated curve rather than every bar.
-          equity_curve: decimate(result.equity_curve, 500),
-          // `trades` is the per-leg array; every consumer on this page reads
-          // `grouped_trades`, which already carries the legs it needs.
-          trades: undefined,
-          run_logs: undefined,
-          replay: undefined,
-        };
-        localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(slim));
-      } catch {
-        // Still too large (a portfolio run with hundreds of groups). Drop the
-        // trade list and keep the headline, rather than retrying a full
-        // serialisation that has already been shown not to fit.
+      // Shed weight in STEPS rather than going straight from "everything" to
+      // "no trades at all". The old two-tier version dropped the entire trade
+      // list on the first quota error, so a pyramiding run (175 -> ~1,000
+      // groups at ~29 KB each = well past the ~5 MB quota) reloaded with an
+      // empty table and no way to tell why. Each tier below drops the next
+      // heaviest thing the page can live without, and only the last resort
+      // gives up the trades.
+      const omit = (obj, keys) => {
+        if (!obj || typeof obj !== 'object') return obj;
+        const out = {};
+        for (const k of Object.keys(obj)) if (!keys.includes(k)) out[k] = obj[k];
+        return out;
+      };
+      const stripTrades = (keys, dropSubTrades = false) =>
+        (result.grouped_trades || []).map(g => {
+          const t = omit(g, dropSubTrades ? [...keys, 'sub_trades'] : keys);
+          if (!dropSubTrades && Array.isArray(g.sub_trades)) {
+            t.sub_trades = g.sub_trades.map(s => omit(s, keys));
+          }
+          return t;
+        });
+
+      // Never read by this frontend (chart_data* has zero references; the
+      // per-trade base64 PNG is guarded at the render site and simply won't
+      // show). Safe to drop even on the happy path.
+      const NEVER_READ = ['chart_data', 'chart_data_h1', 'chart_data_m15', 'chart_data_m5',
+                          'entry_snapshot_b64', 'gate_vector', 'confluence_tags'];
+      // Read, but only by the expanded-trade panel — which refetches from the
+      // server anyway. Losing these costs chart overlays, not the trade list.
+      const PANEL_ONLY = [...NEVER_READ, 'smc_data', 'original_signal', 'entry_confirmations'];
+
+      const base = {
+        ...result,
+        // Rebuilt from the server on demand; the chart downsamples to 500
+        // points anyway, so keep a decimated curve rather than every bar.
+        equity_curve: decimate(result.equity_curve, 500),
+        // `trades` is the per-leg array; every consumer on this page reads
+        // `grouped_trades`, which already carries the legs it needs.
+        trades: undefined,
+        run_logs: undefined,
+        replay: undefined,
+      };
+
+      const tiers = [
+        ['full', () => ({ ...base, grouped_trades: stripTrades(NEVER_READ) })],
+        ['no-overlays', () => ({ ...base, grouped_trades: stripTrades(PANEL_ONLY) })],
+        ['no-legs', () => ({ ...base, grouped_trades: stripTrades(PANEL_ONLY, true) })],
+        // blocked_signals backs the gate-breakdown panel (RunReport.jsx), so it
+        // is kept above and only given up once the trade list itself is at risk.
+        ['no-curve', () => ({
+          ...base,
+          equity_curve: [],
+          blocked_signals: undefined,
+          grouped_trades: stripTrades(PANEL_ONLY, true),
+        })],
+        // Last resort: headline only. The trade table will be empty until the
+        // server responds, which is the behaviour this whole block exists to
+        // avoid — so it is worth knowing in the console when we land here.
+        ['headline-only', () => ({
+          backtest_id: result.backtest_id,
+          initial_balance: result.initial_balance,
+          final_balance: result.final_balance,
+          total_trades: result.total_trades,
+          report: result.report,
+          params_snapshot: result.params_snapshot,
+          grouped_trades: [],
+          equity_curve: [],
+        })],
+      ];
+
+      for (const [name, build] of tiers) {
         try {
-          localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify({
-            backtest_id: result.backtest_id,
-            initial_balance: result.initial_balance,
-            final_balance: result.final_balance,
-            total_trades: result.total_trades,
-            report: result.report,
-            params_snapshot: result.params_snapshot,
-            grouped_trades: [],
-            equity_curve: [],
-          }));
-        } catch { }
+          localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(build()));
+          if (name !== 'full') {
+            console.warn(
+              `[Backtester] Cached last run at reduced fidelity ("${name}") — ` +
+              `${result.total_trades} trades exceeded the localStorage quota. ` +
+              `Full data still loads from the server.`
+            );
+          }
+          break;
+        } catch {
+          // Try the next, lighter tier.
+        }
       }
     }, 500);
     return () => clearTimeout(timer);
