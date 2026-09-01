@@ -37,6 +37,8 @@ except ImportError:
     redis_client = None
 
 
+import time as _time
+
 logger = get_logger(__name__)
 
 from backend.services.replay_stream import ReplayStreamer, bar_from_row  # noqa: E402
@@ -1301,7 +1303,13 @@ async def run_backtest_endpoint(
             # replay series. On a large run that is tens of millions of Python
             # objects — seconds to minutes of solid CPU. Run it in a thread so
             # the event loop keeps answering /backtest_status.
+            # Post-sim timing. The run reports 90% at the end of the simulation
+            # phase (PH_SIM), so anything slow AFTER this point looks to the user
+            # like "stuck at 90%" with no indication of which step is running.
+            # These three lines turn that into a log you can read.
+            _t0 = _time.perf_counter()
             sanitized = await asyncio.to_thread(_sanitize, response)
+            logger.info(f"[BT-TIMING] _sanitize took {_time.perf_counter() - _t0:.1f}s")
 
             current_state = await _get_state()
             current_state["status"] = "complete"
@@ -1332,10 +1340,14 @@ async def run_backtest_endpoint(
             # state and is fetched via /replay when needed.)
             
             # Send the run logs immediately as part of the WS payload
+            _t1 = _time.perf_counter()
             await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
-            
+            logger.info(f"[BT-TIMING] ws broadcast took {_time.perf_counter() - _t1:.1f}s")
+
             # Now save to state (which writes to Redis and might block)
+            _t2 = _time.perf_counter()
             await _save_state(current_state)
+            logger.info(f"[BT-TIMING] _save_state took {_time.perf_counter() - _t2:.1f}s")
             
         except Exception as e:
             current_state = await _get_state()

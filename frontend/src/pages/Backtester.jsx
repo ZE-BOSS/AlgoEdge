@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap, LayoutDashboard, PlusCircle, MinusCircle } from 'lucide-react';
+import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap, LayoutDashboard, PlusCircle, MinusCircle, Download } from 'lucide-react';
 import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts, getStrategyDefaults } from '../services/api';
 import TradeChart from '../components/TradeChart';
 import BacktestReplay from '../components/BacktestReplay';
@@ -11,6 +11,7 @@ import ParamsPanel from '../components/ParamsPanel';
 import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
 import * as summaryEngine from '../utils/summaryEngine';
+import { saveCachedResult, loadCachedResult, clearCachedResult, downloadResult } from '../utils/resultCache';
 
 // Below this many trades, win-rate/expectancy stats are not statistically
 // meaningful (e.g. a 1-trade "100% win rate" result). Used to show a
@@ -1110,6 +1111,10 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         {!result.is_saved ? (
           <>
             <button className="btn btn-primary btn-sm" onClick={onSave} disabled={isSaving}><Save size={14} /> {isSaving ? 'Saving...' : 'Save'}</button>
+            {/* Writes the COMPLETE in-memory result to a .json file. No quota,
+                no stripping — this is the way to hand a whole run to someone
+                else, which the cache was being misused for. */}
+            <button className="btn btn-secondary btn-sm" onClick={() => downloadResult(result)} title="Download the full result as JSON"><Download size={14} /> Export</button>
             <button className="btn btn-danger btn-sm" onClick={onDismiss}><X size={14} /> Dismiss</button>
           </>
         ) : (
@@ -1696,7 +1701,7 @@ export default function Backtester() {
 
   const portfolioMutation = useMutation({
     mutationFn: () => {
-      setResult(null);
+      applyFreshResult(null);
       setEvents([]);
       setBtError(null);
       return runPortfolioBacktest({
@@ -1809,14 +1814,27 @@ export default function Backtester() {
     return JSON.parse(JSON.stringify(DEFAULT_FORM));
   });
 
-  const RESULT_STORAGE_KEY = 'algoedge_bt_result';
-  const [result, setResult] = useState(() => {
-    try {
-      const saved = localStorage.getItem(RESULT_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch { }
-    return null;
-  });
+  // The cache is IndexedDB now, which is async — so there is no synchronous
+  // initial value. `hasFreshResult` stops a slow cache read from overwriting a
+  // result that already arrived from the server or a completed run in the
+  // meantime; the cache is only ever allowed to fill an empty slot.
+  const [result, setResult] = useState(null);
+  const hasFreshResult = useRef(false);
+  const applyFreshResult = useCallback((r) => {
+    hasFreshResult.current = true;
+    setResult(r);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCachedResult().then(cached => {
+      if (!cancelled && cached && !hasFreshResult.current) setResult(cached);
+    });
+    // One-time cleanup of the old localStorage key so its multi-MB string
+    // stops occupying the quota other features share.
+    try { localStorage.removeItem('algoedge_bt_result'); } catch { }
+    return () => { cancelled = true; };
+  }, []);
 
   const [events, setEvents] = useState([]);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
@@ -1858,159 +1876,30 @@ export default function Backtester() {
   // This used to `JSON.stringify(result)` in full. A finished run is 4-8 MB —
   // a per-bar equity curve (45k+ points on a 5,000-candle multi-timeframe run),
   // every leg, every grouped trade — and stringify plus localStorage.setItem
-  // are both synchronous on the main thread. Worse, anything over the ~5 MB
-  // quota threw, and the catch block then stringified the WHOLE THING A SECOND
-  // TIME. Two multi-megabyte serialisations back to back is a visible freeze,
-  // and on a large run neither of them could ever succeed.
+  // are both synchronous on the main thread, and anything over the ~5 MB quota
+  // (billed in UTF-16, so ~2.5 MB of JSON) threw. The tiered version that
+  // replaced it shed fields until something fit, which on a 1,300-trade run
+  // meant caching the headline and NO trades — useless for the one job the
+  // cache has.
   //
-  // localStorage is a convenience here — it repaints the last run on reload
-  // before the server responds — so it only needs enough to render the headline
-  // and the trade list. The heavy series are refetched from the server.
+  // IndexedDB stores a structured clone, so there is no stringify pass, the
+  // write is async and off the paint path, and the quota is large enough that
+  // the COMPLETE result goes in untouched. See utils/resultCache.js.
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!result) {
-        try { localStorage.removeItem(RESULT_STORAGE_KEY); } catch { }
+        clearCachedResult();
         return;
       }
-
-      // A result that reports trades but carries none is DEGRADED, not small.
-      // Two ways to get here, and they need opposite fixes:
-      //   1. it was restored from a cache entry that had already been reduced
-      //      to headline-only — re-saving it just re-writes the same stripped
-      //      blob, so the cache can never recover and the failure is invisible;
-      //   2. the server genuinely sent a payload with no trades, which is a
-      //      backend problem and nothing done here can fix it.
-      // Either way: don't overwrite, and say which one it is. Silently
-      // re-persisting this is what made the two indistinguishable.
-      const groups = result.grouped_trades || [];
-      if ((result.total_trades || 0) > 0 && groups.length === 0) {
-        console.warn(
-          `[Backtester] Not caching: result claims ${result.total_trades} trades but ` +
-          `carries 0. Either this was restored from a reduced cache entry (harmless — ` +
-          `re-run or reload to refetch from the server), or the server sent a ` +
-          `trade-less payload (a backend problem — check the [BT-WS] line in pm2 logs). ` +
-          `Existing cache left untouched.`
-        );
-        return;
-      }
-      // Shed weight in STEPS rather than going straight from "everything" to
-      // "no trades at all". The old two-tier version dropped the entire trade
-      // list on the first quota error, so a pyramiding run (175 -> ~1,000
-      // groups at ~29 KB each = well past the ~5 MB quota) reloaded with an
-      // empty table and no way to tell why. Each tier below drops the next
-      // heaviest thing the page can live without, and only the last resort
-      // gives up the trades.
-      //
-      // The whole block stays inside a try: building the tiers touches
-      // `result` shapes that vary between the live WS payload, a restored
-      // cache entry and a re-opened saved run, and an uncaught throw in here
-      // is inside a setTimeout — it would abort the write with no trace.
-      try {
-      const omit = (obj, keys) => {
-        if (!obj || typeof obj !== 'object') return obj;
-        const out = {};
-        for (const k of Object.keys(obj)) if (!keys.includes(k)) out[k] = obj[k];
-        return out;
-      };
-      const stripTrades = (keys, dropSubTrades = false) =>
-        (result.grouped_trades || []).map(g => {
-          const t = omit(g, dropSubTrades ? [...keys, 'sub_trades'] : keys);
-          if (!dropSubTrades && Array.isArray(g.sub_trades)) {
-            t.sub_trades = g.sub_trades.map(s => omit(s, keys));
-          }
-          return t;
-        });
-
-      // Never read by this frontend (chart_data* has zero references; the
-      // per-trade base64 PNG is guarded at the render site and simply won't
-      // show). Safe to drop even on the happy path.
-      const NEVER_READ = ['chart_data', 'chart_data_h1', 'chart_data_m15', 'chart_data_m5',
-                          'entry_snapshot_b64', 'gate_vector', 'confluence_tags'];
-      // Read, but only by the expanded-trade panel — which refetches from the
-      // server anyway. Losing these costs chart overlays, not the trade list.
-      const PANEL_ONLY = [...NEVER_READ, 'smc_data', 'original_signal', 'entry_confirmations'];
-
-      const base = {
-        ...result,
-        // Rebuilt from the server on demand; the chart downsamples to 500
-        // points anyway, so keep a decimated curve rather than every bar.
-        equity_curve: decimate(result.equity_curve, 500),
-        // `trades` is the per-leg array; every consumer on this page reads
-        // `grouped_trades`, which already carries the legs it needs.
-        trades: undefined,
-        run_logs: undefined,
-        replay: undefined,
-      };
-
-      const tiers = [
-        ['full', () => ({ ...base, grouped_trades: stripTrades(NEVER_READ) })],
-        ['no-overlays', () => ({ ...base, grouped_trades: stripTrades(PANEL_ONLY) })],
-        ['no-legs', () => ({ ...base, grouped_trades: stripTrades(PANEL_ONLY, true) })],
-        // blocked_signals backs the gate-breakdown panel (RunReport.jsx), so it
-        // is kept above and only given up once the trade list itself is at risk.
-        ['no-curve', () => ({
-          ...base,
-          equity_curve: [],
-          blocked_signals: undefined,
-          grouped_trades: stripTrades(PANEL_ONLY, true),
-        })],
-        // Last resort: headline only. The trade table will be empty until the
-        // server responds, which is the behaviour this whole block exists to
-        // avoid — so it is worth knowing in the console when we land here.
-        ['headline-only', () => ({
-          backtest_id: result.backtest_id,
-          initial_balance: result.initial_balance,
-          final_balance: result.final_balance,
-          total_trades: result.total_trades,
-          report: result.report,
-          params_snapshot: result.params_snapshot,
-          grouped_trades: [],
-          equity_curve: [],
-        })],
-      ];
-
-      // Don't attempt a tier that measurement says cannot fit. On a 994-group
-      // run the `full` tier costs 357 ms to build and stringify and then always
-      // throws — pure main-thread burn before the tier that actually fits.
-      // ~29 KB/group unstripped, so anything past a few hundred groups goes
-      // straight to the lean tiers.
-      const groupCount = (result.grouped_trades || []).length;
-      const startTier = groupCount > 250 ? 1 : 0;
-
-      let stored = null;
-      for (const [name, build] of tiers.slice(startTier)) {
-        try {
-          localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(build()));
-          stored = name;
-          break;
-        } catch {
-          // Try the next, lighter tier.
+      saveCachedResult(result).then(ok => {
+        if (!ok) {
+          console.warn(
+            '[Backtester] Could not cache this run — IndexedDB is unavailable ' +
+            '(private window, or site data blocked). The result still loads ' +
+            'from the server on reload, and the Export button still works.'
+          );
         }
-      }
-
-      if (stored === null) {
-        // Every tier failed — the quota is exhausted by something else, or
-        // storage is unavailable (private mode, blocked site data). Clear the
-        // key rather than leaving it: a stale entry would repaint the PREVIOUS
-        // run on reload, which is worse than showing nothing while the server
-        // response lands.
-        try { localStorage.removeItem(RESULT_STORAGE_KEY); } catch { }
-        console.warn(
-          '[Backtester] Could not cache this run at any fidelity — localStorage is ' +
-          'full or unavailable. The result still loads from the server on reload. ' +
-          'Run `localStorage.clear()` in this console if the quota is the problem.'
-        );
-      } else if (stored !== 'full') {
-        console.warn(
-          `[Backtester] Cached last run at reduced fidelity ("${stored}") — ` +
-          `${result.total_trades} trades exceeded the localStorage quota. ` +
-          `Full data still loads from the server.`
-        );
-      }
-      } catch (e) {
-        console.warn('[Backtester] Result caching failed:', e);
-        try { localStorage.removeItem(RESULT_STORAGE_KEY); } catch { }
-      }
+      });
     }, 500);
     return () => clearTimeout(timer);
   }, [result]);
@@ -2074,7 +1963,7 @@ export default function Backtester() {
           if (m.stage === 'complete') {
             if (m.result) {
               // Legacy path: an older backend still inlines the whole run.
-              setResult(m.result);
+              applyFreshResult(m.result);
               if (m.result.run_logs) setEvents(m.result.run_logs);
               setTimeout(() => setProgress(null), 2000);
             } else {
@@ -2090,7 +1979,7 @@ export default function Backtester() {
               getLatestBacktestResult()
                 .then(r => {
                   if (r.data && Object.keys(r.data).length > 0) {
-                    setResult(r.data);
+                    applyFreshResult(r.data);
                     if (r.data.run_logs) setEvents(r.data.run_logs);
                   }
                 })
@@ -2128,7 +2017,7 @@ export default function Backtester() {
           setIsLoadingDetail(true);
           getLatestBacktestResult().then(r => {
             if (r.data && Object.keys(r.data).length > 0) {
-              setResult(r.data);
+              applyFreshResult(r.data);
               if (r.data.run_logs) setEvents(r.data.run_logs);
             }
           }).catch(() => { })
@@ -2203,7 +2092,7 @@ export default function Backtester() {
   const handleSaveSuccess = () => {
     setShowSaveModal(false);
     setResult(null);
-    localStorage.removeItem(RESULT_STORAGE_KEY);
+    clearCachedResult();
     queryClient.invalidateQueries({ queryKey: ['backtests'] });
     refetch();
     setTimeout(() => {
@@ -2213,7 +2102,7 @@ export default function Backtester() {
 
   const handleDismiss = () => {
     setResult(null);
-    localStorage.removeItem(RESULT_STORAGE_KEY);
+    clearCachedResult();
   };
   const handleDelete = async id => { await deleteBacktest(id); refetch(); };
   const handleView = async id => {
@@ -2225,7 +2114,7 @@ export default function Backtester() {
 
     try {
       const res = await getBacktest(id);
-      setResult({ ...res.data.run, trades: res.data.trades, equity_curve: res.data.equity_curve, report: res.data.run, grouped_trades: res.data.grouped_trades || [], is_saved: true });
+      applyFreshResult({ ...res.data.run, trades: res.data.trades, equity_curve: res.data.equity_curve, report: res.data.run, grouped_trades: res.data.grouped_trades || [], is_saved: true });
       if (res.data.run_logs) setEvents(res.data.run_logs);
     } catch (e) {
       console.error(e);
