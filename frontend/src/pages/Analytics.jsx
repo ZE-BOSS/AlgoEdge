@@ -80,7 +80,10 @@ export default function Analytics() {
         <StatCard label="Win Rate" value={`${((s.win_rate || 0) * 100).toFixed(1)}%`} color={s.win_rate >= 0.55 ? 'green' : 'yellow'} icon={Target} />
         <StatCard label="Profit Factor" value={(s.profit_factor || 0).toFixed(2)} color="green" icon={TrendingUp} />
         <StatCard label="Sharpe Ratio" value={(s.sharpe_ratio || 0).toFixed(2)} color="blue" icon={Activity} />
-        <StatCard label="Max Drawdown" value={`${((s.max_drawdown_pct || 0) * 100).toFixed(1)}%`} color="red" icon={Shield} />
+        <StatCard label="Max DD (of capital)" value={`${((s.max_drawdown_pct || 0) * 100).toFixed(1)}%`} color="red" icon={Shield} />
+        {/* Peak-relative companion — the comparable figure once the account
+            has grown. See metrics.calculate_max_drawdown_of_peak. */}
+        <StatCard label="Max DD (of peak)" value={`${((s.max_drawdown_pct_of_peak || 0) * 100).toFixed(1)}%`} color="red" icon={Shield} />
         <StatCard label="Expectancy" value={`$${(s.expectancy || 0).toFixed(2)}`} color="green" icon={TrendingUp} />
         <StatCard label="Max Consec Losses" value={s.max_consecutive_losses || 0} color="red" icon={Clock} />
       </div>

@@ -1437,7 +1437,12 @@ class BacktestEngine(CostModelMixin):
         except Exception as e:
             logger.warning(f"[ENGINE] Gate telemetry merge failed (run unaffected): {e}")
 
-        report = generate_risk_report(grouped_trades, initial_balance=initial_balance)
+        report = generate_risk_report(
+            grouped_trades,
+            initial_balance=initial_balance,
+            # Sharpe/Sortino need the same normaliser the sizer actually used.
+            sizing_basis=self.risk_config.get("sizing_basis") or "STATIC",
+        )
         report.rejection_funnel = self.rejection_funnel
 
         # ── Task 5: recompute TP/SL/BE/TRAIL hit rates from LEG-level exits ──

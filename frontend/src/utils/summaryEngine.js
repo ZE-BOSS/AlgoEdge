@@ -117,38 +117,64 @@ export function bucketByPeriod(trades, period) {
  * this codebase's own circuit breaker enforces: 5% of a $25,000 account is
  * breached the instant you're down $1,250, whether the account has since
  * grown to $56,000 or not.
+ *
+ * `maxDdPctOfPeak` is the companion figure, anchored to the rolling peak
+ * instead (metrics.py::calculate_max_drawdown_of_peak). The capital basis is
+ * only the right *comparable* when dollar risk per trade is constant — i.e.
+ * under `sizing_basis: STATIC`. Once sizing compounds, risk grows with the
+ * account and a fixed denominator inflates the number purely for having made
+ * money: a run that went $10k -> $44k and gave back $11.2k reports 112% on
+ * capital (reads like a blown account) and 25% against peak (what happened).
+ * computePeriodStats picks between them from sizingBasis; both are returned
+ * either way so no caller loses a figure it already had.
  */
 export function maxDrawdown(equityCurve, initialBalance) {
-  if (!equityCurve || equityCurve.length === 0) return { maxDdPct: 0, maxDdAbs: 0 };
+  if (!equityCurve || equityCurve.length === 0) return { maxDdPct: 0, maxDdAbs: 0, maxDdPctOfPeak: 0 };
 
   const capital = num(initialBalance, 0) > 0 ? num(initialBalance) : num(equityCurve[0]);
   let peak = num(equityCurve[0]);
   let maxDdAbs = 0;
   let maxDdPct = 0;
+  let maxDdPctOfPeak = 0;
 
   for (const raw of equityCurve) {
     const val = num(raw);
     if (val > peak) peak = val;
     const ddAbs = peak - val;                         // absolute $ drawdown from rolling peak
     const ddPct = capital > 0 ? ddAbs / capital : 0;  // % anchored to initial capital
+    const ddPctPeak = peak > 0 ? ddAbs / peak : 0;    // % anchored to the rolling peak
 
     if (ddAbs > maxDdAbs) maxDdAbs = ddAbs;
     if (ddPct > maxDdPct) maxDdPct = ddPct;
+    if (ddPctPeak > maxDdPctOfPeak) maxDdPctOfPeak = ddPctPeak;
   }
 
   if (maxDdAbs < 0) maxDdAbs = 0;
   if (maxDdPct < 0) maxDdPct = 0;
+  if (maxDdPctOfPeak < 0) maxDdPctOfPeak = 0;
 
-  return { maxDdPct, maxDdAbs };
+  return { maxDdPct, maxDdAbs, maxDdPctOfPeak };
+}
+
+/**
+ * True when `sizing_basis` makes per-trade dollar risk scale with the account.
+ * STATIC (and anything unrecognised, matching the backend's fallback in
+ * position_sizer.resolve_sizing_base_balance) sizes off fixed capital.
+ */
+export function isCompoundingBasis(sizingBasis) {
+  return sizingBasis === 'BALANCE' || sizingBasis === 'EQUITY';
 }
 
 /**
  * Annualized Sharpe ratio.
  *
  * Note that mean/std is scale-invariant, so it doesn't matter WHICH fixed
- * balance the caller divided P&L by to build `returns` — only that the same
- * one was used for every trade. Dividing each trade by its own floating
- * pre-trade balance is what breaks it (see computePeriodStats).
+ * balance the caller divided P&L by to build `returns` — only that the
+ * denominator matches how the account was actually sized. Under
+ * `sizing_basis: STATIC` that means one fixed balance for every trade;
+ * under BALANCE/EQUITY it means each trade's own pre-trade balance, because
+ * risk really did scale with the account. Mixing the two is what breaks it
+ * (see computePeriodStats).
  */
 export function sharpe(returns) {
   if (returns.length < 2) return 0;
@@ -259,20 +285,28 @@ function groupKey(t, i) {
  * @param {number} initialBalance        Opening balance of THIS window (period start).
  * @param {number} accountInitialBalance Account's fixed starting capital; drawdown %
  *                                       is anchored here. Defaults to initialBalance.
+ * @param {string} sizingBasis           RiskParams.sizing_basis for the run
+ *                                       ('STATIC' | 'BALANCE' | 'EQUITY'). Decides
+ *                                       whether the fixed-capital or the
+ *                                       compounding normaliser is the correct one
+ *                                       for drawdown %, Sharpe/Sortino and Calmar.
+ *                                       Defaults to STATIC, matching the backend.
  */
-export function computePeriodStats(trades, initialBalance = 10000, accountInitialBalance = null) {
+export function computePeriodStats(trades, initialBalance = 10000, accountInitialBalance = null, sizingBasis = 'STATIC') {
   if (!trades || trades.length === 0) {
     return {
       totalTrades: 0, totalGroups: 0, wins: 0, losses: 0, winRate: 0,
       pnl: 0, grossProfit: 0, grossLoss: 0, profitFactor: 0,
       avgWin: 0, avgLoss: 0, bestTrade: 0, worstTrade: 0,
-      maxDdPct: 0, maxDdAbs: 0, sharpe: 0, sortino: 0,
+      maxDdPct: 0, maxDdAbs: 0, maxDdPctOfCapital: 0, maxDdPctOfPeak: 0,
+      sharpe: 0, sortino: 0,
       expectancyR: 0, avgWinR: 0, avgLossR: 0, avgDurationMin: 0,
-      maxConsecWins: 0, maxConsecLosses: 0, calmar: 0
+      maxConsecWins: 0, maxConsecLosses: 0, calmar: 0, sizingBasis
     };
   }
 
   const startBalance = num(initialBalance, 10000);
+  const compounding = isCompoundingBasis(sizingBasis);
 
   let wins = 0;
   let losses = 0;
@@ -338,16 +372,23 @@ export function computePeriodStats(trades, initialBalance = 10000, accountInitia
   for (const t of byExit) {
     const tpnl = num(t.pnl);
 
-    // Returns for Sharpe/Sortino are on a FIXED capital basis, matching
-    // compute_portfolio_stats. The previous version divided each trade by its
-    // own `balance_before`; because that balance grows as the account
-    // compounds, later trades' returns were scaled down purely for having
-    // happened after a winning streak, which shrinks apparent volatility and
-    // silently inflates Sharpe/Sortino over any profitable run. On the 58
-    // saved runs in debug/ it was enough to flip the SIGN of a run's Sharpe
-    // (apa/xauusd_session-filter_off: reported +0.007 on a run whose true
-    // Sharpe is -0.069, i.e. a losing run reading as a winning one).
-    returns.push(startBalance > 0 ? tpnl / startBalance : 0);
+    // Returns for Sharpe/Sortino. WHICH denominator is correct depends on
+    // sizing_basis, because it decides what a trade's dollar P&L is a return ON.
+    //
+    // STATIC: dollar risk per trade is constant, so fixed capital is the right
+    // normaliser — matching compute_portfolio_stats. Dividing by the trade's own
+    // pre-trade balance here scales later trades down purely for having happened
+    // after a winning streak, shrinking apparent volatility and inflating
+    // Sharpe/Sortino over any profitable run. On the 58 saved runs in debug/ that
+    // was enough to flip the SIGN of a run's Sharpe (apa/xauusd_session-filter_off:
+    // reported +0.007 on a run whose true Sharpe is -0.069).
+    //
+    // BALANCE/EQUITY: risk genuinely scales with the account, so a $500 loss on
+    // $50k IS the same risk event as $100 on $10k. Holding the denominator at the
+    // opening balance makes later trades look progressively more volatile and
+    // DEFLATES Sharpe — the same bug in the opposite direction.
+    const denom = compounding ? currentBal : startBalance;
+    returns.push(denom > 0 ? tpnl / denom : 0);
 
     currentBal += tpnl;
     equityCurve.push(currentBal);
@@ -371,11 +412,20 @@ export function computePeriodStats(trades, initialBalance = 10000, accountInitia
   const anchorBalance = accountInitialBalance != null && num(accountInitialBalance) > 0
     ? num(accountInitialBalance)
     : startBalance;
-  const { maxDdPct, maxDdAbs } = maxDrawdown(equityCurve, anchorBalance);
+  const dd = maxDrawdown(equityCurve, anchorBalance);
+  const maxDdAbs = dd.maxDdAbs;
+  const maxDdPctOfCapital = dd.maxDdPct;
+  const maxDdPctOfPeak = dd.maxDdPctOfPeak;
+  // Headline drawdown: capital basis under STATIC (the prop-firm reading, and
+  // correct while dollar risk is fixed), peak basis once sizing compounds.
+  // Both are returned above so a consumer can show either.
+  const maxDdPct = compounding ? maxDdPctOfPeak : maxDdPctOfCapital;
   const sh = sharpe(returns);
   const so = sortino(returns);
 
   const totalReturnPct = startBalance > 0 ? (currentBal - startBalance) / startBalance : 0;
+  // Calmar rides the headline drawdown, or it silently keeps the basis the
+  // rest of the card is no longer using.
   const calmar = maxDdPct > 0 ? totalReturnPct / maxDdPct : 999.0;
 
   return {
@@ -394,6 +444,9 @@ export function computePeriodStats(trades, initialBalance = 10000, accountInitia
     worstTrade: worstTrade === Infinity ? 0 : worstTrade,
     maxDdPct,
     maxDdAbs,
+    maxDdPctOfCapital,
+    maxDdPctOfPeak,
+    sizingBasis,
     sharpe: sh,
     sortino: so,
     expectancyR,
@@ -409,7 +462,7 @@ export function computePeriodStats(trades, initialBalance = 10000, accountInitia
 /**
  * Computes stats for each symbol + strategy combination present in the trades.
  */
-export function computePerSymbolStats(trades) {
+export function computePerSymbolStats(trades, sizingBasis = 'STATIC') {
   const symbolMap = new Map();
   for (const t of trades) {
     const key = `${t._source_symbol} (${t._source_strategy})`;
@@ -419,7 +472,7 @@ export function computePerSymbolStats(trades) {
 
   const result = {};
   for (const [key, symTrades] of symbolMap.entries()) {
-    result[key] = computePeriodStats(symTrades, symTrades[0]._initial_balance || 10000);
+    result[key] = computePeriodStats(symTrades, symTrades[0]._initial_balance || 10000, null, sizingBasis);
   }
   return result;
 }
@@ -491,7 +544,7 @@ export function buildEquityCurve(trades, initialBalance = 10000) {
 /**
  * Process a grouped map of buckets into the final matrix for the table.
  */
-export function computePeriodSymbolMatrix(bucketsMap, initialBalance = 10000) {
+export function computePeriodSymbolMatrix(bucketsMap, initialBalance = 10000, sizingBasis = 'STATIC') {
   // Sort keys chronologically
   const keys = Array.from(bucketsMap.keys()).sort((a, b) => a.localeCompare(b));
 
@@ -512,7 +565,7 @@ export function computePeriodSymbolMatrix(bucketsMap, initialBalance = 10000) {
     // called the same function WITHOUT the flag. Seeding the rolling peak at
     // the period's opening balance (what maxDrawdown already does) is both
     // the correct prop-firm reading and the consistent one.
-    const periodStats = computePeriodStats(trades, start + cumulativePnl, start);
+    const periodStats = computePeriodStats(trades, start + cumulativePnl, start, sizingBasis);
 
     // Sub-group by symbol inside this period
     const symbolBreakdown = {};

@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from backend.analytics.metrics import compute_portfolio_stats
+from backend.analytics.metrics import calculate_max_drawdown_of_peak, compute_portfolio_stats
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -46,6 +46,10 @@ class RiskReport:
     # Drawdown
     max_drawdown_pct: float = 0.0
     max_drawdown_abs: float = 0.0
+    # Same drawdown against the rolling equity peak. `max_drawdown_pct` is the
+    # prop-firm/capital basis and is deliberately anchored to initial_balance;
+    # this one is the run-comparable figure. See metrics.calculate_max_drawdown_of_peak.
+    max_drawdown_pct_of_peak: float = 0.0
     avg_drawdown_pct: float = 0.0
     max_drawdown_duration: int = 0
 
@@ -85,7 +89,11 @@ class RiskReport:
     rejection_funnel: dict[str, Any] = field(default_factory=dict)
 
 
-def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | None = None) -> RiskReport:
+def generate_risk_report(
+    trades: list[dict[str, Any]],
+    initial_balance: float | None = None,
+    sizing_basis: str = "STATIC",
+) -> RiskReport:
     """
     Generate a full RiskReport from a list of closed trades.
 
@@ -104,7 +112,7 @@ def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | 
         # (which grouped trades from trade_grouper.py can have) — guard explicitly.
         _first_balance = trades[0].get("balance_before") if trades else None
         initial_balance = _first_balance if _first_balance is not None else 10000.0
-    stats = compute_portfolio_stats(trades, initial_balance=initial_balance)
+    stats = compute_portfolio_stats(trades, initial_balance=initial_balance, sizing_basis=sizing_basis)
 
     if not trades:
         return RiskReport()
@@ -173,6 +181,7 @@ def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | 
     avg_drawdown_pct = sum(drawdowns_pct_of_capital) / len(drawdowns_pct_of_capital) if drawdowns_pct_of_capital else 0.0
     max_drawdown_abs = max(drawdowns_abs) if drawdowns_abs else 0.0
     max_drawdown_pct = (max_drawdown_abs / initial_balance) if initial_balance > 0 else 0.0
+    max_drawdown_pct_of_peak = calculate_max_drawdown_of_peak(equity)
 
     total_return_pct = (equity[-1] - equity[0]) / equity[0] if equity[0] > 0 else 0
     calmar_ratio = total_return_pct / max_drawdown_pct if max_drawdown_pct > 0 else float('inf')
@@ -217,7 +226,7 @@ def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | 
     per_symbol = {}
     for sym in symbols:
         sym_trades = [t for t in trades if t.get("symbol") == sym]
-        sym_stats = compute_portfolio_stats(sym_trades, initial_balance=initial_balance)
+        sym_stats = compute_portfolio_stats(sym_trades, initial_balance=initial_balance, sizing_basis=sizing_basis)
         per_symbol[sym] = {
             "win_rate": sym_stats.get("win_rate", 0),
             "pnl": sym_stats.get("total_pnl", 0),
@@ -361,6 +370,7 @@ def generate_risk_report(trades: list[dict[str, Any]], initial_balance: float | 
         calmar_ratio=safe_float(calmar_ratio),
         max_drawdown_pct=max_drawdown_pct,
         max_drawdown_abs=max_drawdown_abs,
+        max_drawdown_pct_of_peak=max_drawdown_pct_of_peak,
         avg_drawdown_pct=avg_drawdown_pct,
         max_drawdown_duration=max_dd_duration,
         max_consecutive_wins=stats["max_consecutive_wins"],

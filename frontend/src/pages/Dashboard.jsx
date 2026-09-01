@@ -475,7 +475,17 @@ export default function Dashboard() {
         <MetricCard label="Win Rate" value={`${((s.win_rate || 0) * 100).toFixed(1)}%`} color={s.win_rate >= 0.55 ? 'green' : 'yellow'} icon={Target} />
         <MetricCard label="Profit Factor" value={(s.profit_factor || 0).toFixed(2)} color={s.profit_factor >= 1.5 ? 'green' : 'yellow'} icon={TrendingUp} />
         <MetricCard label="Sharpe Ratio" value={(s.sharpe_ratio || 0).toFixed(2)} color="blue" icon={Activity} />
-        <MetricCard label="Max Drawdown" value={`${((s.max_drawdown_pct || s.max_drawdown || 0) * 100).toFixed(1)}%`} color="red" icon={TrendingDown} />
+        {/* Capital basis divides by the STARTING balance, so a grown account
+            can read >100% without ever nearing a blow-up. Show the
+            peak-relative figure alongside it rather than leaving one number
+            that looks catastrophic on a profitable account. */}
+        <MetricCard
+          label="Max Drawdown (of capital)"
+          value={`${((s.max_drawdown_pct || s.max_drawdown || 0) * 100).toFixed(1)}%`}
+          subtext={s.max_drawdown_pct_of_peak != null ? `${(s.max_drawdown_pct_of_peak * 100).toFixed(1)}% of peak equity` : ''}
+          color="red"
+          icon={TrendingDown}
+        />
         <MetricCard label="TP1 Hit Rate" value={`${((s.tp1_hit_rate || 0) * 100).toFixed(0)}%`} color="green" icon={Shield} />
       </div>
 

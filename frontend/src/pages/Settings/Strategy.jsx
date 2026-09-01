@@ -13,9 +13,9 @@ export default function StrategySettings() {
   const [config, setConfig] = useState({
     symbols: ['XAUUSD', 'XAGUSD', 'XPTUSD', 'EURUSD', 'GBPUSD'], // legacy support
     instrument_settings: [
-      { symbol: 'XAUUSD', strategy_id: 'APA_v1', enabled: true, compounding_enabled: false },
-      { symbol: 'EURUSD', strategy_id: 'APA_v1', enabled: true, compounding_enabled: false },
-      { symbol: 'GBPUSD', strategy_id: 'APA_v1', enabled: true, compounding_enabled: false }
+      { symbol: 'XAUUSD', strategy_id: 'APA_v1', enabled: true },
+      { symbol: 'EURUSD', strategy_id: 'APA_v1', enabled: true },
+      { symbol: 'GBPUSD', strategy_id: 'APA_v1', enabled: true }
     ],
     // Section names and field names below must match the backend config
     // dataclasses exactly (backend/core/config_schema.py and each strategy's
@@ -205,7 +205,7 @@ export default function StrategySettings() {
     if (exists) {
       exists.enabled = !exists.enabled;
     } else {
-      settings.push({ symbol: sym, strategy_id: 'APA_v1', enabled: true, compounding_enabled: false });
+      settings.push({ symbol: sym, strategy_id: 'APA_v1', enabled: true });
     }
 
     const active = settings.filter(i => i.enabled).map(i => i.symbol);
@@ -216,7 +216,7 @@ export default function StrategySettings() {
     let settings = [...(config.instrument_settings || [])];
     let exists = settings.find(i => i.symbol === sym);
     if (!exists) {
-      exists = { symbol: sym, strategy_id: 'APA_v1', enabled: true, compounding_enabled: false };
+      exists = { symbol: sym, strategy_id: 'APA_v1', enabled: true };
       settings.push(exists);
     }
     exists[key] = val;

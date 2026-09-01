@@ -31,10 +31,19 @@ export default function CumulativeSummary({ selectedIds, onClose }) {
     // 2. Compute Top-Level Stats
     // We use the initial_balance of the first backtest for the portfolio starting balance
     const initialBalance = bulkData[0].initial_balance || 10000;
-    const overallStats = summaryEngine.computePeriodStats(merged, initialBalance);
-    
+
+    // Sizing basis decides the normaliser for drawdown %, Sharpe/Sortino and
+    // Calmar. Only honour it when EVERY selected run agrees — a mixed
+    // selection has no single correct denominator, so fall back to the
+    // fixed-capital basis rather than silently scoring some runs one way and
+    // some the other.
+    const bases = new Set(bulkData.map(b => b.sizing_basis || 'STATIC'));
+    const sizingBasis = bases.size === 1 ? [...bases][0] : 'STATIC';
+
+    const overallStats = summaryEngine.computePeriodStats(merged, initialBalance, null, sizingBasis);
+
     // 3. Compute Symbol Stats
-    const symbolStats = summaryEngine.computePerSymbolStats(merged);
+    const symbolStats = summaryEngine.computePerSymbolStats(merged, sizingBasis);
     
     // 4. Compute Session Stats
     const sessionStats = summaryEngine.computeSessionStats(merged);
@@ -44,7 +53,7 @@ export default function CumulativeSummary({ selectedIds, onClose }) {
     
     // 6. Period Breakdown
     const buckets = summaryEngine.bucketByPeriod(merged, period);
-    const periodMatrix = summaryEngine.computePeriodSymbolMatrix(buckets, initialBalance);
+    const periodMatrix = summaryEngine.computePeriodSymbolMatrix(buckets, initialBalance, sizingBasis);
     
     return { trades: merged, overallStats, symbolStats, sessionStats, equityCurve, periodMatrix };
   }, [bulkData, period]);
@@ -100,7 +109,7 @@ export default function CumulativeSummary({ selectedIds, onClose }) {
           <MetricCard title="Win Rate" value={`${(overallStats.winRate * 100).toFixed(1)}%`} color={overallStats.winRate >= 0.5 ? 'var(--green)' : 'var(--red)'} />
           <MetricCard title="Net P&L" value={`$${overallStats.pnl.toFixed(2)}`} color={overallStats.pnl >= 0 ? 'var(--green)' : 'var(--red)'} />
           <MetricCard title="Profit Factor" value={overallStats.profitFactor >= 999 ? '∞' : overallStats.profitFactor.toFixed(2)} />
-          <MetricCard title="Max Drawdown" value={`${(overallStats.maxDdPct * 100).toFixed(2)}%`} color="var(--red)" />
+          <MetricCard title={`Max Drawdown (${overallStats.sizingBasis === 'STATIC' ? 'of capital' : 'of peak'})`} value={`${(overallStats.maxDdPct * 100).toFixed(2)}%`} color="var(--red)" />
           <MetricCard title="Sharpe Ratio" value={overallStats.sharpe.toFixed(2)} />
           <MetricCard title="Expectancy (R)" value={overallStats.expectancyR.toFixed(2)} color={overallStats.expectancyR > 0 ? 'var(--green)' : 'var(--red)'} />
           <MetricCard title="Avg Duration" value={fmtDur(overallStats.avgDurationMin)} />

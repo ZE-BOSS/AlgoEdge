@@ -26,6 +26,29 @@ async def get_user_stats(
 ):
     """Get aggregate performance stats for the authenticated user."""
     logger.info(f"Computing stats for {current_user.email}")
+
+    # Sharpe/Sortino need the same normaliser the LIVE sizer is actually using
+    # (RiskParams.sizing_basis, resolved in bot_service via
+    # resolve_sizing_base_balance). Under BALANCE/EQUITY dollar risk scales with
+    # the account, so a fixed-capital denominator deflates both ratios. Falls
+    # back to STATIC — the schema default — if the user has no saved config.
+    sizing_basis = "STATIC"
+    try:
+        import json as _json
+
+        from backend.core.config_schema import UserConfigV2
+        from backend.data.models import UserConfigModel as _UserConfigModel
+
+        _cfg_row = (
+            await db.execute(
+                select(_UserConfigModel).where(_UserConfigModel.user_id == current_user.id)
+            )
+        ).scalar_one_or_none()
+        if _cfg_row and _cfg_row.config_json:
+            _parsed = UserConfigV2.from_dict(_json.loads(_cfg_row.config_json))
+            sizing_basis = getattr(_parsed.risk, "sizing_basis", "STATIC") or "STATIC"
+    except Exception as e:
+        logger.warning(f"Could not resolve sizing_basis for stats, defaulting to STATIC: {e}")
     # DB Cache check removed: Always compute live from MT5 for accuracy.
 
     # 1. Try to get deals from MT5 history first
@@ -71,7 +94,7 @@ async def get_user_stats(
                     "be_applied": False,
                 })
             
-            return compute_portfolio_stats(trade_dicts, initial_balance=initial_balance)
+            return compute_portfolio_stats(trade_dicts, initial_balance=initial_balance, sizing_basis=sizing_basis)
     except Exception as e:
         logger.warning(f"Could not compute stats from MT5: {e}. Falling back to DB.")
 
@@ -96,4 +119,4 @@ async def get_user_stats(
         "be_applied": False,
     } for t in trades]
 
-    return compute_portfolio_stats(trade_dicts, initial_balance=initial_balance)
+    return compute_portfolio_stats(trade_dicts, initial_balance=initial_balance, sizing_basis=sizing_basis)

@@ -884,6 +884,10 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     [result.equity_curve],
   );
   const initialBalance = result.initial_balance || 10000;
+  // Which normaliser summaryEngine should use for drawdown %, Sharpe/Sortino
+  // and Calmar. Read from the run that produced these trades, not from the
+  // live form — an old saved run must keep being scored on ITS basis.
+  const sizingBasis = result.params_snapshot?.sizing_basis || 'STATIC';
 
   const [groupBy, setGroupBy] = useState('Month'); // Default to month
   const [viewMode, setViewMode] = useState('TRADES'); // 'TRADES' or 'SUMMARY'
@@ -939,8 +943,8 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
   }, [filteredGrouped]);
 
   const filteredStats = useMemo(
-    () => summaryEngine.computePeriodStats(filteredNormalized, initialBalance),
-    [filteredNormalized, initialBalance]
+    () => summaryEngine.computePeriodStats(filteredNormalized, initialBalance, null, sizingBasis),
+    [filteredNormalized, initialBalance, sizingBasis]
   );
 
   const filteredSessionData = useMemo(() => {
@@ -1033,7 +1037,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         pnl_r: t.pnl_r,
         symbol: t.symbol,
       }));
-      const stats = summaryEngine.computePeriodStats(normalized, startBal ?? initialBalance, initialBalance);
+      const stats = summaryEngine.computePeriodStats(normalized, startBal ?? initialBalance, initialBalance, sizingBasis);
 
       // TP-level / exit-reason breakdown across every leg in this period —
       // this is what the row's expand panel drills into.
@@ -1084,7 +1088,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         isBreached
       };
     });
-  }, [displayGroups, groupBy, symbolFilter, initialBalance]);
+  }, [displayGroups, groupBy, symbolFilter, initialBalance, sizingBasis]);
 
   const [expandedPeriods, setExpandedPeriods] = useState(new Set());
   const togglePeriod = (period) => {
@@ -1208,7 +1212,15 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       <MetricCard title="Win Rate" value={`${(filteredStats.winRate * 100).toFixed(1)}%`} color={filteredStats.winRate >= 0.5 ? 'var(--green)' : 'var(--red)'} />
       <MetricCard title="Profit Factor" value={filteredStats.profitFactor >= 999 ? '∞' : filteredStats.profitFactor.toFixed(2)} />
       <MetricCard title="Sharpe" value={filteredStats.sharpe.toFixed(2)} />
-      <MetricCard title="Max DD" value={`${(filteredStats.maxDdPct * 100).toFixed(1)}%`} color="var(--red)" />
+      {/* Say which basis this is. The capital basis divides by the STARTING
+          balance, so a run that grows a lot can print >100% without ever
+          having come close to blowing up — the peak basis is the readable one
+          there, and computePeriodStats already switches when sizing compounds. */}
+      <MetricCard
+        title={`Max DD (${filteredStats.sizingBasis === 'STATIC' ? 'of capital' : 'of peak'})`}
+        value={`${(filteredStats.maxDdPct * 100).toFixed(1)}%`}
+        color="var(--red)"
+      />
       <MetricCard title="Expectancy (R)" value={filteredStats.expectancyR.toFixed(2)} />
       <MetricCard title="Sortino" value={filteredStats.sortino >= 999 ? '∞' : filteredStats.sortino.toFixed(2)} />
     </div>
@@ -1621,6 +1633,12 @@ const DEFAULT_FORM = {
   // same symbol is discarded while one is open.
   max_positions_per_symbol: 1,
   allow_pyramiding: false, min_bars_between_entries: 0,
+  // [sizing] What each trade's risk is computed against. STATIC (backend
+  // default) sizes every trade off initial_balance and never compounds;
+  // BALANCE/EQUITY compound with realised/floating P&L. Sent explicitly so a
+  // saved run records which basis produced it — the same trade sequence
+  // returns wildly different equity curves under the two.
+  sizing_basis: 'STATIC',
   min_sl_pips: 10.0, max_account_leverage: 30.0,
   tp_count: 3, tp1_rr: 1.5, tp2_rr: 3.0, tp3_rr: 5.0, tp4_rr: 10.0, tp5_rr: 15.0,
   tp_splits: '50,30,20',
@@ -1638,7 +1656,6 @@ const DEFAULT_FORM = {
   // all, so the backend silently used its own default of 1.0.
   trail_trigger_rr: 2.0,
   atr_trail_multiplier: 1.5, trail_pips: 15,
-  compounding_enabled: false,
   prop_firm: {
     account_mode: 'personal',
     challenge_type: 'none',
@@ -1733,6 +1750,10 @@ export default function Backtester() {
         trail_mode: form.trail_mode ?? 'TP_HIT',
         allow_pyramiding: !!form.allow_pyramiding,
         min_bars_between_entries: form.min_bars_between_entries ?? 0,
+        // The single-symbol call spreads `...form` so it carries this already;
+        // the portfolio payload is explicit, so it has to be named here or a
+        // portfolio run silently falls back to the STATIC default.
+        sizing_basis: form.sizing_basis ?? 'STATIC',
         target_profit_enabled: form.target_profit_enabled,
         max_daily_profit: form.max_daily_profit,
         max_weekly_profit: form.max_weekly_profit,
@@ -1929,8 +1950,6 @@ export default function Backtester() {
           merged.htf_fvg_flip = { ...(c.htf_fvg_flip || {}), ...(prev.htf_fvg_flip || {}) };
           merged.bias_ifvg = { ...(c.bias_ifvg || {}), ...(prev.bias_ifvg || {}) };
           merged.ny_open_retest = { ...(c.ny_open_retest || {}), ...(prev.ny_open_retest || {}) };
-          merged.compounding_enabled = prev.compounding_enabled ?? c.compounding?.compounding_enabled;
-          
           return merged;
         });
       }
@@ -2325,6 +2344,21 @@ export default function Backtester() {
                 />
                 <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>
                   1 = a new setup is discarded while one is open.
+                </div>
+              </div>
+
+              {/* [sizing] RiskParams.sizing_basis — the compounding switch. The
+                  backend has supported this end-to-end since 4.2/D1 but no UI
+                  ever sent it, so every run silently used STATIC. */}
+              <div>
+                <label style={{ fontSize: '0.7rem' }}>Size against</label>
+                <select value={form.sizing_basis ?? 'STATIC'} onChange={e => u('sizing_basis', e.target.value)}>
+                  <option value="STATIC">Starting balance — no compounding</option>
+                  <option value="BALANCE">Closed balance — compounds with realised P&amp;L</option>
+                  <option value="EQUITY">Floating equity — compounds incl. open P&amp;L</option>
+                </select>
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>
+                  Compounding scales losing streaks too: a 69-trade streak at 1% costs 50% of the account.
                 </div>
               </div>
 

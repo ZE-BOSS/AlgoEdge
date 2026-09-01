@@ -1220,6 +1220,7 @@ async def run_backtest_endpoint(
                     "sharpe_ratio": report.sharpe_ratio if report else 0,
                     "sortino_ratio": report.sortino_ratio if report else 0,
                     "max_drawdown_pct": report.max_drawdown_pct if report else 0,
+                    "max_drawdown_pct_of_peak": getattr(report, "max_drawdown_pct_of_peak", 0) if report else 0,
                     "total_pnl": report.total_pnl if report else 0,
                     "expectancy_r": report.expectancy_r if report else 0,
                     "tp1_hit_rate": report.tp1_hit_rate if report else 0,
@@ -1896,6 +1897,7 @@ async def run_portfolio_backtest_endpoint(
                     "sharpe_ratio": getattr(report, 'sharpe_ratio', 0) if report else results.get("sharpe_ratio", 0),
                     "sortino_ratio": getattr(report, 'sortino_ratio', 0) if report else results.get("sortino_ratio", 0),
                     "max_drawdown_pct": getattr(report, 'max_drawdown_pct', 0) if report else results.get("max_drawdown_pct", 0),
+                    "max_drawdown_pct_of_peak": getattr(report, 'max_drawdown_pct_of_peak', 0) if report else results.get("max_drawdown_pct_of_peak", 0),
                     "total_pnl": total_pnl,
                     "expectancy_r": getattr(report, 'expectancy_r', 0) if report else results.get("expectancy_r", 0),
                     "tp1_hit_rate": getattr(report, 'tp1_hit_rate', 0) if report else 0,
@@ -2198,7 +2200,12 @@ async def get_backtest(
         import dataclasses
 
         from backend.analytics.reports import generate_risk_report
-        risk_report = generate_risk_report(grouped_trades_out, initial_balance=initial_balance)
+        risk_report = generate_risk_report(
+            grouped_trades_out,
+            initial_balance=initial_balance,
+            # Score a saved run on the basis it was RUN with, not today's default.
+            sizing_basis=(params or {}).get("sizing_basis") or "STATIC",
+        )
         resp["report"] = dataclasses.asdict(risk_report)
         resp["session_win_rates"] = {
             "LONDON": risk_report.london_win_rate,
@@ -2781,6 +2788,11 @@ async def get_bulk_backtests(
             "title": run.title or run.symbol,
             "strategy_id": run.strategy_id,
             "initial_balance": initial_balance,
+            # The frontend's summaryEngine needs this to pick the right
+            # normaliser for drawdown %, Sharpe/Sortino and Calmar — a run sized
+            # off a compounding balance is not comparable to a STATIC one on a
+            # fixed-capital denominator.
+            "sizing_basis": params.get("sizing_basis") or "STATIC",
             "trades": trades_out
         })
         

@@ -148,6 +148,29 @@ def calculate_max_drawdown(equity_curve: list[float], initial_balance: float | N
     return max_dd_pct, max_dd_abs
 
 
+def calculate_max_drawdown_of_peak(equity_curve: list[float]) -> float:
+    """
+    Max drawdown as a fraction of the rolling equity PEAK.
+
+    This is the companion to `calculate_max_drawdown`, NOT a replacement for it.
+    The capital-basis figure above is the right one for a prop-firm limit, but
+    it is not comparable between runs that finish at different equity levels:
+    the same proportional loss prints a bigger number the more the run made.
+    A run that grows $10k -> $44k and gives back $11.2k reports 112% on the
+    capital basis (which reads like a blown account) and 25% against its peak
+    (which is what actually happened). Report both; compare runs on this one.
+    """
+    if not equity_curve:
+        return 0.0
+    peak = equity_curve[0]
+    max_dd_pct = 0.0
+    for val in equity_curve:
+        peak = max(peak, val)
+        if peak > 0:
+            max_dd_pct = max(max_dd_pct, (peak - val) / peak)
+    return max_dd_pct
+
+
 def max_consecutive(values: list[bool]) -> int:
     """Return max consecutive True values."""
     max_count = 0
@@ -172,7 +195,11 @@ def _resolve_balance_before(trade: dict[str, Any], fallback: float) -> float:
     return val if val is not None else fallback
 
 
-def compute_portfolio_stats(trades: list[dict[str, Any]], initial_balance: float = 10000.0) -> dict[str, Any]:
+def compute_portfolio_stats(
+    trades: list[dict[str, Any]],
+    initial_balance: float = 10000.0,
+    sizing_basis: str = "STATIC",
+) -> dict[str, Any]:
     """
     Compute aggregate portfolio statistics from a list of closed trades.
     Source: RiskManagement_Spec.md Section 8.2
@@ -184,16 +211,6 @@ def compute_portfolio_stats(trades: list[dict[str, Any]], initial_balance: float
         initial_balance = 10000.0
 
     pnls = [t.get("pnl", 0) for t in trades]
-    # Capital-basis returns for Sharpe/Sortino: each trade's PnL divided by
-    # the FIXED initial_balance, not that trade's own floating pre-trade
-    # balance. Dividing by a growing balance understates later returns'
-    # apparent volatility purely because the account compounded up, which
-    # silently inflates Sharpe/Sortino over the course of a winning run —
-    # same root cause as the drawdown fix above.
-    pct_returns = [
-        t.get("pnl", 0) / initial_balance if initial_balance > 0 else 0
-        for t in trades
-    ]
     wins = [t for t in trades if t.get("pnl", 0) > 0]
     losses = [t for t in trades if t.get("pnl", 0) <= 0]
 
@@ -219,6 +236,38 @@ def compute_portfolio_stats(trades: list[dict[str, Any]], initial_balance: float
             equity.append(equity[-1] + t.get("pnl", 0))
 
     max_dd_pct, max_dd_abs = calculate_max_drawdown(equity, initial_balance)
+    # Live parity: /api/stats reads this function, so without the peak-relative
+    # companion the LIVE dashboard keeps showing only the capital basis — the
+    # one that reads >100% on any account that has grown a lot. Backtests get
+    # both via generate_risk_report; live should too.
+    max_dd_pct_of_peak = calculate_max_drawdown_of_peak(equity)
+
+    # Returns for Sharpe/Sortino. WHICH denominator is correct depends on
+    # sizing_basis, because it decides what a trade's dollar P&L is a return ON.
+    # Computed here (not earlier) so it can reuse the exit-ordered `equity`
+    # series: equity[i] is the balance the i-th trade actually opened against.
+    #
+    # STATIC: dollar risk per trade is constant, so fixed capital is right.
+    # Dividing by a growing balance would understate later returns' apparent
+    # volatility purely because the account compounded up, silently inflating
+    # Sharpe/Sortino over a winning run.
+    #
+    # BALANCE/EQUITY: risk genuinely scales with the account, so a $500 loss on
+    # $50k IS the same risk event as $100 on $10k. Holding the denominator at
+    # initial_balance makes later trades look progressively more volatile and
+    # DEFLATES Sharpe — the same distortion mirrored.
+    #
+    # Mirrors frontend summaryEngine.js::computePeriodStats so the two agree.
+    if sizing_basis in ("BALANCE", "EQUITY"):
+        pct_returns = [
+            (t.get("pnl", 0) / equity[i] if equity[i] > 0 else 0)
+            for i, t in enumerate(sorted_trades)
+        ]
+    else:
+        pct_returns = [
+            t.get("pnl", 0) / initial_balance if initial_balance > 0 else 0
+            for t in sorted_trades
+        ]
 
     # TP breakdown
     exit_reasons = [t.get("exit_reason", "") for t in trades]
@@ -242,6 +291,7 @@ def compute_portfolio_stats(trades: list[dict[str, Any]], initial_balance: float
         "sortino_ratio": calculate_sortino(pct_returns),
         "max_drawdown_pct": max_dd_pct,
         "max_drawdown_abs": max_dd_abs,
+        "max_drawdown_pct_of_peak": max_dd_pct_of_peak,
         "max_consecutive_wins": max_consecutive(is_win),
         "max_consecutive_losses": max_consecutive(is_loss),
         "best_trade": max(pnls) if pnls else 0,

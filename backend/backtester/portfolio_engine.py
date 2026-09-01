@@ -1005,7 +1005,11 @@ class PortfolioBacktestEngine(CostModelMixin):
         # from trades[0].balance_before (fragile, and was the root cause of
         # every report metric — Sharpe/Sortino/drawdown/equity curve — being
         # computed off a $0 baseline before balance_before was fixed above).
-        report = generate_risk_report(grouped_trades, initial_balance=initial_balance)
+        report = generate_risk_report(
+            grouped_trades,
+            initial_balance=initial_balance,
+            sizing_basis=self.risk_config.get("sizing_basis") or "STATIC",
+        )
         # Attach rejection funnel directly to the RiskReport object (same pattern as engine.py)
         report.rejection_funnel = self.rejection_funnel
 

@@ -57,7 +57,11 @@ class RiskEngine:
         # inferred from an empty funnel.
         self._warn_if_rr_unreachable()
         self.sl_buffer_pips = config.get("sl_buffer_pips", 5.0)
-        self.compounding_enabled = config.get("compounding_enabled", False)
+        # `compounding_enabled` used to be read here and never used again — a
+        # dead switch that read like it controlled compounding while the sizer
+        # ignored it. Compounding is `RiskParams.sizing_basis`
+        # (STATIC / BALANCE / EQUITY), resolved in
+        # position_sizer.resolve_sizing_base_balance().
         # [Phase 2 sizing-truth] real, user-editable settings that used to be
         # hardcoded module constants — see core/config_schema.py::RiskParams.
         self.max_margin_utilisation_pct = config.get("max_margin_utilisation_pct")

@@ -18,7 +18,11 @@ drawdown is computed from closed-trade equity only.
 
 from typing import Any
 
-from backend.analytics.metrics import calculate_max_drawdown, compute_portfolio_stats
+from backend.analytics.metrics import (
+    calculate_max_drawdown,
+    calculate_max_drawdown_of_peak,
+    compute_portfolio_stats,
+)
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -170,7 +174,12 @@ def apply_bar_level_drawdown(
     is the convention `calculate_max_drawdown` already uses and the one prop-firm
     drawdown limits are evaluated on.
     """
-    result = {"max_drawdown_pct": 0.0, "max_drawdown_abs": 0.0, "calmar_ratio": 0.0}
+    result = {
+        "max_drawdown_pct": 0.0,
+        "max_drawdown_abs": 0.0,
+        "max_drawdown_pct_of_peak": 0.0,
+        "calmar_ratio": 0.0,
+    }
     if not equity_curve:
         return result
 
@@ -179,14 +188,20 @@ def apply_bar_level_drawdown(
         return result
 
     dd_pct, dd_abs = calculate_max_drawdown(curve, initial_balance)
+    # The peak-relative companion has to be rebased on the SAME bar-level curve,
+    # or the two drawdown figures on one report end up measured on different
+    # series (capital basis bar-level, peak basis closed-trade).
+    dd_pct_peak = calculate_max_drawdown_of_peak(curve)
     result["max_drawdown_pct"] = dd_pct
     result["max_drawdown_abs"] = dd_abs
+    result["max_drawdown_pct_of_peak"] = dd_pct_peak
 
     if report is not None:
         prev_pct = getattr(report, "max_drawdown_pct", 0.0) or 0.0
         try:
             report.max_drawdown_pct = dd_pct
             report.max_drawdown_abs = dd_abs
+            report.max_drawdown_pct_of_peak = dd_pct_peak
             # Calmar is total return / max drawdown — must be rebased on the
             # corrected drawdown or it silently keeps the closed-equity figure.
             total_pnl = getattr(report, "total_pnl", 0.0) or 0.0
@@ -203,6 +218,7 @@ def apply_bar_level_drawdown(
             logger.info(
                 f"[REPORT] max_drawdown_pct corrected from closed-trade basis "
                 f"{prev_pct * 100:.2f}% -> bar-level basis {dd_pct * 100:.2f}% "
-                f"(abs ${dd_abs:,.2f}, {len(curve)} equity points)"
+                f"(abs ${dd_abs:,.2f}, {len(curve)} equity points) | "
+                f"vs peak: {dd_pct_peak * 100:.2f}%"
             )
     return result

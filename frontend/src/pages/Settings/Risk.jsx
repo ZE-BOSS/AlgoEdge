@@ -31,6 +31,10 @@ export default function RiskSettings() {
     be_buffer_atr_mult: 0.10,
     min_sl_pips: 10.0,
     max_account_leverage: 30.0,
+    // [sizing] RiskParams.sizing_basis. Falls into `riskParams` on save, so it
+    // reaches the live sizer through the existing channel. STATIC matches the
+    // backend default; BALANCE/EQUITY are the compounding modes.
+    sizing_basis: 'STATIC',
     tp_count: 3,
     tp1_rr: 1.5,
     tp2_rr: 3.0,
@@ -72,7 +76,6 @@ export default function RiskSettings() {
     // declaration beside trail_trigger_rr is now authoritative.
     trail_step_pips: 5.0,
     trail_structure_bars: 3,
-    compounding_enabled: false,
 
     prop_firm: {
       account_mode: 'personal',
@@ -134,7 +137,6 @@ export default function RiskSettings() {
         ),
         // Additional top-level mapping
         prop_firm: cfg.prop_firm || prev.prop_firm,
-        compounding_enabled: cfg.compounding?.compounding_enabled ?? prev.compounding_enabled,
         // Strategy sub-configs (FEAT-1)
         vwap: { ...prev.vwap, ...(cfg.vwap || {}) },
         crt: { ...prev.crt, ...(cfg.crt || {}) },
@@ -182,11 +184,10 @@ export default function RiskSettings() {
   }
 
   const handleSave = () => {
-    const { prop_firm, compounding_enabled, vwap, crt, apa, ...riskParams } = config;
+    const { prop_firm, vwap, crt, apa, ...riskParams } = config;
     mutation.mutate({
       risk: riskParams,
       prop_firm: prop_firm,
-      compounding: { compounding_enabled },
       // Strategy sub-configs (FEAT-1)
       vwap,
       crt,
@@ -212,6 +213,17 @@ export default function RiskSettings() {
           <div><label>Minimum R:R</label><input type="number" step="0.5" value={config.min_rr} onChange={e => update('min_rr', +e.target.value)} /></div>
           <div><label>Min SL (pips)</label><input type="number" step="0.5" min="0" value={config.min_sl_pips} onChange={e => update('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Global stop floor. Prevents a sub-spread stop sizing into an untradeable position. Set 0 to disable.</div></div>
           <div><label>Max Account Leverage (×)</label><input type="number" step="1" min="0" value={config.max_account_leverage} onChange={e => update('max_account_leverage', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Caps total notional against equity. Blocks the 100×+ sizes MT5 rejects with retcode 10019. Set 0 to disable.</div></div>
+          <div>
+            <label>Size Against</label>
+            <select value={config.sizing_basis ?? 'STATIC'} onChange={e => update('sizing_basis', e.target.value)}>
+              <option value="STATIC">Starting balance — no compounding</option>
+              <option value="BALANCE">Closed balance — compounds with realised P&amp;L</option>
+              <option value="EQUITY">Floating equity — compounds incl. open P&amp;L</option>
+            </select>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              This is the compounding switch. Set it the same here and in the Backtester, or live and backtest results will not be comparable.
+            </div>
+          </div>
         </div>
       </div>
 
