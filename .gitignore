@@ -95,3 +95,7 @@ coverage/
 research/data/*.log
 research/data/*.out
 research/data/__pycache__/
+
+# Compiled Python — machine-specific, and .gitignore does not
+# affect files already tracked (see docs/VPS-UPDATE.md).
+*.pyc
