@@ -1879,6 +1879,12 @@ export default function Backtester() {
       // empty table and no way to tell why. Each tier below drops the next
       // heaviest thing the page can live without, and only the last resort
       // gives up the trades.
+      //
+      // The whole block stays inside a try: building the tiers touches
+      // `result` shapes that vary between the live WS payload, a restored
+      // cache entry and a re-opened saved run, and an uncaught throw in here
+      // is inside a setTimeout — it would abort the write with no trace.
+      try {
       const omit = (obj, keys) => {
         if (!obj || typeof obj !== 'object') return obj;
         const out = {};
@@ -1942,20 +1948,47 @@ export default function Backtester() {
         })],
       ];
 
-      for (const [name, build] of tiers) {
+      // Don't attempt a tier that measurement says cannot fit. On a 994-group
+      // run the `full` tier costs 357 ms to build and stringify and then always
+      // throws — pure main-thread burn before the tier that actually fits.
+      // ~29 KB/group unstripped, so anything past a few hundred groups goes
+      // straight to the lean tiers.
+      const groupCount = (result.grouped_trades || []).length;
+      const startTier = groupCount > 250 ? 1 : 0;
+
+      let stored = null;
+      for (const [name, build] of tiers.slice(startTier)) {
         try {
           localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(build()));
-          if (name !== 'full') {
-            console.warn(
-              `[Backtester] Cached last run at reduced fidelity ("${name}") — ` +
-              `${result.total_trades} trades exceeded the localStorage quota. ` +
-              `Full data still loads from the server.`
-            );
-          }
+          stored = name;
           break;
         } catch {
           // Try the next, lighter tier.
         }
+      }
+
+      if (stored === null) {
+        // Every tier failed — the quota is exhausted by something else, or
+        // storage is unavailable (private mode, blocked site data). Clear the
+        // key rather than leaving it: a stale entry would repaint the PREVIOUS
+        // run on reload, which is worse than showing nothing while the server
+        // response lands.
+        try { localStorage.removeItem(RESULT_STORAGE_KEY); } catch { }
+        console.warn(
+          '[Backtester] Could not cache this run at any fidelity — localStorage is ' +
+          'full or unavailable. The result still loads from the server on reload. ' +
+          'Run `localStorage.clear()` in this console if the quota is the problem.'
+        );
+      } else if (stored !== 'full') {
+        console.warn(
+          `[Backtester] Cached last run at reduced fidelity ("${stored}") — ` +
+          `${result.total_trades} trades exceeded the localStorage quota. ` +
+          `Full data still loads from the server.`
+        );
+      }
+      } catch (e) {
+        console.warn('[Backtester] Result caching failed:', e);
+        try { localStorage.removeItem(RESULT_STORAGE_KEY); } catch { }
       }
     }, 500);
     return () => clearTimeout(timer);
