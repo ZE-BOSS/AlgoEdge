@@ -233,6 +233,12 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
 #
 # Source: research/16-full-window-backtest.md — 285 cells, 23,989 trades,
 # uniform 238-242 day window per asset.
+#
+# [18.5] WALK-FORWARD VERIFIED. Every entry below was re-tested by choosing on
+# Jan-Apr and scoring on May-Aug (research/18). 14 of the original 17 held; the
+# three that did not are commented out above with their figures rather than
+# deleted, so the negative result stays on the record. A removed slot simply
+# falls back to its strategy default — nothing is disabled.
 SLOT_TP1_RR: dict[str, float] = {
     # DriftJumpAlpha — the only strategy profitable in aggregate
     "CRASH 1000 INDEX|DriftJumpAlpha_v1": 5.0,   # +$80,262  n=514  DD 37.0%
@@ -243,7 +249,7 @@ SLOT_TP1_RR: dict[str, float] = {
     "GERMANY 40|VWAP_v1": 4.0,                   #  +$5,766  n=167  DD 16.9%
     "GER30|VWAP_v1": 4.0,                        #  FundedNext name for the above
     "XAGUSD|VWAP_v1": 4.0,                       #  +$4,088  n=169  DD 30.0%
-    "XAUUSD|VWAP_v1": 5.0,                       #  +$4,077  n=169  DD 13.3%
+    # "XAUUSD|VWAP_v1": 5.0,   REMOVED — IS +$2,991 but OOS -$144 (n=86)                       #  +$4,077  n=169  DD 13.3%
 
     # CRT
     "CRASH 500 INDEX|CRT_v1": 5.0,               # +$11,869  n=220  DD 16.7%
@@ -254,13 +260,13 @@ SLOT_TP1_RR: dict[str, float] = {
 
     # BiasIFVG — best risk-adjusted cell in the study is USOUSD (Sharpe 6.58)
     "USOUSD|BiasIFVG_v1": 5.0,                   #  +$8,673  n=57   DD 7.7%
-    "ETHUSD|BiasIFVG_v1": 5.0,                   #  +$6,904  n=75   DD 11.1%
+    # "ETHUSD|BiasIFVG_v1": 5.0,  REMOVED — IS -$817, OOS -$25 (n=23, thin)                   #  +$6,904  n=75   DD 11.1%
     "UKOUSD|BiasIFVG_v1": 5.0,                   #  +$5,093  n=53   DD 6.0%
 
     # APA
     "VOLATILITY 75 INDEX|APA_v1": 4.0,           #  +$5,016  n=113  DD 18.6%
     "XRPUSD|APA_v1": 5.0,                        #  +$4,988  n=116  DD 22.5%
-    "BTCUSD|APA_v1": 5.0,                        #  +$4,370  n=85   DD 18.2%
+    # "BTCUSD|APA_v1": 5.0,   REMOVED — IS +$5,292 but OOS -$923 (n=45)                        #  +$4,370  n=85   DD 18.2%
     "CRASH 500 INDEX|APA_v1": 3.0,               #  +$4,310  n=104  DD 6.4%
 }
 
