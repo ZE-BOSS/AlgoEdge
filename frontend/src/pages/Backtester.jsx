@@ -1872,6 +1872,27 @@ export default function Backtester() {
         try { localStorage.removeItem(RESULT_STORAGE_KEY); } catch { }
         return;
       }
+
+      // A result that reports trades but carries none is DEGRADED, not small.
+      // Two ways to get here, and they need opposite fixes:
+      //   1. it was restored from a cache entry that had already been reduced
+      //      to headline-only — re-saving it just re-writes the same stripped
+      //      blob, so the cache can never recover and the failure is invisible;
+      //   2. the server genuinely sent a payload with no trades, which is a
+      //      backend problem and nothing done here can fix it.
+      // Either way: don't overwrite, and say which one it is. Silently
+      // re-persisting this is what made the two indistinguishable.
+      const groups = result.grouped_trades || [];
+      if ((result.total_trades || 0) > 0 && groups.length === 0) {
+        console.warn(
+          `[Backtester] Not caching: result claims ${result.total_trades} trades but ` +
+          `carries 0. Either this was restored from a reduced cache entry (harmless — ` +
+          `re-run or reload to refetch from the server), or the server sent a ` +
+          `trade-less payload (a backend problem — check the [BT-WS] line in pm2 logs). ` +
+          `Existing cache left untouched.`
+        );
+        return;
+      }
       // Shed weight in STEPS rather than going straight from "everything" to
       // "no trades at all". The old two-tier version dropped the entire trade
       // list on the first quota error, so a pyramiding run (175 -> ~1,000

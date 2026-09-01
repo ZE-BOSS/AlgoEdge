@@ -49,6 +49,56 @@ from backend.services.log_stream import log_hub  # noqa: E402
 USER_BACKTEST_STATE = {}  # Fallback in-memory persistence: user_id -> state
 
 
+# ── One definition of "what is heavy in a grouped trade" ──────────────────
+# There were three independent, DIFFERENT strip lists in this file (the WS
+# completion payload, the Redis mirror, and /latest_result). They drifted:
+# /latest_result stripped chart_data/_m15/_m5 but NOT chart_data_h1 — the one
+# field that is actually populated — and none of them touched `sub_trades`,
+# where `original_signal` and `entry_confirmations` are repeated per leg.
+# Measured on a 994-group run: 22.0 MB payload and 1,229 ms of main-thread
+# parse in the browser, versus 2.6 MB and 105 ms once the legs are stripped too.
+_TRADE_HEAVY = ("chart_data", "chart_data_h1", "chart_data_m15", "chart_data_m5")
+# Zero frontend references (grepped).
+_TRADE_UNUSED = ("gate_vector", "confluence_tags")
+# Read only by the expanded-trade panel; re-fetched per trade on demand.
+_TRADE_PANEL_ONLY = ("smc_data", "original_signal", "entry_confirmations")
+# Above this many groups, shed the panel-only fields too. Ordinary runs keep
+# full fidelity; only runs that would otherwise stall the tab go lean.
+_LEAN_GROUP_THRESHOLD = 300
+
+
+def _slim_groups(groups, drop_panel_only=None):
+    """
+    Return `groups` with the heavy fields removed from each group AND each of
+    its `sub_trades`. Builds new shallow dicts — never deepcopy, and never
+    mutates the caller's list, which is the shared in-memory run state.
+
+    `drop_panel_only=None` decides from the group count.
+    """
+    if not isinstance(groups, list):
+        return groups
+    if drop_panel_only is None:
+        drop_panel_only = len(groups) > _LEAN_GROUP_THRESHOLD
+    drop = _TRADE_HEAVY + _TRADE_UNUSED
+    if drop_panel_only:
+        drop = drop + _TRADE_PANEL_ONLY
+
+    def _one(t):
+        if not isinstance(t, dict):
+            return t
+        out = {k: v for k, v in t.items() if k not in drop}
+        subs = out.get("sub_trades")
+        if isinstance(subs, list):
+            out["sub_trades"] = [
+                {k: v for k, v in s.items() if k not in drop}
+                if isinstance(s, dict) else s
+                for s in subs
+            ]
+        return out
+
+    return [_one(t) for t in groups]
+
+
 def _redis_safe_state(state):
     """
     State minus the megabyte payloads, for the Redis mirror.
@@ -68,16 +118,12 @@ def _redis_safe_state(state):
     res = out.get("result")
     if isinstance(res, dict):
         res = {k: v for k, v in res.items() if k != "replay"}
-        heavy = ("chart_data", "chart_data_h1", "chart_data_m15",
-                 "chart_data_m5", "smc_data")
+        # The Redis mirror only has to answer "is it done, and what were the
+        # headline numbers", so it always takes the leanest form regardless of
+        # size — hence drop_panel_only=True rather than the count threshold.
         for key in ("grouped_trades", "trades"):
-            rows = res.get(key)
-            if isinstance(rows, list):
-                res[key] = [
-                    {k: v for k, v in t.items() if k not in heavy}
-                    if isinstance(t, dict) else t
-                    for t in rows
-                ]
+            if key in res:
+                res[key] = _slim_groups(res[key], drop_panel_only=True)
         res["run_logs"] = []
         out["result"] = res
     return out
@@ -458,21 +504,19 @@ async def get_backtest_latest_result(current_user: User = Depends(get_current_us
             logger.warning(f"[API] Redis get latest_result failed: {e}")
             
     if state and state.get("status") == "complete":
-        import copy
-        result_data = copy.deepcopy(state.get("result", {}))
-        # Strip massive chart data from main payload
-        trades = result_data.get("grouped_trades", result_data.get("trades", []))
-        if isinstance(trades, list):
-            for t in trades:
-                if isinstance(t, dict):
-                    t.pop("chart_data", None)
-                    t.pop("chart_data_m15", None)
-                    t.pop("chart_data_m5", None)
-        
-        # Strip massive run_logs array
-        if "run_logs" in result_data:
-            result_data["run_logs"] = []
-            
+        # This used to `copy.deepcopy` the whole result — duplicating tens of MB
+        # synchronously on the event loop purely to pop a few keys off it — and
+        # then strip chart_data/_m15/_m5 while leaving `chart_data_h1` (the one
+        # that is actually populated) and every `sub_trades` payload intact. It
+        # is the endpoint the page calls on reload, so that cost landed on every
+        # refresh. Build the trimmed view directly instead; `_slim_groups`
+        # returns new dicts, so the shared in-memory state is never mutated.
+        src = state.get("result") or {}
+        result_data = {k: v for k, v in src.items() if k not in ("run_logs", "replay")}
+        result_data["run_logs"] = []
+        for key in ("grouped_trades", "trades"):
+            if key in result_data:
+                result_data[key] = _slim_groups(result_data[key])
         return result_data
     return {}
 
@@ -1271,52 +1315,18 @@ async def run_backtest_endpoint(
             # MB purely to throw most of it away, synchronously, on the event
             # loop. Build the trimmed view directly instead: shallow-copy each
             # trade dict without the chart keys and share everything else.
-            _HEAVY = ("chart_data", "chart_data_h1", "chart_data_m15", "chart_data_m5")
-            # Never read by the frontend (grepped: zero references). Free to drop.
-            _UNUSED = ("gate_vector", "confluence_tags")
-            # Read only by the expanded-trade panel. Measured on a 994-group
-            # DriftJumpAlpha run: the payload is 22.0 MB with these in and
-            # 2.6 MB without, and the browser blocks 1,229 ms vs 105 ms just
-            # parsing it — before any of it renders. The bulk is not the SMC
-            # overlay, it is `original_signal` + `entry_confirmations` repeated
-            # on every group AND every leg inside `sub_trades`.
-            #
-            # Dropped only above the threshold, so ordinary runs keep full
-            # fidelity and only the runs that would otherwise hang the tab lose
-            # the overlay detail. `smc_data` is already absent from the Redis
-            # restore path (see _slim_state), so shedding it here makes the two
-            # delivery paths agree rather than introducing a new gap.
-            _PANEL_ONLY = ("smc_data", "original_signal", "entry_confirmations")
-            _LEAN_GROUP_THRESHOLD = 300
-
+            # Same rules as /latest_result and the Redis mirror — see
+            # _slim_groups. Keeping them in one place is what stops the three
+            # delivery paths drifting apart again.
             ws_payload = {k: v for k, v in sanitized.items() if k != "replay"}
             _groups = ws_payload.get("grouped_trades")
             if isinstance(_groups, list):
-                _drop = _HEAVY + _UNUSED
                 if len(_groups) > _LEAN_GROUP_THRESHOLD:
-                    _drop = _drop + _PANEL_ONLY
                     logger.info(
                         f"[BT-WS] {len(_groups)} groups > {_LEAN_GROUP_THRESHOLD}: "
                         f"sending lean payload (overlay detail refetched on demand)"
                     )
-
-                def _slim_trade(t):
-                    if not isinstance(t, dict):
-                        return t
-                    out = {k: v for k, v in t.items() if k not in _drop}
-                    subs = out.get("sub_trades")
-                    if isinstance(subs, list):
-                        # The legs carry their own copies of the same heavy
-                        # fields — stripping only the group left most of the
-                        # weight behind.
-                        out["sub_trades"] = [
-                            {k: v for k, v in s.items() if k not in _drop}
-                            if isinstance(s, dict) else s
-                            for s in subs
-                        ]
-                    return out
-
-                ws_payload["grouped_trades"] = [_slim_trade(t) for t in _groups]
+                ws_payload["grouped_trades"] = _slim_groups(_groups)
             # (replay is already excluded above — it is megabytes and the
             # client already has it from the live stream; it stays in saved
             # state and is fetched via /replay when needed.)
@@ -1985,14 +1995,19 @@ async def run_portfolio_backtest_endpoint(
             # the "tremendous load" the on-demand chart endpoint exists to
             # avoid. Mirror the /backtest endpoint's pattern: strip the heavy
             # fields from what actually goes over the wire.
-            import copy
-            ws_payload = copy.deepcopy(sanitized)
-            if "grouped_trades" in ws_payload:
-                for t in ws_payload["grouped_trades"]:
-                    if isinstance(t, dict):
-                        t.pop("chart_data", None)
-                        t.pop("chart_data_m15", None)
-                        t.pop("chart_data_m5", None)
+            # Was a copy.deepcopy of the whole result followed by a strip list
+            # that missed `chart_data_h1` (the populated one) and never touched
+            # `sub_trades` — the same three defects /latest_result had. Routed
+            # through _slim_groups so all four delivery paths share one rule.
+            ws_payload = {k: v for k, v in sanitized.items() if k != "replay"}
+            _groups = ws_payload.get("grouped_trades")
+            if isinstance(_groups, list):
+                if len(_groups) > _LEAN_GROUP_THRESHOLD:
+                    logger.info(
+                        f"[PORTFOLIO_BT-WS] {len(_groups)} groups > "
+                        f"{_LEAN_GROUP_THRESHOLD}: sending lean payload"
+                    )
+                ws_payload["grouped_trades"] = _slim_groups(_groups)
             # Same reasoning as the per-trade chart_data above — the client
             # already received this series live; it is refetched from saved
             # state via /replay rather than pushed again at completion.
