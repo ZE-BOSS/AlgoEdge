@@ -23,6 +23,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer, selectinload
 
+from backend.strategies.strategy_defaults import get_slot_tp1_rr_defaults
 from backend.api.deps import get_current_user
 from backend.data.database import get_db
 from backend.data.models import BacktestRun, BacktestTrade, User
@@ -1002,8 +1003,11 @@ async def run_backtest_endpoint(
                 # [17.1] Single-symbol runs resolve through the same slot map as
                 # live, so a backtest and a live trade on the same symbol+strategy
                 # read their target from identical code.
+                # [18.3] Measured defaults seeded first; the request's own
+                # tp1_rr wins, so the UI still controls the run.
                 "tp1_rr_overrides_by_slot": {
-                    f"{req.symbol.upper()}|{req.strategy_id}": req.tp1_rr
+                    **get_slot_tp1_rr_defaults(),
+                    f"{req.symbol.upper()}|{req.strategy_id}": req.tp1_rr,
                 },
                 "tp_count_overrides_by_slot": {
                     f"{req.symbol.upper()}|{req.strategy_id}": req.tp_count
@@ -1091,35 +1095,29 @@ async def run_backtest_endpoint(
             # Capture the loop here (we are still on it) and hand work back to
             # it with `run_coroutine_threadsafe`, which is the thread-safe entry
             # point. Failures are logged rather than silently dropped.
-            _loop = asyncio.get_running_loop()
-            _last_sim_emit = [0.0]
+            # [18.4] Simulation progress via a real BacktestProgress phase.
+            #
+            # A plain callback cannot work here: runner.run_backtest tests
+            # `progress_phase is None` to decide whether it owns the progress
+            # scale, and calls `.set()` on it. Passing a bare function raised
+            # NameError and killed every run.
+            #
+            # `_owned_scale` is also what stops run_backtest broadcasting
+            # stage="complete" before this route has assembled the result —
+            # the actual cause of "results only appear after a refresh".
+            from backend.services.backtest_progress import BacktestProgress
 
-            # [merge] The engines now hand a single float fraction (0-1), the
-            # signature origin/dev standardised on. Adapted rather than keeping
-            # the old (done, total) pair so the route matches both engines.
-            def _sim_progress(fraction: float):
-                import time as _t
-                now = _t.monotonic()
-                if now - _last_sim_emit[0] < 0.25:
-                    return
-                _last_sim_emit[0] = now
-                pct = min(90, 35 + int(55 * max(0.0, min(1.0, fraction))))
-                payload = {"stage": "Simulating trades...", "pct": pct}
-                try:
-                    # [B5] Keep the polled status endpoint in step with the
-                    # WebSocket. This used to write only the process-local dict,
-                    # so `GET /api/backtest/status` — which reads the Redis-backed
-                    # state — saw nothing move and the UI needed a manual refresh.
-                    state = USER_BACKTEST_STATE.setdefault(current_user.id, {})
-                    state["progress"] = payload
-                    asyncio.run_coroutine_threadsafe(
-                        _save_state({**state, "progress": payload}), _loop)
-                    asyncio.run_coroutine_threadsafe(
-                        ws_manager.broadcast_to_user(
-                            current_user.id, {"type": "backtest_progress", **payload}),
-                        _loop)
-                except Exception as _e:
-                    logger.warning(f"[BACKTEST] progress emit failed: {_e}")
+            _progress = BacktestProgress(
+                user_id=current_user.id,
+                broadcast=lambda uid, payload: ws_manager.broadcast_to_user(uid, payload),
+                save_state=lambda payload: _save_state(
+                    {**USER_BACKTEST_STATE.get(current_user.id, {}), "progress": payload}
+                ),
+            )
+            PH_SIM = _progress.phase(35, 90, "Simulating trades...")
+            # `.note` is a pure assignment inside the worker thread; this task
+            # does the actual I/O on the event loop.
+            _pump_task = asyncio.create_task(_progress.pump())
 
             current_state["progress"] = {"stage": "Simulating trades...", "pct": 35}
             await _save_state(current_state)
@@ -1135,10 +1133,17 @@ async def run_backtest_endpoint(
                 candles_m5=candles_m5_idx,
                 save_mode="DISCARD",
                 strategy=engine,  # [Phase 14 B2.3] enables on_position_bar hook
-                progress_cb=_sim_progress,
+                progress_phase=PH_SIM,
                 # [B6] H1 context for the trade viewer's higher-timeframe pane.
                 candles_h1=indexed_by_tf.get("H1"),
             )
+
+            # [18.4] Stop the pump as soon as the engine returns. Leaving it
+            # running would keep polling for the life of the request, and
+            # `close()` before the route emits its own stage="complete" is what
+            # guarantees nothing else claims the run is finished first.
+            _progress.close()
+            _pump_task.cancel()
 
             report = results.get("report")
             elapsed = (_time.time() - bt_start) * 1000
@@ -1431,9 +1436,12 @@ async def run_portfolio_backtest_endpoint(
                 # [17.1] Per-ROW (symbol+strategy) R:R and TP count. More
                 # specific than the per-strategy map above and takes priority,
                 # so one portfolio run can hold several different targets.
+                # [18.3] Measured defaults, overridden per row where the UI
+                # set one. A row left blank inherits the measured value.
                 "tp1_rr_overrides_by_slot": {
-                    f"{sym_cfg.symbol.upper()}|{sym_cfg.strategy_id}": sym_cfg.tp1_rr
-                    for sym_cfg in req.symbols if sym_cfg.tp1_rr is not None
+                    **get_slot_tp1_rr_defaults(),
+                    **{f"{sym_cfg.symbol.upper()}|{sym_cfg.strategy_id}": sym_cfg.tp1_rr
+                       for sym_cfg in req.symbols if sym_cfg.tp1_rr is not None},
                 },
                 "tp_count_overrides_by_slot": {
                     f"{sym_cfg.symbol.upper()}|{sym_cfg.strategy_id}": sym_cfg.tp_count

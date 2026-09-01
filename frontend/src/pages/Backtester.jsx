@@ -1898,6 +1898,23 @@ export default function Backtester() {
     staleTime: Infinity,
   });
   const allStrategyDefaults = strategyDefaultsResp?.strategy_defaults || {};
+
+  // [18.3] Adopt the selected strategy's MEASURED R:R (research/16, 285 cells /
+  // 23,989 trades). Previously these were displayed in the defaults panel but
+  // never applied, so every run used the generic 1.5 regardless of what the
+  // measurement said — DriftJumpAlpha wants 1:5, NYOpenRetest 1:2, and the gap
+  // between them is the largest single determinant of a cell's outcome.
+  //
+  // Only fires when the strategy actually changes, so a value the user has
+  // typed is not overwritten while they work.
+  const lastStratRef = useRef(null);
+  useEffect(() => {
+    const sid = form.strategy_id;
+    if (!sid || lastStratRef.current === sid) return;
+    const measured = allStrategyDefaults[sid]?.defaults?.tp1_rr;
+    lastStratRef.current = sid;
+    if (measured != null) setForm(prev => ({ ...prev, tp1_rr: measured }));
+  }, [form.strategy_id, allStrategyDefaults]);
   useEffect(() => {
       if (userCfg?.config && !configLoaded) {
         const c = userCfg.config;

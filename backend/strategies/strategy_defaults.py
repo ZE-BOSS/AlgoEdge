@@ -71,6 +71,9 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     # rate from trailing alone — more than the whole book's improvement.
     # GBPJPY alone went 2.6% -> 25.6% win rate, +1,353 PnL.
     "NYOpenRetest_v1": {
+        # [18.3] Measured best fixed R:R — research/16.
+        # 1:2 best ($-46,699; degrades to $-64,059 at 1:5), n=4,978.
+        "tp1_rr": 2.0,
         "trail_method_tp1": "ATR_TRAIL",
         "trail_mode": "RR",
         "trail_trigger_rr": 1.5,
@@ -96,6 +99,9 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     # Its binding constraint is daily_trade_cap (blocks 77.9%), a risk control
     # rather than a market filter — deliberately left in place.
     "DriftJumpAlpha_v1": {
+        # [18.3] Measured best fixed R:R — research/16.
+        # 1:5 $+78,849 vs $+28,881 at 1:2 — monotonic in RR, n=1,595.
+        "tp1_rr": 5.0,
         "trail_method_tp1": "NONE",
         "trail_mode": "NONE",
         "be_mode": "TP_HIT",
@@ -112,6 +118,9 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     # yields ~94% more signals that are materially worse. Trailing was -4 PnL
     # net across 6 cells, with Hong Kong 50 losing 542 while its win rate rose.
     "VWAP_v1": {
+        # [18.3] Measured best fixed R:R — research/16.
+        # 1:4 best ($-45,994 vs $-54,794 at 1:3), n=7,604.
+        "tp1_rr": 4.0,
         "trail_method_tp1": "NONE",
         "trail_mode": "NONE",
         "be_mode": "EITHER",
@@ -128,6 +137,9 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     # signals (87 -> 435) and worse expectancy — so the low trade count is the
     # price of the edge, not a defect to tune away.
     "BiasIFVG_v1": {
+        # [18.3] Measured best fixed R:R — research/16.
+        # 1:3 best ($-7,480; 1:5 is $-18,943), n=2,757.
+        "tp1_rr": 3.0,
         "trail_method_tp1": "NONE",
         "trail_mode": "NONE",
         "be_mode": "EITHER",
@@ -145,6 +157,9 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     # (186 -> 571 signals) at essentially unchanged expectancy, and CRT cannot
     # be evaluated at 19 trades per symbol.
     "CRT_v1": {
+        # [18.3] Measured best fixed R:R — research/16.
+        # 1:5 least-bad ($-46,302 vs $-56,569 at 1:3), n=3,372.
+        "tp1_rr": 5.0,
         "session_filter_enabled": False,
         "trail_method_tp1": "NONE",
         "trail_mode": "NONE",
@@ -163,6 +178,9 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     # quality simultaneously. The clearest single verdict in the study, and the
     # opposite of what its 89.5% block rate suggests.
     "HTFFVGFlip_v1": {
+        # [18.3] Measured best fixed R:R — research/16.
+        # 1:4 the only profitable setting ($+540), n=458.
+        "tp1_rr": 4.0,
         "session_filter_enabled": False,
         "trail_method_tp1": "NONE",
         "trail_mode": "NONE",
@@ -180,6 +198,9 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     # runs) while require_rejection_candle defaults True. Fixed in the engine by
     # evaluating rejection independently of the retest state.
     "APA_v1": {
+        # [18.3] Measured best fixed R:R — research/16.
+        # 1:3 best of four ($-3,689 vs $-12,116 at 1:2), n=3,225.
+        "tp1_rr": 3.0,
         "trail_method_tp1": "NONE",
         "trail_mode": "NONE",
         "be_mode": "EITHER",
@@ -191,6 +212,67 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     },
 }
 
+
+
+# ── Per-SLOT measured defaults (symbol x strategy) ───────────────────────
+#
+# [18.3] The strategy-level tp1_rr above is the best single value across every
+# symbol that strategy trades. Research/16 showed the optimum is materially
+# symbol-specific on top of that: DriftJumpAlpha wants 1:5 on Crash 1000 but
+# 1:3 on Crash 300, and NYOpenRetest wants 1:5 on the two Nasdaq feeds while
+# 1:2 is right for it everywhere else.
+#
+# Only cells with n >= 30 trades AND a profitable best setting are listed —
+# a cell that loses at every R:R has no "best" worth shipping, and a cell on
+# 12 trades cannot support one. Everything absent falls back to the strategy
+# default, then to RiskParams.
+#
+# Keyed "SYMBOL|strategy_id", matching MultiTPManager.slot_key(). Symbol names
+# differ per broker (US Tech 100 on Deriv is NDX100 on FundedNext), so both
+# appear where both were measured.
+#
+# Source: research/16-full-window-backtest.md — 285 cells, 23,989 trades,
+# uniform 238-242 day window per asset.
+SLOT_TP1_RR: dict[str, float] = {
+    # DriftJumpAlpha — the only strategy profitable in aggregate
+    "CRASH 1000 INDEX|DriftJumpAlpha_v1": 5.0,   # +$80,262  n=514  DD 37.0%
+    "CRASH 300 INDEX|DriftJumpAlpha_v1": 3.0,    #  +$4,517  n=554  DD 36.1%
+
+    # VWAP
+    "VOLATILITY 75 INDEX|VWAP_v1": 5.0,          # +$15,328  n=240  DD 16.4%
+    "GERMANY 40|VWAP_v1": 4.0,                   #  +$5,766  n=167  DD 16.9%
+    "GER30|VWAP_v1": 4.0,                        #  FundedNext name for the above
+    "XAGUSD|VWAP_v1": 4.0,                       #  +$4,088  n=169  DD 30.0%
+    "XAUUSD|VWAP_v1": 5.0,                       #  +$4,077  n=169  DD 13.3%
+
+    # CRT
+    "CRASH 500 INDEX|CRT_v1": 5.0,               # +$11,869  n=220  DD 16.7%
+
+    # NYOpenRetest — 1:5 on the Nasdaq feeds, against its 1:2 strategy default
+    "US TECH 100|NYOpenRetest_v1": 5.0,          #  +$8,944  n=133  DD 10.6%
+    "NDX100|NYOpenRetest_v1": 5.0,               #  +$7,862  n=109  DD 10.8%
+
+    # BiasIFVG — best risk-adjusted cell in the study is USOUSD (Sharpe 6.58)
+    "USOUSD|BiasIFVG_v1": 5.0,                   #  +$8,673  n=57   DD 7.7%
+    "ETHUSD|BiasIFVG_v1": 5.0,                   #  +$6,904  n=75   DD 11.1%
+    "UKOUSD|BiasIFVG_v1": 5.0,                   #  +$5,093  n=53   DD 6.0%
+
+    # APA
+    "VOLATILITY 75 INDEX|APA_v1": 4.0,           #  +$5,016  n=113  DD 18.6%
+    "XRPUSD|APA_v1": 5.0,                        #  +$4,988  n=116  DD 22.5%
+    "BTCUSD|APA_v1": 5.0,                        #  +$4,370  n=85   DD 18.2%
+    "CRASH 500 INDEX|APA_v1": 3.0,               #  +$4,310  n=104  DD 6.4%
+}
+
+
+def get_slot_tp1_rr_defaults() -> dict[str, float]:
+    """Measured per-symbol R:R defaults, ready to merge into a risk_config.
+
+    Consumed by both the live path (bot_service) and the backtest routes, so a
+    measured target is the target actually traded. A user override always wins:
+    these are seeded first and anything explicit is applied on top.
+    """
+    return dict(SLOT_TP1_RR)
 
 def get_strategy_defaults(strategy_id: str) -> dict[str, Any]:
     """

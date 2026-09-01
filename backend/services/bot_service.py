@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from backend.risk.multi_tp import slot_overrides_from_config
+from backend.strategies.strategy_defaults import get_slot_tp1_rr_defaults
 from backend.services.profit_tracker import profit_tracker
 from backend.utils.logger import get_logger
 
@@ -729,8 +730,18 @@ class BotService:
                                         # same helper the backtest routes use, so
                                         # a target measured in a backtest is the
                                         # target actually traded live.
-                                        **slot_overrides_from_config(
-                                            getattr(config, "instrument_slots", None)),
+                                        # [18.3] Measured per-symbol R:R first,
+                                        # then anything the user set explicitly
+                                        # on the slot — user always wins.
+                                        "tp1_rr_overrides_by_slot": {
+                                            **get_slot_tp1_rr_defaults(),
+                                            **slot_overrides_from_config(
+                                                getattr(config, "instrument_slots", None)
+                                            )["tp1_rr_overrides_by_slot"],
+                                        },
+                                        **{k: v for k, v in slot_overrides_from_config(
+                                            getattr(config, "instrument_slots", None)
+                                        ).items() if k != "tp1_rr_overrides_by_slot"},
                                         "multi_position_mode": True,
 
                                         "max_daily_drawdown_pct": config.risk.max_daily_drawdown_pct,

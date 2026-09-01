@@ -101,13 +101,17 @@ async def run_backtest(
     candles_m5: pd.DataFrame = None,
     title: str | None = None,
     strategy: Any = None,
-    # [merge] origin/dev renamed this to `progress_phase` and passed
-    # `progress_phase.note`. Kept as `progress_cb` because the route on this
-    # branch supplies a plain callable; the SIGNATURE both sides settled on is
-    # the same either way — one float fraction, no I/O, safe across the
-    # to_thread boundary. backend/services/backtest_progress.py remains
-    # available for a later switch to phase objects.
-    progress_cb: Any = None,
+    # [18.4] A `services/backtest_progress._Phase`, NOT a plain callable.
+    #
+    # I briefly renamed this to `progress_cb` during a merge and passed a bare
+    # function. That broke the run outright — the body below calls
+    # `progress_phase.set(...)` and tests `progress_phase is None` to decide
+    # whether it owns the progress scale, neither of which a plain callable
+    # supports. `_owned_scale` is the mechanism that stops this function
+    # broadcasting `stage="complete"` while the route is still assembling the
+    # result, which is the actual cause of "results only appear after a
+    # refresh". It has to stay a phase object.
+    progress_phase: Any = None,
     # candles_h1 is the H1 context the trade viewer's higher-timeframe pane
     # reads (bug B3). origin/dev never carried it; dropping it would silently
     # reintroduce that bug.
@@ -166,7 +170,8 @@ async def run_backtest(
     results = await asyncio.to_thread(
         engine.run, candles, signals, initial_balance, candles_m15, candles_m5,
         strategy,
-        progress_cb,
+        # `.note` is a pure assignment, safe across the to_thread boundary.
+        progress_phase.note if progress_phase is not None else None,
         candles_h1,
     )
 

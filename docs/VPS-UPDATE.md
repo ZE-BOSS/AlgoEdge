@@ -243,12 +243,13 @@ effect on files git already tracks** — that is why they keep coming back.
 | symptom | cause |
 |---|---|
 | `No Python at '"/usr/bin\python.exe'` | `venv/pyvenv.cfg` is tracked; a pull overwrote it with another machine's |
+| `No Python at '"C:\Users\<someone-else>\...'` | `venv_win/` is tracked and PM2 picks it first — see [The interpreter trap](#the-interpreter-trap-hit-on-the-live-vps-2026-09-01) |
 | every pull conflicts on `__pycache__` | compiled `.pyc` files are tracked |
 
 **Fix once, on a development machine, then push:**
 
 ```powershell
-git rm -r --cached venv --quiet
+git rm -r --cached venv venv_win --quiet
 ```
 
 ```powershell
@@ -269,6 +270,129 @@ git ls-files "*.pyc" | ForEach-Object { git update-index --skip-worktree $_ }
 ```
 
 ---
+
+## The interpreter trap (hit on the live VPS, 2026-09-01)
+
+**Symptom.** Frontend `online`, backend `stopped` or crash-looping with a rising
+restart count, and an error log full of:
+
+```
+No Python at '"C:\Users\ikchr\AppData\Local\Programs\Python\Python311\python.exe'
+```
+
+A path belonging to **someone else's machine**, on your box.
+
+**Cause.** `ecosystem.config.js` resolves its interpreter from a candidate list
+and checks **`venv_win` first**:
+
+```
+venv_win/Scripts/python.exe   <-  checked first
+.venv/Scripts/python.exe
+venv/Scripts/python.exe
+```
+
+`venv_win/` was tracked in git, so a pull delivered a virtual environment built
+on a different machine. PM2 launched its `python.exe` shim, which points at a
+Python install that does not exist on this host, and the backend crash-looped.
+The frontend was unaffected, which makes it look like a backend fault rather
+than a deployment one.
+
+### Fix
+
+```powershell
+pm2 stop algoedge-backend
+```
+
+```powershell
+Rename-Item venv_win venv_win.disabled
+```
+
+**`pm2 restart` is not enough here.** It reuses the *saved process definition*,
+which still holds the old interpreter path — renaming the directory changes
+nothing until PM2 re-reads the config file. Delete and re-create:
+
+```powershell
+pm2 delete algoedge-backend; pm2 start ecosystem.config.js --only algoedge-backend
+```
+
+```powershell
+pm2 status; pm2 logs algoedge-backend --lines 20 --nostream
+```
+
+The error log is append-only, so ignore everything above the new start. Success
+is `↺` no longer climbing and `pid` showing a real number instead of `N/A`.
+
+If it still fails, force the interpreter — the config honours this override:
+
+```powershell
+$env:ALGOEDGE_PYTHON = "C:\Users\Administrator\Documents\AlgoEdge\venv\Scripts\python.exe"
+```
+
+```powershell
+pm2 delete algoedge-backend; pm2 start ecosystem.config.js --only algoedge-backend
+```
+
+### Permanent fix
+
+`venv/`, `venv_win/` and `*.pyc` were untracked in commit `fca6505`. Once a host
+pulls that, `venv_win` can no longer be delivered by git and this cannot recur.
+Verify after the next pull:
+
+```powershell
+git ls-files venv_win | Measure-Object -Line
+```
+
+Zero means the fix landed; delete `venv_win.disabled` at that point.
+
+> **Rule of thumb.** Any change to `ecosystem.config.js` — or to what it
+> *resolves* (interpreter path, script path, cwd) — needs `pm2 delete` +
+> `pm2 start ecosystem.config.js`, never `pm2 restart`. Restart only re-runs the
+> definition PM2 already holds in memory.
+
+---
+
+## Two production concerns worth fixing
+
+Both were found on the live box and apply to any new one.
+
+### The API is reachable from the open internet
+
+The backend log showed continuous unsolicited scanning from many IPs:
+
+```
+POST /jsonrpc                             GET /api/kernels
+GET /api/2.0/mlflow/experiments/list      GET /.well-known/security.txt
+```
+
+Bots probing for exposed Jupyter, MLflow and RPC services. Every one 404s, so
+nothing leaks — but **this host holds live broker credentials and can place
+trades.** It should not answer the public internet.
+
+Restrict the security group (or Windows Firewall) to your own IP on ports 80 and
+8000, or put the box behind a VPN. Check what is currently listening:
+
+```powershell
+Get-NetTCPConnection -State Listen | Where-Object LocalPort -in 80,8000 | Select-Object LocalAddress, LocalPort
+```
+
+`0.0.0.0` means every interface, i.e. the internet.
+
+### The frontend serves the Vite dev server, not a build
+
+`ecosystem.config.js` launches `vite/bin/vite.js` directly, so port 80 is the
+**development** server:
+
+```
+->  Local:   http://localhost:80/
+Server responded with status code 431
+```
+
+Two consequences: `npm run build` output is never actually served (the build
+step does nothing for you), and the dev server is not hardened — that 431 is it
+choking on oversized request headers, most likely from the bot traffic above.
+
+For production, serve the static `frontend/dist` instead. Until that changes,
+`npm run build` can be skipped on redeploy — the dev server compiles on demand.
 
 ## Quick reference
 
