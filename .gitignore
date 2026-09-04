@@ -99,3 +99,7 @@ research/data/__pycache__/
 # Compiled Python — machine-specific, and .gitignore does not
 # affect files already tracked (see docs/VPS-UPDATE.md).
 *.pyc
+
+# Tick archives — 1.2 GB of raw Deriv ticks (research/24). Regenerate with
+# research/data/synth_tick_harvest.py rather than committing them.
+research/data/ticks/

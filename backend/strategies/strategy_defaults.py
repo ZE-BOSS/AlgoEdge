@@ -271,6 +271,59 @@ SLOT_TP1_RR: dict[str, float] = {
 }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SYNTHETIC-INDEX SLOT PARAMETERS  (research/26, 2026-09-04)
+# ─────────────────────────────────────────────────────────────────────────────
+# Selected by research/data/pick_shipping_defaults.py: a 60-configuration grid
+# per symbol over 1 Jan 2026 -> 4 Sep 2026, executed on RAW TICKS with
+# market-order stop fills and limit-order target fills, then filtered to
+# configurations with max drawdown <= 35% and n >= 100 before taking the best
+# return. The drawdown filter is not cosmetic — the unconstrained best on
+# Crash 1000 returned +176.9% with an 89.5% drawdown, which no risk policy would
+# authorise.
+#
+# HOW TO REPRODUCE, exactly:
+#     cd research/data
+#     python run_strategy_search.py          # the full grid, all 12 symbols
+#     python pick_shipping_defaults.py       # the drawdown-filtered choice
+#
+# HEALTH WARNING. research/24 measured every one of these instruments to be a
+# fair martingale with memoryless jump arrival. None of these configurations has
+# a demonstrated statistical edge: independent-sample t runs 0.4-2.3, and picking
+# the best of 60 grid points guarantees a positive number even on noise. They are
+# what performed best in one eight-month window and are shipped for FORWARD
+# TESTING, not as validated alpha. Size accordingly.
+#
+# Format: "SYMBOL|Strategy_id": {param: value}
+SYNTH_SLOT_PARAMS: dict[str, dict[str, Any]] = {
+    # symbol                strategy              stop  tp     n   WR    PF   ret%   DD%
+    "BOOM 1000 INDEX|RangeRevert_v1":   {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "revert_k_atr": 2.0},   # 533  18.8  1.08  +35.5  27.7
+    "BOOM 500 INDEX|RangeRevert_v1":    {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "revert_k_atr": 2.0},   # 397  19.6  1.17  +56.0  19.7
+    "CRASH 1000 INDEX|TrendDrift_v1":   {"stop_atr_multiple": 5.0, "tp1_rr": 8.0},                        # 410  16.1  1.30 +120.5  20.0
+    "CRASH 500 INDEX|RangeRevert_v1":   {"stop_atr_multiple": 1.0, "tp1_rr": 5.0, "revert_k_atr": 2.0},   # 1479 19.9  1.04  +61.7  27.5
+    "VOLATILITY 75 INDEX|TrendDrift_v1": {"stop_atr_multiple": 2.5, "tp1_rr": 5.0},                       # 859  18.0  1.06  +45.3  33.2
+    "VOLATILITY 25 INDEX|RangeBreakout_v1": {"stop_atr_multiple": 2.5, "tp1_rr": 3.0, "breakout_lookback": 20},  # 1256 26.9 1.07 +64.3 27.9
+    "VOLATILITY 100 INDEX|RangeRevert_v1": {"stop_atr_multiple": 2.5, "tp1_rr": 8.0, "revert_k_atr": 2.0},  # 527 15.0 1.36 +168.6 29.1
+    "JUMP 25 INDEX|RangeRevert_v1":     {"stop_atr_multiple": 2.5, "tp1_rr": 8.0, "revert_k_atr": 2.0},   # 646  13.5  1.16  +97.2  32.4
+    "JUMP 100 INDEX|TrendDrift_v1":     {"stop_atr_multiple": 5.0, "tp1_rr": 5.0},                        # 235  19.6  1.18  +35.4  33.9
+    "RANGE BREAK 100 INDEX|SpikeFade_v1": {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "spike_k_atr": 3.0},  # 316  24.7  1.25  +77.7  22.2
+    "RANGE BREAK 200 INDEX|SpikeFade_v1": {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "spike_k_atr": 3.0},  # 230  24.3  1.06  +16.4  24.0
+    # Step Index is deliberately ABSENT. Its best drawdown-constrained
+    # configuration returned +1.1% at PF 1.00 over eight months, and research/24
+    # §1.1 measured the instrument as a fair coin to a precision of 0.009% on
+    # P(up) with no memory at any Markov order to 10. There is nothing to trade.
+}
+
+
+def get_synth_slot_params(symbol: str, strategy_id: str) -> dict[str, Any]:
+    """Measured per-symbol parameters for a synthetic-index slot, or {}.
+
+    Symbol matching is case-insensitive, mirroring SLOT_TP1_RR, because MT5 names
+    arrive in mixed case ("Crash 1000 Index") while the table is keyed upper.
+    """
+    return dict(SYNTH_SLOT_PARAMS.get(f"{symbol.upper()}|{strategy_id}") or {})
+
+
 def get_slot_tp1_rr_defaults() -> dict[str, float]:
     """Measured per-symbol R:R defaults, ready to merge into a risk_config.
 

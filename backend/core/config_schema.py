@@ -583,6 +583,55 @@ class RiskParams:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SYNTHETIC-INDEX STRATEGIES (Boom mirror + the three template strategies)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class BoomDriftJumpParams:
+    """Tunable parameters for BoomDriftJump_v1 — the Boom mirror of DriftJumpAlpha.
+
+    Defaults mirror DriftJumpAlphaParams, because the strategy is the same logic
+    reflected. Source: research/25.
+    """
+    drift_ema_fast: int = 20
+    drift_ema_slow: int = 50
+    min_adx_to_trade: int = 20
+    jump_entry_percentile_threshold: float = 95.0
+    trade_jumps_enabled: bool = False
+    min_rrr_to_accept_trade: float = 1.5
+    max_trades_per_day: int = 6
+    max_daily_risk_pct: float = 4.0
+    adx_gate_mode: str = "REDUCED_SIZE"
+    adx_gate_min_size_modifier: float = 0.1
+    tp1_rr: float = 5.0
+
+
+@dataclass
+class SynthParams:
+    """Shared parameters for SpikeFade_v1, RangeRevert_v1 and RangeBreakout_v1.
+
+    One dataclass covers all three because they share an entry/exit skeleton and
+    differ only in the entry predicate — see strategy_synth/engine.py.
+
+    Stops are wide by default. On jump instruments the stop is what the spike gaps
+    through, and research/24 §4.1 measured ~1 R of unmodelled slippage at
+    0.5 x ATR against ~0.2 R at 5 x ATR, so a tight stop here converts a spike into
+    a multi-R loss. Per-symbol overrides: strategy_defaults.py::SYNTH_SLOT_PARAMS.
+    """
+    stop_atr_multiple: float = 5.0
+    tp1_rr: float = 1.5
+    spike_k_atr: float = 3.0
+    revert_k_atr: float = 2.0
+    breakout_lookback: int = 20
+    ema_fast: int = 20
+    ema_slow: int = 50
+    require_adx: bool = True
+    min_adx_to_trade: int = 20
+    max_trades_per_day: int = 6
+    max_daily_risk_pct: float = 4.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # STRATEGY TWO (CRASHBOOM) PARAMETERS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1011,6 +1060,8 @@ class UserConfigV2(UserConfig):
     instrument_slots: list[InstrumentSlot] = None
     """[12.1/12.3/Part14] The authoritative symbol+strategy configuration — see InstrumentSlot."""
     drift_jump_alpha: DriftJumpAlphaParams = field(default_factory=DriftJumpAlphaParams)
+    boom_drift_jump: BoomDriftJumpParams = field(default_factory=BoomDriftJumpParams)
+    synth: SynthParams = field(default_factory=SynthParams)
     crt: CRTParams = field(default_factory=CRTParams)
     htf_fvg_flip: HTFFVGFlipParams = field(default_factory=HTFFVGFlipParams)
     bias_ifvg: BiasIFVGParams = field(default_factory=BiasIFVGParams)
@@ -1025,6 +1076,8 @@ class UserConfigV2(UserConfig):
         instrument_data = data.pop("instrument_settings", None)
         instrument_slots_data = data.pop("instrument_slots", None)
         drift_jump_alpha_data = data.pop("drift_jump_alpha", {})
+        boom_drift_jump_data = data.pop("boom_drift_jump", {})
+        synth_data = data.pop("synth", {})
         crt_data = data.pop("crt", {})
         htf_fvg_flip_data = data.pop("htf_fvg_flip", {})
         bias_ifvg_data = data.pop("bias_ifvg", {})
@@ -1045,6 +1098,8 @@ class UserConfigV2(UserConfig):
 
         config.risk = RiskParams(**filter_kwargs(RiskParams, _sync_trail_rr_aliases(risk_data)))
         config.drift_jump_alpha = DriftJumpAlphaParams(**filter_kwargs(DriftJumpAlphaParams, drift_jump_alpha_data))
+        config.boom_drift_jump = BoomDriftJumpParams(**filter_kwargs(BoomDriftJumpParams, boom_drift_jump_data))
+        config.synth = SynthParams(**filter_kwargs(SynthParams, synth_data))
         config.crt = CRTParams(**filter_kwargs(CRTParams, crt_data))
         config.htf_fvg_flip = HTFFVGFlipParams(**filter_kwargs(HTFFVGFlipParams, htf_fvg_flip_data))
         config.bias_ifvg = BiasIFVGParams(**filter_kwargs(BiasIFVGParams, bias_ifvg_data))
@@ -1105,6 +1160,8 @@ class UserConfigV2(UserConfig):
             ]
         if self.drift_jump_alpha is None:
             self.drift_jump_alpha = DriftJumpAlphaParams()
+            self.boom_drift_jump = BoomDriftJumpParams()
+            self.synth = SynthParams()
         if self.crt is None:
             self.crt = CRTParams()
         if self.htf_fvg_flip is None:

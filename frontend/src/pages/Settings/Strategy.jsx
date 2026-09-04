@@ -282,7 +282,7 @@ export default function StrategySettings() {
                       <option value="CRT_v1">CRT Strategy</option>
                       <option value="HTFFVGFlip_v1">HTF FVG Flip</option>
                       <option value="BiasIFVG_v1">Bias KeyLevel IFVG</option>
-                      <option value="NYOpenRetest_v1">NY Open Break Retest</option>
+                      <option value="NYOpenRetest_v1">NY Open Break Retest</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option><option value="SpikeFade_v1">Spike Fade (synthetics)</option><option value="RangeRevert_v1">Range Revert (synthetics)</option><option value="RangeBreakout_v1">Range Breakout (synthetics)</option><option value="TrendDrift_v1">Trend Drift (synthetics)</option>
                     </select>
                   </div>
 
