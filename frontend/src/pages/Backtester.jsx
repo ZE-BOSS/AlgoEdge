@@ -67,6 +67,12 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
   const updateBiasIfvg = (k, v) => setForm({ ...form, bias_ifvg: { ...biasIfvg, [k]: v } });
   const nyOpen = form.ny_open_retest || {};
   const updateNyOpen = (k, v) => setForm({ ...form, ny_open_retest: { ...nyOpen, [k]: v } });
+  const boom = form.boom_drift_jump || {};
+  const updateBoom = (k, v) => setForm({ ...form, boom_drift_jump: { ...boom, [k]: v } });
+  // SpikeFade / RangeRevert / RangeBreakout / TrendDrift all read the same
+  // backend dataclass (SynthParams), so they share one slice here too.
+  const synth = form.synth || {};
+  const updateSynth = (k, v) => setForm({ ...form, synth: { ...synth, [k]: v } });
 
   if (strategyId === 'APA_v1') {
     return (
@@ -222,6 +228,50 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
       </div>
     );
   }
+
+  if (strategyId === 'BoomDriftJump_v1') {
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <div><label style={{ fontSize: '0.7rem' }}>Drift EMA Fast</label><input type="number" value={boom.drift_ema_fast ?? 20} onChange={e => updateBoom('drift_ema_fast', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Drift EMA Slow</label><input type="number" value={boom.drift_ema_slow ?? 50} onChange={e => updateBoom('drift_ema_slow', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Min ADX to Trade</label><input type="number" value={boom.min_adx_to_trade ?? 20} onChange={e => updateBoom('min_adx_to_trade', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Measured cost of this gate: 0.069 R/trade on Boom.</div></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Jump Threshold (%)</label><input type="number" step="0.5" value={boom.jump_entry_percentile_threshold ?? 95.0} onChange={e => updateBoom('jump_entry_percentile_threshold', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Target R:R</label><input type="number" step="0.5" min="0" value={boom.tp1_rr ?? 5.0} onChange={e => updateBoom('tp1_rr', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Min RRR to Accept</label><input type="number" step="0.1" min="0" value={boom.min_rrr_to_accept_trade ?? 1.5} onChange={e => updateBoom('min_rrr_to_accept_trade', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" min="0" value={boom.max_trades_per_day ?? 6} onChange={e => updateBoom('max_trades_per_day', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={boom.max_daily_risk_pct ?? 4.0} onChange={e => updateBoom('max_daily_risk_pct', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>ADX Gate Mode</label><select value={boom.adx_gate_mode || 'REDUCED_SIZE'} onChange={e => updateBoom('adx_gate_mode', e.target.value)}><option value="REDUCED_SIZE">Reduced size</option><option value="BLOCK">Block</option></select></div>
+        <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 8, fontSize: '0.75rem' }}><input type="checkbox" checked={boom.trade_jumps_enabled ?? false} onChange={e => updateBoom('trade_jumps_enabled', e.target.checked)} /> Trade jump entries (Setup B)</label></div>
+      </div>
+    );
+  }
+
+  if (strategyId === 'SpikeFade_v1' || strategyId === 'RangeRevert_v1'
+      || strategyId === 'RangeBreakout_v1' || strategyId === 'TrendDrift_v1') {
+    const isSpike = strategyId === 'SpikeFade_v1';
+    const isRevert = strategyId === 'RangeRevert_v1';
+    const isBreak = strategyId === 'RangeBreakout_v1';
+    const isDrift = strategyId === 'TrendDrift_v1';
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <div><label style={{ fontSize: '0.7rem' }}>Stop (x ATR)</label><input type="number" step="0.5" min="0.1" value={synth.stop_atr_multiple ?? 5.0} onChange={e => updateSynth('stop_atr_multiple', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Keep wide: at 0.5x ATR the unmodelled spike gap is ~1 R/trade.</div></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Target R:R</label><input type="number" step="0.5" min="0.1" value={synth.tp1_rr ?? 5.0} onChange={e => updateSynth('tp1_rr', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" min="0" value={synth.max_trades_per_day ?? 6} onChange={e => updateSynth('max_trades_per_day', +e.target.value)} /></div>
+        {isSpike && <div><label style={{ fontSize: '0.7rem' }}>Spike Size (x ATR)</label><input type="number" step="0.5" min="0.5" value={synth.spike_k_atr ?? 3.0} onChange={e => updateSynth('spike_k_atr', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Bar must move this far one way to count as a spike.</div></div>}
+        {isRevert && <div><label style={{ fontSize: '0.7rem' }}>Stretch (x ATR)</label><input type="number" step="0.5" min="0.5" value={synth.revert_k_atr ?? 2.0} onChange={e => updateSynth('revert_k_atr', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Distance from the slow EMA before entering back toward it.</div></div>}
+        {isBreak && <div><label style={{ fontSize: '0.7rem' }}>Breakout Lookback (bars)</label><input type="number" min="2" value={synth.breakout_lookback ?? 20} onChange={e => updateSynth('breakout_lookback', +e.target.value)} /></div>}
+        {(isRevert || isDrift) && <div><label style={{ fontSize: '0.7rem' }}>EMA Fast</label><input type="number" min="2" value={synth.ema_fast ?? 20} onChange={e => updateSynth('ema_fast', +e.target.value)} /></div>}
+        {(isRevert || isDrift) && <div><label style={{ fontSize: '0.7rem' }}>EMA Slow</label><input type="number" min="3" value={synth.ema_slow ?? 50} onChange={e => updateSynth('ema_slow', +e.target.value)} /></div>}
+        {isDrift && <div><label style={{ fontSize: '0.7rem' }}>Min ADX to Trade</label><input type="number" min="0" value={synth.min_adx_to_trade ?? 20} onChange={e => updateSynth('min_adx_to_trade', +e.target.value)} disabled={!(synth.require_adx ?? true)} style={{ opacity: (synth.require_adx ?? true) ? 1 : 0.5 }} /></div>}
+        <div><label style={{ fontSize: '0.7rem' }}>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={synth.max_daily_risk_pct ?? 4.0} onChange={e => updateSynth('max_daily_risk_pct', +e.target.value)} /></div>
+        {isDrift && <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 8, fontSize: '0.75rem' }}><input type="checkbox" checked={synth.require_adx ?? true} onChange={e => updateSynth('require_adx', e.target.checked)} /> Require ADX trend filter</label></div>}
+        <div style={{ gridColumn: '1 / -1', fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 6 }}>
+          These four strategies share one backend params block (SynthParams), so a change here applies to all of them. Per-symbol shipped values live in strategy_defaults.py (SYNTH_SLOT_PARAMS).
+        </div>
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -1478,6 +1528,15 @@ function buildPortfolioStrategyParams(strategyId, form) {
       return form.bias_ifvg || {};
     case 'NYOpenRetest_v1':
       return form.ny_open_retest || {};
+    case 'BoomDriftJump_v1':
+      return form.boom_drift_jump || {};
+    // The four synthetic template strategies share one params dataclass
+    // (SynthParams), so they share one form slice too.
+    case 'SpikeFade_v1':
+    case 'RangeRevert_v1':
+    case 'RangeBreakout_v1':
+    case 'TrendDrift_v1':
+      return form.synth || {};
     default:
       return {};
   }
@@ -1562,7 +1621,7 @@ const costOrAuto = (v) => (v === '' || v === null || v === undefined ? null : +v
 
 // Form slices that are objects. The localStorage restore merges these one level
 // deep so a newly-added strategy parameter is not lost behind a stale blob.
-const NESTED_FORM_KEYS = ['apa', 'drift_jump_alpha', 'crt', 'vwap', 'htf_fvg_flip', 'bias_ifvg', 'ny_open_retest', 'prop_firm'];
+const NESTED_FORM_KEYS = ['apa', 'drift_jump_alpha', 'crt', 'vwap', 'htf_fvg_flip', 'bias_ifvg', 'ny_open_retest', 'boom_drift_jump', 'synth', 'prop_firm'];
 
 // Bump this whenever a default below changes in a way a cached blob would
 // override. Old keys are purged on load — see the `form` initialiser.
@@ -1627,6 +1686,21 @@ const DEFAULT_FORM = {
     range_window_start: '08:00', range_window_end: '08:15', earliest_valid_break_time: '09:30',
     session_end: '11:00', stop_buffer_points: 5.0, fixed_target_points: 50.0,
     dynamic_target_override: true, target_mode: 'rr', target_rr: 2.0, sl_buffer_atr_mult: 1.0,
+  },
+  // Boom mirror of DriftJumpAlpha — mirrors BoomDriftJumpParams.
+  boom_drift_jump: {
+    drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20,
+    jump_entry_percentile_threshold: 95.0, trade_jumps_enabled: false,
+    min_rrr_to_accept_trade: 1.5, max_trades_per_day: 6, max_daily_risk_pct: 4.0,
+    adx_gate_mode: 'REDUCED_SIZE', adx_gate_min_size_modifier: 0.1, tp1_rr: 5.0,
+  },
+  // Shared by SpikeFade / RangeRevert / RangeBreakout / TrendDrift — they all
+  // read SynthParams, so one slice serves all four (see buildPortfolioStrategyParams).
+  synth: {
+    stop_atr_multiple: 5.0, tp1_rr: 5.0, spike_k_atr: 3.0, revert_k_atr: 2.0,
+    breakout_lookback: 20, ema_fast: 20, ema_slow: 50,
+    require_adx: true, min_adx_to_trade: 20,
+    max_trades_per_day: 6, max_daily_risk_pct: 4.0,
   },
   // Global session gate (RiskParams / BacktestRequest.session_filter_enabled) —
   // distinct from the per-strategy session_filter_enabled fields above.
@@ -1948,6 +2022,8 @@ export default function Backtester() {
           merged.htf_fvg_flip = { ...(c.htf_fvg_flip || {}), ...(prev.htf_fvg_flip || {}) };
           merged.bias_ifvg = { ...(c.bias_ifvg || {}), ...(prev.bias_ifvg || {}) };
           merged.ny_open_retest = { ...(c.ny_open_retest || {}), ...(prev.ny_open_retest || {}) };
+          merged.boom_drift_jump = { ...(c.boom_drift_jump || {}), ...(prev.boom_drift_jump || {}) };
+          merged.synth = { ...(c.synth || {}), ...(prev.synth || {}) };
           return merged;
         });
       }

@@ -210,35 +210,54 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
             "re-measure before changing exits."
         ),
     },
+
+    # ── Synthetic-index strategies (research/26) ─────────────────────────────
+    # Every one of these was measured with a SINGLE target, break-even OFF and
+    # trailing OFF. The global defaults are be_mode="EITHER" (break-even arms at
+    # 2 R), tp_count=3 (partial exits) and tp1_rr=1.5 — so without these entries a
+    # live run would use a materially different exit policy from the one the
+    # reported numbers came from, and would not reproduce them.
+    #
+    # Break-even in particular is not neutral here: research/25 §4.1 measured it
+    # costing up to 0.154 R per trade on Boom, and BE_SL exits giving up 2.08 R of
+    # mean favourable excursion. It is off deliberately, not by omission.
+    "BoomDriftJump_v1": {
+        "tp_count": 1,
+        "tp1_rr": 5.0,
+        "be_mode": "NONE",
+        "trail_method_tp1": "NONE",
+        "evidence": "research/25 — Boom mirror of DJA; BE measured harmful (-0.154 R).",
+    },
+    "SpikeFade_v1": {
+        "tp_count": 1,
+        "tp1_rr": 5.0,
+        "be_mode": "NONE",
+        "trail_method_tp1": "NONE",
+        "evidence": "research/26 — best on Range Break 100 (+77.7%, PF 1.25, DD 22.2%).",
+    },
+    "RangeRevert_v1": {
+        "tp_count": 1,
+        "tp1_rr": 5.0,
+        "be_mode": "NONE",
+        "trail_method_tp1": "NONE",
+        "evidence": "research/26 — best on Vol 100 (+168.6%, PF 1.36) and Boom 500.",
+    },
+    "RangeBreakout_v1": {
+        "tp_count": 1,
+        "tp1_rr": 3.0,
+        "be_mode": "NONE",
+        "trail_method_tp1": "NONE",
+        "evidence": "research/26 — best on Volatility 25 (+64.3%, PF 1.07, DD 27.9%).",
+    },
+    "TrendDrift_v1": {
+        "tp_count": 1,
+        "tp1_rr": 8.0,
+        "be_mode": "NONE",
+        "trail_method_tp1": "NONE",
+        "evidence": "research/26 — best on Crash 1000 (+120.5%, PF 1.30, DD 20.0%).",
+    },
 }
 
-
-
-# ── Per-SLOT measured defaults (symbol x strategy) ───────────────────────
-#
-# [18.3] The strategy-level tp1_rr above is the best single value across every
-# symbol that strategy trades. Research/16 showed the optimum is materially
-# symbol-specific on top of that: DriftJumpAlpha wants 1:5 on Crash 1000 but
-# 1:3 on Crash 300, and NYOpenRetest wants 1:5 on the two Nasdaq feeds while
-# 1:2 is right for it everywhere else.
-#
-# Only cells with n >= 30 trades AND a profitable best setting are listed —
-# a cell that loses at every R:R has no "best" worth shipping, and a cell on
-# 12 trades cannot support one. Everything absent falls back to the strategy
-# default, then to RiskParams.
-#
-# Keyed "SYMBOL|strategy_id", matching MultiTPManager.slot_key(). Symbol names
-# differ per broker (US Tech 100 on Deriv is NDX100 on FundedNext), so both
-# appear where both were measured.
-#
-# Source: research/16-full-window-backtest.md — 285 cells, 23,989 trades,
-# uniform 238-242 day window per asset.
-#
-# [18.5] WALK-FORWARD VERIFIED. Every entry below was re-tested by choosing on
-# Jan-Apr and scoring on May-Aug (research/18). 14 of the original 17 held; the
-# three that did not are commented out above with their figures rather than
-# deleted, so the negative result stays on the record. A removed slot simply
-# falls back to its strategy default — nothing is disabled.
 SLOT_TP1_RR: dict[str, float] = {
     # DriftJumpAlpha — the only strategy profitable in aggregate
     "CRASH 1000 INDEX|DriftJumpAlpha_v1": 5.0,   # +$80,262  n=514  DD 37.0%

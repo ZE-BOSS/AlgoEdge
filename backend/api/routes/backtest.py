@@ -129,6 +129,48 @@ def _redis_safe_state(state):
         res["run_logs"] = []
         out["result"] = res
     return out
+# strategy_id -> the UserConfigV2 attribute holding that strategy's params.
+# A map rather than an if/elif chain: the chain was duplicated in the
+# single-symbol and portfolio paths, and adding a strategy to one but not the
+# other silently dropped every tuned parameter for it — which is exactly what
+# happened to the five synthetic strategies added in research/26.
+STRATEGY_PARAM_SECTION: dict[str, str] = {
+    "APA_v1": "apa",
+    "VWAP_v1": "vwap",
+    "DriftJumpAlpha_v1": "drift_jump_alpha",
+    "CRT_v1": "crt",
+    "HTFFVGFlip_v1": "htf_fvg_flip",
+    "BiasIFVG_v1": "bias_ifvg",
+    "NYOpenRetest_v1": "ny_open_retest",
+    "BoomDriftJump_v1": "boom_drift_jump",
+    "SpikeFade_v1": "synth",
+    "RangeRevert_v1": "synth",
+    "RangeBreakout_v1": "synth",
+    "TrendDrift_v1": "synth",
+}
+
+
+def apply_strategy_params(config, strategy_id: str, params: dict) -> list[str]:
+    """Write `params` onto the config section owned by `strategy_id`.
+
+    Returns the keys that were ignored, so a typo or a stale UI field surfaces in
+    the run log instead of silently doing nothing.
+    """
+    section_name = STRATEGY_PARAM_SECTION.get(strategy_id)
+    if not section_name:
+        return list(params or {})
+    block = getattr(config, section_name, None)
+    if block is None:
+        return list(params or {})
+    ignored = []
+    for k, v in (params or {}).items():
+        if hasattr(block, k):
+            setattr(block, k, v)
+        else:
+            ignored.append(k)
+    return ignored
+
+
 router = APIRouter(prefix="/api", tags=["backtest"])
 
 
@@ -665,39 +707,17 @@ async def run_backtest_endpoint(
             config.risk.max_positions_per_symbol = req.max_positions_per_symbol
             config.risk.max_daily_trades = req.max_daily_trades
             
-            # Inject dynamic strategy parameters
-            if req.strategy_id == "APA_v1":
-                for k, v in req.strategy_params.items():
-                    if hasattr(config.apa, k):
-                        setattr(config.apa, k, v)
-            elif req.strategy_id == "VWAP_v1":
-                for k, v in req.strategy_params.items():
-                    if hasattr(config.vwap, k):
-                        setattr(config.vwap, k, v)
+            # Inject dynamic strategy parameters (see STRATEGY_PARAM_SECTION)
+            _ignored = apply_strategy_params(config, req.strategy_id, req.strategy_params)
+            if _ignored:
+                logger.warning(
+                    f"[BACKTEST] {req.strategy_id}: strategy_params keys ignored "
+                    f"(not fields on the params dataclass): {_ignored}")
+            if req.strategy_id == "VWAP_v1":
                 # Sync VWAP's internal daily trade cap with the CB limit,
                 # unless the user explicitly provided one in strategy_params.
                 if "max_trades_per_day" not in req.strategy_params and req.max_daily_trades is not None:
                     config.vwap.max_trades_per_day = req.max_daily_trades
-            elif req.strategy_id == "DriftJumpAlpha_v1":
-                for k, v in req.strategy_params.items():
-                    if hasattr(config.drift_jump_alpha, k):
-                        setattr(config.drift_jump_alpha, k, v)
-            elif req.strategy_id == "CRT_v1":
-                for k, v in req.strategy_params.items():
-                    if hasattr(config.crt, k):
-                        setattr(config.crt, k, v)
-            elif req.strategy_id == "HTFFVGFlip_v1":
-                for k, v in req.strategy_params.items():
-                    if hasattr(config.htf_fvg_flip, k):
-                        setattr(config.htf_fvg_flip, k, v)
-            elif req.strategy_id == "BiasIFVG_v1":
-                for k, v in req.strategy_params.items():
-                    if hasattr(config.bias_ifvg, k):
-                        setattr(config.bias_ifvg, k, v)
-            elif req.strategy_id == "NYOpenRetest_v1":
-                for k, v in req.strategy_params.items():
-                    if hasattr(config.ny_open_retest, k):
-                        setattr(config.ny_open_retest, k, v)
                         
             # [T2.7/T3.5] Session enablement is a strategy-level parameter, and the
             # ablation gave three different verdicts: remove it for HTFFVGFlip
@@ -1598,21 +1618,11 @@ async def run_portfolio_backtest_endpoint(
                 config = UserConfigV2()
                 config.risk.min_rr = req.min_rr
                 config.risk.risk_per_trade_pct = req.risk_per_trade_pct
-                for k, v in sym_cfg.strategy_params.items():
-                    if strat_id == "APA_v1" and hasattr(config.apa, k):
-                        setattr(config.apa, k, v)
-                    elif strat_id == "VWAP_v1" and hasattr(config.vwap, k):
-                        setattr(config.vwap, k, v)
-                    elif strat_id == "DriftJumpAlpha_v1" and hasattr(config.drift_jump_alpha, k):
-                        setattr(config.drift_jump_alpha, k, v)
-                    elif strat_id == "CRT_v1" and hasattr(config.crt, k):
-                        setattr(config.crt, k, v)
-                    elif strat_id == "HTFFVGFlip_v1" and hasattr(config.htf_fvg_flip, k):
-                        setattr(config.htf_fvg_flip, k, v)
-                    elif strat_id == "BiasIFVG_v1" and hasattr(config.bias_ifvg, k):
-                        setattr(config.bias_ifvg, k, v)
-                    elif strat_id == "NYOpenRetest_v1" and hasattr(config.ny_open_retest, k):
-                        setattr(config.ny_open_retest, k, v)
+                _ign = apply_strategy_params(config, strat_id, sym_cfg.strategy_params)
+                if _ign:
+                    logger.warning(
+                        f"[PORTFOLIO] {sym}/{strat_id}: strategy_params keys "
+                        f"ignored: {_ign}")
                 # Sync VWAP's internal daily trade cap with the CB limit,
                 # unless the user explicitly provided one in strategy_params.
                 if strat_id == "VWAP_v1" and "max_trades_per_day" not in sym_cfg.strategy_params:

@@ -58,6 +58,35 @@ export default function StrategySettings() {
       max_losses_per_day: 2,
       drawdown_kill_pct: 10.0,
     },
+    // Boom mirror of DriftJumpAlpha (BoomDriftJumpParams).
+    boom_drift_jump: {
+      drift_ema_fast: 20,
+      drift_ema_slow: 50,
+      min_adx_to_trade: 20,
+      jump_entry_percentile_threshold: 95.0,
+      trade_jumps_enabled: false,
+      min_rrr_to_accept_trade: 1.5,
+      max_trades_per_day: 6,
+      max_daily_risk_pct: 4.0,
+      adx_gate_mode: 'REDUCED_SIZE',
+      adx_gate_min_size_modifier: 0.1,
+      tp1_rr: 5.0,
+    },
+    // Shared by SpikeFade / RangeRevert / RangeBreakout / TrendDrift — all four
+    // read the same backend dataclass (SynthParams), so one section serves them.
+    synth: {
+      stop_atr_multiple: 5.0,
+      tp1_rr: 5.0,
+      spike_k_atr: 3.0,
+      revert_k_atr: 2.0,
+      breakout_lookback: 20,
+      ema_fast: 20,
+      ema_slow: 50,
+      require_adx: true,
+      min_adx_to_trade: 20,
+      max_trades_per_day: 6,
+      max_daily_risk_pct: 4.0,
+    },
     drift_jump_alpha: {
       // spike_lookback_bars removed — no such field on DriftJumpAlphaParams and no
       // reference anywhere in backend/, so it was silently dropped by the hasattr filter.
@@ -513,6 +542,55 @@ export default function StrategySettings() {
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
               <input type="checkbox" checked={config.ny_open_retest?.dynamic_target_override ?? true} onChange={e => updateNested('ny_open_retest', 'dynamic_target_override', e.target.checked)} />
               Dynamic Target Override
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Boom Drift &amp; Jump Parameters</span></div>
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+          Boom mirror of Drift &amp; Jump Alpha: sells the downward grind, buys after an up-spike. Shipped defaults from research/25.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div><label>Drift EMA Fast</label><input type="number" value={config.boom_drift_jump?.drift_ema_fast ?? 20} onChange={e => updateNested('boom_drift_jump', 'drift_ema_fast', +e.target.value)} /></div>
+          <div><label>Drift EMA Slow</label><input type="number" value={config.boom_drift_jump?.drift_ema_slow ?? 50} onChange={e => updateNested('boom_drift_jump', 'drift_ema_slow', +e.target.value)} /></div>
+          <div><label>Min ADX to Trade</label><input type="number" value={config.boom_drift_jump?.min_adx_to_trade ?? 20} onChange={e => updateNested('boom_drift_jump', 'min_adx_to_trade', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Measured cost of this gate: 0.069 R/trade on Boom.</div></div>
+          <div><label>Jump Entry Threshold (%)</label><input type="number" step="0.5" value={config.boom_drift_jump?.jump_entry_percentile_threshold ?? 95.0} onChange={e => updateNested('boom_drift_jump', 'jump_entry_percentile_threshold', +e.target.value)} /></div>
+          <div><label>Target R:R</label><input type="number" step="0.5" min="0" value={config.boom_drift_jump?.tp1_rr ?? 5.0} onChange={e => updateNested('boom_drift_jump', 'tp1_rr', +e.target.value)} /></div>
+          <div><label>Min RRR to Accept Trade</label><input type="number" step="0.1" min="0" value={config.boom_drift_jump?.min_rrr_to_accept_trade ?? 1.5} onChange={e => updateNested('boom_drift_jump', 'min_rrr_to_accept_trade', +e.target.value)} /></div>
+          <div><label>Max Trades / Day</label><input type="number" min="0" value={config.boom_drift_jump?.max_trades_per_day ?? 6} onChange={e => updateNested('boom_drift_jump', 'max_trades_per_day', +e.target.value)} /></div>
+          <div><label>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={config.boom_drift_jump?.max_daily_risk_pct ?? 4.0} onChange={e => updateNested('boom_drift_jump', 'max_daily_risk_pct', +e.target.value)} /></div>
+          <div><label>ADX Gate Mode</label><select value={config.boom_drift_jump?.adx_gate_mode || 'REDUCED_SIZE'} onChange={e => updateNested('boom_drift_jump', 'adx_gate_mode', e.target.value)}><option value="REDUCED_SIZE">Reduced size</option><option value="BLOCK">Block</option></select></div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.8rem' }}>
+              <input type="checkbox" checked={config.boom_drift_jump?.trade_jumps_enabled ?? false} onChange={e => updateNested('boom_drift_jump', 'trade_jumps_enabled', e.target.checked)} />
+              Trade jump entries (Setup B)
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Synthetic Template Strategies</span></div>
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+          Shared by Spike Fade, Range Revert, Range Breakout and Trend Drift — all four read one backend params block, so a change here applies to all of them. Per-symbol shipped values live in strategy_defaults.py (SYNTH_SLOT_PARAMS) and override these.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div><label>Stop (x ATR)</label><input type="number" step="0.5" min="0.1" value={config.synth?.stop_atr_multiple ?? 5.0} onChange={e => updateNested('synth', 'stop_atr_multiple', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Keep wide. At 0.5x ATR the unmodelled spike gap is ~1 R/trade.</div></div>
+          <div><label>Target R:R</label><input type="number" step="0.5" min="0.1" value={config.synth?.tp1_rr ?? 5.0} onChange={e => updateNested('synth', 'tp1_rr', +e.target.value)} /></div>
+          <div><label>Spike Size (x ATR)</label><input type="number" step="0.5" min="0.5" value={config.synth?.spike_k_atr ?? 3.0} onChange={e => updateNested('synth', 'spike_k_atr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Spike Fade only.</div></div>
+          <div><label>Stretch (x ATR)</label><input type="number" step="0.5" min="0.5" value={config.synth?.revert_k_atr ?? 2.0} onChange={e => updateNested('synth', 'revert_k_atr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Range Revert only.</div></div>
+          <div><label>Breakout Lookback (bars)</label><input type="number" min="2" value={config.synth?.breakout_lookback ?? 20} onChange={e => updateNested('synth', 'breakout_lookback', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Range Breakout only.</div></div>
+          <div><label>Min ADX to Trade</label><input type="number" min="0" value={config.synth?.min_adx_to_trade ?? 20} onChange={e => updateNested('synth', 'min_adx_to_trade', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Trend Drift only.</div></div>
+          <div><label>EMA Fast</label><input type="number" min="2" value={config.synth?.ema_fast ?? 20} onChange={e => updateNested('synth', 'ema_fast', +e.target.value)} /></div>
+          <div><label>EMA Slow</label><input type="number" min="3" value={config.synth?.ema_slow ?? 50} onChange={e => updateNested('synth', 'ema_slow', +e.target.value)} /></div>
+          <div><label>Max Trades / Day</label><input type="number" min="0" value={config.synth?.max_trades_per_day ?? 6} onChange={e => updateNested('synth', 'max_trades_per_day', +e.target.value)} /></div>
+          <div><label>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={config.synth?.max_daily_risk_pct ?? 4.0} onChange={e => updateNested('synth', 'max_daily_risk_pct', +e.target.value)} /></div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.8rem' }}>
+              <input type="checkbox" checked={config.synth?.require_adx ?? true} onChange={e => updateNested('synth', 'require_adx', e.target.checked)} />
+              Require ADX trend filter (Trend Drift)
             </label>
           </div>
         </div>
