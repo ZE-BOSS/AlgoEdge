@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { decimate } from '../utils/decimate';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap, LayoutDashboard, PlusCircle, MinusCircle, Download } from 'lucide-react';
 import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts, getStrategyDefaults } from '../services/api';
@@ -369,15 +370,6 @@ const SymbolAutocomplete = memo(function SymbolAutocomplete({ value, onChange, o
  * else reads the full series, so every place that stores or re-derives it should
  * decimate first.
  */
-function decimate(series, limit = 500) {
-  if (!Array.isArray(series) || series.length <= limit) return series || [];
-  const step = Math.ceil(series.length / limit);
-  const out = [];
-  for (let i = 0; i < series.length; i += step) out.push(series[i]);
-  if (out[out.length - 1] !== series[series.length - 1]) out.push(series[series.length - 1]);
-  return out;
-}
-
 function fmt(v) {
   if (!v) return '—';
   if (typeof v === 'string' && v.includes('T')) return new Date(v).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -925,7 +917,11 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
   // Their backing data (rejection_funnel, blocked_signals, sizing_diagnostics)
   // has been in the response since Phase 0 with nothing rendering it.
   const runReport = <RunReport result={result} backtestId={result.backtest_id || null} />;
-  const grouped = result.grouped_trades || [];
+  // Memoised so the `|| []` fallback cannot mint a fresh array on every render.
+  // That identity feeds filteredGrouped -> filteredNormalized -> displayGroups ->
+  // summaryData -> the virtualized list, so an unstable `grouped` would defeat the
+  // whole chain exactly as the unmemoised filteredGrouped used to.
+  const grouped = useMemo(() => result.grouped_trades || [], [result.grouped_trades]);
   // Was recomputed on EVERY render: a 45,000-element `.map()` building 45,000
   // objects, followed further down by a 45,000-element `.filter()` to downsample
   // for the chart. Both ran again on every filter, sort, tab and group-by
@@ -956,11 +952,21 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     return Array.from(s).sort();
   }, [grouped]);
 
-  let filteredGrouped = grouped;
-  if (activeFilter === 'Wins') filteredGrouped = filteredGrouped.filter(g => (g.net_pnl ?? g.combined_pnl ?? g.pnl) > 0);
-  if (activeFilter === 'Losses') filteredGrouped = filteredGrouped.filter(g => (g.net_pnl ?? g.combined_pnl ?? g.pnl) <= 0);
-  if (symbolFilter !== 'All') filteredGrouped = filteredGrouped.filter(g => g.symbol === symbolFilter);
-  if (strategyFilter !== 'All') filteredGrouped = filteredGrouped.filter(g => g.strategy_id === strategyFilter);
+  // MEMOISED, and this is load-bearing. As a plain `let` it produced a new array
+  // identity on every render, which silently defeated EVERY memo downstream of it
+  // — filteredNormalized, filteredStats, filteredSessionData, displayGroups,
+  // summaryData, the virtualized list's flattenedRows, and the memo() on the list
+  // component itself. One unmemoised line meant a 2,216-trade run re-ran four
+  // filters, a full normalise+sort, both summaryEngine passes and the whole
+  // grouping on every keystroke, hover and tab change.
+  const filteredGrouped = useMemo(() => {
+    let out = grouped;
+    if (activeFilter === 'Wins') out = out.filter(g => (g.net_pnl ?? g.combined_pnl ?? g.pnl) > 0);
+    if (activeFilter === 'Losses') out = out.filter(g => (g.net_pnl ?? g.combined_pnl ?? g.pnl) <= 0);
+    if (symbolFilter !== 'All') out = out.filter(g => g.symbol === symbolFilter);
+    if (strategyFilter !== 'All') out = out.filter(g => g.strategy_id === strategyFilter);
+    return out;
+  }, [grouped, activeFilter, symbolFilter, strategyFilter]);
 
   // Normalize grouped trades into the shape summaryEngine's math expects,
   // sorted chronologically (its stats functions assume this). Re-derived
@@ -1009,12 +1015,32 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
     ];
   }, [filteredNormalized]);
 
-  let displayGroups = [];
   const displayGrouped = filteredGrouped; // Virtualized list handles large datasets efficiently
 
-  if (groupBy === 'None') {
-    displayGroups = [{ label: 'All Trades', trades: displayGrouped }];
-  } else {
+  // Earliest entry time, computed ONCE per dataset. getWeekNumber used to derive
+  // this itself on every call — and it is called once per trade while grouping,
+  // so a 2,216-trade run did 2,216 full passes (~5M date parses) every time the
+  // list re-rendered. The spread in `Math.min(...arr)` was also a latent hard
+  // failure: above ~65k elements it throws RangeError, so a large run crashed
+  // the tab outright rather than merely being slow. A reduce has no such limit.
+  const earliestEntryTime = useMemo(() => {
+    let min = Infinity;
+    for (const tg of displayGrouped) {
+      const t = new Date(tg.entry_time_iso || 0).getTime();
+      if (!Number.isNaN(t) && t < min) min = t;
+    }
+    return min === Infinity ? null : min;
+  }, [displayGrouped]);
+
+  const getWeekNumber = useCallback((d) => {
+    if (earliestEntryTime == null) return 1;
+    return Math.floor((d.getTime() - earliestEntryTime) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  }, [earliestEntryTime]);
+
+  const displayGroups = useMemo(() => {
+    if (groupBy === 'None') {
+      return [{ label: 'All Trades', trades: displayGrouped }];
+    }
     const groupsMap = {};
     // Sort on a real timestamp captured per bucket, not on the label. The old
     // `new Date(b) - new Date(a)` re-parsed the display label, and a Week
@@ -1036,14 +1062,8 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
       if (groupSortKey[key] === undefined || ts < groupSortKey[key]) groupSortKey[key] = ts;
     });
     const sortedKeys = Object.keys(groupsMap).sort((a, b) => groupSortKey[b] - groupSortKey[a]);
-    displayGroups = sortedKeys.map(k => ({ label: k, trades: groupsMap[k] }));
-  }
-
-  function getWeekNumber(d) {
-    if (!displayGrouped || displayGrouped.length === 0) return 1;
-    const earliestTime = Math.min(...displayGrouped.map(tg => new Date(tg.entry_time_iso || 0).getTime()));
-    return Math.floor((d.getTime() - earliestTime) / (7 * 24 * 60 * 60 * 1000)) + 1;
-  }
+    return sortedKeys.map(k => ({ label: k, trades: groupsMap[k] }));
+  }, [displayGrouped, groupBy, getWeekNumber]);
 
   const summaryData = useMemo(() => {
     if (groupBy === 'None') return [];
@@ -1990,7 +2010,13 @@ export default function Backtester() {
     enabled: isAuth,
     staleTime: Infinity,
   });
-  const allStrategyDefaults = strategyDefaultsResp?.strategy_defaults || {};
+  // Memoised: the `|| {}` fallback otherwise produces a new object every render,
+  // and this value is a dependency of the effect below — so that effect re-ran on
+  // every single render instead of only when the defaults actually arrive.
+  const allStrategyDefaults = useMemo(
+    () => strategyDefaultsResp?.strategy_defaults || {},
+    [strategyDefaultsResp],
+  );
 
   // [18.3] Adopt the selected strategy's MEASURED R:R (research/16, 285 cells /
   // 23,989 trades). Previously these were displayed in the defaults panel but

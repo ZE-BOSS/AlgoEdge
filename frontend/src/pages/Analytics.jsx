@@ -1,4 +1,6 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { decimate } from '../utils/decimate';
 import { BarChart3, TrendingUp, Target, Shield, Activity, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, CartesianGrid } from 'recharts';
 import { getStats, getTrades } from '../services/api';
@@ -33,17 +35,23 @@ export default function Analytics() {
 
   const s = stats || {};
 
-  // Build equity curve from stats if available (MT5 verified), else fallback to DB trades
-  let equityCurve = [];
-  if (s.equity_curve && s.equity_curve.length > 0) {
-    equityCurve = s.equity_curve.map((balance, i) => ({ trade: i, balance: +balance.toFixed(2) }));
-  } else {
+  // Build equity curve from stats if available (MT5 verified), else fallback to DB trades.
+  // MEMOISED AND DECIMATED. This ran on every render and kept every point: a
+  // 72,578-point curve meant 72k toFixed calls plus 72k object allocations per
+  // render, and then Recharts drew all 72k - which is what hung this page on
+  // large backtests. The chart cannot resolve more than a few hundred points.
+  const equityCurve = useMemo(() => {
+    if (s.equity_curve && s.equity_curve.length > 0) {
+      return decimate(s.equity_curve, 500).map((balance, i) => ({ trade: i, balance: +balance.toFixed(2) }));
+    }
+    const out = [];
     let balance = (trades && trades.length > 0) ? (trades[0].balance_before || 10000) : 10000;
     (trades || []).forEach((t, i) => {
       balance += (t.pnl || 0);
-      equityCurve.push({ trade: i + 1, balance: +balance.toFixed(2) });
+      out.push({ trade: i + 1, balance: +balance.toFixed(2) });
     });
-  }
+    return decimate(out, 500);
+  }, [s.equity_curve, trades]);
 
   // TP distribution (TP1-TP5)
   const tpDist = [
