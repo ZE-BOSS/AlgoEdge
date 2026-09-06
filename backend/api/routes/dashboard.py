@@ -70,10 +70,12 @@ async def get_dashboard(
             try:
                 import MetaTrader5 as mt5
                 from datetime import datetime
-                acc = mt5.account_info()
+                from backend.mt5.executor import run_mt5
+                # Both on the shared MT5 thread — see backend/mt5/executor.py.
+                acc = await run_mt5(mt5.account_info)
                 if acc:
                     # Accurately calculate active trading days and net deposits directly from MT5 history
-                    deals = mt5.history_deals_get(datetime(2020, 1, 1), datetime.utcnow())
+                    deals = await run_mt5(mt5.history_deals_get, datetime(2020, 1, 1), datetime.utcnow())
                     net_deposits = 0.0
                     if deals:
                         active_days = set()

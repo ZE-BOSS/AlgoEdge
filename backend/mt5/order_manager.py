@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from backend.utils.logger import get_logger
+from backend.mt5.executor import mt5_executor
 
 try:
     import MetaTrader5 as mt5
@@ -18,7 +19,10 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-_executor = ThreadPoolExecutor(max_workers=4)
+# Aliased to the process-wide single MT5 thread. This module used to own a
+# separate pool, which meant MT5 was called from a thread that did not hold
+# the terminal connection. See backend/mt5/executor.py.
+_executor = mt5_executor
 
 # MT5 retcodes that indicate a permanent, broker/account-side condition — retrying
 # immediately will not help (the account/symbol needs to be fixed in the MT5 terminal

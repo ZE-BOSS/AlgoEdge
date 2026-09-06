@@ -66,7 +66,12 @@ async def get_user_stats(
             
             # Fetch MT5 live balance
             import MetaTrader5 as mt5
-            account_info = mt5.account_info()
+            from backend.mt5.executor import run_mt5
+            # On the shared MT5 thread. Called bare, this ran on the event-loop
+            # thread while OrderManager's history fetch ran on the MT5 thread —
+            # two threads into a connection that belongs to one, which is what
+            # produced "returned a result with an exception set" here.
+            account_info = await run_mt5(mt5.account_info)
             live_balance = account_info.balance if account_info else 10000.0
             
             total_mt5_pnl = sum((d["profit"] + d["commission"] + d["swap"]) for d in deals)

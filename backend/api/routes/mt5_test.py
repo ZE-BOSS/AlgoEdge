@@ -14,6 +14,7 @@ from backend.api.deps import get_current_user
 from backend.data.models import User
 from backend.mt5.order_manager import OrderManager
 from backend.utils.logger import get_logger
+from backend.mt5.executor import mt5_executor
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/mt5_test", tags=["mt5_test"])
@@ -57,8 +58,8 @@ async def test_mt5_entry(req: EntryRequest, current_user: User = Depends(get_cur
         risk_dollar = balance * (risk_pct / 100.0)
         
         loop = asyncio.get_running_loop()
-        tick = await loop.run_in_executor(None, lambda: mt5.symbol_info_tick(req.symbol))
-        sym_info = await loop.run_in_executor(None, lambda: mt5.symbol_info(req.symbol))
+        tick = await loop.run_in_executor(mt5_executor, lambda: mt5.symbol_info_tick(req.symbol))
+        sym_info = await loop.run_in_executor(mt5_executor, lambda: mt5.symbol_info(req.symbol))
         
         if not tick or not sym_info:
             return {"success": False, "error": f"Symbol {req.symbol} not found in Market Watch."}
@@ -121,7 +122,7 @@ async def test_mt5_breakeven(req: TicketRequest, current_user: User = Depends(ge
         except ImportError:
             mt5 = None
         loop = asyncio.get_running_loop()
-        position = await loop.run_in_executor(None, lambda: mt5.positions_get(ticket=req.ticket))
+        position = await loop.run_in_executor(mt5_executor, lambda: mt5.positions_get(ticket=req.ticket))
         if not position:
             return {"success": False, "error": "Position not found"}
             
@@ -142,14 +143,14 @@ async def test_mt5_trail(req: TicketRequest, current_user: User = Depends(get_cu
         except ImportError:
             mt5 = None
         loop = asyncio.get_running_loop()
-        position = await loop.run_in_executor(None, lambda: mt5.positions_get(ticket=req.ticket))
+        position = await loop.run_in_executor(mt5_executor, lambda: mt5.positions_get(ticket=req.ticket))
         if not position:
             return {"success": False, "error": "Position not found"}
             
         p = position[0]
         direction = "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL"
         
-        tick = await loop.run_in_executor(None, lambda: mt5.symbol_info_tick(p.symbol))
+        tick = await loop.run_in_executor(mt5_executor, lambda: mt5.symbol_info_tick(p.symbol))
         if not tick:
              return {"success": False, "error": "Tick not found"}
              
@@ -201,11 +202,11 @@ async def get_symbol_costs(symbol: str, current_user: User = Depends(get_current
             return {"success": False, "error": "MT5 not available"}
 
         loop = asyncio.get_running_loop()
-        info = await loop.run_in_executor(None, lambda: mt5.symbol_info(symbol))
+        info = await loop.run_in_executor(mt5_executor, lambda: mt5.symbol_info(symbol))
         if info is None:
             return {"success": False, "error": f"Symbol {symbol} not found"}
 
-        tick = await loop.run_in_executor(None, lambda: mt5.symbol_info_tick(symbol))
+        tick = await loop.run_in_executor(mt5_executor, lambda: mt5.symbol_info_tick(symbol))
         pip_size = _get_pip_size_for_symbol(symbol)
 
         # Current spread from tick data (more accurate than info.spread)
@@ -255,8 +256,7 @@ async def get_average_spread(
         from_time = now - timedelta(minutes=minutes)
 
         # Try tick data first
-        ticks = await loop.run_in_executor(
-            None,
+        ticks = await loop.run_in_executor(mt5_executor,
             lambda: mt5.copy_ticks_range(symbol, from_time, now, mt5.COPY_TICKS_INFO)
             if hasattr(mt5, 'copy_ticks_range') else None
         )
@@ -279,7 +279,7 @@ async def get_average_spread(
             }
         else:
             # Fallback: use symbol_info current spread
-            info = await loop.run_in_executor(None, lambda: mt5.symbol_info(symbol))
+            info = await loop.run_in_executor(mt5_executor, lambda: mt5.symbol_info(symbol))
             if info:
                 spread_pips = (info.spread * info.point) / pip_size if pip_size else 0
                 return {

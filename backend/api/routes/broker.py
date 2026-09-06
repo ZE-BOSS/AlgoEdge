@@ -18,6 +18,7 @@ from backend.api.deps import get_current_user
 from backend.data.database import get_db
 from backend.data.models import User
 from backend.utils.logger import get_logger
+from backend.mt5.executor import mt5_executor
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/broker", tags=["broker"])
@@ -71,9 +72,9 @@ async def _test_mt5_connection(account: int, password: str, server: str, path: s
 
     # Initialize MT5
     if path:
-        init_ok = await loop.run_in_executor(None, lambda: mt5.initialize(path=path))
+        init_ok = await loop.run_in_executor(mt5_executor, lambda: mt5.initialize(path=path))
     else:
-        init_ok = await loop.run_in_executor(None, mt5.initialize)
+        init_ok = await loop.run_in_executor(mt5_executor, mt5.initialize)
 
     if not init_ok:
         error = mt5.last_error()
@@ -83,14 +84,13 @@ async def _test_mt5_connection(account: int, password: str, server: str, path: s
         }
 
     # Login
-    login_ok = await loop.run_in_executor(
-        None,
+    login_ok = await loop.run_in_executor(mt5_executor,
         lambda: mt5.login(account, password=password, server=server)
     )
 
     if not login_ok:
         error = mt5.last_error()
-        await loop.run_in_executor(None, mt5.shutdown)
+        await loop.run_in_executor(mt5_executor, mt5.shutdown)
         return {
             "connected": False,
             "message": f"Login failed: {error}",
@@ -113,7 +113,7 @@ async def _test_mt5_connection(account: int, password: str, server: str, path: s
         } if info else {},
     }
 
-    await loop.run_in_executor(None, mt5.shutdown)
+    await loop.run_in_executor(mt5_executor, mt5.shutdown)
     return result
 
 
@@ -212,7 +212,7 @@ async def get_instrument_resolution(
     )
 
     loop = asyncio.get_running_loop()
-    if not await loop.run_in_executor(None, mt5.terminal_info):
+    if not await loop.run_in_executor(mt5_executor, mt5.terminal_info):
         return {
             "connected": False,
             "broker_id": None,
@@ -220,14 +220,14 @@ async def get_instrument_resolution(
             "instruments": [],
         }
 
-    info = await loop.run_in_executor(None, mt5.account_info)
+    info = await loop.run_in_executor(mt5_executor, mt5.account_info)
     broker_id = broker_id_from_account(
         getattr(info, "company", None), getattr(info, "server", None)
     )
 
     mapping = None if refresh else get_broker_map(broker_id)
     if mapping is None:
-        symbols = await loop.run_in_executor(None, mt5.symbols_get)
+        symbols = await loop.run_in_executor(mt5_executor, mt5.symbols_get)
         mapping = discover_broker_symbols(broker_id, symbols)
 
     rows = [

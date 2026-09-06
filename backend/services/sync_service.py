@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from backend.data.models import Trade, TradePosition, User
 from backend.utils.encryption import get_encryption_service
 from backend.utils.logger import get_logger
+from backend.mt5.executor import mt5_executor
 
 logger = get_logger(__name__)
 
@@ -37,7 +38,7 @@ async def sync_mt5_history(user: User, db: AsyncSession, hours_back: int = 72) -
     loop = asyncio.get_running_loop()
     
     # Check if we are already connected to the correct account
-    acc_info = await loop.run_in_executor(None, mt5.account_info)
+    acc_info = await loop.run_in_executor(mt5_executor, mt5.account_info)
     is_already_connected = (acc_info is not None and acc_info.login == user.mt5_account)
 
     if not is_already_connected:
@@ -51,35 +52,34 @@ async def sync_mt5_history(user: User, db: AsyncSession, hours_back: int = 72) -
 
         # Connect to MT5
         if user.mt5_path:
-            init_ok = await loop.run_in_executor(None, lambda: mt5.initialize(path=user.mt5_path))
+            init_ok = await loop.run_in_executor(mt5_executor, lambda: mt5.initialize(path=user.mt5_path))
         else:
-            init_ok = await loop.run_in_executor(None, mt5.initialize)
+            init_ok = await loop.run_in_executor(mt5_executor, mt5.initialize)
 
         if not init_ok:
             logger.error(f"MT5 Init failed for sync: {mt5.last_error()}")
             return {"status": "error", "reason": f"MT5 Init failed: {mt5.last_error()}"}
 
-        login_ok = await loop.run_in_executor(
-            None,
+        login_ok = await loop.run_in_executor(mt5_executor,
             lambda: mt5.login(user.mt5_account, password=password, server=user.mt5_server)
         )
 
         if not login_ok:
             logger.error(f"MT5 Login failed for sync: {mt5.last_error()}")
-            await loop.run_in_executor(None, mt5.shutdown)
+            await loop.run_in_executor(mt5_executor, mt5.shutdown)
             return {"status": "error", "reason": f"MT5 Login failed: {mt5.last_error()}"}
 
     now = datetime.now(timezone.utc)
     from_date = now - timedelta(hours=hours_back)
     
     # Fetch historical deals
-    deals = await loop.run_in_executor(None, lambda: mt5.history_deals_get(from_date, now))
+    deals = await loop.run_in_executor(mt5_executor, lambda: mt5.history_deals_get(from_date, now))
     
     # Also fetch account info to sync live balance/equity
-    account_info = await loop.run_in_executor(None, mt5.account_info)
+    account_info = await loop.run_in_executor(mt5_executor, mt5.account_info)
     
     if not is_already_connected:
-        await loop.run_in_executor(None, mt5.shutdown)
+        await loop.run_in_executor(mt5_executor, mt5.shutdown)
 
     if deals is None:
         logger.warning(f"No deals returned from MT5 for {user.email}")

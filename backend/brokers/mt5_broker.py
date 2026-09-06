@@ -23,6 +23,7 @@ logger = get_logger(__name__)
 
 
 from backend.brokers.base import BaseBroker
+from backend.mt5.executor import mt5_executor
 
 
 class MT5Broker(BaseBroker):
@@ -33,7 +34,9 @@ class MT5Broker(BaseBroker):
     
     def __init__(self):
         self.connected = False
-        self._executor = ThreadPoolExecutor(max_workers=4)
+        # The process-wide single MT5 thread, not a private 4-worker pool:
+        # MetaTrader5 is not thread-safe and four workers raced each other.
+        self._executor = mt5_executor
         self.account_info = None
         self._connected_account: int | None = None  # Track which account is connected
         self._intentional_disconnect = False

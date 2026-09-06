@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from backend.utils.logger import get_logger
+from backend.mt5.executor import mt5_executor
 
 try:
     import MetaTrader5 as mt5
@@ -26,7 +27,10 @@ logger = get_logger(__name__)
 _SERVER_OFFSET_CACHE: float | None = None
 
 # Executor for blocking MT5 calls — single worker to serialize MT5 access
-_executor = ThreadPoolExecutor(max_workers=1)
+# Aliased to the process-wide single MT5 thread. This module used to own a
+# separate pool, which meant MT5 was called from a thread that did not hold
+# the terminal connection. See backend/mt5/executor.py.
+_executor = mt5_executor
 
 def _get_timeframe_code(tf_str: str):
     if not mt5:
