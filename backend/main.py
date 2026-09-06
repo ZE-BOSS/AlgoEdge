@@ -32,6 +32,7 @@ from backend.api.routes import (
     signals,
     stats,
     strategy_factory,
+    system,
     trades,
 )
 from backend.data.database import close_db, init_db
@@ -142,10 +143,32 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("MT5 skipped (not Windows) — using mock data")
 
+    # 4. Load Telegram credentials into the notification service.
+    #
+    # These used to be loaded ONLY from inside the bot's scan loop, which meant
+    # the process had no token at all until the bot was started — so every alert
+    # raised before that (startup errors, prop-firm breaches, manual test sends)
+    # was dropped silently by the "not configured" guard. Loading here makes
+    # notifications work independently of whether the bot is running.
+    tg_ok = False
+    try:
+        from backend.services.telegram import load_telegram_config_any_user
+        tg_ok = await load_telegram_config_any_user()
+        logger.info(
+            "Telegram credentials loaded" if tg_ok
+            else "Telegram not configured — notifications disabled"
+        )
+    except Exception as e:
+        logger.warning(f"Telegram config load failed: {e}")
+
     # Log startup events to the activity log for frontend visibility
     from backend.services.bot_service import bot_service
     bot_service.log_system_event("AlgoEdge Backend started", category="SYSTEM")
     bot_service.log_system_event(f"Database: connected | Redis: {'connected' if redis_ok else 'offline'} | MT5: {'connected' if mt5_ok else 'mock mode'}", category="SYSTEM")
+    bot_service.log_system_event(
+        f"Telegram: {'configured' if tg_ok else 'NOT configured — no alerts will be sent'}",
+        "INFO" if tg_ok else "WARN", category="SYSTEM",
+    )
 
     yield
 
@@ -232,6 +255,7 @@ app.include_router(broker.router)
 app.include_router(mt5_test.router)
 app.include_router(dashboard.router)
 app.include_router(strategy_factory.router)  # [Phase 14 Stream 3]
+app.include_router(system.router)  # Telegram status/test, live account, state reset
 
 
 # ── Request Logging Middleware ───────────────────────────────────────────────

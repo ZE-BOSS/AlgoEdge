@@ -87,7 +87,11 @@ async def update_user_config(
 
         merged_config = deep_update(existing_config, req.config)
         config.config_json = json.dumps(merged_config)
-        config.preset_name = req.preset_name
+        # Only overwrite the preset name when the caller actually sent one.
+        # Every partial save (the Telegram card, a single risk field) omits it,
+        # and assigning None wiped the user's saved preset name on each of them.
+        if req.preset_name is not None:
+            config.preset_name = req.preset_name
         logger.info(f"Config updated for {current_user.email}: {list(req.config.keys())}")
     else:
         config = UserConfigModel(
@@ -99,6 +103,20 @@ async def update_user_config(
         logger.info(f"Config created for {current_user.email}: {list(req.config.keys())}")
 
     bot_service.log_system_event(f"Config saved: {', '.join(list(req.config.keys())[:5])}", category="CONFIG")
+
+    # Push Telegram credentials into the live notification service immediately.
+    # They used to reach it only via the bot's scan loop, so saving a token on
+    # the Settings page did nothing at all until the bot was (re)started — and
+    # the frontend gave no sign of that.
+    try:
+        from backend.services.telegram import telegram_service
+        merged = json.loads(config.config_json)
+        telegram_service.update_config(
+            merged.get("telegram_bot_token", ""),
+            merged.get("telegram_chat_id", ""),
+        )
+    except Exception as e:
+        logger.warning(f"Could not refresh Telegram credentials after config save: {e}")
 
     # [12.9/Part14] Non-blocking cross-validation — same pattern as the
     # existing risk_per_trade_pct-vs-max_risk_hard_cap_pct frontend warning:

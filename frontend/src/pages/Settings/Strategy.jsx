@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Sliders, Save, Loader2, Check } from 'lucide-react';
 import { getConfig, updateConfig } from '../../services/api';
+import { invalidateConfigDependents } from '../../utils/invalidate';
 import { useConnectionStore, useAuthStore } from '../../store';
 
 export default function StrategySettings() {
@@ -180,7 +181,10 @@ export default function StrategySettings() {
   const mutation = useMutation({
     mutationFn: (newConfig) => updateConfig({ config: newConfig }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['config'] });
+      // Every cached response that embeds config, not just ['config'] itself —
+      // the dashboard, the live-account risk resolution and the stats all
+      // derive from these values and kept serving pre-save copies.
+      invalidateConfigDependents(queryClient);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     },

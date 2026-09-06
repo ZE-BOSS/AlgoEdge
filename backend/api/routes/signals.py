@@ -70,8 +70,13 @@ async def get_signals(
         "skip_reason": s.skip_reason,
         "trade_id": s.trade_id,
         "session": s.session,
+        # When the session this signal fired in closes. A signal taken 20
+        # minutes before the NY close is a different proposition from one taken
+        # at the open, and the list had no way to show that.
+        "session_close_time": s.session_close_time,
         "entry_snapshot": s.entry_snapshot,
         "signal_time": s.signal_time,
+        "created_at": s.created_at,
         "chart_data": s.chart_data,
     } for s in signals]
 
@@ -107,6 +112,17 @@ async def get_signal_detail(
                 "exit_time": trade.exit_time,
                 "entry_snapshot": trade.entry_snapshot,
                 "exit_snapshot": trade.exit_snapshot,
+                # Outcome detail the signal detail view could not show.
+                "pnl_pips": trade.pnl_pips,
+                "balance_before": trade.balance_before,
+                "balance_after": trade.balance_after,
+                "status": trade.status,
+                "session": trade.session,
+                "session_close_time": trade.session_close_time,
+                "duration_seconds": (
+                    (trade.exit_time - trade.entry_time).total_seconds()
+                    if trade.exit_time and trade.entry_time else None
+                ),
             }
 
     return {
@@ -132,6 +148,7 @@ async def get_signal_detail(
         "acted_on": signal.acted_on,
         "skip_reason": signal.skip_reason,
         "session": signal.session,
+        "session_close_time": signal.session_close_time,
         "signal_time": signal.signal_time,
         "entry_snapshot": signal.entry_snapshot,
         "chart_data": signal.chart_data,

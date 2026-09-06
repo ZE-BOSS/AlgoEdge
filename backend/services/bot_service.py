@@ -48,6 +48,102 @@ class BotService:
         self._static_personal_balance_anchor: float | None = None
         self.circuit_breaker = None
         self.prop_firm_validator = None
+        # UserConfig.magic_base — the base of the magic-number range that marks
+        # an order as this bot's. Refreshed from config on every scan cycle; the
+        # default matches config_schema.UserConfig.magic_base.
+        self._magic_base: int = 1001
+        # The MT5 login currently connected, and the balance last seen on it.
+        # Both are surfaced to the frontend so the user can see which account
+        # the risk percentage is actually being sized against.
+        self.account_id: int | None = None
+        self.account_balance: float = 0.0
+        self.account_equity: float = 0.0
+        self.account_currency: str = ""
+        self.account_server: str = ""
+        self._bot_tickets_cache: set[int] = set()
+        self._bot_tickets_cache_at: float = 0.0
+
+    # ── MT5 account identity, ownership and balance ──────────────────────────
+
+    async def _current_mt5_account(self) -> int | None:
+        """The MT5 login now connected, or None if MT5 is unreachable."""
+        try:
+            import MetaTrader5 as mt5
+
+            from backend.mt5.executor import run_mt5
+            info = await run_mt5(mt5.account_info)
+            if info is None:
+                return None
+            self.account_id = int(info.login)
+            return self.account_id
+        except Exception as e:
+            logger.warning(f"[SYNC] Could not read MT5 account: {e}")
+            return None
+
+    async def _sync_account_balance(self) -> dict:
+        """Read the live balance/equity and hand it to the circuit breaker.
+
+        Two jobs:
+
+          1. Give the frontend a real number. `get_broker_status` only ever
+             returned the masked login and server name, so the dashboard could
+             not show what balance the risk percentage was being applied to.
+          2. Let the circuit breaker distinguish a *balance reset* (new account,
+             deposit, withdrawal, demo reset) from a trading loss — see
+             CircuitBreaker.note_account_balance().
+        """
+        try:
+            import MetaTrader5 as mt5
+
+            from backend.mt5.executor import run_mt5
+            info = await run_mt5(mt5.account_info)
+            if info is None:
+                return {}
+            self.account_id = int(info.login)
+            self.account_balance = float(info.balance)
+            self.account_equity = float(info.equity)
+            self.account_currency = getattr(info, "currency", "") or ""
+            self.account_server = getattr(info, "server", "") or ""
+            if self.circuit_breaker:
+                if self.circuit_breaker.note_account_balance(self.account_balance, self.account_id):
+                    self._log_event(
+                        f"Account balance re-baselined to "
+                        f"{self.account_balance:.2f} {self.account_currency} "
+                        f"(account {self.account_id}) — this is a balance reset, "
+                        f"not a drawdown.",
+                        "WARNING", "RISK",
+                    )
+            return {
+                "login": self.account_id,
+                "balance": self.account_balance,
+                "equity": self.account_equity,
+                "currency": self.account_currency,
+                "server": self.account_server,
+            }
+        except Exception as e:
+            logger.warning(f"[SYNC] Could not read MT5 balance: {e}")
+            return {}
+
+    async def _bot_ticket_set(self, max_age_s: float = 60.0) -> set[int]:
+        """Position ids the bot recorded when it opened them.
+
+        The authoritative half of the ownership test in
+        backend/services/trade_ownership.py. Cached for `max_age_s` because the
+        sync loop runs every 15 seconds and this set only grows when the bot
+        itself places an order.
+        """
+        now = datetime.now(timezone.utc).timestamp()
+        if self._bot_tickets_cache and (now - self._bot_tickets_cache_at) < max_age_s:
+            return self._bot_tickets_cache
+        try:
+            from backend.data.database import async_session
+            from backend.services.trade_ownership import load_bot_tickets
+            async with async_session() as session:
+                self._bot_tickets_cache = await load_bot_tickets(session, self.user_id)
+                self._bot_tickets_cache_at = now
+        except Exception as e:
+            logger.warning(f"[SYNC] Could not refresh bot ticket set: {e}")
+        return self._bot_tickets_cache
 
     def _log_event(self, message: str, level: str = "INFO", category: str = "BOT"):
         """Log an event to memory, terminal, and WebSocket."""
@@ -173,6 +269,16 @@ class BotService:
                     sig_time = datetime.utcnow().timestamp()
                 
                 dt_time = datetime.utcfromtimestamp(sig_time)
+
+                from backend.utils.timeutils import detect_session, get_session_close
+                _sess_dt = dt_time.replace(tzinfo=timezone.utc)
+                _is_synthetic = any(
+                    k in (signal_domain.symbol or "").upper()
+                    for k in ("BOOM", "CRASH", "VOLATILITY", "STEP", "JUMP", "RANGE BREAK")
+                )
+                _sess = "24/7" if _is_synthetic else detect_session(_sess_dt)
+                _close = None if _is_synthetic else get_session_close(_sess_dt)
+                _sess_close = _close.replace(tzinfo=None) if _close else None
                 
                 query = select(Signal).where(
                     Signal.user_id == self.user_id,
@@ -198,6 +304,13 @@ class BotService:
                         confluence_score=getattr(signal_domain, 'confluence_score', getattr(signal_domain, 'score', 0.0)),
                         acted_on=(status == "EXECUTED"),
                         skip_reason=reject_reason if status != "EXECUTED" else None,
+                        # Session tagging. The Signal model has carried a
+                        # `session` column since day one and the live path never
+                        # wrote it, so every signal in the UI showed a blank
+                        # session; `session_close_time` is new alongside it, so
+                        # a late entry can be recognised as late.
+                        session=_sess,
+                        session_close_time=_sess_close,
                         signal_time=dt_time,
                         chart_data=json.dumps(signal_domain.chart_data) if getattr(signal_domain, 'chart_data', None) else None
                     )
@@ -206,6 +319,9 @@ class BotService:
                     sig_db.acted_on = (status == "EXECUTED")
                     if reject_reason:
                         sig_db.skip_reason = reject_reason
+                    if not sig_db.session:
+                        sig_db.session = _sess
+                        sig_db.session_close_time = _sess_close
                 
                 await session.commit()
                 return sig_db.id
@@ -395,6 +511,19 @@ class BotService:
                 # never updated, so max_daily_trades / max_concurrent_positions
                 # changes made in the frontend had no effect on a running bot.
                 risk_dict = config.risk.to_dict() if hasattr(config.risk, 'to_dict') else vars(config.risk)
+                # The magic-number base that marks an order as ours — used by
+                # the ownership filter so the bot never books somebody else's
+                # trades. See backend/services/trade_ownership.py.
+                self._magic_base = int(getattr(config, "magic_base", 1001) or 1001)
+                try:
+                    from backend.services.position_manager import position_manager
+                    position_manager.magic_base = self._magic_base
+                except Exception:
+                    pass
+                # Tag the circuit breaker with the connected MT5 login so its
+                # persisted daily/weekly P&L cannot leak across accounts.
+                risk_dict = dict(risk_dict)
+                risk_dict["mt5_account"] = await self._current_mt5_account()
                 _cb_fp = (
                     risk_dict.get("max_daily_trades"),
                     risk_dict.get("max_concurrent_positions"),
@@ -1151,6 +1280,29 @@ class BotService:
                                                     Signal,
                                                 )
                                                 
+                                                from backend.utils.timeutils import (
+                                                    detect_session,
+                                                    get_session_close,
+                                                )
+                                                _now_utc = datetime.now(timezone.utc)
+                                                _t_is_synth = any(
+                                                    k in (signal.symbol or "").upper()
+                                                    for k in ("BOOM", "CRASH", "VOLATILITY",
+                                                              "STEP", "JUMP", "RANGE BREAK")
+                                                )
+                                                _t_sess = "24/7" if _t_is_synth else detect_session(_now_utc)
+                                                _t_close = None if _t_is_synth else get_session_close(_now_utc)
+                                                _t_sess_close = _t_close.replace(tzinfo=None) if _t_close else None
+                                                # Planned R:R measured to the FURTHEST take-profit, which is
+                                                # the target the trade is actually aiming at once the nearer
+                                                # legs have banked.
+                                                _risk_dist = abs(signal.entry_price - signal.stop_loss)
+                                                _planned_rr = None
+                                                if _risk_dist > 0 and db_positions:
+                                                    _far_tp = db_positions[-1]["tp_price"]
+                                                    if _far_tp:
+                                                        _planned_rr = abs(_far_tp - signal.entry_price) / _risk_dist
+
                                                 async with async_session() as session:
                                                     trade = Trade(
                                                         user_id=self.user_id,
@@ -1171,6 +1323,15 @@ class BotService:
                                                         # generated it. This broke any strategy_id-based logic
                                                         # downstream (e.g. VWAP's live hard-close gate).
                                                         strategy_id=getattr(signal, 'strategy_id', None) or "APA_v1",
+                                                        # Journal completeness: the session the trade was
+                                                        # opened in, when that session closes, and the
+                                                        # PLANNED reward-to-risk. All three columns existed
+                                                        # and only the backtester ever filled them, so the
+                                                        # live journal showed blanks.
+                                                        session=_t_sess,
+                                                        session_close_time=_t_sess_close,
+                                                        risk_reward=_planned_rr,
+                                                        take_profit=(db_positions[-1]["tp_price"] if db_positions else None),
                                                     )
                                                     session.add(trade)
                                                     await session.flush()
@@ -1185,7 +1346,11 @@ class BotService:
                                                             entry_price=signal.entry_price,
                                                             stop_loss=signal.stop_loss,
                                                             take_profit=p["tp_price"],
-                                                            status="OPEN"
+                                                            status="OPEN",
+                                                            planned_rr=(
+                                                                abs(p["tp_price"] - signal.entry_price) / _risk_dist
+                                                                if _risk_dist > 0 and p["tp_price"] else None
+                                                            ),
                                                         )
                                                         session.add(pos)
                                                         
@@ -1276,7 +1441,18 @@ class BotService:
         import os
         state_file = "backend/data/bot_sync_state.json"
         
-        last_check_time = datetime.now(timezone.utc).timestamp() - 86400 * 3
+        # The MT5 login this loop's state belongs to. Sync state written for a
+        # different account must never be reused: `last_check_time` would open
+        # a window into an account whose history we have never seen, and every
+        # deal in that window would be booked as ours.
+        current_account = await self._current_mt5_account()
+
+        # Default when there is no usable state: start from NOW, not three days
+        # ago. Reaching back 3 days on a fresh login is what made the bot ingest
+        # a brand-new account's pre-existing history and book months of somebody
+        # else's losses as today's realised P&L, tripping max-daily-drawdown on
+        # an account that had not lost a cent under this bot.
+        last_check_time = datetime.now(timezone.utc).timestamp()
         # Item 3.9 + Phase-5 pruning: keyed by individual deal ticket -> deal
         # time (not position_id — see loop below for why), so we can bound
         # growth by dropping entries whose deal time has fallen behind
@@ -1289,6 +1465,26 @@ class BotService:
             try:
                 with open(state_file, "r") as f:
                     data = json.load(f)
+                saved_account = data.get("mt5_account")
+                account_matches = (
+                    current_account is not None
+                    and saved_account is not None
+                    and int(saved_account) == int(current_account)
+                )
+                if not account_matches:
+                    logger.warning(
+                        f"[SYNC] bot_sync_state.json was written for MT5 account "
+                        f"{saved_account}, connected account is {current_account} - "
+                        f"ignoring it and syncing from now onwards only."
+                    )
+                    self._log_event(
+                        f"New MT5 account detected ({current_account}) - previous sync "
+                        f"state discarded. Pre-existing account history will NOT be "
+                        f"counted as this bot's trades.",
+                        "WARNING", "SYNC",
+                    )
+                    data = {}
+                if data:
                     last_check_time = data.get("last_check_time", last_check_time)
                     raw_tickets = data.get("processed_deal_tickets", [])
                     if isinstance(raw_tickets, dict):
@@ -1305,7 +1501,23 @@ class BotService:
             try:
                 await asyncio.sleep(15)
                 
-                deals = await OrderManager.get_closed_positions_since(last_check_time)
+                # Ownership filter. Only deals this bot actually placed reach
+                # the P&L accumulator, the journal and the circuit breaker -
+                # everything else in the account's history is left alone.
+                # See backend/services/trade_ownership.py.
+                _known = await self._bot_ticket_set()
+                deals = await OrderManager.get_closed_positions_since(
+                    last_check_time,
+                    bot_only=True,
+                    known_tickets=_known,
+                    magic_base=self._magic_base,
+                )
+
+                # Feed the live balance to the circuit breaker so a balance
+                # reset / deposit / withdrawal re-baselines the drawdown
+                # denominators instead of reading as a loss.
+                await self._sync_account_balance()
+
                 if deals:
                     deals.sort(key=lambda x: x["time"])
 
@@ -1424,6 +1636,10 @@ class BotService:
                         os.makedirs(os.path.dirname(state_file), exist_ok=True)
                         with open(state_file, "w") as f:
                             json.dump({
+                                # Tag the state with the account it describes, so a
+                                # later run against a different login discards it
+                                # instead of replaying that login's window.
+                                "mt5_account": current_account,
                                 "last_check_time": last_check_time,
                                 "processed_deal_tickets": processed_deal_tickets
                             }, f)

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, DollarSign, Target, Shield, Activity, AlertTriangle, Play, Square, Eye, Loader2, Terminal, Trash2 } from 'lucide-react';
 import { useConnectionStore, useRiskStore, useAuthStore } from '../store';
-import { getDashboardData, getChartData, startBot, stopBot, getBotLogs, forceCloseAll } from '../services/api';
+import { getDashboardData, getChartData, startBot, stopBot, getBotLogs, forceCloseAll, getLiveAccount } from '../services/api';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
 
 // ── Category color mapping for activity log ───────────────────────────────
@@ -24,6 +24,93 @@ function getCategoryColor(evt) {
   if (evt.level === 'WARN') return CATEGORY_COLORS.WARN;
   if (evt.level === 'SIGNAL') return CATEGORY_COLORS.SIGNAL;
   return CATEGORY_COLORS[evt.category] || CATEGORY_COLORS.SYSTEM;
+}
+
+/**
+ * The connected MT5 account, its live balance, and what the configured risk
+ * percentage resolves to in money on THAT balance.
+ *
+ * Nothing on the dashboard previously showed the account balance at all
+ * (`/broker/status` returns only a masked login and the server name), so after
+ * switching MT5 logins there was no way to tell whether "1.8% risk" meant 1.8%
+ * of the account now connected or of the previous, larger one. It also surfaces
+ * a circuit-breaker pause with its reason, because a halted bot otherwise just
+ * looks idle.
+ */
+function LiveAccountPanel() {
+  const { data: acct } = useQuery({
+    queryKey: ['live-account'],
+    queryFn: () => getLiveAccount().then(r => r.data),
+    refetchInterval: 10000,
+  });
+
+  if (!acct) return null;
+
+  const money = (v) => (v == null ? '—' : `${acct.currency || '$'}${Number(v).toFixed(2)}`);
+  const risk = acct.risk || {};
+  const cb = acct.circuit_breaker;
+  const mismatch = acct.account_matches_config === false;
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-header">
+        <span className="card-title"><DollarSign size={14} /> Live MT5 Account</span>
+        <span className={`badge ${acct.connected ? 'badge-green' : 'badge-red'}`}>
+          {acct.connected ? `#${acct.login}` : 'Disconnected'}
+        </span>
+      </div>
+
+      {mismatch && (
+        <div className="offline-banner" style={{ marginBottom: 10 }}>
+          <AlertTriangle size={16} />
+          <span>
+            The terminal is logged into #{acct.login} but this app is configured for
+            #{acct.configured_account}. Risk is being sized against the account above.
+          </span>
+        </div>
+      )}
+
+      <div className="metrics-grid" style={{ marginBottom: 0 }}>
+        <MetricCard label="Balance" value={money(acct.balance)} icon={DollarSign} subtext={acct.server || ''} />
+        <MetricCard
+          label="Equity"
+          value={money(acct.equity)}
+          color={acct.equity >= acct.balance ? 'green' : 'red'}
+          icon={Activity}
+          subtext={acct.balance ? `${(((acct.equity - acct.balance) / acct.balance) * 100).toFixed(2)}% floating` : ''}
+        />
+        <MetricCard
+          label="Risk / Trade"
+          value={risk.risk_per_trade_amount != null ? money(risk.risk_per_trade_amount) : '—'}
+          icon={Shield}
+          subtext={`${risk.risk_per_trade_pct ?? '—'}% of ${risk.sizing_base_label || 'balance'}`}
+        />
+        <MetricCard
+          label="Daily Loss Limit"
+          value={risk.max_daily_drawdown_amount != null ? money(risk.max_daily_drawdown_amount) : '—'}
+          color="red"
+          icon={TrendingDown}
+          subtext={`${risk.max_daily_drawdown_pct ?? '—'}% — used ${cb ? money(Math.min(0, cb.daily_pnl)) : '—'}`}
+        />
+      </div>
+
+      {cb?.is_paused && (
+        <div className="offline-banner" style={{ marginTop: 12 }}>
+          <AlertTriangle size={16} />
+          <span>Trading paused: {cb.pause_reason}</span>
+        </div>
+      )}
+      {cb && cb.account_id != null && acct.login != null && cb.account_id !== acct.login && (
+        <div className="offline-banner" style={{ marginTop: 12 }}>
+          <AlertTriangle size={16} />
+          <span>
+            Risk state still belongs to account #{cb.account_id}. Reset it in
+            Settings → Broker so this account starts clean.
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function MetricCard({ label, value, color = '', subtext = '', icon: Icon }) {
@@ -469,6 +556,8 @@ export default function Dashboard() {
           <span>Backend Offline — Showing cached data</span>
         </div>
       )}
+
+      <LiveAccountPanel />
 
       <div className="metrics-grid">
         <MetricCard label="Total P&L" value={`$${(s.total_pnl || 0).toFixed(2)}`} color={s.total_pnl >= 0 ? 'green' : 'red'} icon={DollarSign} subtext={`${s.total_trades || 0} trades`} />

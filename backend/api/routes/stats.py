@@ -33,6 +33,9 @@ async def get_user_stats(
     # the account, so a fixed-capital denominator deflates both ratios. Falls
     # back to STATIC — the schema default — if the user has no saved config.
     sizing_basis = "STATIC"
+    # Magic-number base identifying orders this bot placed — used to keep other
+    # people's trades out of this user's performance stats.
+    _magic_base = 1001
     try:
         import json as _json
 
@@ -47,6 +50,7 @@ async def get_user_stats(
         if _cfg_row and _cfg_row.config_json:
             _parsed = UserConfigV2.from_dict(_json.loads(_cfg_row.config_json))
             sizing_basis = getattr(_parsed.risk, "sizing_basis", "STATIC") or "STATIC"
+            _magic_base = int(getattr(_parsed, "magic_base", 1001) or 1001)
     except Exception as e:
         logger.warning(f"Could not resolve sizing_basis for stats, defaulting to STATIC: {e}")
     # DB Cache check removed: Always compute live from MT5 for accuracy.
@@ -54,8 +58,19 @@ async def get_user_stats(
     # 1. Try to get deals from MT5 history first
     try:
         from backend.mt5.order_manager import OrderManager
-        deals = await OrderManager.get_closed_positions_since(0)
-        
+        from backend.services.trade_ownership import load_bot_tickets
+
+        # Bot-owned deals only. This used to pull the account's ENTIRE deal
+        # history unfiltered, so connecting to an account that already had a
+        # trading history made the dashboard report that history as this bot's
+        # performance — win rate, P&L, drawdown, all of it. Ownership is
+        # decided by backend/services/trade_ownership.py.
+        _known = await load_bot_tickets(db, current_user.id)
+        deals = await OrderManager.get_closed_positions_since(
+            0, bot_only=True, known_tickets=_known, magic_base=_magic_base
+        )
+
+
         if deals:
             # Fetch balance operations to calculate net deposits
             balance_ops = await OrderManager.get_balance_operations_since(0)
@@ -75,16 +90,50 @@ async def get_user_stats(
             live_balance = account_info.balance if account_info else 10000.0
             
             total_mt5_pnl = sum((d["profit"] + d["commission"] + d["swap"]) for d in deals)
-            # Initial Balance = Current Balance - Net Deposits - PnL
-            initial_balance = live_balance - net_deposits - total_mt5_pnl
+            # Starting balance for THIS BOT's equity curve: the live balance
+            # with the bot's own realised P&L backed out.
+            #
+            # The old formula also subtracted net_deposits, which was correct
+            # only while `deals` was the account's entire history. Now that
+            # `deals` is bot-owned trades only, the account balance also
+            # contains P&L the bot did not produce; subtracting deposits on top
+            # of that double-counts. `live_balance - total_mt5_pnl` answers the
+            # question the dashboard is actually asking — "what was the balance
+            # before the bot's trades" — for an account whose non-bot activity
+            # is already baked into the current balance.
+            initial_balance = live_balance - total_mt5_pnl
             if initial_balance <= 0:
-                initial_balance = 10000.0
+                initial_balance = live_balance if live_balance > 0 else 10000.0
                 
             # Fetch local DB trades to get the accurate exit_reason (e.g., TP1, TP2) instead of just "TP"
+            #
+            # This read `t.position_id`, which is not a column on Trade (the MT5
+            # position ticket is stored as `mt5_ticket`, and per-leg on
+            # TradePosition.mt5_ticket). Every call therefore raised
+            # AttributeError here, was swallowed by the `except Exception` below,
+            # and logged "Could not compute stats from MT5 ... Falling back to
+            # DB" — so this MT5 stats path never actually returned once the
+            # account had any deals at all.
+            from backend.data.models import TradePosition as _TP
+
             db_trades_result = await db.execute(
                 select(Trade).where(Trade.user_id == current_user.id, Trade.status == "CLOSED")
             )
-            db_trades = {str(t.position_id): t.exit_reason for t in db_trades_result.scalars().all() if t.position_id}
+            _closed = db_trades_result.scalars().all()
+            db_trades = {
+                str(t.mt5_ticket): t.exit_reason for t in _closed if t.mt5_ticket
+            }
+            # Multi-TP trades hold their MT5 tickets on the legs, not the parent.
+            _legs = await db.execute(
+                select(_TP.mt5_ticket, _TP.tp_level, _TP.parent_trade_id).where(
+                    _TP.user_id == current_user.id, _TP.mt5_ticket.isnot(None)
+                )
+            )
+            _reason_by_trade = {t.id: t.exit_reason for t in _closed}
+            for _tk, _lvl, _parent in _legs.all():
+                db_trades.setdefault(
+                    str(_tk), _reason_by_trade.get(_parent) or (f"TP{_lvl}" if _lvl else None)
+                )
                 
             trade_dicts = []
             for d in deals:

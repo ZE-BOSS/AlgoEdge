@@ -165,6 +165,7 @@ export const checkHealth = () => api.get('/health');
 // ── Trades (JWT-authed, no user_id) ─────────────────────────────────────────
 
 export const getTrades = (params) => api.get('/trades', { params });
+export const getTradesSummary = (params) => api.get('/trades/summary', { params });
 export const getPositions = () => api.get('/positions');
 export const forceCloseAll = () => api.get('/force-close-all');
 
@@ -235,6 +236,15 @@ export const getSymbolCosts = (symbol) => api.get(`/mt5_test/symbol-costs/${symb
 
 export const saveBrokerStandard = (data) => api.post('/broker/standard', data);
 export const getBrokerStatus = () => api.get('/broker/status');
+
+// ── Live account, Telegram diagnostics, and account-state reset ──────────────
+// getBrokerStatus only ever returned the masked login + server name, so nothing
+// in the UI could show the balance the risk percentage is actually applied to.
+export const getLiveAccount = () => api.get('/account/live');
+export const getAccountState = () => api.get('/account/state');
+export const resetAccountState = (data) => api.post('/account/reset', data);
+export const getTelegramStatus = () => api.get('/telegram/status');
+export const sendTelegramTest = (message) => api.post('/telegram/test', { message: message || null });
 export const testBrokerConnection = (data) => api.post('/broker/test', data);
 export const removeBrokerStandard = () => api.delete('/broker/standard');
 // Canonical instrument -> this broker's symbol (task 14.9). `refresh` re-runs

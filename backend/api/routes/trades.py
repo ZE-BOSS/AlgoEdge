@@ -69,7 +69,130 @@ async def get_trades(
         "confluence_score": t.confluence_score,
         "chart_data": t.chart_data,
         "created_at": t.created_at,
+        # Journal detail the UI asked for and the API never sent.
+        "strategy_id": t.strategy_id,
+        "session": t.session,
+        "session_close_time": t.session_close_time,
+        "duration_seconds": (
+            (t.exit_time - t.entry_time).total_seconds()
+            if t.exit_time and t.entry_time else None
+        ),
+        "positions": [{
+            "tp_level": p.tp_level,
+            "mt5_ticket": p.mt5_ticket,
+            "volume": p.volume,
+            "entry_price": p.entry_price,
+            "stop_loss": p.stop_loss,
+            "take_profit": p.take_profit,
+            "exit_price": p.exit_price,
+            "exit_time": p.exit_time,
+            "exit_reason": p.exit_reason,
+            "pnl": p.pnl,
+            "pnl_pips": p.pnl_pips,
+            "planned_rr": p.planned_rr,
+            "realized_rr": p.realized_rr,
+            "status": p.status,
+            "be_applied": p.be_applied,
+            "trail_method": p.trail_method,
+            "trail_activated": p.trail_activated,
+        } for p in sorted(t.positions, key=lambda x: x.tp_level or 0)],
     } for t in trades]
+
+
+@router.get("/trades/summary")
+async def get_trades_summary(
+    symbol: str | None = None,
+    days: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Journal summary — the totals row the journal page had no data for.
+
+    Deliberately computed over CLOSED trades only: an open trade has no realised
+    P&L, and including floating P&L in a win-rate makes the number move on every
+    tick.
+    """
+    from datetime import timedelta
+
+    q = select(Trade).where(Trade.user_id == current_user.id, Trade.status == "CLOSED")
+    if symbol:
+        q = q.where(Trade.symbol == symbol)
+    if days:
+        q = q.where(Trade.entry_time >= datetime.utcnow() - timedelta(days=days))
+    trades = (await db.execute(q.order_by(Trade.entry_time.asc()))).scalars().all()
+
+    if not trades:
+        return {
+            "trades": 0, "wins": 0, "losses": 0, "breakeven": 0, "win_rate": 0.0,
+            "gross_profit": 0.0, "gross_loss": 0.0, "net_pnl": 0.0,
+            "profit_factor": None, "expectancy": 0.0, "avg_win": 0.0, "avg_loss": 0.0,
+            "largest_win": 0.0, "largest_loss": 0.0, "total_pips": 0.0,
+            "avg_rr": None, "max_drawdown": 0.0, "max_drawdown_pct": None,
+            "balance_start": None, "balance_end": None,
+            "by_symbol": [], "by_strategy": [], "by_session": [],
+        }
+
+    pnls = [t.pnl or 0.0 for t in trades]
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
+    net = sum(pnls)
+
+    # Peak-to-trough on the realised equity curve.
+    equity, peak, max_dd = 0.0, 0.0, 0.0
+    for p in pnls:
+        equity += p
+        peak = max(peak, equity)
+        max_dd = max(max_dd, peak - equity)
+
+    balance_start = next((t.balance_before for t in trades if t.balance_before), None)
+    balance_end = next((t.balance_after for t in reversed(trades) if t.balance_after), None)
+
+    def _group(key_fn):
+        buckets: dict = {}
+        for t in trades:
+            k = key_fn(t) or "UNKNOWN"
+            b = buckets.setdefault(k, {"key": k, "trades": 0, "wins": 0, "pnl": 0.0})
+            b["trades"] += 1
+            b["pnl"] += t.pnl or 0.0
+            if (t.pnl or 0.0) > 0:
+                b["wins"] += 1
+        for b in buckets.values():
+            b["win_rate"] = round(100.0 * b["wins"] / b["trades"], 2) if b["trades"] else 0.0
+            b["pnl"] = round(b["pnl"], 2)
+        return sorted(buckets.values(), key=lambda x: -x["pnl"])
+
+    rrs = [t.risk_reward for t in trades if t.risk_reward is not None]
+    pips = [t.pnl_pips for t in trades if t.pnl_pips is not None]
+
+    return {
+        "trades": len(trades),
+        "wins": len(wins),
+        "losses": len(losses),
+        "breakeven": len(pnls) - len(wins) - len(losses),
+        "win_rate": round(100.0 * len(wins) / len(trades), 2),
+        "gross_profit": round(gross_profit, 2),
+        "gross_loss": round(gross_loss, 2),
+        "net_pnl": round(net, 2),
+        "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss > 0 else None,
+        "expectancy": round(net / len(trades), 2),
+        "avg_win": round(gross_profit / len(wins), 2) if wins else 0.0,
+        "avg_loss": round(-gross_loss / len(losses), 2) if losses else 0.0,
+        "largest_win": round(max(pnls), 2),
+        "largest_loss": round(min(pnls), 2),
+        "total_pips": round(sum(pips), 1) if pips else 0.0,
+        "avg_rr": round(sum(rrs) / len(rrs), 2) if rrs else None,
+        "max_drawdown": round(max_dd, 2),
+        "max_drawdown_pct": (
+            round(100.0 * max_dd / balance_start, 2) if balance_start else None
+        ),
+        "balance_start": balance_start,
+        "balance_end": balance_end,
+        "by_symbol": _group(lambda t: t.symbol),
+        "by_strategy": _group(lambda t: t.strategy_id),
+        "by_session": _group(lambda t: t.session),
+    }
 
 
 @router.get("/positions")

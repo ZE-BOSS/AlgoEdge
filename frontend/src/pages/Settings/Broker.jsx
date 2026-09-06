@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Server, Save, Loader2, Check, Wifi, WifiOff, Trash2, Shield, Eye, EyeOff, MessageSquare, RefreshCw, Search, AlertTriangle } from 'lucide-react';
-import { getBrokerStatus, saveBrokerStandard, testBrokerConnection, removeBrokerStandard, testMt5Entry, testMt5Close, testMt5Breakeven, testMt5Trail, getConfig, updateConfig, getInstrumentResolution } from '../../services/api';
+import { getBrokerStatus, saveBrokerStandard, testBrokerConnection, removeBrokerStandard, testMt5Entry, testMt5Close, testMt5Breakeven, testMt5Trail, getConfig, updateConfig, getInstrumentResolution, getTelegramStatus, sendTelegramTest, getAccountState, resetAccountState } from '../../services/api';
 import { useConnectionStore, useAuthStore } from '../../store';
+import { invalidateAccountDependents } from '../../utils/invalidate';
 
 function BrokerCard({ title, description, type, brokerStatus, onSave, onTest, onRemove }) {
   const [form, setForm] = useState({ account: '', password: '', server: '', path: '' });
@@ -446,11 +447,150 @@ function InstrumentResolutionCard() {
   );
 }
 
+/**
+ * Switching MT5 logins used to leave three kinds of state behind: the circuit
+ * breaker's persisted daily/weekly P&L, the sync loop's "how far back to read
+ * deal history" marker, and journal rows the bot had adopted from the broker.
+ * The first two are now scoped to an account number and self-invalidate, but
+ * the journal rows are the user's data and only the user can say whether to
+ * keep them. This card shows exactly what state exists, whose account it
+ * belongs to, and clears the parts you choose.
+ */
+function StateRow({ label, value, warn }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '0.8rem' }}>
+      <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
+      <span style={{ color: warn ? 'var(--red)' : 'var(--text-primary)' }}>{value}</span>
+    </div>
+  );
+}
+
+function AccountStateCard() {
+  const queryClient = useQueryClient();
+  const [state, setState] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [opts, setOpts] = useState({
+    clear_risk_state: true,
+    clear_adopted_trades: true,
+    clear_all_trades: false,
+    clear_signals: false,
+  });
+
+  const refresh = () => getAccountState().then(r => setState(r.data)).catch(() => {});
+  useEffect(() => { refresh(); }, []);
+
+  const stale =
+    state?.circuit_breaker_state?.stale || state?.sync_state?.stale;
+
+  const handleReset = async () => {
+    const parts = [];
+    if (opts.clear_risk_state) parts.push('risk/circuit-breaker state');
+    if (opts.clear_all_trades) parts.push('ALL journal trades');
+    else if (opts.clear_adopted_trades) parts.push('broker-adopted journal trades');
+    if (opts.clear_signals) parts.push('all signals');
+    if (!parts.length) { setMsg({ type: 'error', text: 'Nothing selected.' }); return; }
+    if (!window.confirm(`This will permanently delete: ${parts.join(', ')}.
+
+Continue?`)) return;
+
+    setBusy(true); setMsg(null);
+    try {
+      const { data } = await resetAccountState(opts);
+      setMsg({ type: 'success', text: `Reset for account #${data.live_login ?? '?'}: ` +
+        Object.entries(data.removed).map(([k, v]) => `${k}=${v}`).join(', ') });
+      // Journal, signals, stats and the dashboard all still hold the previous
+      // account's rows until they are dropped.
+      invalidateAccountDependents(queryClient);
+      await refresh();
+    } catch (e) {
+      setMsg({ type: 'error', text: 'Reset failed: ' + (e.response?.data?.detail || e.message) });
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title"><RefreshCw size={14} /> Account State &amp; Reset</span>
+        {state?.live_login && <span className="badge badge-green">#{state.live_login}</span>}
+      </div>
+
+      {stale && (
+        <div style={{ marginBottom: 12, padding: 12, borderRadius: 4, background: 'rgba(239,68,68,0.1)', color: 'var(--red)', fontSize: '0.82rem', display: 'flex', gap: 8 }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+          <span>
+            Saved state belongs to a different MT5 account. It is being ignored, but
+            clearing it removes the confusion for good.
+          </span>
+        </div>
+      )}
+
+      {state && (
+        <div style={{ marginBottom: 16 }}>
+          <StateRow label="Connected MT5 login" value={state.live_login ?? 'not connected'} />
+          <StateRow
+            label="Risk state (cb_state.json)"
+            value={state.circuit_breaker_state.exists
+              ? `account #${state.circuit_breaker_state.mt5_account ?? 'untagged'} · daily P&L ${(state.circuit_breaker_state.daily_pnl ?? 0).toFixed(2)}${state.circuit_breaker_state.is_paused ? ' · PAUSED' : ''}`
+              : 'none'}
+            warn={state.circuit_breaker_state.stale}
+          />
+          <StateRow
+            label="Sync state (bot_sync_state.json)"
+            value={state.sync_state.exists ? `account #${state.sync_state.mt5_account ?? 'untagged'}` : 'none'}
+            warn={state.sync_state.stale}
+          />
+          <StateRow label="Journal trades" value={state.journal.trades_total} />
+          <StateRow
+            label="…of which adopted from the broker"
+            value={state.journal.trades_adopted_from_broker}
+            warn={state.journal.trades_adopted_from_broker > 0}
+          />
+          <StateRow label="Signals recorded" value={state.journal.signals_total} />
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gap: 6, marginBottom: 14, fontSize: '0.82rem' }}>
+        {[
+          ['clear_risk_state', 'Clear risk / circuit-breaker + sync state (recommended after switching accounts)'],
+          ['clear_adopted_trades', 'Delete journal trades adopted from the broker (MANUAL / MANUAL_OFFLINE)'],
+          ['clear_all_trades', "Delete ALL journal trades, including the bot's own"],
+          ['clear_signals', 'Delete all recorded signals'],
+        ].map(([key, label]) => (
+          <label key={key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={opts[key]}
+              onChange={e => setOpts(o => ({ ...o, [key]: e.target.checked }))}
+              style={{ marginTop: 3, width: 'auto' }}
+            />
+            <span>{label}</span>
+          </label>
+        ))}
+      </div>
+
+      <button className="btn btn-danger" onClick={handleReset} disabled={busy}>
+        {busy ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+        {busy ? 'Resetting...' : 'Reset selected state'}
+      </button>
+
+      {msg && (
+        <div style={{ marginTop: 14, padding: 12, borderRadius: 4, fontSize: '0.82rem', background: msg.type === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)', color: msg.type === 'error' ? 'var(--red)' : 'var(--green)' }}>
+          {msg.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TelegramSettingsCard() {
   const [token, setToken] = useState('');
   const [chatId, setChatId] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [tgStatus, setTgStatus] = useState(null);
   const [resultMsg, setResultMsg] = useState(null);
 
   useEffect(() => {
@@ -462,6 +602,10 @@ function TelegramSettingsCard() {
     }).catch(() => {});
   }, []);
 
+  const refreshStatus = () => getTelegramStatus().then(r => setTgStatus(r.data)).catch(() => {});
+
+  useEffect(() => { refreshStatus(); }, []);
+
   const handleSave = async () => {
     setSaving(true);
     setResultMsg(null);
@@ -470,10 +614,30 @@ function TelegramSettingsCard() {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
       setResultMsg({ type: 'success', text: 'Telegram settings saved.' });
+      await refreshStatus();
     } catch (e) {
       setResultMsg({ type: 'error', text: 'Failed to save: ' + (e.response?.data?.detail || e.message) });
     }
     setSaving(false);
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setResultMsg(null);
+    try {
+      const { data } = await sendTelegramTest();
+      setTgStatus(data.status || null);
+      if (data.ok) {
+        setResultMsg({ type: 'success', text: 'Test message delivered. Check your Telegram.' });
+      } else {
+        const detail = (data.results || []).filter(r => !r.ok)
+          .map(r => `chat ${r.chat_id}: ${r.detail || r.status}`).join(' | ');
+        setResultMsg({ type: 'error', text: `Not delivered — ${data.reason || detail || 'unknown error'}` });
+      }
+    } catch (e) {
+      setResultMsg({ type: 'error', text: 'Test failed: ' + (e.response?.data?.detail || e.message) });
+    }
+    setTesting(false);
   };
 
   return (
@@ -496,10 +660,38 @@ function TelegramSettingsCard() {
           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 4 }}>Separate multiple IDs with commas</div>
         </div>
       </div>
-      <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-        {saving ? <Loader2 size={14} className="spin" /> : saved ? <Check size={14} /> : <Save size={14} />}
-        {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Telegram Settings'}
-      </button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 size={14} className="spin" /> : saved ? <Check size={14} /> : <Save size={14} />}
+          {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Telegram Settings'}
+        </button>
+        {/* Saving the token proved nothing: send_message swallowed every
+            failure into the server log, so a bad token, a chat the bot has
+            never been started in, and a TLS failure all looked the same from
+            here — nothing happens. This sends a real message and shows
+            Telegram's own answer. */}
+        <button className="btn btn-secondary" onClick={handleTest} disabled={testing}>
+          {testing ? <Loader2 size={14} className="spin" /> : <MessageSquare size={14} />}
+          {testing ? 'Sending...' : 'Send Test Message'}
+        </button>
+      </div>
+
+      {tgStatus && (
+        <div style={{ marginTop: 12, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+          <div>
+            Service state:{' '}
+            <strong style={{ color: tgStatus.configured ? 'var(--green)' : 'var(--red)' }}>
+              {tgStatus.configured ? `loaded (${tgStatus.chat_id_count} chat id${tgStatus.chat_id_count === 1 ? '' : 's'})` : 'NOT loaded — no alerts will be sent'}
+            </strong>
+            {' · '}sent {tgStatus.sent_count} · failed {tgStatus.failed_count}
+          </div>
+          {tgStatus.last_error && (
+            <div style={{ color: 'var(--red)', marginTop: 4 }}>
+              Last error: {tgStatus.last_error}
+            </div>
+          )}
+        </div>
+      )}
       {resultMsg && (
         <div style={{ marginTop: 16, padding: 12, borderRadius: 4, background: resultMsg.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)', color: resultMsg.type === 'error' ? 'var(--red)' : 'var(--green)', fontSize: '0.85rem' }}>
           {resultMsg.text}
@@ -563,6 +755,7 @@ export default function BrokerSettings() {
       </div>
       
       <InstrumentResolutionCard />
+      <AccountStateCard />
       <TelegramSettingsCard />
       <Mt5DiagnosticCard />
     </div>

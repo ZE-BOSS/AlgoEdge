@@ -98,6 +98,8 @@ class Trade(Base):
     exit_snapshot = Column(Text)   # path to exit chart PNG
     balance_before = Column(Float)
     balance_after = Column(Float)
+    session = Column(String(20))            # LONDON, NY, LONDON/NY, ASIAN, 24/7
+    session_close_time = Column(DateTime)   # when that session ends (UTC), None for 24/7
     confluence_score = Column(Integer)
     chart_data = Column(Text)
     mt5_ticket = Column(BigInteger)
@@ -128,6 +130,8 @@ class TradePosition(Base):
     status = Column(String(20))
     exit_price = Column(Float)
     exit_time = Column(DateTime)
+    exit_reason = Column(String(30))  # SL, TP1..TP5, TRAIL, BE, CLIENT
+    pnl_pips = Column(Float)
     be_applied = Column(Boolean, default=False)
     trail_method = Column(String(30))
     trail_activated = Column(Boolean, default=False)
@@ -169,6 +173,7 @@ class Signal(Base):
     entry_snapshot = Column(Text)  # Path to entry chart PNG
     chart_data = Column(Text)
     session = Column(String(20))  # LONDON, NY, OVERLAP, 24/7
+    session_close_time = Column(DateTime)  # when that session ends (UTC), None for 24/7
     signal_time = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())
     __table_args__ = (

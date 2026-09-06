@@ -65,6 +65,42 @@ def get_current_session(dt: datetime | None = None) -> str | None:
     return None
 
 
+def get_session_close(dt: datetime | None = None) -> datetime | None:
+    """When the session that `dt` falls in ends, in UTC.
+
+    The journal and the signal list show which session a setup fired in but
+    could not show how much of that session was left, which is what actually
+    matters when deciding whether to take a late entry. Returns None outside
+    LONDON/NY (i.e. in the Asian block, where the bot does not trade forex).
+
+    Synthetics run 24/7 and have no session close; callers tag those "24/7" and
+    get None here, which is correct.
+    """
+    if dt is None:
+        dt = get_utc_now()
+    local = get_local_time(dt)
+    hour = local.hour
+
+    in_london = SESSIONS["LONDON"]["start"] <= hour < SESSIONS["LONDON"]["end"]
+    in_ny = SESSIONS["NY"]["start"] <= hour < SESSIONS["NY"]["end"]
+
+    if in_ny:
+        end_hour = SESSIONS["NY"]["end"]
+    elif in_london:
+        end_hour = SESSIONS["LONDON"]["end"]
+    else:
+        return None
+
+    close_local = local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=end_hour)
+    return close_local.astimezone(timezone.utc)
+
+
+def get_session_close_iso(dt: datetime | None = None) -> str | None:
+    """`get_session_close` as an ISO string, or None."""
+    close = get_session_close(dt)
+    return close.isoformat() if close else None
+
+
 def is_kill_zone(dt: datetime | None = None) -> bool:
     """Returns True if current time is in a London or NY kill zone."""
     dt = get_local_time(dt)

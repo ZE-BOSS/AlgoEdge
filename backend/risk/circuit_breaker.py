@@ -102,6 +102,30 @@ class CircuitBreaker:
         self.paused_bars = 0
         self.last_pause_reason = ""
         self.last_trade_closed_time: dict[str, int] = {}
+
+        # Which MT5 login this state belongs to. Persisted state that was
+        # written for a DIFFERENT account is discarded on load — see
+        # load_state(). Without this, switching to a new account inherited the
+        # old account's daily_pnl / weekly_pnl / open-position counts, and a
+        # fresh $700 account could start out already "in drawdown" from a
+        # $10,000 account's losses.
+        self.account_id: int | None = config.get("mt5_account") or None
+
+        # Last balance we were shown. Used to tell a *balance reset* (new
+        # account, deposit, withdrawal, broker correction) apart from a trading
+        # loss: a balance change that our own realised P&L cannot explain is
+        # not drawdown, and must re-baseline the drawdown denominators rather
+        # than count against them. See note_account_balance().
+        self._last_known_balance: float = 0.0
+
+        # Realised P&L this process has booked, cumulative and never reset by a
+        # day or week rollover. note_account_balance() needs "how much of the
+        # balance change did our own trading cause"; daily_pnl cannot answer
+        # that across a midnight boundary, because it goes back to zero while
+        # the balance does not.
+        self._cumulative_pnl: float = 0.0
+        self._cumulative_pnl_at_last_balance: float = 0.0
+
         # Bug 4: Track the balance at day-start for correct daily drawdown % denominator.
         self._day_start_balance: float = 0.0
         # §2.6 fix: same anchoring for the weekly check — without this, the weekly %
@@ -473,6 +497,15 @@ class CircuitBreaker:
         try:
             os.makedirs(os.path.dirname(CB_STATE_FILE), exist_ok=True)
             state = {
+                # Scopes this file to one MT5 login. load_state() throws the
+                # whole file away when it does not match the account now
+                # connected.
+                "mt5_account": self.account_id,
+                "day_start_balance": self._day_start_balance,
+                "week_start_balance": self._week_start_balance,
+                "last_known_balance": self._last_known_balance,
+                "cumulative_pnl": self._cumulative_pnl,
+                "cumulative_pnl_at_last_balance": self._cumulative_pnl_at_last_balance,
                 "daily_trades_count": self.daily_trades_count,
                 "daily_pnl": self.daily_pnl,
                 "weekly_pnl": self.weekly_pnl,
@@ -498,6 +531,39 @@ class CircuitBreaker:
                 return
             with open(CB_STATE_FILE) as f:
                 data = json.load(f)
+
+            # Account scoping. State written against a different MT5 login says
+            # nothing about this one: its daily/weekly P&L, its open-position
+            # counts and its drawdown baselines all belong to another account's
+            # balance. Carrying them over is what made a freshly reset demo
+            # account come up already halted on "max daily drawdown".
+            saved_account = data.get("mt5_account")
+            if self.account_id and saved_account and int(saved_account) != int(self.account_id):
+                logger.warning(
+                    f"[CB] Persisted state belongs to MT5 account {saved_account}, "
+                    f"but {self.account_id} is connected - discarding it and starting clean."
+                )
+                self.reset_for_new_account(self.account_id)
+                return
+            if self.account_id and not saved_account:
+                # Pre-scoping state file: we cannot prove it belongs to this
+                # account, so we refuse to trust its P&L. Same treatment.
+                logger.warning(
+                    "[CB] Persisted state has no account tag (written before account "
+                    "scoping existed) - discarding it rather than risk booking another "
+                    "account's P&L as this one's."
+                )
+                self.reset_for_new_account(self.account_id)
+                return
+
+            self._day_start_balance = data.get("day_start_balance", 0.0) or 0.0
+            self._week_start_balance = data.get("week_start_balance", 0.0) or 0.0
+            self._last_known_balance = data.get("last_known_balance", 0.0) or 0.0
+            self._cumulative_pnl = data.get("cumulative_pnl", 0.0) or 0.0
+            self._cumulative_pnl_at_last_balance = (
+                data.get("cumulative_pnl_at_last_balance", self._cumulative_pnl) or 0.0
+            )
+
             from datetime import date
             saved_day_str = data.get("last_reset_day", "")
             today = datetime.now(timezone.utc).date()
@@ -528,10 +594,136 @@ class CircuitBreaker:
             logger.error(f"[CB] Failed to load state: {e}")
 
 
+    # -- Account identity & balance-reset handling ---------------------------
+
+    def reset_for_new_account(self, account_id: int | None):
+        """Wipe every carried-over counter and re-tag this state to `account_id`.
+
+        Called when the connected MT5 login changes (or when persisted state
+        cannot be proven to belong to the connected login). Everything the old
+        account taught us - realised P&L, trade counts, open-position counts,
+        pause latches, drawdown baselines - is about a different balance and a
+        different set of positions, so none of it survives.
+        """
+        self.account_id = int(account_id) if account_id else None
+        self.daily_trades_count = 0
+        self.daily_trades_count_by_strategy = {}
+        self.daily_pnl = 0.0
+        self.weekly_pnl = 0.0
+        self.strategy_daily_pnl = {}
+        self.strategy_weekly_pnl = {}
+        self.open_positions_by_symbol = {}
+        self.open_positions_by_strategy = {}
+        self.open_positions_by_slot = {}
+        self.losses_today_by_slot = {}
+        self.last_trade_closed_time = {}
+        self.active_groups = {}
+        self.is_paused = False
+        self.pause_reason = ""
+        # Baselines are re-anchored to the new account's balance on the next
+        # check_all() call, because they are zero here.
+        self._day_start_balance = 0.0
+        self._week_start_balance = 0.0
+        self._last_known_balance = 0.0
+        self._cumulative_pnl = 0.0
+        self._cumulative_pnl_at_last_balance = 0.0
+        self.last_reset_day = datetime.now(timezone.utc).date()
+        self.last_reset_week = datetime.now(timezone.utc).isocalendar()[1]
+        logger.info(f"[CB] State reset for MT5 account {self.account_id}.")
+        self.save_state()
+
+    def note_account_balance(self, balance: float, account_id: int | None = None) -> bool:
+        """Feed the live account balance in, and re-baseline if it was reset.
+
+        A drawdown check compares realised P&L against a *baseline balance*. If
+        the balance moves for a reason that is not trading - a new account, a
+        deposit, a withdrawal, a demo-account reset, a broker correction - then
+        the old baseline describes money that is no longer there, and the
+        drawdown percentage computed from it is meaningless.
+
+        We can detect exactly that, because we know how much of the change our
+        own trading accounts for: `daily_pnl`. If the balance moved by
+        materially more than our realised P&L explains, the difference did not
+        come from trading, and the baselines are re-anchored to the balance we
+        are actually looking at now.
+
+        Returns True if a re-baseline happened.
+        """
+        if not balance or balance <= 0:
+            return False
+
+        # Account switch takes priority - nothing about the old state applies.
+        if account_id and self.account_id and int(account_id) != int(self.account_id):
+            self.reset_for_new_account(account_id)
+            self._last_known_balance = balance
+            self._day_start_balance = balance
+            self._week_start_balance = balance
+            self.save_state()
+            return True
+        if account_id and not self.account_id:
+            self.account_id = int(account_id)
+
+        if self._last_known_balance <= 0:
+            # First observation on this account - just anchor.
+            self._last_known_balance = balance
+            self._cumulative_pnl_at_last_balance = self._cumulative_pnl
+            if self._day_start_balance <= 0:
+                self._day_start_balance = balance
+            if self._week_start_balance <= 0:
+                self._week_start_balance = balance
+            self.save_state()
+            return False
+
+        # How much the balance moved, and how much of that our own trading
+        # accounts for. Anything left over did not come from trading.
+        #
+        # The comparison is against the P&L booked SINCE THE LAST OBSERVATION,
+        # not against the day's total: an earlier version compared |delta| to
+        # abs(daily_pnl) as a tolerance, which meant a -$250 losing day made a
+        # +$250 unexplained jump (exactly what a demo-account reset looks like)
+        # fall inside tolerance and go undetected.
+        delta = balance - self._last_known_balance
+        explained = self._cumulative_pnl - self._cumulative_pnl_at_last_balance
+        unexplained = delta - explained
+        # Slack for swap, commission and rounding we did not book precisely,
+        # and for floating positions that closed between observations.
+        tolerance = max(balance * 0.001, 1.0)
+        if abs(unexplained) > tolerance:
+            logger.warning(
+                f"[CB] Balance moved {delta:+.2f} to {balance:.2f}, of which our own "
+                f"trading explains {explained:+.2f} - {unexplained:+.2f} is unaccounted "
+                f"for. Treating as a balance reset / deposit / withdrawal, NOT drawdown. "
+                f"Re-baselining."
+            )
+            self._day_start_balance = balance
+            self._week_start_balance = balance
+            self._last_known_balance = balance
+            self._cumulative_pnl_at_last_balance = self._cumulative_pnl
+            # The P&L that produced the (now void) drawdown reading belonged to
+            # the old balance, so it is cleared alongside the baseline. Weekly
+            # goes with it: a weekly drawdown percentage measured from a
+            # week-start balance that no longer exists is just as meaningless
+            # as the daily one.
+            self.daily_pnl = 0.0
+            self.weekly_pnl = 0.0
+            self.strategy_daily_pnl = {}
+            self.strategy_weekly_pnl = {}
+            if self.is_paused and ("drawdown" in self.pause_reason.lower()):
+                logger.warning(f"[CB] Clearing drawdown pause ({self.pause_reason}) after balance reset.")
+                self.is_paused = False
+                self.pause_reason = ""
+            self.save_state()
+            return True
+
+        self._last_known_balance = balance
+        self._cumulative_pnl_at_last_balance = self._cumulative_pnl
+        return False
+
     def _record_trade_result(self, pnl: float, is_win: bool, strategy_id: str = "", slot_id: str = ""):
         """Update state after a grouped trade fully closes."""
         self.daily_pnl += pnl
         self.weekly_pnl += pnl
+        self._cumulative_pnl += pnl
         if strategy_id:
             self.strategy_daily_pnl[strategy_id] = self.strategy_daily_pnl.get(strategy_id, 0.0) + pnl
             self.strategy_weekly_pnl[strategy_id] = self.strategy_weekly_pnl.get(strategy_id, 0.0) + pnl

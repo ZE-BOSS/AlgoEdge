@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from backend.api.websocket import manager as ws_manager
 from backend.risk.position_sizer import get_pip_size
+from backend.services.trade_ownership import is_bot_deal, is_bot_position
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,6 +30,9 @@ class PositionManager:
         self.GHOST_GRACE_POLLS = 10           # require 10 consecutive polls (~200s) before marking ghost
         self._cached_atr = {}
         self._cached_structure = {}
+        # UserConfig.magic_base — set by bot_service so the ownership gates
+        # below use the user's configured magic range, not just the default.
+        self.magic_base: int = 1001
 
     def start(self, user_id: str):
         if not self.running:
@@ -99,6 +103,25 @@ class PositionManager:
             for p in db_positions:
                 trades_map.setdefault(p.parent_trade_id, []).append(p)
 
+            # parent_trade_id -> symbol, so the exit handler can size pips
+            # without an extra query per closed leg.
+            trades_map_symbol: dict = {}
+            if trades_map:
+                _sym_rows = await session.execute(
+                    select(Trade.id, Trade.symbol).where(Trade.id.in_(list(trades_map.keys())))
+                )
+                trades_map_symbol = {tid: sym for tid, sym in _sym_rows.all()}
+
+            # The account balance right now, stamped onto every trade that closes
+            # this cycle as `balance_after`. Read once per loop, not per trade.
+            account_balance_now = None
+            try:
+                _acc = mt5.account_info()
+                if _acc is not None:
+                    account_balance_now = float(_acc.balance)
+            except Exception:
+                pass
+
             # 3. Fetch all open positions from MT5
             mt5_positions = mt5.positions_get()
             mt5_tickets = {p.ticket: p for p in mt5_positions} if mt5_positions else {}
@@ -150,6 +173,23 @@ class PositionManager:
                     if current_time - self.pending_adoptions[ticket] < 15:
                         continue
                         
+                    # OWNERSHIP GATE. "God Sync" adopts an MT5 position that
+                    # is not in our DB. Without this check it adopted EVERY
+                    # such position — including manual trades and positions
+                    # that were already open on the account before this bot
+                    # ever logged in — writing them into the journal as
+                    # strategy_id="MANUAL" and feeding their P&L into the
+                    # drawdown counters. Only positions carrying the bot's own
+                    # magic number are ours to adopt.
+                    # See backend/services/trade_ownership.py.
+                    if not is_bot_position(live_pos, magic_base=self.magic_base):
+                        logger.debug(
+                            f"God Sync: ignoring position {ticket} on {live_pos.symbol} "
+                            f"(magic {getattr(live_pos, 'magic', 0)}) — not placed by this bot."
+                        )
+                        self.pending_adoptions.pop(ticket, None)
+                        continue
+
                     unrecorded_live_tickets.append(live_pos)
             
             if unrecorded_live_tickets:
@@ -212,6 +252,15 @@ class PositionManager:
                     in_deals = [d for d in pos_deals if d.entry == mt5.DEAL_ENTRY_IN]
                     out_deals = [d for d in pos_deals if d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT)]
                     
+                    # OWNERSHIP GATE — same reasoning as God Sync above, for
+                    # CLOSED positions. This block reaches 14 days back into
+                    # the account's deal history; on a freshly connected
+                    # account that history belongs to somebody else, and
+                    # importing it as MANUAL_OFFLINE trades is what put months
+                    # of unrelated losses into the journal.
+                    if in_deals and not is_bot_deal(in_deals[0], magic_base=self.magic_base):
+                        continue
+
                     if in_deals and out_deals and pos_id not in all_known_tickets:
                         existing_q = await session.execute(select(TradePosition).where(TradePosition.mt5_ticket == pos_id))
                         existing_pos = existing_q.scalars().first()
@@ -311,18 +360,40 @@ class PositionManager:
                             exit_deal = deals[-1]
                             net_profit = exit_deal.profit + getattr(exit_deal, 'commission', 0.0) + getattr(exit_deal, 'swap', 0.0) + getattr(exit_deal, 'fee', 0.0)
 
+                        reason = "CLOSED"
+                        if exit_deal.reason == mt5.DEAL_REASON_SL:
+                            reason = "TRAIL" if pos.be_applied else "SL"
+                        elif exit_deal.reason == mt5.DEAL_REASON_TP:
+                            reason = f"TP{pos.tp_level}" if pos.tp_level else "TP"
+
                         if pos.status != "CLOSED" or pos.pnl != net_profit:
                             pos.status = "CLOSED"
                             pos.pnl = net_profit
                             pos.exit_price = exit_deal.price
-                            if not pos.exit_time:
-                                pos.exit_time = datetime.utcnow()
-                            
-                            reason = "CLOSED"
-                            if exit_deal.reason == mt5.DEAL_REASON_SL:
-                                reason = "TRAIL" if pos.be_applied else "SL"
-                            elif exit_deal.reason == mt5.DEAL_REASON_TP:
-                                reason = f"TP{pos.tp_level}" if pos.tp_level else "TP"
+                            # The BROKER's exit timestamp, not the moment this
+                            # 20-second poll happened to notice. `datetime.utcnow()`
+                            # here is why the journal's close time could be minutes
+                            # off the actual fill.
+                            pos.exit_time = datetime.utcfromtimestamp(exit_deal.time)
+
+                            # Journal completeness. `exit_reason` and `pnl_pips` are
+                            # new columns; `realized_rr` existed and was never
+                            # written by the live path, so the journal showed the
+                            # planned R:R with no way to see what was achieved.
+                            pos.exit_reason = reason
+                            try:
+                                _sym = trades_map_symbol.get(pos.parent_trade_id) or ""
+                                _pip = get_pip_size(_sym) if _sym else 0.0
+                                if _pip and pos.entry_price and pos.exit_price:
+                                    _dir_sign = 1.0 if (pos.take_profit or 0) >= (pos.entry_price or 0) else -1.0
+                                    pos.pnl_pips = ((pos.exit_price - pos.entry_price) / _pip) * _dir_sign
+                                _risk = abs((pos.entry_price or 0) - (pos.stop_loss or 0))
+                                if _risk > 0 and pos.exit_price is not None:
+                                    _dir_sign = 1.0 if (pos.take_profit or 0) >= (pos.entry_price or 0) else -1.0
+                                    pos.realized_rr = ((pos.exit_price - pos.entry_price) * _dir_sign) / _risk
+                            except Exception as _e:
+                                logger.debug(f"Could not compute exit metrics for {pos.mt5_ticket}: {_e}")
+
                             modifications_made = True
 
                         # ALWAYs check if parent trade needs closing, even if was_open was False (fixes UI stuck trades)
@@ -338,10 +409,59 @@ class PositionManager:
                             if all(s.status in ("CLOSED", "RECONCILE_FAILED") for s in siblings):
                                 if trade.status != "CLOSED":
                                     trade.status = "CLOSED"
-                                    trade.exit_time = pos.exit_time
-                                    trade.exit_reason = getattr(trade, 'exit_reason', "CLIENT")
-                                    if trade.exit_reason is None:
-                                        trade.exit_reason = "CLIENT"
+                                    trade.exit_time = max(
+                                        (sb.exit_time for sb in siblings if sb.exit_time),
+                                        default=pos.exit_time,
+                                    )
+                                    # The reason the LAST leg closed for, rather
+                                    # than a hardcoded "CLIENT" — the journal
+                                    # labelled every bot exit a manual close.
+                                    _last_leg = max(
+                                        (sb for sb in siblings if sb.exit_time),
+                                        key=lambda sb: sb.exit_time,
+                                        default=pos,
+                                    )
+                                    trade.exit_reason = (
+                                        getattr(_last_leg, "exit_reason", None)
+                                        or getattr(trade, "exit_reason", None)
+                                        or "CLIENT"
+                                    )
+                                    trade.exit_price = (
+                                        _last_leg.exit_price
+                                        if _last_leg.exit_price else trade.entry_price
+                                    )
+
+                                    # balance_after / pnl_pips / achieved R:R.
+                                    # All three columns are read by the journal UI
+                                    # and only the backtester ever wrote them, so
+                                    # the live journal showed balance_before with
+                                    # nothing after it, and no pip or R result.
+                                    try:
+                                        if account_balance_now is not None:
+                                            trade.balance_after = account_balance_now
+                                        elif trade.balance_before is not None:
+                                            trade.balance_after = trade.balance_before + (trade.pnl or 0.0)
+                                        _pips = [sb.pnl_pips for sb in siblings if sb.pnl_pips is not None]
+                                        if _pips:
+                                            # Volume-weighted so a 3-leg trade reports the
+                                            # pip result of the position, not of one leg.
+                                            _vols = [sb.volume or 0.0 for sb in siblings if sb.pnl_pips is not None]
+                                            _tv = sum(_vols)
+                                            trade.pnl_pips = (
+                                                sum(p * v for p, v in zip(_pips, _vols)) / _tv
+                                                if _tv > 0 else sum(_pips) / len(_pips)
+                                            )
+                                        _risk_amt = None
+                                        _rrs = [sb.realized_rr for sb in siblings if sb.realized_rr is not None]
+                                        if _rrs:
+                                            _vols = [sb.volume or 0.0 for sb in siblings if sb.realized_rr is not None]
+                                            _tv = sum(_vols)
+                                            trade.risk_reward = (
+                                                sum(r * v for r, v in zip(_rrs, _vols)) / _tv
+                                                if _tv > 0 else sum(_rrs) / len(_rrs)
+                                            )
+                                    except Exception as _e:
+                                        logger.debug(f"Could not finalise trade metrics for {trade.id}: {_e}")
                                     
                                     # Chart data was attached at signal creation time and does not
                                     # need to be refreshed on every close. Fetching M5 candles

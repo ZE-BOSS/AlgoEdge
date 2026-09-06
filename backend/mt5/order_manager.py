@@ -416,28 +416,47 @@ class OrderManager:
         return result.retcode == mt5.TRADE_RETCODE_DONE
 
     @staticmethod
-    async def get_closed_positions_since(last_check_time: float) -> list[dict[str, Any]]:
-        """Get positions closed since last_check_time."""
+    async def get_closed_positions_since(
+        last_check_time: float,
+        bot_only: bool = False,
+        known_tickets: set | None = None,
+        magic_base: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get positions closed since last_check_time.
+
+        `magic` is now included on every returned deal, because the caller has
+        to be able to tell a trade the bot placed from one it did not. Passing
+        `bot_only=True` applies that filter here (see
+        backend/services/trade_ownership.py): every other deal in the account's
+        history - manual trades, another EA's trades, the months of history
+        that were already on the account before the bot ever logged in - is
+        dropped, so it can never reach the P&L accumulator or the circuit
+        breaker's drawdown counters.
+        """
         if not mt5:
             return []
-            
+
         from datetime import datetime, timedelta
-        
+
         loop = asyncio.get_running_loop()
         now = datetime.now() + timedelta(days=1)
         start_dt = datetime.fromtimestamp(last_check_time)
-        
+
         deals = await loop.run_in_executor(
             _executor,
             lambda: mt5.history_deals_get(start_dt, now)
         )
-        
+
         if not deals:
             return []
-            
+
+        from backend.services.trade_ownership import is_bot_deal
+
         closed_deals = []
         for d in deals:
             if d.entry == mt5.DEAL_ENTRY_OUT:
+                if bot_only and not is_bot_deal(d, known_tickets, magic_base):
+                    continue
                 closed_deals.append({
                     "ticket": d.ticket,
                     "position_id": d.position_id,
@@ -448,6 +467,9 @@ class OrderManager:
                     "time": d.time,
                     "price": d.price,
                     "reason": getattr(d, 'reason', -1),
+                    "magic": getattr(d, 'magic', 0),
+                    "volume": getattr(d, 'volume', 0.0),
+                    "deal_type": getattr(d, 'type', -1),
                 })
         return closed_deals
 

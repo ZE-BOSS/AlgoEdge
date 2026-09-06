@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, ChevronDown, ChevronRight, Bot, ExternalLink } from 'lucide-react';
-import { getTrades, analyzeTrade } from '../services/api';
+import { getTrades, getTradesSummary, analyzeTrade } from '../services/api';
 import { useConnectionStore, useAuthStore } from '../store';
 import AnalyzeButton from '../components/AnalyzeButton';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
@@ -50,6 +50,77 @@ function MiniChart({ data }) {
     };
   }, [data]);
   return <div ref={containerRef} style={{ width: '100%', height: 220, marginTop: 8 }} />;
+}
+
+/**
+ * The journal's headline numbers, computed server-side over every CLOSED trade
+ * — not only the page currently loaded. The journal had no summary at all, so
+ * there was no single place showing win rate, profit factor, realised drawdown
+ * or where the balance started and ended.
+ */
+function SummaryCell({ label, value, color }) {
+  return (
+    <div style={{ minWidth: 110 }}>
+      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+      <div style={{ fontSize: '1.05rem', fontWeight: 600, color: color || 'var(--text-primary)' }}>{value}</div>
+    </div>
+  );
+}
+
+function JournalSummary() {
+  const { data: s } = useQuery({
+    queryKey: ['trades-summary'],
+    queryFn: () => getTradesSummary().then(r => r.data),
+    refetchInterval: 30000,
+  });
+
+  if (!s || !s.trades) return null;
+
+  const money = (v) => (v == null ? '—' : `${v < 0 ? '-' : ''}$${Math.abs(v).toFixed(2)}`);
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div className="card-header">
+        <span className="card-title">Journal Summary — {s.trades} closed trades</span>
+        {s.balance_start != null && s.balance_end != null && (
+          <span className="badge badge-green">{money(s.balance_start)} → {money(s.balance_end)}</span>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24 }}>
+        <SummaryCell label="Net P&L" value={money(s.net_pnl)} color={s.net_pnl >= 0 ? 'var(--green)' : 'var(--red)'} />
+        <SummaryCell label="Win Rate" value={`${s.win_rate}%`} color={s.win_rate >= 50 ? 'var(--green)' : 'var(--yellow)'} />
+        <SummaryCell label="W / L" value={`${s.wins} / ${s.losses}`} />
+        <SummaryCell label="Profit Factor" value={s.profit_factor != null ? s.profit_factor.toFixed(2) : '—'} color={(s.profit_factor ?? 0) >= 1.3 ? 'var(--green)' : 'var(--yellow)'} />
+        <SummaryCell label="Expectancy" value={money(s.expectancy)} />
+        <SummaryCell label="Avg Win" value={money(s.avg_win)} color="var(--green)" />
+        <SummaryCell label="Avg Loss" value={money(s.avg_loss)} color="var(--red)" />
+        <SummaryCell label="Max DD" value={`${money(s.max_drawdown)}${s.max_drawdown_pct != null ? ` (${s.max_drawdown_pct}%)` : ''}`} color="var(--red)" />
+        <SummaryCell label="Avg R:R" value={s.avg_rr != null ? `${s.avg_rr.toFixed(2)}R` : '—'} />
+        <SummaryCell label="Total Pips" value={s.total_pips != null ? s.total_pips.toFixed(1) : '—'} />
+      </div>
+
+      {(s.by_symbol?.length > 0 || s.by_session?.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20, marginTop: 20 }}>
+          {[['By symbol', s.by_symbol], ['By strategy', s.by_strategy], ['By session', s.by_session]].map(([title, rows]) => (
+            rows?.length > 0 && (
+              <div key={title}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>{title}</div>
+                {rows.map(r => (
+                  <div key={r.key} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', padding: '2px 0' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>{r.key}</span>
+                    <span>
+                      <span style={{ color: 'var(--text-muted)' }}>{r.trades}t · {r.win_rate}% · </span>
+                      <span style={{ color: r.pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>{money(r.pnl)}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TradeRow({ trade }) {
@@ -138,7 +209,54 @@ function TradeRow({ trade }) {
                   <span style={{ color: 'var(--text-muted)' }}>Balance Before:</span><span>{trade.balance_before != null ? '$' + trade.balance_before.toFixed(2) : '—'}</span>
                   <span style={{ color: 'var(--text-muted)' }}>Balance After:</span><span>{trade.balance_after != null ? '$' + trade.balance_after.toFixed(2) : '—'}</span>
                   <span style={{ color: 'var(--text-muted)' }}>Confluence Score:</span><span>{trade.confluence_score != null ? trade.confluence_score + ' / 100' : '—'}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Strategy:</span><span>{trade.strategy_id || '—'}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Session:</span><span>{trade.session || '—'}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Session Closes:</span><span>{trade.session_close_time ? formatTime(trade.session_close_time) : (trade.session === '24/7' ? '24/7 — no close' : '—')}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Exit Reason:</span><span>{trade.exit_reason || '—'}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>R:R Achieved:</span><span>{trade.risk_reward != null ? `${trade.risk_reward >= 0 ? '+' : ''}${trade.risk_reward.toFixed(2)}R` : '—'}</span>
                 </div>
+
+                {/* Per-leg exit detail. A multi-TP trade closes in several
+                    pieces at different prices, for different reasons — the
+                    journal showed only the aggregate, so there was no way to
+                    see which leg hit TP and which was stopped out. */}
+                {Array.isArray(trade.positions) && trade.positions.length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase' }}>Legs</div>
+                    <table style={{ width: '100%', fontSize: '0.78rem' }}>
+                      <thead>
+                        <tr style={{ color: 'var(--text-muted)' }}>
+                          <th style={{ textAlign: 'left' }}>TP</th>
+                          <th style={{ textAlign: 'right' }}>Vol</th>
+                          <th style={{ textAlign: 'right' }}>Exit</th>
+                          <th style={{ textAlign: 'left' }}>Reason</th>
+                          <th style={{ textAlign: 'right' }}>Pips</th>
+                          <th style={{ textAlign: 'right' }}>R plan</th>
+                          <th style={{ textAlign: 'right' }}>R done</th>
+                          <th style={{ textAlign: 'right' }}>P&L</th>
+                          <th style={{ textAlign: 'left' }}>Closed</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {trade.positions.map(p => (
+                          <tr key={p.mt5_ticket || p.tp_level}>
+                            <td>TP{p.tp_level}</td>
+                            <td style={{ textAlign: 'right' }}>{p.volume}</td>
+                            <td style={{ textAlign: 'right' }}>{p.exit_price ?? '—'}</td>
+                            <td>{p.exit_reason || p.status || '—'}</td>
+                            <td style={{ textAlign: 'right' }}>{p.pnl_pips != null ? p.pnl_pips.toFixed(1) : '—'}</td>
+                            <td style={{ textAlign: 'right' }}>{p.planned_rr != null ? p.planned_rr.toFixed(2) : '—'}</td>
+                            <td style={{ textAlign: 'right' }}>{p.realized_rr != null ? p.realized_rr.toFixed(2) : '—'}</td>
+                            <td style={{ textAlign: 'right', color: (p.pnl ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                              {p.pnl != null ? p.pnl.toFixed(2) : '—'}
+                            </td>
+                            <td style={{ color: 'var(--text-muted)' }}>{p.exit_time ? formatTime(p.exit_time) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 12, fontWeight: 600, textTransform: 'uppercase' }}>
@@ -279,6 +397,8 @@ export default function Journal() {
           />
         </div>
       </div>
+
+      <JournalSummary />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 8 }}>

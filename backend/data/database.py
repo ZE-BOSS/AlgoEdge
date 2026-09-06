@@ -102,6 +102,15 @@ async def init_db():
             # each trade, so without it a multi-strategy run is unreadable
             # after saving.
             "ALTER TABLE backtest_trades ADD COLUMN strategy_id TEXT;",
+            # Live journal completeness. Every one of these columns is read by
+            # the journal/signal UI but was never written by the LIVE path (only
+            # by the backtester), so the frontend rendered blanks for session,
+            # exit reason per leg, achieved R:R, P&L in pips and balance-after.
+            "ALTER TABLE signals ADD COLUMN session_close_time TIMESTAMP;",
+            "ALTER TABLE trades ADD COLUMN session VARCHAR(20);",
+            "ALTER TABLE trades ADD COLUMN session_close_time TIMESTAMP;",
+            "ALTER TABLE trade_positions ADD COLUMN exit_reason VARCHAR(30);",
+            "ALTER TABLE trade_positions ADD COLUMN pnl_pips FLOAT;",
         ]
 
         # DROP COLUMN ... IF EXISTS is Postgres syntax — SQLite's ALTER TABLE

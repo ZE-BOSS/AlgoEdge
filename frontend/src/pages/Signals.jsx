@@ -115,6 +115,28 @@ function SignalDetail({ signal }) {
           </div>
         </div>
 
+        {/* Session context. `session` was always blank because the live path
+            never wrote it; `session_close_time` is new, so a setup taken near
+            the session close can be recognised as such. */}
+        <div className="detail-section">
+          <h4>Session</h4>
+          <div className="detail-pairs">
+            <div><span>Session:</span> <strong>{d.session || '—'}</strong></div>
+            <div>
+              <span>Session closes:</span>{' '}
+              <strong>
+                {d.session_close_time
+                  ? new Date(d.session_close_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+                  : (d.session === '24/7' ? '24/7 — no close' : '—')}
+              </strong>
+            </div>
+            <div>
+              <span>Signal time:</span>{' '}
+              {d.signal_time ? new Date(d.signal_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+            </div>
+          </div>
+        </div>
+
         <div className="detail-section">
           <h4>SMC Zones</h4>
           <div className="detail-pairs">
@@ -148,8 +170,27 @@ function SignalDetail({ signal }) {
             <h4>Trade Result</h4>
             <div className="detail-pairs">
               <div><span>P&L:</span> <strong className={data.linked_trade.pnl >= 0 ? 'green' : 'red'}>${data.linked_trade.pnl?.toFixed(2)}</strong></div>
-              <div><span>R:R:</span> <strong>{data.linked_trade.risk_reward?.toFixed(2)}</strong></div>
-              <div><span>Exit:</span> {data.linked_trade.exit_reason}</div>
+              <div><span>R:R achieved:</span> <strong>{data.linked_trade.risk_reward != null ? `${data.linked_trade.risk_reward.toFixed(2)}R` : '—'}</strong></div>
+              <div><span>P&L pips:</span> <strong>{data.linked_trade.pnl_pips != null ? data.linked_trade.pnl_pips.toFixed(1) : '—'}</strong></div>
+              <div><span>Exit:</span> {data.linked_trade.exit_reason || '—'} @ {data.linked_trade.exit_price ?? '—'}</div>
+              <div>
+                <span>Exit time:</span>{' '}
+                {data.linked_trade.exit_time
+                  ? new Date(data.linked_trade.exit_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+                  : '—'}
+              </div>
+              <div>
+                <span>Duration:</span>{' '}
+                {data.linked_trade.duration_seconds != null
+                  ? `${Math.floor(data.linked_trade.duration_seconds / 60)}m`
+                  : '—'}
+              </div>
+              <div>
+                <span>Balance:</span>{' '}
+                {data.linked_trade.balance_before != null ? `$${data.linked_trade.balance_before.toFixed(2)}` : '—'}
+                {' → '}
+                <strong>{data.linked_trade.balance_after != null ? `$${data.linked_trade.balance_after.toFixed(2)}` : '—'}</strong>
+              </div>
             </div>
           </div>
         )}
