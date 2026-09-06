@@ -363,11 +363,9 @@ async def account_reset(
             removed["circuit_breaker"] = f"failed: {e}"
         try:
             from backend.services.profit_tracker import profit_tracker
-            if hasattr(profit_tracker, "reset"):
-                await profit_tracker.reset()
-                removed["profit_tracker"] = "reset"
-        except Exception:
-            pass
+            removed["profit_tracker"] = await profit_tracker.reset()
+        except Exception as e:
+            removed["profit_tracker"] = f"failed: {e}"
         # Drop the cached ticket set so ownership is recomputed from the DB.
         bot_service._bot_tickets_cache = set()
         bot_service._bot_tickets_cache_at = 0.0

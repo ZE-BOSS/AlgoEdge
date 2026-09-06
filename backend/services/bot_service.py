@@ -65,6 +65,38 @@ class BotService:
 
     # ── MT5 account identity, ownership and balance ──────────────────────────
 
+    async def _load_magic_base(self, user_id: str) -> int:
+        """Read UserConfig.magic_base from the DB into self._magic_base.
+
+        Ownership is decided by magic number, so anything that reads MT5 state
+        needs this set first — see backend/services/trade_ownership.py.
+        """
+        import json
+
+        from sqlalchemy import select
+
+        from backend.data.database import async_session
+        from backend.data.models import UserConfigModel
+
+        try:
+            async with async_session() as session:
+                row = (
+                    await session.execute(
+                        select(UserConfigModel).where(UserConfigModel.user_id == user_id)
+                    )
+                ).scalar_one_or_none()
+                if row and row.config_json:
+                    cfg = json.loads(row.config_json)
+                    self._magic_base = int(cfg.get("magic_base", 1001) or 1001)
+        except Exception as e:
+            logger.warning(f"[BOT] Could not load magic_base, using {self._magic_base}: {e}")
+        try:
+            from backend.services.position_manager import position_manager
+            position_manager.magic_base = self._magic_base
+        except Exception:
+            pass
+        return self._magic_base
+
     async def _current_mt5_account(self) -> int | None:
         """The MT5 login now connected, or None if MT5 is unreachable."""
         try:
@@ -99,7 +131,27 @@ class BotService:
             info = await run_mt5(mt5.account_info)
             if info is None:
                 return {}
-            self.account_id = int(info.login)
+            _new_login = int(info.login)
+            if self.account_id is not None and _new_login != self.account_id:
+                # The terminal was switched to a different login while this
+                # process kept running. STATIC sizing anchors to "the first
+                # balance seen this process", so without clearing it here a
+                # $700 account would keep being sized against the $10,000
+                # account's anchor for the life of the process — a stop/start
+                # of the bot does NOT clear it, only a full restart did.
+                logger.warning(
+                    f"[SYNC] MT5 login changed {self.account_id} -> {_new_login}; "
+                    f"clearing the static balance anchor so sizing re-anchors."
+                )
+                self._log_event(
+                    f"MT5 account changed to #{_new_login} — position sizing re-anchored "
+                    f"to this account's balance.",
+                    "WARNING", "RISK",
+                )
+                self._static_personal_balance_anchor = None
+                self._bot_tickets_cache = set()
+                self._bot_tickets_cache_at = 0.0
+            self.account_id = _new_login
             self.account_balance = float(info.balance)
             self.account_equity = float(info.equity)
             self.account_currency = getattr(info, "currency", "") or ""
@@ -341,6 +393,13 @@ class BotService:
         self.total_signals_today = 0
         self.user_id = user_id
 
+        # Load the ownership magic base BEFORE anything reads MT5 state.
+        # _scan_loop sets this from config, but start() reconciles the circuit
+        # breaker against live positions first — so without this the reconcile
+        # (and the position_manager gates it configures) would run against the
+        # default base 1001 even for a user who configured a different one.
+        await self._load_magic_base(user_id)
+
         self._log_event(
             f"Bot started — scanning {', '.join(self.symbols)} every {self.scan_interval}s",
             category="BOT"
@@ -407,7 +466,21 @@ class BotService:
             import MetaTrader5 as mt5
             if mt5.terminal_info() and self.circuit_breaker:
                 live_positions = mt5.positions_get()
-                open_symbols = [p.symbol for p in live_positions] if live_positions else []
+                # Bot-owned positions only. Feeding every live position in here
+                # made the circuit breaker count somebody else's open trade
+                # against max_positions_per_symbol, so a manual position sitting
+                # on Crash 1000 silently blocked the bot from ever entering
+                # Crash 1000 itself. See backend/services/trade_ownership.py.
+                from backend.services.trade_ownership import is_bot_position
+                _all = list(live_positions) if live_positions else []
+                _mine = [p for p in _all if is_bot_position(p, magic_base=self._magic_base)]
+                if len(_all) != len(_mine):
+                    self._log_event(
+                        f"Ignoring {len(_all) - len(_mine)} open MT5 position(s) not placed "
+                        f"by this bot — they do not count towards position limits.",
+                        "INFO", "SYNC",
+                    )
+                open_symbols = [p.symbol for p in _mine]
                 self.circuit_breaker.reconcile_from_mt5(open_symbols)
                 self._log_event(
                     f"CB reconciled with MT5: {len(open_symbols)} open position(s) — "
@@ -839,8 +912,33 @@ class BotService:
                                 try:
                                     from backend.brokers.factory import broker_factory
                                     broker = broker_factory.get_broker()
+
+                                    # Refresh the account snapshot before sizing.
+                                    # `broker.account_info` was assigned ONLY at
+                                    # connect time and get_live_account_info() had
+                                    # no callers anywhere in the bot, so every
+                                    # position was sized against the balance as it
+                                    # stood when the process last connected. After
+                                    # switching MT5 logins that meant sizing a
+                                    # $700 account with the $10,000 account's
+                                    # balance — over-risking by 14x.
+                                    try:
+                                        if hasattr(broker, "get_live_account_info"):
+                                            await broker.get_live_account_info()
+                                    except Exception as _acc_err:
+                                        logger.warning(f"Could not refresh MT5 account info: {_acc_err}")
+
                                     if not broker.account_info:
-                                        logger.warning("No MT5 account info available for risk sizing")
+                                        # This used to `continue` with nothing but a
+                                        # logger.warning: no activity-log entry, no
+                                        # journal row, no Telegram. A signal the bot
+                                        # found and then dropped looked identical to
+                                        # no signal at all, which is why "the bot
+                                        # isn't trading" came with no alert.
+                                        _acc_msg = "No MT5 account info available for risk sizing — broker not connected"
+                                        self._log_event(f"[REJECTED] {_acc_msg} — {signal.symbol}", "SIGNAL", "RISK")
+                                        self._last_signal_time[symbol] = _sig_fp
+                                        await self._save_signal_state(signal, "SKIPPED", _acc_msg)
                                         continue
                                     account_balance = broker.account_info.balance
 

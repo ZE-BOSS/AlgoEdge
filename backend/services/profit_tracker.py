@@ -48,6 +48,29 @@ class DailyProfitTracker:
         except Exception as e:
             logger.error(f"[ProfitTracker] Failed to update Redis: {e}")
 
+    async def reset(self) -> dict:
+        """Drop the accumulated daily/weekly profit for the current period.
+
+        Needed when the connected MT5 account changes: these totals feed the
+        target-profit halt, and carrying the previous account's accumulated
+        profit into a new one either halts trading that has not happened yet or
+        masks a fresh account's actual progress.
+
+        POST /api/account/reset called this behind a `hasattr` guard, which
+        silently did nothing because the method did not exist.
+        """
+        removed = {}
+        for label, key in (("daily", self._get_daily_key()), ("weekly", self._get_weekly_key())):
+            try:
+                val = await self.redis.get(key)
+                await self.redis.delete(key)
+                removed[label] = float(val) if val else 0.0
+            except Exception as e:
+                logger.error(f"[ProfitTracker] Failed to reset {label} ({key}): {e}")
+                removed[label] = f"failed: {e}"
+        logger.warning(f"[ProfitTracker] Reset: {removed}")
+        return removed
+
     async def get_daily_profit(self) -> float:
         try:
             val = await self.redis.get(self._get_daily_key())
