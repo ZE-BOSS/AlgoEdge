@@ -740,6 +740,37 @@ class BotService:
                             # per-slot override must rebind engine.params to its
                             # OWN copy first, or applying it here would silently
                             # leak into every sibling slot sharing that strategy.
+                            # Measured per-symbol parameters first, the slot's own
+                            # override on top. SYNTH_SLOT_PARAMS was dead code —
+                            # get_synth_slot_params() had no callers on either the
+                            # live or the backtest path — so every synthetic slot
+                            # ran the generic SynthParams defaults rather than the
+                            # values the parameter search selected for that symbol.
+                            # backtest.py::apply_strategy_params does the same, so
+                            # the two paths configure the engine identically.
+                            _slot_measured = {}
+                            try:
+                                from backend.strategies.strategy_defaults import get_synth_slot_params
+                                _slot_measured = get_synth_slot_params(symbol, strategy_id)
+                            except Exception as _e:
+                                logger.warning(f"[LIVE] per-symbol synth params not loaded: {_e}")
+                            _override = getattr(slot, "strategy_params_override", None) or {}
+                            if _slot_measured:
+                                import copy as _copy
+                                new_engine.params = _copy.deepcopy(new_engine.params)
+                                _land = {}
+                                for _k, _v in _slot_measured.items():
+                                    if _k in _override:
+                                        continue  # the slot's own setting wins
+                                    if hasattr(new_engine.params, _k):
+                                        setattr(new_engine.params, _k, _v)
+                                        _land[_k] = _v
+                                if _land:
+                                    self._log_event(
+                                        f"[{symbol}] {strategy_id}: applied measured per-symbol "
+                                        f"params {_land}", category="RISK",
+                                    )
+
                             if getattr(slot, "strategy_params_override", None):
                                 import copy as _copy
                                 new_engine.params = _copy.deepcopy(new_engine.params)

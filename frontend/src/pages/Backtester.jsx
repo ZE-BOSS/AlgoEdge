@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { decimate } from '../utils/decimate';
+
+// The exit settings the live bot applies from strategy_defaults.py. Kept at
+// module scope: as a value inside the component it would be a fresh array on
+// every render, and it is a dependency of the prefill effect below.
+const MEASURED_EXIT_FIELDS = ['tp_count', 'tp1_rr', 'be_mode', 'trail_method_tp1'];
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap, LayoutDashboard, PlusCircle, MinusCircle, Download } from 'lucide-react';
 import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts, getStrategyDefaults } from '../services/api';
@@ -2018,11 +2023,21 @@ export default function Backtester() {
     [strategyDefaultsResp],
   );
 
-  // [18.3] Adopt the selected strategy's MEASURED R:R (research/16, 285 cells /
-  // 23,989 trades). Previously these were displayed in the defaults panel but
-  // never applied, so every run used the generic 1.5 regardless of what the
-  // measurement said — DriftJumpAlpha wants 1:5, NYOpenRetest 1:2, and the gap
-  // between them is the largest single determinant of a cell's outcome.
+  // [18.3] Adopt the selected strategy's MEASURED exit settings (research/16,
+  // 285 cells / 23,989 trades). Previously these were displayed in the defaults
+  // panel but never applied, so every run used the generic values regardless of
+  // what the measurement said.
+  //
+  // EXTENDED from tp1_rr alone to every measured exit field, because applying
+  // only one of them is what put backtest and live out of sync: the live bot
+  // applies the whole block (tp_count, tp1_rr, be_mode, trail_method_tp1), so a
+  // backtest that adopted only tp1_rr ran THREE TP legs per signal against a
+  // live bot running one. The same four setups then showed as ~12 backtest
+  // trades and 4 live trades, which looked like the bot skipping signals.
+  //
+  // Pre-filling the form (rather than substituting server-side) means the
+  // numbers on screen are the numbers that run, and changing one still wins —
+  // the backend only fills in fields the request does not mention.
   //
   // Only fires when the strategy actually changes, so a value the user has
   // typed is not overwritten while they work.
@@ -2030,9 +2045,14 @@ export default function Backtester() {
   useEffect(() => {
     const sid = form.strategy_id;
     if (!sid || lastStratRef.current === sid) return;
-    const measured = allStrategyDefaults[sid]?.defaults?.tp1_rr;
+    const measured = allStrategyDefaults[sid]?.defaults;
     lastStratRef.current = sid;
-    if (measured != null) setForm(prev => ({ ...prev, tp1_rr: measured }));
+    if (!measured) return;
+    const patch = {};
+    MEASURED_EXIT_FIELDS.forEach(k => {
+      if (measured[k] != null) patch[k] = measured[k];
+    });
+    if (Object.keys(patch).length) setForm(prev => ({ ...prev, ...patch }));
   }, [form.strategy_id, allStrategyDefaults]);
   useEffect(() => {
       if (userCfg?.config && !configLoaded) {

@@ -72,6 +72,14 @@ class _SynthBase(BaseStrategy):
         self.trades_today = 0
         self.daily_risk_used_pct = 0.0
         self.last_reset_date = None
+        # Bar time of the last signal this engine emitted. The daily counters
+        # below are a per-BAR budget, and on_bar() is called once per bar by the
+        # backtester but once per SCAN CYCLE by the live bot — which re-feeds the
+        # same closed bar every cycle until the next one closes. Without this,
+        # one setup on a 5-minute bar burned the whole day's budget five times
+        # over on a 60-second scan interval, and live took a fraction of the
+        # backtest's trades. See _consume_daily_budget().
+        self._last_emitted_bar = None
 
     def get_required_timeframes(self) -> list[str]:
         return ["M5"]
@@ -92,6 +100,53 @@ class _SynthBase(BaseStrategy):
         d["atr"] = calculate_atr(d, DEFAULTS["atr_period"])
         d["adx"] = calculate_adx(d, 14)
         return d
+
+    # -- daily budget ------------------------------------------------------
+    def _consume_daily_budget(self, bar_time, risk_pct: float) -> None:
+        """Charge one trade against today's budget, ONCE per bar.
+
+        `on_bar` is called at a different rate by the two code paths:
+
+            backtester/engine.py   once per closed bar
+            bot_service._scan_loop once every `scan_interval` seconds, always
+                                   with the full closed history
+
+        The live loop therefore hands the SAME final bar to this engine
+        repeatedly — 5 times on a 60-second scan interval against an M5 bar.
+        Charging the budget on every call meant a single setup consumed five
+        trades' worth of the daily allowance, so live silently stopped trading
+        long before the backtest did on identical data.
+
+        Keying on the bar makes the charge idempotent: re-evaluating a bar the
+        engine has already signalled on costs nothing, so both paths spend the
+        budget at exactly the same rate.
+        """
+        if self._last_emitted_bar == bar_time:
+            return
+        self._last_emitted_bar = bar_time
+        self.trades_today += 1
+        self.daily_risk_used_pct += risk_pct
+
+    def _budget_available(self, bar_time, risk_pct: float) -> tuple[bool, str]:
+        """Is there room for another trade today? (allowed, reason-if-not).
+
+        A bar already charged still counts as available, so a re-scan of that
+        bar reaches the same verdict it did the first time instead of being
+        rejected by the budget it itself consumed.
+        """
+        already = self._last_emitted_bar == bar_time
+        max_trades = self._p("max_trades_per_day", DEFAULTS["max_trades_per_day"])
+        used_trades = self.trades_today - (1 if already else 0)
+        if used_trades >= max_trades:
+            return False, f"daily trade cap reached ({used_trades}/{max_trades})"
+        max_daily = self._p("max_daily_risk_pct", DEFAULTS["max_daily_risk_pct"])
+        used_risk = self.daily_risk_used_pct - (risk_pct if already else 0.0)
+        if used_risk + risk_pct > max_daily:
+            return False, (
+                f"daily risk cap reached ({used_risk:.1f}% used + {risk_pct:.1f}% "
+                f"> {max_daily:.1f}% allowed)"
+            )
+        return True, ""
 
     # -- subclasses override ---------------------------------------------
     def signal_for_bar(self, d: pd.DataFrame) -> int:
@@ -117,13 +172,14 @@ class _SynthBase(BaseStrategy):
             self.daily_risk_used_pct = 0.0
             self.last_reset_date = bar_date
 
-        max_trades = self._p("max_trades_per_day", DEFAULTS["max_trades_per_day"])
-        if not self.gate("daily_trade_cap", self.trades_today < max_trades):
-            return None
         risk_pct = getattr(getattr(self.config, "risk", None), "risk_per_trade_pct", 1.0)
-        max_daily = self._p("max_daily_risk_pct", DEFAULTS["max_daily_risk_pct"])
-        if not self.gate("daily_risk_cap",
-                         self.daily_risk_used_pct + risk_pct <= max_daily):
+        _ok, _why = self._budget_available(candles.index[-1], risk_pct)
+        # Surfaced rather than returning a bare None: hitting the daily budget
+        # is the single most likely reason this strategy stops trading part-way
+        # through a session, and it used to be completely invisible — no log
+        # line, no signal row, no alert.
+        if not self.gate("daily_budget", _ok, _why):
+            self._log_budget_block(symbol, _why)
             return None
 
         d = self._frame(candles)
@@ -146,8 +202,7 @@ class _SynthBase(BaseStrategy):
         sl = entry - risk if long else entry + risk
         tp = entry + tp_rr * risk if long else entry - tp_rr * risk
 
-        self.trades_today += 1
-        self.daily_risk_used_pct += risk_pct
+        self._consume_daily_budget(candles.index[-1], risk_pct)
         return self._tag_signal(TradeSignal(
             strategy_id=self.strategy_id,
             symbol=symbol,
@@ -166,6 +221,20 @@ class _SynthBase(BaseStrategy):
                 "reason": f"{self.strategy_id} {'BUY' if long else 'SELL'}",
             },
         ))
+
+    def _log_budget_block(self, symbol: str, reason: str) -> None:
+        """Say once per symbol per day that the budget stopped trading."""
+        key = (symbol, self.last_reset_date)
+        if getattr(self, "_budget_logged", None) == key:
+            return
+        self._budget_logged = key
+        msg = f"{self.strategy_id} on {symbol}: no more entries today — {reason}"
+        logger.info(f"[SYNTH] {msg}")
+        try:
+            from backend.services.bot_service import bot_service
+            bot_service.log_system_event(msg, "WARN", "RISK")
+        except Exception:
+            pass
 
     async def on_tick(self, symbol: str, tick: dict[str, Any]) -> None:
         return None

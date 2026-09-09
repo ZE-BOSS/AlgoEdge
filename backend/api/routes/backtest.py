@@ -150,11 +150,22 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
 }
 
 
-def apply_strategy_params(config, strategy_id: str, params: dict) -> list[str]:
+def apply_strategy_params(
+    config, strategy_id: str, params: dict, symbol: str | None = None
+) -> list[str]:
     """Write `params` onto the config section owned by `strategy_id`.
 
-    Returns the keys that were ignored, so a typo or a stale UI field surfaces in
-    the run log instead of silently doing nothing.
+    When `symbol` is given, the measured per-symbol values from
+    `strategy_defaults.SYNTH_SLOT_PARAMS` are laid down FIRST and `params` is
+    applied on top, so an explicit request value always wins.
+
+    That per-symbol table was dead code: `get_synth_slot_params()` had no callers
+    anywhere, in either the backtest or the live path. Every synthetic-index run
+    therefore used the generic SynthParams defaults instead of the values the
+    parameter search actually selected — on Crash 500 that is a 1.0x ATR stop
+    being replaced by the generic 5.0x, a five-fold difference in stop distance
+    and in position size. bot_service applies the same table at engine build, so
+    both paths land on the same numbers.
     """
     section_name = STRATEGY_PARAM_SECTION.get(strategy_id)
     if not section_name:
@@ -162,6 +173,19 @@ def apply_strategy_params(config, strategy_id: str, params: dict) -> list[str]:
     block = getattr(config, section_name, None)
     if block is None:
         return list(params or {})
+
+    if symbol:
+        from backend.strategies.strategy_defaults import get_synth_slot_params
+        measured = get_synth_slot_params(symbol, strategy_id)
+        if measured:
+            for k, v in measured.items():
+                if hasattr(block, k) and k not in (params or {}):
+                    setattr(block, k, v)
+            logger.info(
+                f"[BACKTEST] {strategy_id} on {symbol}: applied measured per-symbol "
+                f"params {measured} (SYNTH_SLOT_PARAMS)"
+            )
+
     ignored = []
     for k, v in (params or {}).items():
         if hasattr(block, k):
@@ -320,6 +344,50 @@ class BacktestRequest(BaseModel):
     stops_level_pips: float | str | None = None
     # ── Wick Simulation (BUG-9) ──
     simulate_wicks: bool = True      # Use OHLC shadow-weighted model for ambiguous SL/TP bars
+
+def strategy_defaults_to_apply(req, strategy_defaults: dict) -> dict:
+    """Which measured strategy defaults this request has NOT overridden.
+
+    THIS IS WHY BACKTEST AND LIVE DISAGREED ON TRADE COUNT.
+
+    The rule used to be `getattr(req, key) is None` — "the request left it
+    unset". But every one of these fields has a non-None default on
+    BacktestRequest, and the frontend form posts all of them on every run
+    (Backtester.jsx sends `tp_count: form.tp_count` unconditionally). So
+    `req.tp_count` was never None, and SpikeFade_v1's measured `tp_count: 1`
+    was never applied to a backtest.
+
+    Live used a different rule — bot_service asks whether the SAVED config still
+    equals the shipped RiskParams default — and did apply it. The result was a
+    backtest running three TP legs per signal against a live bot running one, so
+    the same four setups showed as ~12 backtest trades and 4 live trades.
+
+    The test is pydantic's `model_fields_set`: the fields the caller actually
+    put in the payload, as opposed to the ones pydantic filled in. A field the
+    request never mentioned takes the measured default; a field it did mention
+    keeps the caller's value, even when that value happens to equal the shipped
+    default.
+
+    The Backtester form pre-fills these from the same measured defaults when a
+    strategy is selected (see Backtester.jsx), so what the form shows is what
+    runs — no silent substitution, and changing a field there still wins.
+    """
+    fields = getattr(type(req), "model_fields", None) or getattr(type(req), "__fields__", {})
+    sent = getattr(req, "model_fields_set", None)
+    if sent is None:  # pydantic v1
+        sent = set(getattr(req, "__fields_set__", set()))
+    explicit = req.risk_config or {}
+    out = {}
+    for key, value in strategy_defaults.items():
+        if key == "session_filter_enabled":
+            continue  # lives on the strategy params object, applied separately
+        if key in explicit or key in sent:
+            continue  # the caller chose this one
+        if key not in fields:
+            continue
+        out[key] = value
+    return out
+
 
 class SaveBacktestRequest(BaseModel):
     backtest_data: dict[str, Any]
@@ -708,7 +776,7 @@ async def run_backtest_endpoint(
             config.risk.max_daily_trades = req.max_daily_trades
             
             # Inject dynamic strategy parameters (see STRATEGY_PARAM_SECTION)
-            _ignored = apply_strategy_params(config, req.strategy_id, req.strategy_params)
+            _ignored = apply_strategy_params(config, req.strategy_id, req.strategy_params, req.symbol)
             if _ignored:
                 logger.warning(
                     f"[BACKTEST] {req.strategy_id}: strategy_params keys ignored "
@@ -1131,13 +1199,8 @@ async def run_backtest_endpoint(
                 get_strategy_defaults, get_strategy_evidence,
             )
             _sdefaults = get_strategy_defaults(req.strategy_id)
-            _applied = {}
-            for _k, _v in _sdefaults.items():
-                if _k == "session_filter_enabled":
-                    continue  # lives on the strategy params object, applied below
-                if getattr(req, _k, None) is None and _k not in (req.risk_config or {}):
-                    merged_risk_config[_k] = _v
-                    _applied[_k] = _v
+            _applied = strategy_defaults_to_apply(req, _sdefaults)
+            merged_risk_config.update(_applied)
             if _applied:
                 logger.info(
                     f"[BACKTEST] Applied {req.strategy_id} exit defaults: {_applied} "
@@ -1618,7 +1681,7 @@ async def run_portfolio_backtest_endpoint(
                 config = UserConfigV2()
                 config.risk.min_rr = req.min_rr
                 config.risk.risk_per_trade_pct = req.risk_per_trade_pct
-                _ign = apply_strategy_params(config, strat_id, sym_cfg.strategy_params)
+                _ign = apply_strategy_params(config, strat_id, sym_cfg.strategy_params, sym_cfg.symbol)
                 if _ign:
                     logger.warning(
                         f"[PORTFOLIO] {sym}/{strat_id}: strategy_params keys "
