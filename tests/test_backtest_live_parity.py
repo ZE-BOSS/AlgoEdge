@@ -166,3 +166,32 @@ def test_stop_fill_model_is_configurable_from_risk_config():
     assert eng._fill_model.mode == "OFF"
     eng = PortfolioBacktestEngine({"stop_fill_model": "nonsense"})
     assert eng._fill_model.mode == "CONSERVATIVE", "an unknown mode must fail safe, not fail open"
+
+
+# ── [P1.12] The Backtester ignored every saved strategy block ───────────────
+#
+# The seeding effect spread the component's own hardcoded initial state LAST,
+# and that state is fully populated — so every key of the user's saved config
+# was overwritten by a form default. Settings had the synth block at 20/20 and
+# the live bot ran 20/20 while the Backtester silently ran 6/4.0, a daily risk
+# cap that stops the engine after 2 trades a day and blinds it to the rest of
+# the session. Observed in backtest_Boom_1000_Index_f8f2bb33: 0 trades.
+
+def test_backtester_seeds_strategy_blocks_from_the_saved_config():
+    from pathlib import Path
+
+    js = Path("frontend/src/pages/Backtester.jsx").read_text(encoding="utf-8")
+    for block in ("synth", "apa", "vwap", "crt", "drift_jump_alpha",
+                  "boom_drift_jump", "htf_fvg_flip", "bias_ifvg", "ny_open_retest"):
+        good = f"merged.{block} = {{ ...(prev.{block} || {{}}), ...(c.{block} || {{}}) }};"
+        bad = f"merged.{block} = {{ ...(c.{block} || {{}}), ...(prev.{block} || {{}}) }};"
+        assert good in js, f"{block}: saved config must be spread last so it wins"
+        assert bad not in js, f"{block}: form defaults must not overwrite the saved config"
+
+
+def test_backtester_hard_cap_prefers_the_saved_config():
+    from pathlib import Path
+
+    js = Path("frontend/src/pages/Backtester.jsx").read_text(encoding="utf-8")
+    assert ("merged.max_risk_hard_cap_pct = c.risk?.max_risk_hard_cap_pct "
+            "?? prev.max_risk_hard_cap_pct ?? 3.0;") in js

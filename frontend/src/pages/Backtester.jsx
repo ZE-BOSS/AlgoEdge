@@ -2059,19 +2059,38 @@ export default function Backtester() {
   useEffect(() => {
       if (userCfg?.config && !configLoaded) {
         const c = userCfg.config;
+        // [P1.12] The saved config is spread LAST, so it wins.
+        //
+        // This was `{ ...(c.<block> || {}), ...(prev.<block> || {}) }` — saved
+        // config first, form state second — with the intent "a value the user
+        // typed beats the saved config". It could never do that. This effect
+        // runs exactly once, gated on `!configLoaded`, so `prev` is always the
+        // component's own hardcoded initial state and it is FULLY populated:
+        // every key present, so every key of the saved config was overwritten.
+        //
+        // The visible symptom: Settings had the synthetic block at
+        // max_trades_per_day 20 / max_daily_risk_pct 20, the live bot ran those,
+        // and the Backtester silently ran 6 / 4.0 — a daily risk cap that stops
+        // the engine after 2 trades a day and then blinds it to the rest of the
+        // session. Backtests and live could not agree, and nothing said why.
+        // The same bug applied to apa, vwap, crt, drift_jump_alpha and every
+        // other block on this list.
+        //
+        // "The user's edit wins" is still true, because an edit made AFTER this
+        // has run is never revisited — configLoaded latches it off.
         setForm(prev => {
           const merged = { ...prev };
-          merged.max_risk_hard_cap_pct = prev.max_risk_hard_cap_pct ?? c.risk?.max_risk_hard_cap_pct ?? 3.0;
-          merged.prop_firm = { ...(c.prop_firm || {}), ...(prev.prop_firm || {}) };
-          merged.apa = { ...(c.apa || {}), ...(prev.apa || {}) };
-          merged.drift_jump_alpha = { ...(c.drift_jump_alpha || {}), ...(prev.drift_jump_alpha || {}) };
-          merged.crt = { ...(c.crt || {}), ...(prev.crt || {}) };
-          merged.vwap = { ...(c.vwap || {}), ...(prev.vwap || {}) };
-          merged.htf_fvg_flip = { ...(c.htf_fvg_flip || {}), ...(prev.htf_fvg_flip || {}) };
-          merged.bias_ifvg = { ...(c.bias_ifvg || {}), ...(prev.bias_ifvg || {}) };
-          merged.ny_open_retest = { ...(c.ny_open_retest || {}), ...(prev.ny_open_retest || {}) };
-          merged.boom_drift_jump = { ...(c.boom_drift_jump || {}), ...(prev.boom_drift_jump || {}) };
-          merged.synth = { ...(c.synth || {}), ...(prev.synth || {}) };
+          merged.max_risk_hard_cap_pct = c.risk?.max_risk_hard_cap_pct ?? prev.max_risk_hard_cap_pct ?? 3.0;
+          merged.prop_firm = { ...(prev.prop_firm || {}), ...(c.prop_firm || {}) };
+          merged.apa = { ...(prev.apa || {}), ...(c.apa || {}) };
+          merged.drift_jump_alpha = { ...(prev.drift_jump_alpha || {}), ...(c.drift_jump_alpha || {}) };
+          merged.crt = { ...(prev.crt || {}), ...(c.crt || {}) };
+          merged.vwap = { ...(prev.vwap || {}), ...(c.vwap || {}) };
+          merged.htf_fvg_flip = { ...(prev.htf_fvg_flip || {}), ...(c.htf_fvg_flip || {}) };
+          merged.bias_ifvg = { ...(prev.bias_ifvg || {}), ...(c.bias_ifvg || {}) };
+          merged.ny_open_retest = { ...(prev.ny_open_retest || {}), ...(c.ny_open_retest || {}) };
+          merged.boom_drift_jump = { ...(prev.boom_drift_jump || {}), ...(c.boom_drift_jump || {}) };
+          merged.synth = { ...(prev.synth || {}), ...(c.synth || {}) };
           return merged;
         });
       }
