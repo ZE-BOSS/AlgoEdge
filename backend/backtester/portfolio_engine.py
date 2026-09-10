@@ -32,9 +32,19 @@ from backend.backtester.engine import (
     validate_at_fill_price,
     _breakeven_stop,
 )
+from backend.backtester.fill_model import build_stop_fill_model
 from backend.backtester.report import apply_bar_level_drawdown, apply_leg_level_hit_rates
 
 logger = get_logger(__name__)
+
+# [P1.11] Gates that drop a signal BEFORE `rejection_funnel["total_evaluated"]`
+# is incremented. Everything here is counted into `pre_risk_rejections` instead,
+# which is what makes the funnel add up.
+_PRE_RISK_GATES = frozenset({
+    "same_direction_already_open",
+    "min_bars_between_entries",
+})
+
 
 class PortfolioBacktestEngine(CostModelMixin):
     def __init__(self, risk_config: dict[str, Any]):
@@ -71,7 +81,17 @@ class PortfolioBacktestEngine(CostModelMixin):
             # gate but failed re-validation against the ACTUAL FILL price.
             "fill_rejections": {},
             "errors": 0,
-            "approved": 0
+            "approved": 0,
+            # [P1.11] The funnel used to start counting at `total_evaluated`,
+            # which is incremented AFTER the concurrency gates have already
+            # dropped signals — so it never reconciled with `blocked_signals`
+            # (144 evaluated vs 76 blocked vs 132 approved on the user's own
+            # run) and could not answer "how many setups did the strategy
+            # actually find?". `raw_signals` is that number, and
+            # `pre_risk_rejections` holds everything dropped before the risk
+            # engine ever saw it. raw_signals == sum(pre_risk) + total_evaluated.
+            "raw_signals": 0,
+            "pre_risk_rejections": {},
         }
         # [I4] Mirrors engine.py's blocked_signals — see that file for rationale.
         self.blocked_signals: list[dict[str, Any]] = []
@@ -91,6 +111,15 @@ class PortfolioBacktestEngine(CostModelMixin):
         freeze_symbol_info()
         # Wick simulation flag
         self._simulate_wicks = bool(risk_config.get("simulate_wicks", True))
+        # [P1.2] Realistic stop fills. The old code only asked whether the bar
+        # OPENED through the stop, so an intrabar spike — which on Boom/Crash is
+        # where every spike happens — booked a perfect fill at the stop price.
+        # See backtester/fill_model.py for the three measurements behind this.
+        self._fill_model = build_stop_fill_model(risk_config)
+        # [P1.6] Last entry bar per SLOT, for min_bars_between_entries. Keyed by
+        # `_cache_key` ("Symbol::Strategy"), never by symbol — two slots sharing
+        # a symbol must throttle independently.
+        self._last_entry_bar_by_slot: dict[str, int] = {}
 
     def _calc_pnl(
         self,
@@ -160,6 +189,15 @@ class PortfolioBacktestEngine(CostModelMixin):
 
     def _record_blocked(self, sig: dict[str, Any], current_time: Any, gate: str, reason: str = "") -> None:
         """[I4] Mirrors engine.py::_record_blocked — see that file for rationale."""
+        # [P1.11] Counted BEFORE the display cap, and before the early return —
+        # `blocked_signals` is a capped sample for the UI, the funnel is the
+        # census. Gates that fire ahead of `total_evaluated` land in
+        # `pre_risk_rejections` so the funnel reconciles:
+        #     raw_signals == sum(pre_risk_rejections) + total_evaluated
+        if gate in _PRE_RISK_GATES:
+            self.rejection_funnel["pre_risk_rejections"][gate] = (
+                self.rejection_funnel["pre_risk_rejections"].get(gate, 0) + 1
+            )
         if len(self.blocked_signals) >= self._blocked_signals_cap:
             return
         try:
@@ -474,14 +512,25 @@ class PortfolioBacktestEngine(CostModelMixin):
                 pos["mfe_pips"] = max(pos.get("mfe_pips", 0), favorable / pip_size if pip_size else 0)
 
                 if sl_hit:
-                    # Item 3.4: fill at the gapped open (± slippage) instead of a
-                    # perfect SL fill when the bar's open already gapped past SL.
-                    _sl_gapped = (open_p <= pos["stop_loss"]) if pos["direction"] == "BUY" else (open_p >= pos["stop_loss"])
-                    if _sl_gapped:
-                        pos["exit_price"] = _gap_adjusted_fill_price(pos["direction"], open_p, pos["stop_loss"], sym, self._costs_for(sym)["slippage_pips"])
-                        pos["gap_fill"] = True
-                    else:
-                        pos["exit_price"] = pos["stop_loss"]
+                    # [P1.2] Was: gap-adjust only when the bar OPEN was already
+                    # through the stop, else fill at exactly the stop. That
+                    # booked 65/65 hard stops at the stop price in the user's own
+                    # runs, on instruments defined by intrabar jumps. The model
+                    # now also prices a stop breached INSIDE the bar, clamped to
+                    # the bar's own extreme so it can never invent a price that
+                    # did not trade. See backtester/fill_model.py.
+                    _fill, _gapped, _ov_r = self._fill_model.resolve_stop_fill(
+                        direction=pos["direction"],
+                        open_p=open_p, high=high, low=low,
+                        stop_level=pos["stop_loss"],
+                        stop_distance=abs(pos["entry_price"] - pos.get("initial_stop_loss", pos["stop_loss"])),
+                        symbol=sym,
+                        slippage_pips=self._costs_for(sym)["slippage_pips"],
+                        position_key=pos["id"],
+                    )
+                    pos["exit_price"] = _fill
+                    pos["gap_fill"] = _gapped
+                    pos["stop_overshoot_r"] = round(_ov_r, 6)
                     pos["exit_reason"] = "TRAIL_SL" if pos.get("trail_applied") else ("BE_SL" if pos.get("be_applied") else "SL")
                     pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], sym, pos.get("entry_time"), current_time)
                     closed_this_bar.append(pos)
@@ -639,6 +688,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                 if sig_time >= current_timestamp:
                     break
                 signal_idx += 1
+                self.rejection_funnel["raw_signals"] += 1  # [P1.11] the census
 
                 symbol = sig.get("symbol")
                 cache_key = sig.get("_cache_key", symbol)  # [12.8]
@@ -647,16 +697,43 @@ class PortfolioBacktestEngine(CostModelMixin):
                 # [12.5/12.8] Scoped to THIS SLOT (cache_key), not the bare
                 # symbol — two different strategy slots on the same real
                 # symbol must not block each other's entries.
+                #
+                # [P1.6] This used to ignore `allow_pyramiding` entirely while
+                # the single-symbol engine honoured it, so the SAME slot produced
+                # different trade counts depending on which engine ran it — and a
+                # user who ticked "allow pyramiding" got it in a single-symbol
+                # backtest, silently not in a portfolio one, and (via
+                # bot_service -> RiskEngine) yes again live. Three paths, three
+                # behaviours, on one setting. All three now agree.
+                allow_pyramiding = bool(self.risk_config.get("allow_pyramiding", False))
                 already_open = False
-                for p in self.open_positions:
-                    p_is_buy = _is_buy(p.get("direction", "BUY"))
-                    if p.get("_cache_key", p.get("symbol")) == cache_key and p_is_buy == sig_is_buy:
-                        already_open = True
-                        break
-                        
+                if not allow_pyramiding:
+                    for p in self.open_positions:
+                        p_is_buy = _is_buy(p.get("direction", "BUY"))
+                        if p.get("_cache_key", p.get("symbol")) == cache_key and p_is_buy == sig_is_buy:
+                            already_open = True
+                            break
+
                 if already_open:
                     self._record_blocked(sig, current_time_dt, "same_direction_already_open")
                     continue
+
+                if allow_pyramiding:
+                    # Companion throttle so pyramiding cannot fire every bar.
+                    # Keyed by SLOT, not symbol — two slots on one symbol have
+                    # independent entry cadences.
+                    min_bars = int(self.risk_config.get("min_bars_between_entries", 0) or 0)
+                    if min_bars > 0:
+                        # `_tl_i` indexes the GLOBAL timeline (the union of every
+                        # leg's bar times). On a single shared timeframe that is
+                        # one step per bar, which is what the setting means; on a
+                        # mixed-timeframe portfolio it is a conservative
+                        # over-count, and erring toward fewer entries is the
+                        # right direction for a throttle.
+                        last_bar = self._last_entry_bar_by_slot.get(cache_key)
+                        if last_bar is not None and (_tl_i - last_bar) < min_bars:
+                            self._record_blocked(sig, current_time_dt, "min_bars_between_entries")
+                            continue
 
                 group_id = str(uuid.uuid4())[:8]
                 sig["group_id"] = group_id
@@ -919,6 +996,10 @@ class PortfolioBacktestEngine(CostModelMixin):
                     }
                     self.open_positions.append(new_pos)
 
+                # [P1.6] Stamp the slot's last entry bar once per signal, not
+                # per TP leg — a 3-TP signal is one entry, not three.
+                self._last_entry_bar_by_slot[cache_key] = _tl_i
+
             # Item 3.5: record floating equity once per timestamp, INSIDE the
             # `for current_time in global_timeline:` loop. Previously this
             # append call sat at the same indentation as the loop header
@@ -1042,6 +1123,10 @@ class PortfolioBacktestEngine(CostModelMixin):
             # Task 2: per-symbol record of the transaction costs this run assumed
             # and where each value came from (USER vs MT5 vs asset-class default).
             "cost_model": self.cost_model,
+            # [P1.2] What the fill model ACTUALLY charged this run — not what was
+            # configured. `gapped_pct` near 0 on a jump instrument means the model
+            # is off or miscalibrated, and the run's P&L should not be trusted.
+            "fill_model": self._fill_model.summary(),
             # [2.24] Distinguishes a drawdown-latched stretch from "no setups".
             "circuit_breaker_summary": {
                 "paused_checks": self.risk_engine.circuit.paused_bars,

@@ -13,6 +13,7 @@ from typing import Any
 
 from backend.risk.multi_tp import slot_overrides_from_config
 from backend.strategies.strategy_defaults import get_slot_tp1_rr_defaults
+from backend.strategies.windows import window_bars
 from backend.services.profit_tracker import profit_tracker
 from backend.utils.logger import get_logger
 
@@ -33,7 +34,16 @@ class BotService:
         self._events: deque = deque(maxlen=MAX_LOG_ENTRIES)
         self.user_id: str | None = None
         self.total_signals_today = 0
+        # [P2.3] Keyed by slot_id, NOT symbol — see the dedupe check in _scan_loop.
         self._last_signal_time = {}
+        # [P1.1] Last resolved gate parameters per slot, exposed on /bot/status so
+        # the UI can show what the ENGINE resolved rather than what the form holds.
+        self._last_resolved_params: dict[str, dict] = {}
+        # [P1.1] Live signal-suppression funnel, mirroring the backtester's
+        # rejection_funnel. Every dropped signal gets a named reason, so "the bot
+        # isn't trading" is always answerable from the status endpoint.
+        self._suppression_funnel: dict[str, int] = {}
+        self._suppression_day = None
         self.engine = None
         self.risk_engine = None          # Cached RiskEngine — rebuilt only when config changes
         self._risk_engine_fp = None      # Fingerprint tuple for cache invalidation
@@ -254,6 +264,130 @@ class BotService:
     def log_system_event(self, message: str, level: str = "INFO", category: str = "SYSTEM"):
         """Public method for other modules to log events visible on the frontend."""
         self._log_event(message, level, category)
+
+    # ── [P1.1] Resolved-parameter transparency ──────────────────────────────
+    #
+    # Every value below is one that can silently stop the bot trading. They were
+    # spread across RiskParams, the strategy's own Params dataclass, and the
+    # per-slot overrides, with no single place showing what the engine ended up
+    # with — so "live takes a third of the backtest's trades" had no observable
+    # cause. `resolve_slot_gate_params` is deliberately the ONLY definition of
+    # that list, and `backtest.py` reads the same function for its snapshot, so
+    # the live block and the backtest block cannot drift apart.
+    def _resolved_slot_params(self, slot, config, engine) -> dict:
+        risk = getattr(config, "risk", None)
+        sp = getattr(engine, "params", None)
+
+        def _r(name, default=None):
+            return getattr(risk, name, default) if risk is not None else default
+
+        def _s(name, default=None):
+            """Strategy-param value, showing the per-slot override if there is one."""
+            if sp is None:
+                return default
+            return getattr(sp, name, default)
+
+        out = {
+            "slot_id": slot.slot_id,
+            "symbol": slot.symbol,
+            "strategy_id": getattr(engine, "strategy_id", slot.strategy_id),
+            # Gates that cap how many trades a day is allowed to produce.
+            "risk_per_trade_pct": (
+                slot.risk_per_trade_pct if slot.risk_per_trade_pct is not None
+                else _r("risk_per_trade_pct")
+            ),
+            "max_risk_hard_cap_pct": _r("max_risk_hard_cap_pct"),
+            "max_daily_trades": _r("max_daily_trades"),
+            "max_concurrent_positions": _r("max_concurrent_positions"),
+            "max_positions_per_symbol": (
+                slot.max_positions_per_symbol if slot.max_positions_per_symbol is not None
+                else _r("max_positions_per_symbol")
+            ),
+            "max_daily_drawdown_pct": _r("max_daily_drawdown_pct"),
+            "allow_pyramiding": _r("allow_pyramiding"),
+            "min_bars_between_entries": _r("min_bars_between_entries"),
+            "sizing_basis": _r("sizing_basis"),
+            "reject_below_confluence": _r("reject_below_confluence"),
+            "confluence_risk_tiers": _r("confluence_risk_tiers"),
+            "tp_count": slot.tp_count if slot.tp_count is not None else _r("tp_count"),
+            "tp1_rr": slot.tp1_rr if slot.tp1_rr is not None else _r("tp1_rr"),
+            # The strategy's OWN daily budget — the one that shipped at 6 trades
+            # / 4.0% for every synthetic slot and is invisible in the Risk tab.
+            "strategy.max_trades_per_day": (
+                slot.max_trades_per_day if slot.max_trades_per_day is not None
+                else _s("max_trades_per_day")
+            ),
+            "strategy.max_daily_risk_pct": _s("max_daily_risk_pct"),
+        }
+        # Strategy-specific gates worth surfacing, when the engine has them.
+        for extra in ("stop_atr_multiple", "spike_k_atr", "revert_k_atr",
+                      "breakout_lookback", "require_adx", "min_adx_to_trade",
+                      "enable_jump_trades", "trade_jump_entries",
+                      "session_filter_enabled"):
+            val = _s(extra, "__absent__")
+            if val != "__absent__":
+                out[f"strategy.{extra}"] = val
+        if getattr(slot, "strategy_params_override", None):
+            out["slot_overrides"] = dict(slot.strategy_params_override)
+        return out
+
+    def _primary_tf_seconds(self) -> int | None:
+        """Seconds in the fastest timeframe any live engine is scanning.
+
+        A scan cycle longer than this steps over closed bars, and the strategy
+        never sees the setups on them.
+        """
+        tf_secs = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800,
+                   "H1": 3600, "H4": 14400, "D1": 86400}
+        best = None
+        for eng in (getattr(self, "engines", None) or {}).values():
+            try:
+                for tf in eng.get_required_timeframes():
+                    s = tf_secs.get(str(tf).upper())
+                    if s and (best is None or s < best):
+                        best = s
+            except Exception:
+                continue
+        return best
+
+    def _suppressed(self, reason: str, slot_id: str = "") -> None:
+        """[P1.1] Count one signal the live path dropped, by named reason.
+
+        The backtester has produced a `rejection_funnel` for every run for
+        months; the live path had nothing equivalent, so a signal the bot found
+        and then discarded looked exactly like no signal at all. Same shape as
+        the backtest funnel so the two can be diffed directly.
+        """
+        today = datetime.now(timezone.utc).date()
+        if self._suppression_day != today:
+            self._suppression_day = today
+            self._suppression_funnel = {}
+        key = f"{reason}|{slot_id}" if slot_id else reason
+        self._suppression_funnel[key] = self._suppression_funnel.get(key, 0) + 1
+
+    def _log_resolved_slot_params(self, slot, config, engine) -> None:
+        """Emit the resolved gate parameters once per slot per UTC day."""
+        today = datetime.now(timezone.utc).date()
+        key = (slot.slot_id, today)
+        if not hasattr(self, "_resolved_params_logged"):
+            self._resolved_params_logged = set()
+        if key in self._resolved_params_logged:
+            return
+        self._resolved_params_logged.add(key)
+        try:
+            params = self._resolved_slot_params(slot, config, engine)
+            self._last_resolved_params[slot.slot_id] = params
+            summary = ", ".join(
+                f"{k}={v}" for k, v in params.items()
+                if k not in ("slot_id", "symbol", "strategy_id")
+            )
+            self._log_event(
+                f"[{slot.symbol}] {params['strategy_id']} resolved parameters — {summary}",
+                "INFO", "CONFIG",
+            )
+            logger.info(f"[LIVE][RESOLVED] {params}")
+        except Exception as e:
+            logger.warning(f"[P1.1] could not publish resolved slot params: {e}")
 
     async def _save_signal_state(self, signal_domain, status: str, reject_reason: str = "", tp_levels: list = None):
         """Saves or updates a signal in the database and dispatches Telegram alert instantly."""
@@ -529,6 +663,17 @@ class BotService:
             "last_scan": self.last_scan,
             "total_signals_today": self.total_signals_today,
             "scan_interval": self.scan_interval,
+            # [P1.1] Everything needed to answer "why isn't the bot trading?"
+            # without reading the source. `resolved_params` is what each engine
+            # actually resolved (diff it against a backtest's params_snapshot);
+            # `suppression_funnel` names every signal the live path dropped today;
+            # `cycle_seconds` vs `primary_tf_seconds` says whether closed bars are
+            # being skipped.
+            "resolved_params": self._last_resolved_params,
+            "suppression_funnel": dict(self._suppression_funnel),
+            "cycle_seconds": getattr(self, "_last_cycle_seconds", None),
+            "cycle_overruns": getattr(self, "_cycle_overruns", 0),
+            "primary_tf_seconds": self._primary_tf_seconds(),
         }
 
     def get_logs(self, limit: int = 50) -> dict[str, Any]:
@@ -538,11 +683,16 @@ class BotService:
 
     async def _scan_loop(self, user_id: str):
         """Main scanning loop — runs the SMC strategy on each symbol."""
+        import time
+
         from backend.mt5.data_fetcher import DataFetcher
 
         self._log_event("Scan loop started — entering main cycle", category="BOT")
+        self._cycle_overruns = 0
+        self._last_cycle_seconds = None
 
         while self.running:
+            _cycle_started = time.monotonic()
             try:
                 import json
 
@@ -808,7 +958,17 @@ class BotService:
                             self._log_event(f"[{symbol}] Instantiated {strategy_id} Engine (slot {slot.slot_id})", "INFO", "BOT")
 
                         current_engine = self.engines[slot.slot_id]
-                        
+
+                        # [P1.1] Once per slot per UTC day, publish the parameters
+                        # the ENGINE actually resolved — not what the Settings form
+                        # is holding. "Does the backend ignore what I set in the
+                        # UI?" was previously unanswerable without reading code,
+                        # and a UI control whose value never reaches the engine is
+                        # indistinguishable from one that does. This is the live
+                        # half of the backtest's `params_snapshot`; diffing the two
+                        # is the standing parity check.
+                        self._log_resolved_slot_params(slot, config, current_engine)
+
                         # Get required timeframes for the strategy
                         req_tfs = current_engine.get_required_timeframes() if hasattr(current_engine, 'get_required_timeframes') else ["H4", "M15", "M5"]
                         
@@ -835,7 +995,17 @@ class BotService:
                             for i, tf in enumerate(req_tfs):
                                 tf_data = fetched_data[tf]
                                 closed_data = tf_data.iloc[:-1] if len(tf_data) > 1 else tf_data
-                                
+                                # [P1.8] Trim to the SAME window the backtester
+                                # slices, or an indicator that depends on how much
+                                # history it can see (ADX, a long EMA, a lookback
+                                # percentile) computes one thing here and another
+                                # there, on identical data, undetectably. Live was
+                                # passing 5,000 M5 bars against the backtest's 500.
+                                _win = window_bars(tf)
+                                if len(closed_data) > _win:
+                                    closed_data = closed_data.iloc[-_win:]
+
+
                                 await asyncio.sleep(0.01)
                                 res = await current_engine.on_bar(symbol, tf, _index_candles(closed_data))
                                 # Inject live context not available to the backtester engine directly
@@ -860,8 +1030,21 @@ class BotService:
                                 # Using chart_data[-1]['time'] alone would make all scans
                                 # within the same 5-min candle share the same cooldown key,
                                 # silently dropping every re-scan after the first one.
+                                #
+                                # [P2.3] Keyed by SLOT, not by symbol. With two
+                                # slots on one symbol a symbol key gives them one
+                                # shared cell, and it fails in both directions:
+                                # slot B's fingerprint overwrites slot A's (so
+                                # slot A's next re-scan of a bar it already traded
+                                # is no longer deduped — a duplicate entry), and
+                                # two slots emitting the same (entry, SL,
+                                # direction) on one bar — entirely possible for
+                                # SpikeFade and RangeRevert at the same
+                                # stop_atr_multiple — silently drop the second.
                                 _sig_fp = (round(signal.entry_price, 5), round(signal.stop_loss, 5), signal.direction)
-                                if _sig_fp == self._last_signal_time.get(symbol):
+                                _dedupe_key = slot.slot_id
+                                if _sig_fp == self._last_signal_time.get(_dedupe_key):
+                                    self._suppressed("duplicate_signal_same_bar", slot.slot_id)
                                     continue
                                 
                                 # Do NOT update self._last_signal_time here. Wait until we know if it was EXECUTED or REJECTED.
@@ -885,8 +1068,9 @@ class BotService:
                                     reason_str = "; ".join(reasons)
                                     for reason in reasons:
                                         self._log_event(f"[REJECTED] {reason}", "SIGNAL", "SIGNAL")
-                                    self._last_signal_time[symbol] = _sig_fp  # Prevent re-evaluation on next scan
+                                    self._last_signal_time[_dedupe_key] = _sig_fp  # Prevent re-evaluation on next scan
                                     await self._save_signal_state(signal, "SKIPPED", reason_str)
+                                    self._suppressed("strategy_gate", slot.slot_id)
                                     continue
 
                                 self._log_event(
@@ -926,6 +1110,7 @@ class BotService:
                                     if not cb_ok:
                                         self._log_event(f"[REJECTED] Circuit breaker blocked {signal.symbol}: {cb_reason}", "SIGNAL", "RISK")
                                         await self._save_signal_state(signal, "SKIPPED", cb_reason)
+                                        self._suppressed(f"circuit_breaker:{cb_reason}", slot.slot_id)
                                         continue
 
                                 # === News Filter Hard Gate ===
@@ -937,6 +1122,7 @@ class BotService:
                                     _news_msg = f"News filter: high-impact event within {_block_mins}min window"
                                     self._log_event(f"[REJECTED] {_news_msg} — {signal.symbol}", "SIGNAL", "RISK")
                                     await self._save_signal_state(signal, "SKIPPED", _news_msg)
+                                    self._suppressed("news_filter", slot.slot_id)
                                     continue
 
                                 # === Execute trade via RiskEngine ===
@@ -968,8 +1154,9 @@ class BotService:
                                         # isn't trading" came with no alert.
                                         _acc_msg = "No MT5 account info available for risk sizing — broker not connected"
                                         self._log_event(f"[REJECTED] {_acc_msg} — {signal.symbol}", "SIGNAL", "RISK")
-                                        self._last_signal_time[symbol] = _sig_fp
+                                        self._last_signal_time[_dedupe_key] = _sig_fp
                                         await self._save_signal_state(signal, "SKIPPED", _acc_msg)
+                                        self._suppressed("no_account_info", slot.slot_id)
                                         continue
                                     account_balance = broker.account_info.balance
 
@@ -1198,6 +1385,22 @@ class BotService:
                                         "stop_loss": signal.stop_loss,
                                         "take_profit": signal.take_profit,
                                         "timeframe": signal.timeframe,  # [12.10] see risk/engine.py's note
+                                        # [P1.4] MISSING until now, and it silently
+                                        # made live risk MORE than every backtest.
+                                        # RiskEngine.evaluate_signal reads
+                                        # `confluence_score` top-level (falling back
+                                        # to metadata) and scales risk_pct down the
+                                        # tier ladder; the backtest route puts it on
+                                        # the signal dict, the live path did not, and
+                                        # the strategies keep it as a TradeSignal
+                                        # FIELD rather than a metadata key — so live
+                                        # resolved None and skipped the scaling
+                                        # entirely. Measured on SpikeFade (score 70,
+                                        # tier 65 -> 75% of base): backtest sized at
+                                        # 1.35% while live sized at the full 1.8%,
+                                        # a third more risk per trade than any
+                                        # backtest ever reported.
+                                        "confluence_score": getattr(signal, "confluence_score", None),
                                         "chart_data": signal.chart_data,
                                         # Include metadata so size_modifier and confluence-based
                                         # risk scaling (get_confluence_scaled_risk) reach the engine.
@@ -1283,8 +1486,19 @@ class BotService:
                                                         volume=tp.volume,
                                                         sl=signal.stop_loss,
                                                         tp=tp.tp_price,
-                                                        magic=1001 + (tp.level * 10),
-                                                        comment=f"AE_TP{tp.level}",
+                                                        # Was the literal 1001, not self._magic_base —
+                                                        # so a user who changed magic_base placed orders
+                                                        # outside the range trade_ownership.py uses to
+                                                        # recognise them, and the bot stopped seeing its
+                                                        # own positions.
+                                                        magic=self._magic_base + (tp.level * 10),
+                                                        # [P2.7] Slot stamped into the comment. With two
+                                                        # slots on one symbol, symbol alone can no longer
+                                                        # say which strategy owns a position — and
+                                                        # position_manager would happily trail slot A's
+                                                        # trade with slot B's ATR multiplier. MT5 caps the
+                                                        # comment at 31 chars; this is 15.
+                                                        comment=f"AE_TP{tp.level}_{slot.slot_id[:8]}",
                                                         deviation_points=getattr(config.risk, "mt5_order_deviation_points", 20),
                                                         # [2.8/A5] re-anchor SL/TP to the actual live fill —
                                                         # backtest/live parity with engine.py::_create_position (2.7).
@@ -1382,13 +1596,13 @@ class BotService:
                                             all_stale = tp_failure_details and all("Stale Signal" in d for d in tp_failure_details)
                                             if all_stale:
                                                 self._log_event(f"Signal skipped (stale): price moved past SL before execution for {symbol}", "INFO", "TRADE")
-                                                self._last_signal_time[symbol] = _sig_fp
+                                                self._last_signal_time[_dedupe_key] = _sig_fp
                                                 await self._save_signal_state(signal, "SKIPPED", "Stale signal — price moved past SL before execution", tp_levels=tp_levels)
                                             else:
                                                 self._log_event(f"All orders failed. Rolled back risk state for {group_id}.", "WARN", "RISK")
                                                 # Build detailed failure reason for Telegram (includes MT5 error codes)
                                                 fail_reason = "MT5 execution failed: " + " | ".join(tp_failure_details) if tp_failure_details else "MT5 execution failed for all TP levels"
-                                                self._last_signal_time[symbol] = _sig_fp  # Prevent same signal from re-firing
+                                                self._last_signal_time[_dedupe_key] = _sig_fp  # Prevent same signal from re-firing
                                                 await self._save_signal_state(signal, "FAILED", fail_reason, tp_levels=tp_levels)
                                             had_execution_failure = True
                                         elif len(db_positions) < len(tp_levels):
@@ -1396,7 +1610,7 @@ class BotService:
                                     
                                         if db_positions and self.user_id:
                                             sig_id = await self._save_signal_state(signal, "EXECUTED", tp_levels=db_positions)
-                                            self._last_signal_time[symbol] = _sig_fp
+                                            self._last_signal_time[_dedupe_key] = _sig_fp
                                             try:
                                                 import json
 
@@ -1506,7 +1720,8 @@ class BotService:
                                             "WARN", "RISK"
                                         )
                                         await self._save_signal_state(signal, "REJECTED", reason, tp_levels=tp_levels)
-                                        self._last_signal_time[symbol] = _sig_fp
+                                        self._last_signal_time[_dedupe_key] = _sig_fp
+                                        self._suppressed(f"risk_engine:{reason}", slot.slot_id)
                                         # Only trigger explicit popup for risk-based rejections, not basic RR rejections to avoid spam
                                         if "Broker minimum lot forces risk" in reason or "Proposed risk" in reason:
                                             asyncio.ensure_future(self._broadcast_notification(
@@ -1538,9 +1753,28 @@ class BotService:
                     )
                     await asyncio.sleep(5)
                 else:
+                    # [P1.1] Cycle timing. The other candidate cause of "live takes
+                    # a third of the backtest's trades" is a scan cycle longer than
+                    # the strategy's primary timeframe: this loop fetches 5,000 bars
+                    # per slot per timeframe with MT5 serialised onto one thread, so
+                    # a slow cycle silently steps over closed bars and the strategy
+                    # never sees them. That was invisible — it produces no error,
+                    # no gap, just fewer trades. Now it is loud.
+                    _cycle_secs = time.monotonic() - _cycle_started
+                    self._last_cycle_seconds = round(_cycle_secs, 2)
+                    _budget = self._primary_tf_seconds()
+                    if _budget and _cycle_secs >= _budget:
+                        self._cycle_overruns += 1
+                        self._log_event(
+                            f"Scan cycle took {_cycle_secs:.1f}s, which is at or beyond the "
+                            f"{_budget}s bar it is supposed to track — closed bars are being "
+                            f"skipped and signals on them will never be seen. "
+                            f"({self._cycle_overruns} overruns this run)",
+                            "WARN", "BOT",
+                        )
                     self._log_event(
-                        f"Scan cycle complete — {len(self.symbols)} symbols checked — "
-                        f"next scan in {self.scan_interval}s",
+                        f"Scan cycle complete in {_cycle_secs:.1f}s — {len(self.symbols)} symbols "
+                        f"checked — next scan in {self.scan_interval}s",
                         category="BOT"
                     )
                     # Wait for next cycle

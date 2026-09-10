@@ -147,6 +147,7 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
     "RangeRevert_v1": "synth",
     "RangeBreakout_v1": "synth",
     "TrendDrift_v1": "synth",
+    "SpikeRide_v1": "synth",   # [P2] the other side of SpikeFade
 }
 
 
@@ -344,6 +345,12 @@ class BacktestRequest(BaseModel):
     stops_level_pips: float | str | None = None
     # ── Wick Simulation (BUG-9) ──
     simulate_wicks: bool = True      # Use OHLC shadow-weighted model for ambiguous SL/TP bars
+    # [P1.2] How a breached stop fills. OFF reproduces pre-fix runs (fills at
+    # the stop price) and must not be used to evaluate a strategy on a jump
+    # instrument. CONSERVATIVE charges the measured mean overshoot;
+    # EMPIRICAL samples the per-symbol quantile table. See fill_model.py.
+    stop_fill_model: str | None = None
+    stop_fill_seed: str | None = None
 
 def strategy_defaults_to_apply(req, strategy_defaults: dict) -> dict:
     """Which measured strategy defaults this request has NOT overridden.
@@ -522,6 +529,12 @@ class PortfolioBacktestRequest(BaseModel):
     stops_level_pips: float | str | None = None
     # ── Wick Simulation (BUG-9) ──
     simulate_wicks: bool = True      # Use OHLC shadow-weighted model for ambiguous SL/TP bars
+    # [P1.2] How a breached stop fills. OFF reproduces pre-fix runs (fills at
+    # the stop price) and must not be used to evaluate a strategy on a jump
+    # instrument. CONSERVATIVE charges the measured mean overshoot;
+    # EMPIRICAL samples the per-symbol quantile table. See fill_model.py.
+    stop_fill_model: str | None = None
+    stop_fill_seed: str | None = None
 
 
 async def reconcile_orphaned_runs() -> int:
@@ -841,14 +854,18 @@ async def run_backtest_endpoint(
             logger.info(f"[BACKTEST] Strategy {req.strategy_id} requires timeframes: {required_tfs}")
 
             # ── Timeframe metadata used for data-fetch warmup & slice windows ──
+            # [P1.8] `window` comes from strategies/windows.py, which the LIVE
+            # scan loop also reads — the two used to be independent literals and
+            # live handed strategies 5,000 M5 bars against this 500.
+            from backend.strategies.windows import window_bars as _window_bars
             TF_META = {
-                "M1":  {"np_td": (1,  'm'), "warmup_days": 1,   "window": 500},
-                "M5":  {"np_td": (5,  'm'), "warmup_days": 5,   "window": 500},
-                "M15": {"np_td": (15, 'm'), "warmup_days": 10,  "window": 300},
-                "M30": {"np_td": (30, 'm'), "warmup_days": 15,  "window": 200},
-                "H1":  {"np_td": (1,  'h'), "warmup_days": 30,  "window": 200},
-                "H4":  {"np_td": (4,  'h'), "warmup_days": 150, "window": 200},
-                "D1":  {"np_td": (1,  'D'), "warmup_days": 365, "window": 100},
+                "M1":  {"np_td": (1,  'm'), "warmup_days": 1,   "window": _window_bars("M1")},
+                "M5":  {"np_td": (5,  'm'), "warmup_days": 5,   "window": _window_bars("M5")},
+                "M15": {"np_td": (15, 'm'), "warmup_days": 10,  "window": _window_bars("M15")},
+                "M30": {"np_td": (30, 'm'), "warmup_days": 15,  "window": _window_bars("M30")},
+                "H1":  {"np_td": (1,  'h'), "warmup_days": 30,  "window": _window_bars("H1")},
+                "H4":  {"np_td": (4,  'h'), "warmup_days": 150, "window": _window_bars("H4")},
+                "D1":  {"np_td": (1,  'D'), "warmup_days": 365, "window": _window_bars("D1")},
             }
 
             # The fastest (primary clock) timeframe drives the simulation loop.
@@ -1129,6 +1146,8 @@ async def run_backtest_endpoint(
                 "swap_short_per_lot_per_day": req.swap_short_per_lot_per_day,
                 "stops_level_pips": req.stops_level_pips,
                 "simulate_wicks": req.simulate_wicks,
+                "stop_fill_model": req.stop_fill_model,
+                "stop_fill_seed": req.stop_fill_seed,
                 # Strategy attribution: signal dicts carry no strategy_id, so the
                 # engine falls back to this when stamping trades (was "UNKNOWN"
                 # on every saved grouped_trade).
@@ -1342,6 +1361,8 @@ async def run_backtest_endpoint(
                     "resolved_cost_model": results.get("cost_model", {}),
                 },
                 "cost_model": results.get("cost_model", {}),
+                # [P1.2] What the stop-fill model actually charged this run.
+                "fill_model": results.get("fill_model", {}),
                 "log_session_id": log_session_id,
                 "report": {
                     "win_rate": report.win_rate if report else 0,
@@ -1523,14 +1544,18 @@ async def run_portfolio_backtest_endpoint(
             bt_start = _time.time()
             logger.info(f"═══ PORTFOLIO BACKTEST START ═══ {sym_list} | user={current_user.email}")
 
+            # [P1.8] `window` comes from strategies/windows.py, which the LIVE
+            # scan loop also reads — the two used to be independent literals and
+            # live handed strategies 5,000 M5 bars against this 500.
+            from backend.strategies.windows import window_bars as _window_bars
             TF_META = {
-                "M1":  {"np_td": (1,  'm'), "warmup_days": 1,   "window": 500},
-                "M5":  {"np_td": (5,  'm'), "warmup_days": 5,   "window": 500},
-                "M15": {"np_td": (15, 'm'), "warmup_days": 10,  "window": 300},
-                "M30": {"np_td": (30, 'm'), "warmup_days": 15,  "window": 200},
-                "H1":  {"np_td": (1,  'h'), "warmup_days": 30,  "window": 200},
-                "H4":  {"np_td": (4,  'h'), "warmup_days": 150, "window": 200},
-                "D1":  {"np_td": (1,  'D'), "warmup_days": 365, "window": 100},
+                "M1":  {"np_td": (1,  'm'), "warmup_days": 1,   "window": _window_bars("M1")},
+                "M5":  {"np_td": (5,  'm'), "warmup_days": 5,   "window": _window_bars("M5")},
+                "M15": {"np_td": (15, 'm'), "warmup_days": 10,  "window": _window_bars("M15")},
+                "M30": {"np_td": (30, 'm'), "warmup_days": 15,  "window": _window_bars("M30")},
+                "H1":  {"np_td": (1,  'h'), "warmup_days": 30,  "window": _window_bars("H1")},
+                "H4":  {"np_td": (4,  'h'), "warmup_days": 150, "window": _window_bars("H4")},
+                "D1":  {"np_td": (1,  'D'), "warmup_days": 365, "window": _window_bars("D1")},
             }
             TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
 
@@ -1571,6 +1596,8 @@ async def run_portfolio_backtest_endpoint(
                 "swap_short_per_lot_per_day": req.swap_short_per_lot_per_day,
                 "stops_level_pips": req.stops_level_pips,
                 "simulate_wicks": req.simulate_wicks,
+                "stop_fill_model": req.stop_fill_model,
+                "stop_fill_seed": req.stop_fill_seed,
                 # [2.15] Per-strategy TP1 RR override — see DriftJumpAlphaParams.tp1_rr_override.
                 "tp1_rr_overrides_by_strategy": {
                     sym_cfg.strategy_id: sym_cfg.strategy_params["tp1_rr_override"]
@@ -2017,6 +2044,8 @@ async def run_portfolio_backtest_endpoint(
                 # Per-symbol transaction costs the engine actually applied, with
                 # provenance (USER / MT5 / ASSET_CLASS_DEFAULT) for each field.
                 "cost_model": results.get("cost_model", {}),
+                # [P1.2] What the stop-fill model actually charged this run.
+                "fill_model": results.get("fill_model", {}),
                 "params_snapshot": {
                     **(req.model_dump() if hasattr(req, "model_dump") else req.dict()),
                     "resolved_cost_model": results.get("cost_model", {}),

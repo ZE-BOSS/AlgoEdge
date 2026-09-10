@@ -18,6 +18,16 @@ export default function StrategySettings() {
       { symbol: 'EURUSD', strategy_id: 'APA_v1', enabled: true },
       { symbol: 'GBPUSD', strategy_id: 'APA_v1', enabled: true }
     ],
+    // [P2.1] The authoritative symbol x strategy configuration. The backend has
+    // supported InstrumentSlot (UUID-keyed, so ONE symbol may appear in several
+    // slots under different strategies) since [12.1] — slot-aware engines,
+    // circuit breaker and risk engine are all already in place. This page was
+    // the only thing still writing the symbol-keyed `instrument_settings`
+    // array, and config_schema then auto-migrated it to exactly one slot per
+    // symbol, so the multi-slot path was never reachable from the UI.
+    // `instrument_settings` is still written below as a derived projection,
+    // because other screens read it.
+    instrument_slots: [],
     // Section names and field names below must match the backend config
     // dataclasses exactly (backend/core/config_schema.py and each strategy's
     // params.py) — TradingConfig.from_dict() filters every section through a
@@ -87,6 +97,9 @@ export default function StrategySettings() {
       min_adx_to_trade: 20,
       max_trades_per_day: 6,
       max_daily_risk_pct: 4.0,
+      spike_ride_stop_atr: 1.0,
+      spike_ride_tp_rr: 2.0,
+      spike_ride_stretch_atr: 1.5,
     },
     drift_jump_alpha: {
       // spike_lookback_bars removed — no such field on DriftJumpAlphaParams and no
@@ -164,17 +177,32 @@ export default function StrategySettings() {
 
   useEffect(() => {
     if (remoteConfig?.config) {
-      setConfig(prev => ({
-        ...prev,
-        ...Object.fromEntries(
-          Object.entries(remoteConfig.config).filter(([k]) => k in prev).map(([k, v]) => {
-            if (typeof v === 'object' && v !== null && !Array.isArray(v) && typeof prev[k] === 'object') {
-              return [k, { ...prev[k], ...v }];
-            }
-            return [k, v];
-          })
-        ),
-      }));
+      setConfig(prev => {
+        const merged = {
+          ...prev,
+          ...Object.fromEntries(
+            Object.entries(remoteConfig.config).filter(([k]) => k in prev).map(([k, v]) => {
+              if (typeof v === 'object' && v !== null && !Array.isArray(v) && typeof prev[k] === 'object') {
+                return [k, { ...prev[k], ...v }];
+              }
+              return [k, v];
+            })
+          ),
+        };
+        // [P2.1] A config saved before this page wrote slots carries only
+        // `instrument_settings`. Project it to one slot per symbol — the same
+        // migration config_schema.py performs server-side, so what the form
+        // shows is what the backend already resolved.
+        if (!merged.instrument_slots?.length && merged.instrument_settings?.length) {
+          merged.instrument_slots = merged.instrument_settings.map((i, n) => ({
+            slot_id: `legacy${String(n).padStart(7, '0')}`,
+            symbol: i.symbol,
+            strategy_id: i.strategy_id || 'APA_v1',
+            enabled: i.enabled !== false,
+          }));
+        }
+        return merged;
+      });
     }
   }, [remoteConfig]);
 
@@ -229,32 +257,70 @@ export default function StrategySettings() {
     'Step Index', 'Range Break 100 Index', 'Range Break 200 Index',
   ];
 
-  const activeSymbols = config.instrument_settings ? config.instrument_settings.filter(i => i.enabled).map(i => i.symbol) : config.symbols;
+  // ── [P2.1] Slot model ────────────────────────────────────────────────────
+  // A slot is one (symbol, strategy) pairing. The same symbol may appear in as
+  // many slots as you like; each gets its own engine instance, its own daily
+  // budget and its own position quota on the backend.
+  const slots = config.instrument_slots || [];
+  const activeSymbols = [...new Set(slots.filter(s => s.enabled).map(s => s.symbol))];
 
+  // Everything that writes slots goes through here, so `symbols` (which
+  // /bot/start uses to decide what is live) and the legacy
+  // `instrument_settings` projection can never fall out of step with them.
+  const commitSlots = (nextSlots) => {
+    const enabled = nextSlots.filter(s => s.enabled);
+    const symbols = [...new Set(enabled.map(s => s.symbol))];
+    // One legacy row per symbol — first enabled slot wins. Read-only as far as
+    // this page is concerned; the backend prefers instrument_slots when present.
+    const legacy = symbols.map(sym => {
+      const first = enabled.find(s => s.symbol === sym);
+      return { symbol: sym, strategy_id: first.strategy_id, enabled: true };
+    });
+    setConfig({
+      ...config,
+      instrument_slots: nextSlots,
+      instrument_settings: legacy,
+      symbols,
+    });
+  };
+
+  const newSlotId = () =>
+    (crypto?.randomUUID?.() || Math.random().toString(16).slice(2).padEnd(12, '0'))
+      .replace(/-/g, '').slice(0, 12);
+
+  const addSlot = (symbol, strategyId = 'APA_v1') => {
+    if (!symbol) return;
+    commitSlots([...slots, { slot_id: newSlotId(), symbol, strategy_id: strategyId, enabled: true }]);
+  };
+
+  const updateSlot = (slotId, key, val) =>
+    commitSlots(slots.map(s => (s.slot_id === slotId ? { ...s, [key]: val } : s)));
+
+  const removeSlot = (slotId) => commitSlots(slots.filter(s => s.slot_id !== slotId));
+
+  const duplicateSlot = (slotId) => {
+    const src = slots.find(s => s.slot_id === slotId);
+    if (!src) return;
+    commitSlots([...slots, { ...src, slot_id: newSlotId() }]);
+  };
+
+  // Toggling a symbol chip adds a first slot for it, or disables every slot on
+  // it. Removing individual strategies is done on the slot row itself.
   const toggleSymbol = (sym) => {
-    let settings = [...(config.instrument_settings || [])];
-    const exists = settings.find(i => i.symbol === sym);
-
-    if (exists) {
-      exists.enabled = !exists.enabled;
-    } else {
-      settings.push({ symbol: sym, strategy_id: 'APA_v1', enabled: true });
-    }
-
-    const active = settings.filter(i => i.enabled).map(i => i.symbol);
-    setConfig({ ...config, instrument_settings: settings, symbols: active });
+    const existing = slots.filter(s => s.symbol === sym);
+    if (existing.length === 0) { addSlot(sym); return; }
+    const anyEnabled = existing.some(s => s.enabled);
+    commitSlots(slots.map(s => (s.symbol === sym ? { ...s, enabled: !anyEnabled } : s)));
   };
 
-  const updateSymbolSetting = (sym, key, val) => {
-    let settings = [...(config.instrument_settings || [])];
-    let exists = settings.find(i => i.symbol === sym);
-    if (!exists) {
-      exists = { symbol: sym, strategy_id: 'APA_v1', enabled: true };
-      settings.push(exists);
-    }
-    exists[key] = val;
-    setConfig({ ...config, instrument_settings: settings });
-  };
+  // A slot pairing is only meaningful once — two identical (symbol, strategy)
+  // rows would give one strategy two independent daily budgets on one symbol,
+  // which is double-counting, not diversification.
+  const duplicatePairings = new Set(
+    slots
+      .map(s => `${s.symbol}::${s.strategy_id}`)
+      .filter((k, i, arr) => arr.indexOf(k) !== i)
+  );
 
 
 
@@ -291,40 +357,118 @@ export default function StrategySettings() {
       </div>
 
       <div className="card">
-        <div className="card-header"><span className="card-title">Per-Symbol Strategy Configuration</span></div>
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12 }}>
-          Assign a specific trading engine and parameters to each active symbol.
+        <div className="card-header">
+          <span className="card-title">Strategy Slots</span>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {activeSymbols.map(sym => {
-            const symConfig = (config.instrument_settings || []).find(i => i.symbol === sym) || {};
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+          One row = one symbol running one strategy. Add the same symbol more than once to
+          run several strategies on it at the same time — each slot gets its own engine,
+          its own daily budget and its own position quota, and they cannot block each
+          other's entries. This is the same pairing the portfolio backtester uses, so a
+          basket you tested there can be reproduced here row for row.
+        </div>
+
+        {duplicatePairings.size > 0 && (
+          <div style={{ marginBottom: 12, padding: 10, background: 'var(--bg-warning)', border: '1px solid var(--yellow)', borderRadius: 'var(--radius-xs)', color: 'var(--yellow)', fontSize: '0.8rem' }}>
+            <strong>Duplicate slot{duplicatePairings.size > 1 ? 's' : ''}:</strong>{' '}
+            {[...duplicatePairings].join(', ')} — the same strategy is on the same symbol
+            twice. That gives one strategy two independent daily budgets and two position
+            quotas on one instrument, which doubles exposure without adding a signal.
+            Remove one, or change its strategy.
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {slots.length === 0 && (
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '12px 0' }}>
+              No slots configured. Pick a symbol above, or add one below.
+            </div>
+          )}
+          {slots.map(slot => {
+            const dup = duplicatePairings.has(`${slot.symbol}::${slot.strategy_id}`);
             return (
-              <div key={sym} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
-                <strong style={{ fontSize: '0.9rem', width: '150px' }}>{sym}</strong>
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Strategy Engine</label>
-                    <select
-                      value={symConfig.strategy_id || 'APA_v1'}
-                      onChange={e => updateSymbolSetting(sym, 'strategy_id', e.target.value)}
-                      style={{ fontSize: '0.8rem', padding: '4px 8px' }}
-                    >
+              <div
+                key={slot.slot_id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                  background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)',
+                  border: `1px solid ${dup ? 'var(--yellow)' : 'var(--border)'}`,
+                  opacity: slot.enabled ? 1 : 0.5,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={slot.enabled !== false}
+                  onChange={e => updateSlot(slot.slot_id, 'enabled', e.target.checked)}
+                  title={slot.enabled ? 'Enabled — the bot scans this slot' : 'Disabled'}
+                  style={{ width: 14, height: 14 }}
+                />
+                <select
+                  value={slot.symbol}
+                  onChange={e => updateSlot(slot.slot_id, 'symbol', e.target.value)}
+                  style={{ fontSize: '0.8rem', padding: '4px 8px', width: 200 }}
+                >
+                  {[...new Set([...allSymbols, slot.symbol])].map(sym => (
+                    <option key={sym} value={sym}>{sym}</option>
+                  ))}
+                </select>
+                <select
+                  value={slot.strategy_id || 'APA_v1'}
+                  onChange={e => updateSlot(slot.slot_id, 'strategy_id', e.target.value)}
+                  style={{ fontSize: '0.8rem', padding: '4px 8px', flex: 1, minWidth: 200 }}
+                >
                       <option value="APA_v1">APA (Adv. Price Action)</option>
                       <option value="VWAP_v1">VWAP Institutional</option>
-                      <option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option>
+                      <option value="DriftJumpAlpha_v1">Drift &amp; Jump Alpha</option>
                       <option value="CRT_v1">CRT Strategy</option>
                       <option value="HTFFVGFlip_v1">HTF FVG Flip</option>
                       <option value="BiasIFVG_v1">Bias KeyLevel IFVG</option>
-                      <option value="NYOpenRetest_v1">NY Open Break Retest</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option><option value="SpikeFade_v1">Spike Fade (synthetics)</option><option value="RangeRevert_v1">Range Revert (synthetics)</option><option value="RangeBreakout_v1">Range Breakout (synthetics)</option><option value="TrendDrift_v1">Trend Drift (synthetics)</option>
-                    </select>
-                  </div>
-
-
-
-                </div>
+                      <option value="NYOpenRetest_v1">NY Open Break Retest</option>
+                      <option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option>
+                      <option value="SpikeFade_v1">Spike Fade (synthetics)</option>
+                      <option value="RangeRevert_v1">Range Revert (synthetics)</option>
+                      <option value="RangeBreakout_v1">Range Breakout (synthetics)</option>
+                      <option value="TrendDrift_v1">Trend Drift (synthetics)</option>
+                      <option value="SpikeRide_v1">Spike Ride (synthetics)</option>
+                </select>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => duplicateSlot(slot.slot_id)}
+                  title="Add another strategy on this symbol"
+                >
+                  Duplicate
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => removeSlot(slot.slot_id)}
+                  title="Remove this slot"
+                >
+                  Remove
+                </button>
               </div>
             );
           })}
+        </div>
+
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select
+            id="new-slot-symbol"
+            defaultValue={allSymbols[0]}
+            style={{ fontSize: '0.8rem', padding: '4px 8px', width: 200 }}
+          >
+            {allSymbols.map(sym => <option key={sym} value={sym}>{sym}</option>)}
+          </select>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => addSlot(document.getElementById('new-slot-symbol')?.value)}
+          >
+            + Add slot
+          </button>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            {activeSymbols.length} symbol{activeSymbols.length === 1 ? '' : 's'} ·{' '}
+            {slots.filter(x => x.enabled).length} active slot
+            {slots.filter(x => x.enabled).length === 1 ? '' : 's'}
+          </span>
         </div>
       </div>
 
@@ -591,6 +735,9 @@ export default function StrategySettings() {
           <div><label>EMA Slow</label><input type="number" min="3" value={config.synth?.ema_slow ?? 50} onChange={e => updateNested('synth', 'ema_slow', +e.target.value)} /></div>
           <div><label>Max Trades / Day</label><input type="number" min="0" value={config.synth?.max_trades_per_day ?? 6} onChange={e => updateNested('synth', 'max_trades_per_day', +e.target.value)} /></div>
           <div><label>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={config.synth?.max_daily_risk_pct ?? 4.0} onChange={e => updateNested('synth', 'max_daily_risk_pct', +e.target.value)} /></div>
+          <div><label>Spike Ride — Stop (× ATR)</label><input type="number" step="0.25" min="0.1" value={config.synth?.spike_ride_stop_atr ?? 1.0} onChange={e => updateNested('synth', 'spike_ride_stop_atr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Spike Ride only — its own stop, not the shared one above. Tight, and behind the grind: on this side the spike runs into the TARGET, not the stop.</div></div>
+          <div><label>Spike Ride — Target R:R</label><input type="number" step="0.5" min="0.1" value={config.synth?.spike_ride_tp_rr ?? 2.0} onChange={e => updateNested('synth', 'spike_ride_tp_rr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Sized to the measured spike: ~2× ATR on average, ~4.5× at p95.</div></div>
+          <div><label>Spike Ride — Stretch (× ATR)</label><input type="number" step="0.25" min="0" value={config.synth?.spike_ride_stretch_atr ?? 1.5} onChange={e => updateNested('synth', 'spike_ride_stretch_atr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>How far the grind must have run before entering. Stop placement, not timing — jump arrival is memoryless.</div></div>
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.8rem' }}>
               <input type="checkbox" checked={config.synth?.require_adx ?? true} onChange={e => updateNested('synth', 'require_adx', e.target.checked)} />

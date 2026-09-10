@@ -630,6 +630,21 @@ class SynthParams:
     max_trades_per_day: int = 6
     max_daily_risk_pct: float = 4.0
 
+    # ── SpikeRide_v1 ─────────────────────────────────────────────────────────
+    # Its own stop/target, NOT the shared stop_atr_multiple/tp1_rr above, because
+    # the two sides of a jump are not symmetric. SpikeFade wants a wide stop (the
+    # spike runs into it); SpikeRide wants a tight stop against the grind and a
+    # target sized to the spike itself — research/24 §3.1 measures spike
+    # magnitude at 0.0999-0.1005% of price on average and 0.2264-0.2286% at p95,
+    # roughly 2x and 4.5x M5 ATR on the 1000-variants. Sharing the fade's 5x stop
+    # would make it a 1:0.4 proposition and the measurement meaningless.
+    spike_ride_stop_atr: float = 1.0
+    spike_ride_tp_rr: float = 2.0
+    spike_ride_stretch_atr: float = 1.5
+    """How far price must have run AGAINST the spike side, in ATR, before an
+    entry is taken. This is stop placement, not timing: research/24 §3.1 measured
+    jump arrival to be memoryless, so nothing here predicts when a spike comes."""
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STRATEGY TWO (CRASHBOOM) PARAMETERS
@@ -1296,6 +1311,36 @@ class UserConfigV2(UserConfig):
                     f"{len(enabled_slots)} enabled slots, exceeding max_concurrent_positions={global_cap}. "
                     f"Not every slot could reach its own cap simultaneously without breaching the global one."
                 )
+
+        # [P2.9] Two enabled slots on ONE symbol is the whole point of the slot
+        # model — but each sizes independently at `risk_per_trade_pct`, so the
+        # symbol carries N x that risk while every per-slot cap still reads as
+        # satisfied. `max_net_direction_risk_pct` / `max_cluster_risk_pct` are
+        # the controls for exactly this and both default to off, so the failure
+        # is silent: nothing rejects, nothing warns, the account is simply
+        # carrying multiples of the intended risk. Warn at the moment the
+        # configuration first makes it possible.
+        by_symbol: dict[str, list] = {}
+        for s in enabled_slots:
+            by_symbol.setdefault(s.symbol, []).append(s)
+        stacked = {sym: ss for sym, ss in by_symbol.items() if len(ss) > 1}
+        if stacked:
+            net_cap = getattr(self.risk, "max_net_direction_risk_pct", None) or 0.0
+            cluster_cap = getattr(self.risk, "max_cluster_risk_pct", None) or 0.0
+            if net_cap <= 0 and cluster_cap <= 0:
+                base = self.risk.risk_per_trade_pct
+                for sym, ss in stacked.items():
+                    worst = sum(
+                        (s.risk_per_trade_pct if s.risk_per_trade_pct is not None else base)
+                        for s in ss
+                    )
+                    warnings.append(
+                        f"{sym} has {len(ss)} enabled slots "
+                        f"({', '.join(s.strategy_id for s in ss)}). If they agree on direction the "
+                        f"symbol carries up to {worst:.2f}% risk against a per-trade setting of "
+                        f"{base:.2f}%, and neither max_net_direction_risk_pct nor "
+                        f"max_cluster_risk_pct is set to bound it. Set one before running this live."
+                    )
         return warnings
 
 DEFAULT_USER_CONFIG = UserConfigV2()

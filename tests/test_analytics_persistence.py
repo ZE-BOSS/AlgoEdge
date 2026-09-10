@@ -201,7 +201,16 @@ def test_every_strategy_exposes_the_gate_api():
     for name, cls in strategies.items():
         assert hasattr(cls, "gate"), f"{name} has no .gate()"
         assert hasattr(cls, "begin_candidate"), f"{name} has no .begin_candidate()"
-        src = inspect.getsource(cls)
+        # Walk the MRO, not just `cls`. The four synthetic template strategies
+        # (SpikeFade / RangeRevert / RangeBreakout / TrendDrift) implement only
+        # `signal_for_bar`; every gate call lives in the shared `_SynthBase.on_bar`
+        # they inherit. Inspecting the leaf class alone reported them as
+        # unmeasurable when their confluences are in fact fully recorded.
+        src = "".join(
+            inspect.getsource(k)
+            for k in cls.__mro__
+            if k.__module__.startswith("backend.strategies")
+        )
         assert "self.gate(" in src or "begin_candidate" in src, (
             f"{name} inherits the gate API but never calls it — its confluences "
             "are unmeasurable"

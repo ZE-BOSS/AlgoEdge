@@ -64,6 +64,15 @@ class _SynthBase(BaseStrategy):
     default_tp_rr = 1.5
     default_k = 3.0
 
+    #: Which SynthParams field supplies this strategy's stop / target. All four
+    #: original templates share `stop_atr_multiple` and `tp1_rr` — that is what
+    #: the Settings page means by "a change here applies to all of them". A
+    #: strategy whose geometry is genuinely different (SpikeRide: tight stop
+    #: against the grind, target sized to the spike) names its own fields here
+    #: instead of being silently forced onto the shared ones.
+    stop_param_name = "stop_atr_multiple"
+    tp_param_name = "tp1_rr"
+
     def __init__(self, config: Any):
         super().__init__(config)
         # BaseStrategy does not populate `params`; each strategy binds its own
@@ -192,8 +201,8 @@ class _SynthBase(BaseStrategy):
             return None
 
         entry = float(d["close"].iloc[-1])
-        stop_atr = float(self._p("stop_atr_multiple", self.default_stop_atr))
-        tp_rr = float(self._p("tp1_rr", self.default_tp_rr))
+        stop_atr = float(self._p(self.stop_param_name, self.default_stop_atr))
+        tp_rr = float(self._p(self.tp_param_name, self.default_tp_rr))
         risk = stop_atr * atr_val
         if not self.gate("risk_positive", risk > 0):
             return None
@@ -265,6 +274,110 @@ class SpikeFadeStrategy(_SynthBase):
         if dn >= k:
             return 1
         return 0
+
+
+@register_strategy("SpikeRide_v1")
+class SpikeRideStrategy(_SynthBase):
+    """Trade WITH the instrument's spike direction — the other side of SpikeFade.
+
+    On Crash this is the SELL side; on Boom the BUY side. Those are the sides the
+    book has never traded, and there is a specific, mechanical reason they are
+    worth measuring rather than assumed to be the mirror image of the fade.
+
+    WHY THIS IS NOT JUST "SPIKEFADE WITH THE SIGN FLIPPED"
+    -----------------------------------------------------
+    The two sides have opposite exposure to the one thing the backtester models
+    worst. A jump on these instruments is intrabar and it gaps:
+
+        SpikeFade (Crash BUY)  — the spike runs INTO the stop. The gap is a loss,
+                                 and until fill_model.py shipped the harness
+                                 booked every one of them at exactly the stop
+                                 price. research/27 §1.2 measured the unbooked
+                                 cost at 0.35-0.40 R per stopped trade, against a
+                                 measured edge of +0.12 R.
+        SpikeRide (Crash SELL) — the spike runs into the TARGET. A limit order
+                                 fills at its price or better, so this side has
+                                 no equivalent hidden cost, and a target the bar
+                                 gaps through fills at the gapped open.
+
+    So the harness systematically flattered one side and not the other. Whether
+    the ranking between them survives a correct fill model is an open, testable
+    question, and it is the question this strategy exists to answer.
+
+    WHAT THIS IS NOT
+    ----------------
+    It is NOT a timing edge, and it must not be sold as one. research/24 §3.1
+    measured jump arrival on 31,394 Crash 1000 events to be memoryless — P(jump
+    in the next 251 ticks) is flat at 0.217-0.226 whether you have waited 0 or
+    2,008 ticks — and magnitude is uncorrelated with elapsed time (-0.0059,
+    SE 0.0056). No entry rule based on tick count, bar count or "a drop is due"
+    can work. The stretch trigger below is a GEOMETRY choice (where to put the
+    stop relative to a grind that has already run), not a forecast.
+
+    GEOMETRY
+    --------
+    Deliberately different defaults from the fade, because the payoffs are not
+    symmetric. The stop is tight and sits against the grind; the target is sized
+    to the measured spike, which research/24 §3.1 puts at 0.0999-0.1005% of price
+    on average and 0.2264-0.2286% at p95 — roughly 2x and 4.5x M5 ATR on the
+    1000-variants. A 5x ATR stop against a 2x ATR target would be a 1:0.4
+    proposition, which is why `default_stop_atr` is 1.0 here and 5.0 there.
+
+    DIRECTION
+    ---------
+    Taken from the sign of return skew over the visible window, not from the
+    symbol name. Crash grinds up and drops hard (negative skew) so this sells;
+    Boom grinds down and pops (positive skew) so it buys. Measuring it means the
+    strategy works on any instrument with a jump asymmetry without a lookup
+    table that silently goes stale when a broker renames a symbol.
+    """
+
+    strategy_id = "SpikeRide_v1"
+    signal_type = "SPIKE_RIDE"
+    default_stop_atr = 1.0
+    default_tp_rr = 2.0
+    stop_param_name = "spike_ride_stop_atr"
+    tp_param_name = "spike_ride_tp_rr"
+
+    #: |skew| below this is treated as "no measurable jump asymmetry" — the
+    #: instrument is symmetric and there is no spike side to take.
+    min_abs_skew = 0.15
+
+    def signal_for_bar(self, d: pd.DataFrame) -> int:
+        stretch_k = float(self._p("spike_ride_stretch_atr", 1.5))
+
+        bar = d.iloc[-1]
+        atr_val = float(bar["atr"])
+        if atr_val <= 0:
+            return 0
+
+        rets = d["close"].pct_change().dropna()
+        if len(rets) < 60:
+            return 0
+        skew = float(rets.skew())
+        if not np.isfinite(skew) or abs(skew) < self.min_abs_skew:
+            return 0
+
+        # Negative skew => rare violent DOWN moves => the spike side is short.
+        spike_dir = -1 if skew < 0 else 1
+
+        # Enter only once the grind has run against the spike side, so the stop
+        # sits behind an extension rather than in the middle of one. This is
+        # about stop placement, not about the spike being "due" (see above).
+        gap_atr = (float(bar["close"]) - float(bar["ema_s"])) / atr_val
+        if spike_dir < 0 and gap_atr < stretch_k:
+            return 0
+        if spike_dir > 0 and gap_atr > -stretch_k:
+            return 0
+
+        # Never enter into a bar that has ALREADY spiked our way — that move is
+        # the one we were trying to capture and entering after it is chasing.
+        spent = ((float(bar["open"]) - float(bar["low"])) / atr_val if spike_dir < 0
+                 else (float(bar["high"]) - float(bar["open"])) / atr_val)
+        if spent >= float(self._p("spike_k_atr", 3.0)):
+            return 0
+
+        return spike_dir
 
 
 @register_strategy("RangeRevert_v1")

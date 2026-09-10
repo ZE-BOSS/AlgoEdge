@@ -253,7 +253,8 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
   }
 
   if (strategyId === 'SpikeFade_v1' || strategyId === 'RangeRevert_v1'
-      || strategyId === 'RangeBreakout_v1' || strategyId === 'TrendDrift_v1') {
+      || strategyId === 'RangeBreakout_v1' || strategyId === 'TrendDrift_v1'
+      || strategyId === 'SpikeRide_v1') {
     const isSpike = strategyId === 'SpikeFade_v1';
     const isRevert = strategyId === 'RangeRevert_v1';
     const isBreak = strategyId === 'RangeBreakout_v1';
@@ -1561,6 +1562,7 @@ function buildPortfolioStrategyParams(strategyId, form) {
     case 'RangeRevert_v1':
     case 'RangeBreakout_v1':
     case 'TrendDrift_v1':
+    case 'SpikeRide_v1':
       return form.synth || {};
     default:
       return {};
@@ -2156,7 +2158,7 @@ export default function Backtester() {
       setResult(null);
       setEvents([]);
       setBtError(null);
-      const validStrats = ['APA_v1', 'VWAP_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1', 'BoomDriftJump_v1', 'SpikeFade_v1', 'RangeRevert_v1', 'RangeBreakout_v1', 'TrendDrift_v1'];
+      const validStrats = ['APA_v1', 'VWAP_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1', 'BoomDriftJump_v1', 'SpikeFade_v1', 'RangeRevert_v1', 'RangeBreakout_v1', 'TrendDrift_v1', 'SpikeRide_v1'];
       const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'APA_v1';
       const sp = buildPortfolioStrategyParams(payload_strategy, form);
 
@@ -2304,7 +2306,7 @@ export default function Backtester() {
         <div style={{ display: 'grid', gap: 14 }}>
           {activeTab === 'single' ? (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label>Strategy Engine</label><select value={['APA_v1', 'VWAP_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1', 'BoomDriftJump_v1', 'SpikeFade_v1', 'RangeRevert_v1', 'RangeBreakout_v1', 'TrendDrift_v1'].includes(form.strategy_id) ? form.strategy_id : 'APA_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option><option value="SpikeFade_v1">Spike Fade (synthetics)</option><option value="RangeRevert_v1">Range Revert (synthetics)</option><option value="RangeBreakout_v1">Range Breakout (synthetics)</option><option value="TrendDrift_v1">Trend Drift (synthetics)</option></select></div>
+              <div><label>Strategy Engine</label><select value={['APA_v1', 'VWAP_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1', 'BoomDriftJump_v1', 'SpikeFade_v1', 'RangeRevert_v1', 'RangeBreakout_v1', 'TrendDrift_v1', 'SpikeRide_v1'].includes(form.strategy_id) ? form.strategy_id : 'APA_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option><option value="SpikeFade_v1">Spike Fade (synthetics)</option><option value="RangeRevert_v1">Range Revert (synthetics)</option><option value="RangeBreakout_v1">Range Breakout (synthetics)</option><option value="TrendDrift_v1">Trend Drift (synthetics)</option><option value="SpikeRide_v1">Spike Ride (synthetics)</option></select></div>
               <div>
                 <label>Symbol</label>
                 <SymbolAutocomplete
@@ -2336,7 +2338,7 @@ export default function Backtester() {
                     <div style={{ flex: 1 }}>
                       <label style={{ fontSize: '0.7rem' }}>Strategy</label>
                       <select value={item.strategy_id} onChange={e => updatePortfolioSymbol(idx, 'strategy_id', e.target.value)}>
-                        <option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option><option value="SpikeFade_v1">Spike Fade (synthetics)</option><option value="RangeRevert_v1">Range Revert (synthetics)</option><option value="RangeBreakout_v1">Range Breakout (synthetics)</option><option value="TrendDrift_v1">Trend Drift (synthetics)</option>
+                        <option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option><option value="SpikeFade_v1">Spike Fade (synthetics)</option><option value="RangeRevert_v1">Range Revert (synthetics)</option><option value="RangeBreakout_v1">Range Breakout (synthetics)</option><option value="TrendDrift_v1">Trend Drift (synthetics)</option><option value="SpikeRide_v1">Spike Ride (synthetics)</option>
                       </select>
                     </div>
                     {/* [17.1] Per-row R:R. Research 16 measured the optimum as
