@@ -205,3 +205,41 @@ def test_summary_reports_calibration_provenance():
     entry = m.summary()["by_symbol"]["Boom 1000 Index"]
     assert entry["profile_calibration"] in {"interpolated", "assumed", "measured"}
     assert "research/27" in entry["profile_source"]
+
+
+# ── [P1.2] the flags must survive grouping ───────────────────────────────────
+#
+# The engines set gap_fill / stop_overshoot_r on the LEG, but every consumer —
+# the repricer, the frontend trade row, any audit — reads the GROUP. Without
+# propagation a run whose stops ALL gapped reported "gap_fill on 0 of N trades",
+# which is exactly the false negative that let the perfect-fill defect hide.
+
+def test_group_trades_propagates_the_fill_flags():
+    from backend.utils.trade_grouper import group_trades
+
+    legs = [
+        {"group_id": "g1", "symbol": "Crash 1000 Index", "strategy_id": "S",
+         "direction": "BUY", "entry_price": 100.0, "stop_loss": 95.0,
+         "initial_stop_loss": 95.0, "take_profit": 120.0, "volume": 0.2,
+         "tp_level": 1, "entry_time": 0, "exit_time": 60, "exit_price": 94.0,
+         "exit_reason": "SL", "pnl": -1.2, "gap_fill": True,
+         "stop_overshoot_r": 0.2},
+    ]
+    g = group_trades(legs)[0]
+    assert g["gap_fill"] is True, "a gapped leg must mark its group as gapped"
+    assert g["stop_overshoot_r"] == pytest.approx(0.2)
+
+
+def test_group_without_gapped_legs_reports_no_gap():
+    from backend.utils.trade_grouper import group_trades
+
+    legs = [
+        {"group_id": "g2", "symbol": "EURUSD", "strategy_id": "S",
+         "direction": "BUY", "entry_price": 1.10, "stop_loss": 1.09,
+         "initial_stop_loss": 1.09, "take_profit": 1.13, "volume": 0.1,
+         "tp_level": 1, "entry_time": 0, "exit_time": 60, "exit_price": 1.13,
+         "exit_reason": "TP1", "pnl": 3.0},
+    ]
+    g = group_trades(legs)[0]
+    assert g["gap_fill"] is False
+    assert g["stop_overshoot_r"] is None

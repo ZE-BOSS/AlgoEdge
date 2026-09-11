@@ -113,6 +113,24 @@ def report(path: Path) -> None:
     print(f"    ~$ per R (median) ............... {r_dollar:,.2f}")
 
     hard = sum(1 for t in g if t.get("exit_reason") == "SL")
+
+    # A run that already priced its own stops must NOT be charged again — the
+    # correction below exists to estimate what a legacy run is missing, and
+    # applying it on top of an honest run double-counts the very thing it is
+    # measuring. Exactly the kind of quietly-wrong number this script exists
+    # to catch, so it refuses rather than printing it.
+    if fm and str(fm.get("mode", "OFF")).upper() != "OFF":
+        print(f"\n  corrected for unbooked stop overshoot")
+        print(f"    SKIPPED — this run already charged {fm.get('total_overshoot_r', 0):+.2f} R "
+              f"at the fill model's own {fm.get('mode')} setting, so the figures above")
+        print(f"    are ALREADY corrected. Re-running with stop_fill_model=OFF shows what")
+        print(f"    the legacy harness would have reported: "
+              f"{total_r + float(fm.get('total_overshoot_r', 0) or 0):+.2f} R "
+              f"({(total_r + float(fm.get('total_overshoot_r', 0) or 0)) / len(g):+.4f} R/trade).")
+        _signal_mortality(d, g, bal0)
+        _by_symbol(g)
+        return
+
     print(f"\n  corrected for unbooked stop overshoot")
     print(f"    {'scope':<28} {'charge':>8} {'total R':>10} {'R/trade':>10} {'~$':>12}")
     for label, n in (("hard SL exits only", hard), ("all stop-type exits", stops)):
@@ -133,6 +151,11 @@ def report(path: Path) -> None:
             print(f"    {label:<28} {shown:>8} {corrected:>+10.2f} "
                   f"{corrected / len(g):>+10.4f} {corrected * r_dollar:>+12,.2f}")
 
+    _signal_mortality(d, g, bal0)
+    _by_symbol(g)
+
+
+def _signal_mortality(d: dict, g: list, bal0: float) -> None:
     # ── 3. can this account size trade this? ─────────────────────────────────
     funnel = d.get("rejection_funnel", {})
     blocked = d.get("blocked_signals", [])
@@ -159,6 +182,7 @@ def report(path: Path) -> None:
         print(f"       broker will accept, so this account trades a biased subsample "
               f"— the cheap-stop trades — not the strategy.")
 
+def _by_symbol(g: list) -> None:
     # ── per symbol / direction ───────────────────────────────────────────────
     bysd = defaultdict(list)
     for t in g:

@@ -180,6 +180,15 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
         # a property of the position's management, and the legs share one stop.
         g["be_applied"] = any(bool(st.get("be_applied")) for st in sub_trades)
         g["trail_applied"] = any(bool(st.get("trail_applied")) for st in sub_trades)
+        # [P1.2] Same reasoning as be_applied above, for the realistic-fill flags.
+        # The engines set these on the LEG; every consumer (the repricer, the
+        # frontend trade row, any audit) reads the GROUP. Without this a run whose
+        # stops all gapped reported "gap_fill on 0 of N trades" — the exact
+        # false-negative that let the perfect-fill defect hide for months.
+        g["gap_fill"] = any(bool(st.get("gap_fill")) for st in sub_trades)
+        _ov = [st.get("stop_overshoot_r") for st in sub_trades
+               if st.get("stop_overshoot_r") is not None]
+        g["stop_overshoot_r"] = max(_ov) if _ov else None
         # The trailing method that actually ran, rather than whichever leg
         # happened to sort first.
         g["trail_method"] = next(
