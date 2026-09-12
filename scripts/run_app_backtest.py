@@ -80,21 +80,39 @@ async def run(args) -> dict:
         df = await DataFetcher.get_data_range(req.symbol, tf, start_dt - pd.Timedelta(days=warmup[tf]), end_dt)
         by_tf[tf] = (df.set_index(pd.to_datetime(df["time"], unit="s")) if "time" in df.columns else df).sort_index()
     primary = sorted(required, key=lambda t: tf_min.get(t, 999))[0]
-    if len(required) != 1:
-        raise SystemExit("multi-timeframe strategies: use the Backtester page (this runner mirrors the single-TF loop)")
 
-    # ── the route's signal loop (single timeframe) ──
+    # ── the route's signal loop, multi-timeframe ──
+    # The fastest timeframe is the clock. A higher timeframe is fed only when it has
+    # produced a NEW fully-closed bar as of the current moment (the same cutoff the
+    # route uses), so an H4 strategy never sees a half-formed H4 candle.
+    np_td = {"M1": (1, "m"), "M5": (5, "m"), "M15": (15, "m"), "M30": (30, "m"),
+             "H1": (1, "h"), "H4": (4, "h"), "D1": (1, "D")}
     df = by_tf[primary]
     times = df.index.values
-    w = window_bars(primary)
+    tf_times = {tf: by_tf[tf].index.values for tf in required}
+    prev_time_by_tf: dict[str, object] = {tf: None for tf in required}
     cutoff = np.datetime64(start_dt)
     signals = []
     for i in range(300, len(times)):
-        sl = df.iloc[max(0, i - w):i]
-        if len(sl) < 20:
-            continue
-        sig = await engine.on_bar(req.symbol, primary, sl)
-        if sig and times[i] >= cutoff:
+        current_time = times[i]
+        sig = None
+        for tf in required:
+            if tf == primary:
+                tf_end, last_tf_time = i, times[i]
+            else:
+                htf_cut = current_time - np.timedelta64(*np_td[tf])
+                tf_end = int(np.searchsorted(tf_times[tf], htf_cut, side="right"))
+                last_tf_time = tf_times[tf][tf_end - 1] if tf_end > 0 else None
+            if last_tf_time is None or last_tf_time == prev_time_by_tf[tf]:
+                continue
+            sl = by_tf[tf].iloc[max(0, tf_end - window_bars(tf)):tf_end]
+            if len(sl) < 20:
+                continue
+            s = await engine.on_bar(req.symbol, tf, sl)
+            if s:
+                sig = s
+            prev_time_by_tf[tf] = last_tf_time
+        if sig and current_time >= cutoff:
             # Same stamping rule as the route: the signal belongs to the last bar in
             # the slice (i-1), so the engine fills it at bar i's open — live's price.
             _signal_bar_time = int(times[i - 1].astype("datetime64[s]").astype(int))
@@ -120,7 +138,12 @@ async def run(args) -> dict:
     if getattr(args, "dump", None):
         keep = ("entry_time", "exit_time", "direction", "entry_price", "exit_price", "stop_loss", "take_profit",
                 "volume", "pnl", "exit_reason", "balance_before", "balance_after", "spread_cost", "commission",
-                "slippage_cost", "stop_overshoot_r", "gap_fill")
+                "slippage_cost", "stop_overshoot_r", "gap_fill",
+                # Excursion, so one far-target run yields every R:R and scale-out
+                # variant analytically: a target is reached exactly when favourable
+                # excursion gets there before the stop.
+                "mae_pips", "mfe_pips", "mae_r", "mfe_r", "risk_pips", "initial_stop_loss",
+                "original_sl", "tp_level", "group_id", "symbol", "confluence_score")
         Path(args.dump).write_text(json.dumps([{k: t.get(k) for k in keep} for t in res.get("trades", [])],
                                               default=str, indent=1), encoding="utf-8")
         out["dumped_trades_to"] = args.dump
