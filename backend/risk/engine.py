@@ -74,6 +74,12 @@ class RiskEngine:
         self.min_stop_cost_multiple = config.get("min_stop_cost_multiple", 0.0)
         self.confluence_risk_tiers = config.get("confluence_risk_tiers")
         self.reject_below_confluence = config.get("reject_below_confluence", True)
+        # [P5.1] Volatility targeting. None/0 = off, and off is the shipped
+        # default so every existing run reproduces exactly. See risk/vol_target.py.
+        self.vol_target_annual_pct = config.get("vol_target_annual_pct")
+        self.vol_target_lookback_bars = int(config.get("vol_target_lookback_bars", 20) or 20)
+        self.vol_target_min_scale = float(config.get("vol_target_min_scale", 0.5) or 0.5)
+        self.vol_target_max_scale = float(config.get("vol_target_max_scale", 2.0) or 2.0)
         self.post_split_risk_tolerance_pct = config.get("post_split_risk_tolerance_pct", 5.0)
         self.open_risk_weight = config.get("open_risk_weight", 0.5)
         # [3.5/E3] RiskParams.min_sl_pips — defined (default 10.0 in
@@ -312,6 +318,35 @@ class RiskEngine:
                 return False, f"Confluence score {confluence_score} below minimum threshold for risk deployment", []
         else:
             effective_base_risk_pct = base_risk_pct
+
+        # [P5.1] Volatility targeting, applied AFTER confluence scaling so the two
+        # compose: confluence says how much conviction this setup carries, vol
+        # targeting says what that conviction is worth in the current regime.
+        # Off by default — `vol_target_annual_pct` of None returns scale 1.0 and
+        # this whole block is a no-op, so existing runs reproduce exactly.
+        _vol_result = None
+        if self.vol_target_annual_pct:
+            from backend.risk.vol_target import resolve_vol_scale
+            _closes = [
+                bar.get("close") for bar in (signal_data.get("chart_data") or [])
+                if isinstance(bar, dict) and bar.get("close") is not None
+            ]
+            _vol_result = resolve_vol_scale(
+                effective_base_risk_pct, _closes,
+                target_vol_annual_pct=self.vol_target_annual_pct,
+                lookback=self.vol_target_lookback_bars,
+                timeframe=signal_data.get("timeframe") or "M15",
+                min_scale=self.vol_target_min_scale,
+                max_scale=self.vol_target_max_scale,
+            )
+            effective_base_risk_pct = _vol_result.scaled_risk_pct
+            logger.info(json.dumps({
+                "event": "vol_target_applied",
+                "symbol": signal_data.get("symbol"),
+                "scale": round(_vol_result.scale, 4),
+                "binding": _vol_result.binding,
+                "detail": _vol_result.explain(),
+            }))
 
         # Both live and backtest use MT5 data when available → InstrumentProfile fallback.
         # This matches how _calc_pnl() works (MT5 first via get_symbol_info).
@@ -635,6 +670,15 @@ class RiskEngine:
         signal_data.setdefault("metadata", {})["sizing_diagnostics"] = {
             "requested_risk_pct": round(base_risk_pct, 4),  # [12.6] slot override, or global if none
             "confluence_scaled_pct": round(effective_base_risk_pct, 4),
+            # [P5.1] What volatility targeting did, or that it was off. Recorded
+            # so a run's sizing can be reconstructed from its own output rather
+            # than inferred from the config that was live at the time.
+            "vol_target_scale": round(_vol_result.scale, 4) if _vol_result else None,
+            "vol_target_binding": _vol_result.binding if _vol_result else "disabled",
+            "realised_vol_annual_pct": (
+                round(_vol_result.realised_vol_annual * 100, 3)
+                if _vol_result and _vol_result.realised_vol_annual is not None else None
+            ),
             "dd_scaled_pct": round(effective_risk_pct, 4),
             "raw_lot": sizer_diag.get("raw_lot"),
             "broker_volume_clamp": sizer_diag.get("broker_volume_clamp"),

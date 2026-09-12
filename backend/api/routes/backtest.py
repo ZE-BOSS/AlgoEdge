@@ -138,16 +138,8 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
     "APA_v1": "apa",
     "VWAP_v1": "vwap",
     "DriftJumpAlpha_v1": "drift_jump_alpha",
-    "CRT_v1": "crt",
-    "HTFFVGFlip_v1": "htf_fvg_flip",
-    "BiasIFVG_v1": "bias_ifvg",
-    "NYOpenRetest_v1": "ny_open_retest",
     "BoomDriftJump_v1": "boom_drift_jump",
-    "SpikeFade_v1": "synth",
-    "RangeRevert_v1": "synth",
-    "RangeBreakout_v1": "synth",
-    "TrendDrift_v1": "synth",
-    "SpikeRide_v1": "synth",   # [P2] the other side of SpikeFade
+    "ORB_v1": "orb",
 }
 
 
@@ -351,6 +343,12 @@ class BacktestRequest(BaseModel):
     # EMPIRICAL samples the per-symbol quantile table. See fill_model.py.
     stop_fill_model: str | None = None
     stop_fill_seed: str | None = None
+    # [P5.1] Volatility-targeted sizing. None = off, reproducing every
+    # existing run exactly. See backend/risk/vol_target.py.
+    vol_target_annual_pct: float | None = None
+    vol_target_lookback_bars: int | None = None
+    vol_target_min_scale: float | None = None
+    vol_target_max_scale: float | None = None
 
 def strategy_defaults_to_apply(req, strategy_defaults: dict) -> dict:
     """Which measured strategy defaults this request has NOT overridden.
@@ -535,6 +533,12 @@ class PortfolioBacktestRequest(BaseModel):
     # EMPIRICAL samples the per-symbol quantile table. See fill_model.py.
     stop_fill_model: str | None = None
     stop_fill_seed: str | None = None
+    # [P5.1] Volatility-targeted sizing. None = off, reproducing every
+    # existing run exactly. See backend/risk/vol_target.py.
+    vol_target_annual_pct: float | None = None
+    vol_target_lookback_bars: int | None = None
+    vol_target_min_scale: float | None = None
+    vol_target_max_scale: float | None = None
 
 
 async def reconcile_orphaned_runs() -> int:
@@ -809,11 +813,7 @@ async def run_backtest_endpoint(
                 from backend.strategies.strategy_defaults import get_strategy_defaults
                 _sd = get_strategy_defaults(req.strategy_id)
                 if "session_filter_enabled" in _sd and req.session_filter_enabled is None:
-                    _target = {
-                        "APA_v1": "apa", "VWAP_v1": "vwap", "CRT_v1": "crt",
-                        "BiasIFVG_v1": "bias_ifvg", "HTFFVGFlip_v1": "htf_fvg_flip",
-                        "NYOpenRetest_v1": "ny_open_retest",
-                    }.get(req.strategy_id)
+                    _target = {"APA_v1": "apa", "VWAP_v1": "vwap"}.get(req.strategy_id)
                     _blk = getattr(config, _target, None) if _target else None
                     if _blk is not None and hasattr(_blk, "session_filter_enabled"):
                         _blk.session_filter_enabled = _sd["session_filter_enabled"]
@@ -1054,10 +1054,21 @@ async def run_backtest_endpoint(
                         prev_time_by_tf[tf] = last_tf_time
 
                     if sig and not is_warmup:
+                        # [P6.1] Stamp the signal with the bar that PRODUCED it, not with
+                        # `current_time`. The engine fills a signal on the first bar whose
+                        # open is strictly after `sig["time"]` (engine.py's lookahead
+                        # guard), and the slice handed to on_bar above ends at bar i-1 —
+                        # so stamping bar i's open made every entry fill at bar i+1, one
+                        # whole bar later than live, which fills at the first price after
+                        # bar i-1 closes (= bar i's open). Measured on ORB_v1/GBPJPY over
+                        # the last 8 months: all 152 entries were one M15 bar late and the
+                        # run booked +21.7R against +32.0R for the same setups filled at
+                        # live's price (tick-replay confirms +0.18R/trade).
+                        _signal_bar_time = int(_rep_t[i - 1])
                         sig_dict = {
                             "symbol": sig.symbol,
                             "direction": sig.direction,
-                            "time": int(current_time.astype('datetime64[s]').astype(int)) if hasattr(current_time, 'astype') else int(current_time),
+                            "time": _signal_bar_time,
                             "entry_price": sig.entry_price,
                             "stop_loss": sig.stop_loss,
                             "take_profit": sig.take_profit,
@@ -1103,129 +1114,7 @@ async def run_backtest_endpoint(
             signals = await generate_signals_simulated()
             candles = indexed_by_tf.get("M5", indexed_by_tf[primary_tf])
 
-            merged_risk_config = {
-                "risk_per_trade_pct": req.risk_per_trade_pct,
-                "min_rr": req.min_rr,
-                "tp_count": req.tp_count,
-                "tp1_rr": req.tp1_rr,
-                "tp2_rr": req.tp2_rr,
-                "tp3_rr": req.tp3_rr,
-                "tp4_rr": req.tp4_rr,
-                "tp5_rr": req.tp5_rr,
-                "tp_splits": req.tp_splits,
-                "be_trigger_rr": req.be_trigger_rr,
-                "be_buffer_pips": req.be_buffer_pips,
-                "be_buffer_atr_mult": getattr(req, "be_buffer_atr_mult", 0.0) if hasattr(req, "be_buffer_atr_mult") else req.risk_config.get("be_buffer_atr_mult", 0.0),
-                "trail_method_tp2": req.trail_method_tp2,
-                "trail_method_tp3": req.trail_method_tp3,
-                "trail_method_tp4": req.trail_method_tp4,
-                "trail_method_tp5": req.trail_method_tp5,
-                "atr_trail_multiplier": req.atr_trail_multiplier,
-                "trail_pips": req.trail_pips,
-                "session_filter_enabled": req.session_filter_enabled,
-                "multi_position_mode": req.tp_count > 1,
-                "max_daily_drawdown_pct": req.max_daily_drawdown_pct,
-                "max_weekly_drawdown_pct": req.max_weekly_drawdown_pct,
-                "max_concurrent_positions": req.max_concurrent_positions,
-                "max_positions_per_symbol": req.max_positions_per_symbol,
-                "max_daily_trades": req.max_daily_trades,
-                "target_profit_enabled": req.target_profit_enabled,
-                "max_daily_profit": req.max_daily_profit,
-                "max_weekly_profit": req.max_weekly_profit,
-                "manual_bias_overrides": req.manual_bias_overrides,
-                "prop_firm": req.prop_firm,
-                "max_risk_hard_cap_pct": req.max_risk_hard_cap_pct,
-                # Simulation costs and wick simulation.
-                # None values are passed through deliberately: the engine reads
-                # them as "unset" and sources the value from broker data
-                # (live MT5 -> asset-class default). Explicit numbers still win.
-                "slippage_pips": req.slippage_pips,
-                "commission_per_lot": req.commission_per_lot,
-                "spread_pips": req.spread_pips,
-                "swap_long_per_lot_per_day": req.swap_long_per_lot_per_day,
-                "swap_short_per_lot_per_day": req.swap_short_per_lot_per_day,
-                "stops_level_pips": req.stops_level_pips,
-                "simulate_wicks": req.simulate_wicks,
-                "stop_fill_model": req.stop_fill_model,
-                "stop_fill_seed": req.stop_fill_seed,
-                # Strategy attribution: signal dicts carry no strategy_id, so the
-                # engine falls back to this when stamping trades (was "UNKNOWN"
-                # on every saved grouped_trade).
-                "strategy_id": req.strategy_id,
-                # [2.15] Per-strategy TP1 RR override — see DriftJumpAlphaParams.tp1_rr_override.
-                # [17.1] Single-symbol runs resolve through the same slot map as
-                # live, so a backtest and a live trade on the same symbol+strategy
-                # read their target from identical code.
-                # [18.3] Measured defaults seeded first; the request's own
-                # tp1_rr wins, so the UI still controls the run.
-                "tp1_rr_overrides_by_slot": {
-                    **get_slot_tp1_rr_defaults(),
-                    f"{req.symbol.upper()}|{req.strategy_id}": req.tp1_rr,
-                },
-                "tp_count_overrides_by_slot": {
-                    f"{req.symbol.upper()}|{req.strategy_id}": req.tp_count
-                },
-                "tp1_rr_overrides_by_strategy": (
-                    {req.strategy_id: req.strategy_params["tp1_rr_override"]}
-                    if req.strategy_params.get("tp1_rr_override") is not None else {}
-                ),
-                # [Phase 2 sizing-truth] only merged when explicitly set — None
-                # left out entirely so risk/engine.py's own None-means-default
-                # resolution (matching RiskParams) is what actually applies.
-                **{
-                    k: v for k, v in {
-                        "max_margin_utilisation_pct": req.max_margin_utilisation_pct,
-                        "min_deployable_risk_pct": req.min_deployable_risk_pct,
-                        "min_stop_spread_multiple": req.min_stop_spread_multiple,
-                        "confluence_risk_tiers": req.confluence_risk_tiers,
-                        "reject_below_confluence": req.reject_below_confluence,
-                        "post_split_risk_tolerance_pct": req.post_split_risk_tolerance_pct,
-                        "exit_slippage_pips": req.exit_slippage_pips,
-                        "open_risk_weight": req.open_risk_weight,
-                        "allow_pyramiding": req.allow_pyramiding,
-                        "min_bars_between_entries": req.min_bars_between_entries,
-                        "max_account_leverage": req.max_account_leverage,
-                        "min_sl_pips": req.min_sl_pips,
-                        "sizing_basis": req.sizing_basis,
-                        "be_spread_multiple": req.be_spread_multiple,
-                        "trail_require_be_first": req.trail_require_be_first,
-                        "be_mode": req.be_mode,
-                        "be_trigger_tp_level": req.be_trigger_tp_level,
-                        "trail_method_tp1": req.trail_method_tp1,
-                        "trail_mode": req.trail_mode,
-                        "trail_trigger_rr": req.trail_trigger_rr,
-                        "trail_trigger_tp_level": req.trail_trigger_tp_level,
-                        "tp_volume_pcts": req.tp_volume_pcts,
-                        "max_cluster_risk_pct": req.max_cluster_risk_pct,
-                        "max_net_direction_risk_pct": req.max_net_direction_risk_pct,
-                        "symbol_cluster_overrides": req.symbol_cluster_overrides,
-                        "strategy_risk_budget_pct": req.strategy_risk_budget_pct,
-                    }.items() if v is not None
-                },
-                **req.risk_config,
-            }
-
-            # ── Per-strategy exit defaults ────────────────────────────────
-            # Trailing / break-even used to be one global setting for all seven
-            # strategies. Measurement says that cannot be right: the 15-cell
-            # trailing sweep improved 10 cells and made 5 WORSE, with nearly all
-            # the gain in NYOpenRetest (+1,765 PnL) while DriftJumpAlpha lost
-            # 1,299 on Crash 1000. So the unit is the strategy.
-            #
-            # Applied only where the request left the field unset, so anything
-            # the user explicitly chose still wins.
-            from backend.strategies.strategy_defaults import (
-                get_strategy_defaults, get_strategy_evidence,
-            )
-            _sdefaults = get_strategy_defaults(req.strategy_id)
-            _applied = strategy_defaults_to_apply(req, _sdefaults)
-            merged_risk_config.update(_applied)
-            if _applied:
-                logger.info(
-                    f"[BACKTEST] Applied {req.strategy_id} exit defaults: {_applied} "
-                    f"| {get_strategy_evidence(req.strategy_id)}"
-                )
-            merged_risk_config["_strategy_defaults_applied"] = _applied
+            merged_risk_config = build_merged_risk_config(req)
 
             current_state = await _get_state()
             # [T2.1] The simulation reports its own progress across 35-90 via
@@ -1363,6 +1252,9 @@ async def run_backtest_endpoint(
                 "cost_model": results.get("cost_model", {}),
                 # [P1.2] What the stop-fill model actually charged this run.
                 "fill_model": results.get("fill_model", {}),
+                # [P5.9/P5.10] The overlap-aware verdict — read this before
+                # profit_factor, which treats overlapping trades as independent.
+                "significance": results.get("significance", {}),
                 "log_session_id": log_session_id,
                 "report": {
                     "win_rate": report.win_rate if report else 0,
@@ -1598,6 +1490,10 @@ async def run_portfolio_backtest_endpoint(
                 "simulate_wicks": req.simulate_wicks,
                 "stop_fill_model": req.stop_fill_model,
                 "stop_fill_seed": req.stop_fill_seed,
+                "vol_target_annual_pct": req.vol_target_annual_pct,
+                "vol_target_lookback_bars": req.vol_target_lookback_bars,
+                "vol_target_min_scale": req.vol_target_min_scale,
+                "vol_target_max_scale": req.vol_target_max_scale,
                 # [2.15] Per-strategy TP1 RR override — see DriftJumpAlphaParams.tp1_rr_override.
                 "tp1_rr_overrides_by_strategy": {
                     sym_cfg.strategy_id: sym_cfg.strategy_params["tp1_rr_override"]
@@ -2046,6 +1942,9 @@ async def run_portfolio_backtest_endpoint(
                 "cost_model": results.get("cost_model", {}),
                 # [P1.2] What the stop-fill model actually charged this run.
                 "fill_model": results.get("fill_model", {}),
+                # [P5.9/P5.10] The overlap-aware verdict — read this before
+                # profit_factor, which treats overlapping trades as independent.
+                "significance": results.get("significance", {}),
                 "params_snapshot": {
                     **(req.model_dump() if hasattr(req, "model_dump") else req.dict()),
                     "resolved_cost_model": results.get("cost_model", {}),
@@ -2964,3 +2863,138 @@ async def get_bulk_backtests(
         })
         
     return {"data": response}
+
+def build_merged_risk_config(req: "BacktestRequest") -> dict[str, Any]:
+    """The risk config a single-symbol Backtester run hands the engine.
+
+    Module-level so a headless run (scripts/run_app_backtest.py) builds exactly
+    what this route builds. A second hand-copied version would drift, and the
+    whole point of that script is that its numbers match the Backtester page."""
+    merged_risk_config = {
+        "risk_per_trade_pct": req.risk_per_trade_pct,
+        "min_rr": req.min_rr,
+        "tp_count": req.tp_count,
+        "tp1_rr": req.tp1_rr,
+        "tp2_rr": req.tp2_rr,
+        "tp3_rr": req.tp3_rr,
+        "tp4_rr": req.tp4_rr,
+        "tp5_rr": req.tp5_rr,
+        "tp_splits": req.tp_splits,
+        "be_trigger_rr": req.be_trigger_rr,
+        "be_buffer_pips": req.be_buffer_pips,
+        "be_buffer_atr_mult": getattr(req, "be_buffer_atr_mult", 0.0) if hasattr(req, "be_buffer_atr_mult") else req.risk_config.get("be_buffer_atr_mult", 0.0),
+        "trail_method_tp2": req.trail_method_tp2,
+        "trail_method_tp3": req.trail_method_tp3,
+        "trail_method_tp4": req.trail_method_tp4,
+        "trail_method_tp5": req.trail_method_tp5,
+        "atr_trail_multiplier": req.atr_trail_multiplier,
+        "trail_pips": req.trail_pips,
+        "session_filter_enabled": req.session_filter_enabled,
+        "multi_position_mode": req.tp_count > 1,
+        "max_daily_drawdown_pct": req.max_daily_drawdown_pct,
+        "max_weekly_drawdown_pct": req.max_weekly_drawdown_pct,
+        "max_concurrent_positions": req.max_concurrent_positions,
+        "max_positions_per_symbol": req.max_positions_per_symbol,
+        "max_daily_trades": req.max_daily_trades,
+        "target_profit_enabled": req.target_profit_enabled,
+        "max_daily_profit": req.max_daily_profit,
+        "max_weekly_profit": req.max_weekly_profit,
+        "manual_bias_overrides": req.manual_bias_overrides,
+        "prop_firm": req.prop_firm,
+        "max_risk_hard_cap_pct": req.max_risk_hard_cap_pct,
+        # Simulation costs and wick simulation.
+        # None values are passed through deliberately: the engine reads
+        # them as "unset" and sources the value from broker data
+        # (live MT5 -> asset-class default). Explicit numbers still win.
+        "slippage_pips": req.slippage_pips,
+        "commission_per_lot": req.commission_per_lot,
+        "spread_pips": req.spread_pips,
+        "swap_long_per_lot_per_day": req.swap_long_per_lot_per_day,
+        "swap_short_per_lot_per_day": req.swap_short_per_lot_per_day,
+        "stops_level_pips": req.stops_level_pips,
+        "simulate_wicks": req.simulate_wicks,
+        "stop_fill_model": req.stop_fill_model,
+        "stop_fill_seed": req.stop_fill_seed,
+        "vol_target_annual_pct": req.vol_target_annual_pct,
+        "vol_target_lookback_bars": req.vol_target_lookback_bars,
+        "vol_target_min_scale": req.vol_target_min_scale,
+        "vol_target_max_scale": req.vol_target_max_scale,
+        # Strategy attribution: signal dicts carry no strategy_id, so the
+        # engine falls back to this when stamping trades (was "UNKNOWN"
+        # on every saved grouped_trade).
+        "strategy_id": req.strategy_id,
+        # [2.15] Per-strategy TP1 RR override — see DriftJumpAlphaParams.tp1_rr_override.
+        # [17.1] Single-symbol runs resolve through the same slot map as
+        # live, so a backtest and a live trade on the same symbol+strategy
+        # read their target from identical code.
+        # [18.3] Measured defaults seeded first; the request's own
+        # tp1_rr wins, so the UI still controls the run.
+        "tp1_rr_overrides_by_slot": {
+            **get_slot_tp1_rr_defaults(),
+            f"{req.symbol.upper()}|{req.strategy_id}": req.tp1_rr,
+        },
+        "tp_count_overrides_by_slot": {
+            f"{req.symbol.upper()}|{req.strategy_id}": req.tp_count
+        },
+        "tp1_rr_overrides_by_strategy": (
+            {req.strategy_id: req.strategy_params["tp1_rr_override"]}
+            if req.strategy_params.get("tp1_rr_override") is not None else {}
+        ),
+        # [Phase 2 sizing-truth] only merged when explicitly set — None
+        # left out entirely so risk/engine.py's own None-means-default
+        # resolution (matching RiskParams) is what actually applies.
+        **{
+            k: v for k, v in {
+                "max_margin_utilisation_pct": req.max_margin_utilisation_pct,
+                "min_deployable_risk_pct": req.min_deployable_risk_pct,
+                "min_stop_spread_multiple": req.min_stop_spread_multiple,
+                "confluence_risk_tiers": req.confluence_risk_tiers,
+                "reject_below_confluence": req.reject_below_confluence,
+                "post_split_risk_tolerance_pct": req.post_split_risk_tolerance_pct,
+                "exit_slippage_pips": req.exit_slippage_pips,
+                "open_risk_weight": req.open_risk_weight,
+                "allow_pyramiding": req.allow_pyramiding,
+                "min_bars_between_entries": req.min_bars_between_entries,
+                "max_account_leverage": req.max_account_leverage,
+                "min_sl_pips": req.min_sl_pips,
+                "sizing_basis": req.sizing_basis,
+                "be_spread_multiple": req.be_spread_multiple,
+                "trail_require_be_first": req.trail_require_be_first,
+                "be_mode": req.be_mode,
+                "be_trigger_tp_level": req.be_trigger_tp_level,
+                "trail_method_tp1": req.trail_method_tp1,
+                "trail_mode": req.trail_mode,
+                "trail_trigger_rr": req.trail_trigger_rr,
+                "trail_trigger_tp_level": req.trail_trigger_tp_level,
+                "tp_volume_pcts": req.tp_volume_pcts,
+                "max_cluster_risk_pct": req.max_cluster_risk_pct,
+                "max_net_direction_risk_pct": req.max_net_direction_risk_pct,
+                "symbol_cluster_overrides": req.symbol_cluster_overrides,
+                "strategy_risk_budget_pct": req.strategy_risk_budget_pct,
+            }.items() if v is not None
+        },
+        **req.risk_config,
+    }
+
+    # ── Per-strategy exit defaults ────────────────────────────────
+    # Trailing / break-even used to be one global setting for all seven
+    # strategies. Measurement says that cannot be right: the 15-cell
+    # trailing sweep improved 10 cells and made 5 WORSE, with nearly all
+    # the gain in NYOpenRetest (+1,765 PnL) while DriftJumpAlpha lost
+    # 1,299 on Crash 1000. So the unit is the strategy.
+    #
+    # Applied only where the request left the field unset, so anything
+    # the user explicitly chose still wins.
+    from backend.strategies.strategy_defaults import (
+        get_strategy_defaults, get_strategy_evidence,
+    )
+    _sdefaults = get_strategy_defaults(req.strategy_id)
+    _applied = strategy_defaults_to_apply(req, _sdefaults)
+    merged_risk_config.update(_applied)
+    if _applied:
+        logger.info(
+            f"[BACKTEST] Applied {req.strategy_id} exit defaults: {_applied} "
+            f"| {get_strategy_evidence(req.strategy_id)}"
+        )
+    merged_risk_config["_strategy_defaults_applied"] = _applied
+    return merged_risk_config

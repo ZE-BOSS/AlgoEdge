@@ -426,10 +426,6 @@ def _load_strategy_spec(strategy_id: str) -> str | None:
     stems = {
         "APA_v1": ["apa_strategy_implementation_plan"],
         "VWAP_v1": ["vwap_strategy_v2", "vwap_strategy_implementation_plan"],
-        "CRT_v1": ["CRT_Strategy_Spec"],
-        "HTFFVGFlip_v1": ["strategy-1-htf-fvg-flip"],
-        "BiasIFVG_v1": ["strategy-2-bias-keylevel-ifvg"],
-        "NYOpenRetest_v1": ["strategy-3-nyopen-break-retest"],
     }.get(strategy_id, [])
     for stem in stems:
         p = docs / f"{stem}.md"

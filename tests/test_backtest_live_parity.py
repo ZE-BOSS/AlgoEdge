@@ -181,8 +181,8 @@ def test_backtester_seeds_strategy_blocks_from_the_saved_config():
     from pathlib import Path
 
     js = Path("frontend/src/pages/Backtester.jsx").read_text(encoding="utf-8")
-    for block in ("synth", "apa", "vwap", "crt", "drift_jump_alpha",
-                  "boom_drift_jump", "htf_fvg_flip", "bias_ifvg", "ny_open_retest"):
+    for block in ("apa", "vwap", "orb", "drift_jump_alpha",
+                  "boom_drift_jump"):
         good = f"merged.{block} = {{ ...(prev.{block} || {{}}), ...(c.{block} || {{}}) }};"
         bad = f"merged.{block} = {{ ...(c.{block} || {{}}), ...(prev.{block} || {{}}) }};"
         assert good in js, f"{block}: saved config must be spread last so it wins"

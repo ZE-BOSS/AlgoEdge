@@ -590,6 +590,10 @@ class PositionManager:
                 if await self._check_vwap_hard_close(pos, live_pos, session, config):
                     continue
 
+                # --- ORB session close (part of the tested rule, not an add-on) ---
+                if await self._check_orb_session_close(pos, live_pos, session, config):
+                    continue
+
                 # --- 1. BREAKEVEN LOGIC ---
                 # [5.1/5.5/Part4] be_mode: RR-triggered BE only fires under RR/EITHER —
                 # TP_HIT is handled entirely by the CASCADE block further down, which
@@ -1009,6 +1013,59 @@ class PositionManager:
             return success
         except Exception as e:
             logger.error(f"Error enforcing VWAP hard close for ticket {getattr(live_pos, 'ticket', '?')}: {e}")
+            return False
+
+    async def _check_orb_session_close(self, pos, live_pos, session, config) -> bool:
+        """
+        ORB_v1 flattens at the close of the session it entered in. The backtester
+        applies that through ORBStrategy.on_position_bar; live positions are managed
+        here instead, so without this a live ORB trade would be held overnight — and
+        holding past the close was measured to turn BTCUSD's and XAUUSD's
+        profitable periods flat.
+
+        The session is resolved the way the live engine is configured: the global
+        ORB block, then the measured per-symbol table, then the slot's own override.
+        Returns True if the position was closed this cycle.
+        """
+        try:
+            import calendar
+            import time as _time
+
+            from backend.data.models import Trade
+
+            orb = getattr(config, "orb", None)
+            if orb is None or not getattr(orb, "close_at_session_end", True):
+                return False
+            trade = await session.get(Trade, pos.parent_trade_id)
+            if not trade or trade.strategy_id != "ORB_v1":
+                return False
+
+            from backend.strategies.strategy_defaults import get_synth_slot_params
+            from backend.strategies.strategy_orb.engine import SESSIONS, session_bounds
+
+            symbol = live_pos.symbol
+            sess = get_synth_slot_params(symbol, "ORB_v1").get("session", getattr(orb, "session", "london"))
+            for slot in getattr(config, "instrument_slots", None) or []:
+                if slot.symbol == symbol and slot.strategy_id == "ORB_v1":
+                    sess = (getattr(slot, "strategy_params_override", None) or {}).get("session", sess)
+                    break
+            if sess not in SESSIONS:
+                return False
+
+            entered = trade.entry_time or datetime.utcfromtimestamp(live_pos.time)
+            _, close_ts = session_bounds(sess, calendar.timegm(entered.utctimetuple()))
+            if _time.time() < close_ts:
+                return False
+
+            from backend.mt5.order_manager import OrderManager
+            success = await OrderManager.close_position(live_pos.ticket)
+            if success:
+                logger.info(f"[ORB] Session close: ticket {live_pos.ticket} ({symbol}) flattened after the {sess} close")
+            else:
+                logger.warning(f"[ORB] Session-close attempt failed for ticket {live_pos.ticket} — will retry next cycle")
+            return success
+        except Exception as e:
+            logger.error(f"Error enforcing ORB session close for ticket {getattr(live_pos, 'ticket', '?')}: {e}")
             return False
 
     async def _modify_sl(self, ticket: int, symbol: str, new_sl: float) -> bool:

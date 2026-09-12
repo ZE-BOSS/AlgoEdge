@@ -60,25 +60,15 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
   const updateApa = (k, v) => setForm({ ...form, apa: { ...apa, [k]: v } });
   const dja = form.drift_jump_alpha || {};
   const updateDja = (k, v) => setForm({ ...form, drift_jump_alpha: { ...dja, [k]: v } });
-  const crt = form.crt || {};
-  const updateCrt = (k, v) => setForm({ ...form, crt: { ...crt, [k]: v } });
   // Each remaining strategy keeps its own nested slice so that identically-named
   // backend fields (target_rr, session_start, session_cutoff, min_sl_pips, …) do
   // not collide between strategies the way the old flat top-level fields did.
   const vwap = form.vwap || {};
   const updateVwap = (k, v) => setForm({ ...form, vwap: { ...vwap, [k]: v } });
-  const htfFvg = form.htf_fvg_flip || {};
-  const updateHtfFvg = (k, v) => setForm({ ...form, htf_fvg_flip: { ...htfFvg, [k]: v } });
-  const biasIfvg = form.bias_ifvg || {};
-  const updateBiasIfvg = (k, v) => setForm({ ...form, bias_ifvg: { ...biasIfvg, [k]: v } });
-  const nyOpen = form.ny_open_retest || {};
-  const updateNyOpen = (k, v) => setForm({ ...form, ny_open_retest: { ...nyOpen, [k]: v } });
+  const orb = form.orb || {};
+  const updateOrb = (k, v) => setForm({ ...form, orb: { ...orb, [k]: v } });
   const boom = form.boom_drift_jump || {};
   const updateBoom = (k, v) => setForm({ ...form, boom_drift_jump: { ...boom, [k]: v } });
-  // SpikeFade / RangeRevert / RangeBreakout / TrendDrift all read the same
-  // backend dataclass (SynthParams), so they share one slice here too.
-  const synth = form.synth || {};
-  const updateSynth = (k, v) => setForm({ ...form, synth: { ...synth, [k]: v } });
 
   if (strategyId === 'APA_v1') {
     return (
@@ -155,26 +145,6 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
       </div>
     );
   }
-  if (strategyId === 'CRT_v1') {
-    return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-        <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><select value={crt.htf_timeframe} onChange={e => updateCrt('htf_timeframe', e.target.value)}>{['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-        <div><label style={{ fontSize: '0.7rem' }}>LTF Timeframe</label><select value={crt.ltf_timeframe} onChange={e => updateCrt('ltf_timeframe', e.target.value)}>{['M1', 'M5', 'M15'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Target R-Multiple</label><input type="number" step="0.1" value={crt.target_r_multiple} onChange={e => updateCrt('target_r_multiple', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Session</label><input type="number" value={crt.max_trades_per_session} onChange={e => updateCrt('max_trades_per_session', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Session Start (ET)</label><input type="text" value={crt.session_start} onChange={e => updateCrt('session_start', e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff (ET)</label><input type="text" value={crt.session_cutoff} onChange={e => updateCrt('session_cutoff', e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={crt.min_sl_pips} onChange={e => updateCrt('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Hard stop floor — stops a tiny CRT candle producing a sub-spread stop. 0 disables.</div></div>
-        <div><label style={{ fontSize: '0.7rem' }}>SL ATR Multiplier</label><input type="number" step="0.1" min="0" value={crt.sl_atr_mult} onChange={e => updateCrt('sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>SL must also be ≥ this × ATR(14). Larger floor wins. 0 disables.</div></div>
-        <div style={{ gridColumn: '1 / -1' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}>
-            <input type="checkbox" checked={crt.bypass_session_synthetics ?? true} onChange={e => updateCrt('bypass_session_synthetics', e.target.checked)} />
-            Bypass Session Filter (Synthetics)
-          </label>
-        </div>
-      </div>
-    );
-  }
   if (strategyId === 'VWAP_v1') return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 8 }}>
       <div><label style={{ fontSize: '0.7rem' }}>VWAP Anchor (min)</label><input type="number" value={vwap.vwap_anchor_minutes} onChange={e => updateVwap('vwap_anchor_minutes', +e.target.value)} /></div>
@@ -188,49 +158,18 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
       <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" min="0" value={vwap.target_rr} onChange={e => updateVwap('target_rr', +e.target.value)} /></div>
     </div>
   );
-  if (strategyId === 'HTFFVGFlip_v1') return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-      <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><select value={htfFvg.htf_timeframe} onChange={e => updateHtfFvg('htf_timeframe', e.target.value)}>{['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Entry Confirm TF</label><select value={htfFvg.entry_confirmation_tf} onChange={e => updateHtfFvg('entry_confirmation_tf', e.target.value)}>{['M1', 'M5', 'M15'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={htfFvg.target_rr} onChange={e => updateHtfFvg('target_rr', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={htfFvg.session_start} onChange={e => updateHtfFvg('session_start', e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={htfFvg.session_cutoff} onChange={e => updateHtfFvg('session_cutoff', e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={htfFvg.sl_buffer_atr_mult} onChange={e => updateHtfFvg('sl_buffer_atr_mult', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={htfFvg.min_sl_pips} onChange={e => updateHtfFvg('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor. 0 disables.</div></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={htfFvg.min_sl_atr_mult} onChange={e => updateHtfFvg('min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative floor. Larger floor wins. 0 disables.</div></div>
-      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 16 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}><input type="checkbox" checked={htfFvg.require_unfilled_htf_fvg ?? true} onChange={e => updateHtfFvg('require_unfilled_htf_fvg', e.target.checked)} /> Require Unfilled HTF FVG</label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}><input type="checkbox" checked={htfFvg.session_filter_enabled ?? true} onChange={e => updateHtfFvg('session_filter_enabled', e.target.checked)} /> Session Filter Enabled</label>
-      </div>
-    </div>
-  );
-  if (strategyId === 'BiasIFVG_v1') return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-      <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={biasIfvg.target_rr} onChange={e => updateBiasIfvg('target_rr', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" value={biasIfvg.max_trades_per_day} onChange={e => updateBiasIfvg('max_trades_per_day', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>A+ Confluence Threshold</label><input type="number" min="0" max="100" value={biasIfvg.a_plus_confluence_threshold} onChange={e => updateBiasIfvg('a_plus_confluence_threshold', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Score a setup must reach to be taken (0–100).</div></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={biasIfvg.session_start} onChange={e => updateBiasIfvg('session_start', e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={biasIfvg.session_cutoff} onChange={e => updateBiasIfvg('session_cutoff', e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Rejection Min Body (× ATR)</label><input type="number" step="0.05" min="0" value={biasIfvg.rejection_min_body_atr_mult} onChange={e => updateBiasIfvg('rejection_min_body_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Minimum rejection-candle body size, so a doji cannot count as displacement.</div></div>
-      <div><label style={{ fontSize: '0.7rem' }}>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={biasIfvg.sl_buffer_atr_mult} onChange={e => updateBiasIfvg('sl_buffer_atr_mult', +e.target.value)} /></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={biasIfvg.min_sl_pips} onChange={e => updateBiasIfvg('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor. 0 disables.</div></div>
-      <div><label style={{ fontSize: '0.7rem' }}>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={biasIfvg.min_sl_atr_mult} onChange={e => updateBiasIfvg('min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative floor. Larger floor wins. 0 disables.</div></div>
-    </div>
-  );
-  if (strategyId === 'NYOpenRetest_v1') {
-    const rrMode = (nyOpen.target_mode || 'rr') === 'rr';
+  if (strategyId === 'ORB_v1') {
+    const useSym = orb.use_symbol_defaults ?? true;
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-        <div><label style={{ fontSize: '0.7rem' }}>Range Start</label><input type="text" value={nyOpen.range_window_start} onChange={e => updateNyOpen('range_window_start', e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Range End</label><input type="text" value={nyOpen.range_window_end} onChange={e => updateNyOpen('range_window_end', e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Earliest Break Time</label><input type="text" value={nyOpen.earliest_valid_break_time} onChange={e => updateNyOpen('earliest_valid_break_time', e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Session End</label><input type="text" value={nyOpen.session_end} onChange={e => updateNyOpen('session_end', e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Stop Buffer (pts)</label><input type="number" step="0.1" value={nyOpen.stop_buffer_points} onChange={e => updateNyOpen('stop_buffer_points', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>SL Buffer (× ATR)</label><input type="number" step="0.1" min="0" value={nyOpen.sl_buffer_atr_mult} onChange={e => updateNyOpen('sl_buffer_atr_mult', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Target Mode</label><select value={nyOpen.target_mode || 'rr'} onChange={e => updateNyOpen('target_mode', e.target.value)}><option value="rr">R-Multiple (scale-free)</option><option value="points">Fixed Points</option></select></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" min="0" value={nyOpen.target_rr} onChange={e => updateNyOpen('target_rr', +e.target.value)} disabled={!rrMode} style={rrMode ? undefined : { opacity: 0.5 }} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>{rrMode ? 'Target = this × the realised stop distance.' : 'Inactive while Target Mode is Fixed Points.'}</div></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Fixed Target (pts)</label><input type="number" step="0.1" value={nyOpen.fixed_target_points} onChange={e => updateNyOpen('fixed_target_points', +e.target.value)} disabled={rrMode} style={rrMode ? { opacity: 0.5 } : undefined} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>{rrMode ? 'Inactive while Target Mode is R-Multiple.' : 'NQ-native point ceiling; unreachable on most FX pairs.'}</div></div>
-        <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}><input type="checkbox" checked={nyOpen.dynamic_target_override ?? true} onChange={e => updateNyOpen('dynamic_target_override', e.target.checked)} /> Dynamic Target Override</label></div>
+        <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={useSym} onChange={e => updateOrb('use_symbol_defaults', e.target.checked)} /> Use the measured session &amp; range for this symbol (recommended)</label></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Session</label><select value={orb.session || 'london'} disabled={useSym} style={useSym ? { opacity: 0.5 } : undefined} onChange={e => updateOrb('session', e.target.value)}><option value="london">London (08:00 UK)</option><option value="ny">New York (09:30 ET)</option></select></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Range (minutes)</label><select value={orb.range_minutes ?? 60} disabled={useSym} style={useSym ? { opacity: 0.5 } : undefined} onChange={e => updateOrb('range_minutes', +e.target.value)}>{[15, 30, 45, 60, 90, 120].map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Breakout Window (min)</label><input type="number" step="15" min="15" value={orb.breakout_window_minutes ?? 180} onChange={e => updateOrb('breakout_window_minutes', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Side</label><select value={orb.side || 'both'} onChange={e => updateOrb('side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option><option value="short">Short only</option></select></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Min Stop (× ATR)</label><input type="number" step="0.05" min="0" value={orb.min_stop_atr ?? 0.25} onChange={e => updateOrb('min_stop_atr', +e.target.value)} /></div>
+        <div><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 18, fontSize: '0.75rem' }}><input type="checkbox" checked={orb.close_at_session_end ?? true} onChange={e => updateOrb('close_at_session_end', e.target.checked)} /> Close at session end</label></div>
+        <div style={{ gridColumn: '1 / -1', fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 6 }}>Trades the first M15 close beyond the opening range, once per session, and flattens at the session close. Target = the slot TP1 R:R. Measured per-symbol settings apply automatically: GBPJPY London 60m 1:3, BTCUSD New York 60m 1:1.5, XAUUSD New York 30m 1:2.</div>
       </div>
     );
   }
@@ -248,33 +187,6 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
         <div><label style={{ fontSize: '0.7rem' }}>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={boom.max_daily_risk_pct ?? 4.0} onChange={e => updateBoom('max_daily_risk_pct', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>ADX Gate Mode</label><select value={boom.adx_gate_mode || 'REDUCED_SIZE'} onChange={e => updateBoom('adx_gate_mode', e.target.value)}><option value="REDUCED_SIZE">Reduced size</option><option value="BLOCK">Block</option></select></div>
         <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 8, fontSize: '0.75rem' }}><input type="checkbox" checked={boom.trade_jumps_enabled ?? false} onChange={e => updateBoom('trade_jumps_enabled', e.target.checked)} /> Trade jump entries (Setup B)</label></div>
-      </div>
-    );
-  }
-
-  if (strategyId === 'SpikeFade_v1' || strategyId === 'RangeRevert_v1'
-      || strategyId === 'RangeBreakout_v1' || strategyId === 'TrendDrift_v1'
-      || strategyId === 'SpikeRide_v1') {
-    const isSpike = strategyId === 'SpikeFade_v1';
-    const isRevert = strategyId === 'RangeRevert_v1';
-    const isBreak = strategyId === 'RangeBreakout_v1';
-    const isDrift = strategyId === 'TrendDrift_v1';
-    return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-        <div><label style={{ fontSize: '0.7rem' }}>Stop (x ATR)</label><input type="number" step="0.5" min="0.1" value={synth.stop_atr_multiple ?? 5.0} onChange={e => updateSynth('stop_atr_multiple', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Keep wide: at 0.5x ATR the unmodelled spike gap is ~1 R/trade.</div></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Target R:R</label><input type="number" step="0.5" min="0.1" value={synth.tp1_rr ?? 5.0} onChange={e => updateSynth('tp1_rr', +e.target.value)} /></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" min="0" value={synth.max_trades_per_day ?? 6} onChange={e => updateSynth('max_trades_per_day', +e.target.value)} /></div>
-        {isSpike && <div><label style={{ fontSize: '0.7rem' }}>Spike Size (x ATR)</label><input type="number" step="0.5" min="0.5" value={synth.spike_k_atr ?? 3.0} onChange={e => updateSynth('spike_k_atr', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Bar must move this far one way to count as a spike.</div></div>}
-        {isRevert && <div><label style={{ fontSize: '0.7rem' }}>Stretch (x ATR)</label><input type="number" step="0.5" min="0.5" value={synth.revert_k_atr ?? 2.0} onChange={e => updateSynth('revert_k_atr', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Distance from the slow EMA before entering back toward it.</div></div>}
-        {isBreak && <div><label style={{ fontSize: '0.7rem' }}>Breakout Lookback (bars)</label><input type="number" min="2" value={synth.breakout_lookback ?? 20} onChange={e => updateSynth('breakout_lookback', +e.target.value)} /></div>}
-        {(isRevert || isDrift) && <div><label style={{ fontSize: '0.7rem' }}>EMA Fast</label><input type="number" min="2" value={synth.ema_fast ?? 20} onChange={e => updateSynth('ema_fast', +e.target.value)} /></div>}
-        {(isRevert || isDrift) && <div><label style={{ fontSize: '0.7rem' }}>EMA Slow</label><input type="number" min="3" value={synth.ema_slow ?? 50} onChange={e => updateSynth('ema_slow', +e.target.value)} /></div>}
-        {isDrift && <div><label style={{ fontSize: '0.7rem' }}>Min ADX to Trade</label><input type="number" min="0" value={synth.min_adx_to_trade ?? 20} onChange={e => updateSynth('min_adx_to_trade', +e.target.value)} disabled={!(synth.require_adx ?? true)} style={{ opacity: (synth.require_adx ?? true) ? 1 : 0.5 }} /></div>}
-        <div><label style={{ fontSize: '0.7rem' }}>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={synth.max_daily_risk_pct ?? 4.0} onChange={e => updateSynth('max_daily_risk_pct', +e.target.value)} /></div>
-        {isDrift && <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 8, fontSize: '0.75rem' }}><input type="checkbox" checked={synth.require_adx ?? true} onChange={e => updateSynth('require_adx', e.target.checked)} /> Require ADX trend filter</label></div>}
-        <div style={{ gridColumn: '1 / -1', fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 6 }}>
-          These four strategies share one backend params block (SynthParams), so a change here applies to all of them. Per-symbol shipped values live in strategy_defaults.py (SYNTH_SLOT_PARAMS).
-        </div>
       </div>
     );
   }
@@ -1544,26 +1456,17 @@ function buildPortfolioStrategyParams(strategyId, form) {
       return form.apa || {};
     case 'DriftJumpAlpha_v1':
       return form.drift_jump_alpha || {};
-    case 'CRT_v1':
-      return form.crt || {};
     case 'VWAP_v1':
       return form.vwap || {};
-    case 'HTFFVGFlip_v1':
-      return form.htf_fvg_flip || {};
-    case 'BiasIFVG_v1':
-      return form.bias_ifvg || {};
-    case 'NYOpenRetest_v1':
-      return form.ny_open_retest || {};
+    case 'ORB_v1': {
+      // With measured defaults on, leave session/range out so the backend's
+      // per-symbol table (strategy_defaults.SYNTH_SLOT_PARAMS) applies.
+      const { use_symbol_defaults = true, ...orbParams } = form.orb || {};
+      if (use_symbol_defaults) { delete orbParams.session; delete orbParams.range_minutes; }
+      return orbParams;
+    }
     case 'BoomDriftJump_v1':
       return form.boom_drift_jump || {};
-    // The four synthetic template strategies share one params dataclass
-    // (SynthParams), so they share one form slice too.
-    case 'SpikeFade_v1':
-    case 'RangeRevert_v1':
-    case 'RangeBreakout_v1':
-    case 'TrendDrift_v1':
-    case 'SpikeRide_v1':
-      return form.synth || {};
     default:
       return {};
   }
@@ -1648,7 +1551,7 @@ const costOrAuto = (v) => (v === '' || v === null || v === undefined ? null : +v
 
 // Form slices that are objects. The localStorage restore merges these one level
 // deep so a newly-added strategy parameter is not lost behind a stale blob.
-const NESTED_FORM_KEYS = ['apa', 'drift_jump_alpha', 'crt', 'vwap', 'htf_fvg_flip', 'bias_ifvg', 'ny_open_retest', 'boom_drift_jump', 'synth', 'prop_firm'];
+const NESTED_FORM_KEYS = ['apa', 'drift_jump_alpha', 'vwap', 'orb', 'boom_drift_jump', 'prop_firm'];
 
 // Bump this whenever a default below changes in a way a cached blob would
 // override. Old keys are purged on load — see the `form` initialiser.
@@ -1688,31 +1591,14 @@ const DEFAULT_FORM = {
     max_consecutive_losses: 4, cooldown_after_max_losses_hours: 12,
     min_rrr_to_accept_trade: 1.5,
   },
-  crt: {
-    htf_timeframe: 'H1', ltf_timeframe: 'M5', target_r_multiple: 1.5, max_trades_per_session: 1,
-    session_start: '09:30', session_cutoff: '12:00', bypass_session_synthetics: true,
-    min_sl_pips: 15.0, sl_atr_mult: 1.0,
-  },
   vwap: {
     vwap_anchor_minutes: 15, momentum_lookback_bars: 4, momentum_threshold_pct: 0.1,
     sl_method: 'auto', sl_points: 80.0, sl_atr_multiplier: 3.0,
     min_sl_pips: 8.0, min_sl_spread_mult: 4.0, target_rr: 2.0,
   },
-  htf_fvg_flip: {
-    htf_timeframe: 'H1', entry_confirmation_tf: 'M5', target_rr: 2.0,
-    require_unfilled_htf_fvg: true, session_filter_enabled: true,
-    session_start: '09:30', session_cutoff: '16:00',
-    sl_buffer_atr_mult: 0.5, min_sl_pips: 12.0, min_sl_atr_mult: 1.0,
-  },
-  bias_ifvg: {
-    session_start: '09:30', session_cutoff: '11:00', max_trades_per_day: 2, target_rr: 2.0,
-    sl_buffer_atr_mult: 0.5, min_sl_pips: 12.0, min_sl_atr_mult: 1.0,
-    a_plus_confluence_threshold: 90, rejection_min_body_atr_mult: 0.15,
-  },
-  ny_open_retest: {
-    range_window_start: '08:00', range_window_end: '08:15', earliest_valid_break_time: '09:30',
-    session_end: '11:00', stop_buffer_points: 5.0, fixed_target_points: 50.0,
-    dynamic_target_override: true, target_mode: 'rr', target_rr: 2.0, sl_buffer_atr_mult: 1.0,
+  orb: {
+    use_symbol_defaults: true, session: 'london', range_minutes: 60,
+    breakout_window_minutes: 180, side: 'both', min_stop_atr: 0.25, close_at_session_end: true,
   },
   // Boom mirror of DriftJumpAlpha — mirrors BoomDriftJumpParams.
   boom_drift_jump: {
@@ -1720,14 +1606,6 @@ const DEFAULT_FORM = {
     jump_entry_percentile_threshold: 95.0, trade_jumps_enabled: false,
     min_rrr_to_accept_trade: 1.5, max_trades_per_day: 6, max_daily_risk_pct: 4.0,
     adx_gate_mode: 'REDUCED_SIZE', adx_gate_min_size_modifier: 0.1, tp1_rr: 5.0,
-  },
-  // Shared by SpikeFade / RangeRevert / RangeBreakout / TrendDrift — they all
-  // read SynthParams, so one slice serves all four (see buildPortfolioStrategyParams).
-  synth: {
-    stop_atr_multiple: 5.0, tp1_rr: 5.0, spike_k_atr: 3.0, revert_k_atr: 2.0,
-    breakout_lookback: 20, ema_fast: 20, ema_slow: 50,
-    require_adx: true, min_adx_to_trade: 20,
-    max_trades_per_day: 6, max_daily_risk_pct: 4.0,
   },
   // Global session gate (RiskParams / BacktestRequest.session_filter_enabled) —
   // distinct from the per-strategy session_filter_enabled fields above.
@@ -2084,13 +1962,9 @@ export default function Backtester() {
           merged.prop_firm = { ...(prev.prop_firm || {}), ...(c.prop_firm || {}) };
           merged.apa = { ...(prev.apa || {}), ...(c.apa || {}) };
           merged.drift_jump_alpha = { ...(prev.drift_jump_alpha || {}), ...(c.drift_jump_alpha || {}) };
-          merged.crt = { ...(prev.crt || {}), ...(c.crt || {}) };
           merged.vwap = { ...(prev.vwap || {}), ...(c.vwap || {}) };
-          merged.htf_fvg_flip = { ...(prev.htf_fvg_flip || {}), ...(c.htf_fvg_flip || {}) };
-          merged.bias_ifvg = { ...(prev.bias_ifvg || {}), ...(c.bias_ifvg || {}) };
-          merged.ny_open_retest = { ...(prev.ny_open_retest || {}), ...(c.ny_open_retest || {}) };
+          merged.orb = { ...(prev.orb || {}), ...(c.orb || {}) };
           merged.boom_drift_jump = { ...(prev.boom_drift_jump || {}), ...(c.boom_drift_jump || {}) };
-          merged.synth = { ...(prev.synth || {}), ...(c.synth || {}) };
           return merged;
         });
       }
@@ -2177,7 +2051,7 @@ export default function Backtester() {
       setResult(null);
       setEvents([]);
       setBtError(null);
-      const validStrats = ['APA_v1', 'VWAP_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1', 'BoomDriftJump_v1', 'SpikeFade_v1', 'RangeRevert_v1', 'RangeBreakout_v1', 'TrendDrift_v1', 'SpikeRide_v1'];
+      const validStrats = ['APA_v1', 'VWAP_v1', 'ORB_v1', 'DriftJumpAlpha_v1', 'BoomDriftJump_v1'];
       const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'APA_v1';
       const sp = buildPortfolioStrategyParams(payload_strategy, form);
 
@@ -2325,7 +2199,7 @@ export default function Backtester() {
         <div style={{ display: 'grid', gap: 14 }}>
           {activeTab === 'single' ? (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label>Strategy Engine</label><select value={['APA_v1', 'VWAP_v1', 'DriftJumpAlpha_v1', 'CRT_v1', 'HTFFVGFlip_v1', 'BiasIFVG_v1', 'NYOpenRetest_v1', 'BoomDriftJump_v1', 'SpikeFade_v1', 'RangeRevert_v1', 'RangeBreakout_v1', 'TrendDrift_v1', 'SpikeRide_v1'].includes(form.strategy_id) ? form.strategy_id : 'APA_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option><option value="SpikeFade_v1">Spike Fade (synthetics)</option><option value="RangeRevert_v1">Range Revert (synthetics)</option><option value="RangeBreakout_v1">Range Breakout (synthetics)</option><option value="TrendDrift_v1">Trend Drift (synthetics)</option><option value="SpikeRide_v1">Spike Ride (synthetics)</option></select></div>
+              <div><label>Strategy Engine</label><select value={['APA_v1', 'VWAP_v1', 'ORB_v1', 'DriftJumpAlpha_v1', 'BoomDriftJump_v1'].includes(form.strategy_id) ? form.strategy_id : 'APA_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="ORB_v1">Opening Range Breakout</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option></select></div>
               <div>
                 <label>Symbol</label>
                 <SymbolAutocomplete
@@ -2357,7 +2231,7 @@ export default function Backtester() {
                     <div style={{ flex: 1 }}>
                       <label style={{ fontSize: '0.7rem' }}>Strategy</label>
                       <select value={item.strategy_id} onChange={e => updatePortfolioSymbol(idx, 'strategy_id', e.target.value)}>
-                        <option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="CRT_v1">CRT Strategy</option><option value="HTFFVGFlip_v1">HTF FVG Flip</option><option value="BiasIFVG_v1">Bias KeyLevel IFVG</option><option value="NYOpenRetest_v1">NY Open Break Retest</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option><option value="SpikeFade_v1">Spike Fade (synthetics)</option><option value="RangeRevert_v1">Range Revert (synthetics)</option><option value="RangeBreakout_v1">Range Breakout (synthetics)</option><option value="TrendDrift_v1">Trend Drift (synthetics)</option><option value="SpikeRide_v1">Spike Ride (synthetics)</option>
+                        <option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="ORB_v1">Opening Range Breakout</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option>
                       </select>
                     </div>
                     {/* [17.1] Per-row R:R. Research 16 measured the optimum as

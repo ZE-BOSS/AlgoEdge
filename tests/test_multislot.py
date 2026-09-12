@@ -23,11 +23,11 @@ def _cfg(**kw):
 
 def test_one_symbol_can_carry_several_slots():
     cfg = _cfg(instrument_slots=[
-        {"slot_id": "a1", "symbol": "Crash 1000 Index", "strategy_id": "SpikeFade_v1", "enabled": True},
+        {"slot_id": "a1", "symbol": "Crash 1000 Index", "strategy_id": "APA_v1", "enabled": True},
         {"slot_id": "b2", "symbol": "Crash 1000 Index", "strategy_id": "DriftJumpAlpha_v1", "enabled": True},
     ])
     assert len(cfg.instrument_slots) == 2
-    assert {s.strategy_id for s in cfg.instrument_slots} == {"SpikeFade_v1", "DriftJumpAlpha_v1"}
+    assert {s.strategy_id for s in cfg.instrument_slots} == {"APA_v1", "DriftJumpAlpha_v1"}
     assert len({s.slot_id for s in cfg.instrument_slots}) == 2, "slot ids must be distinct"
 
 
@@ -60,8 +60,8 @@ def test_explicit_slots_win_over_the_legacy_array():
     cfg = _cfg(
         instrument_settings=[{"symbol": "EURUSD", "strategy_id": "APA_v1", "enabled": True}],
         instrument_slots=[
-            {"slot_id": "s1", "symbol": "Boom 1000 Index", "strategy_id": "SpikeFade_v1", "enabled": True},
-            {"slot_id": "s2", "symbol": "Boom 1000 Index", "strategy_id": "RangeRevert_v1", "enabled": True},
+            {"slot_id": "s1", "symbol": "Boom 1000 Index", "strategy_id": "APA_v1", "enabled": True},
+            {"slot_id": "s2", "symbol": "Boom 1000 Index", "strategy_id": "VWAP_v1", "enabled": True},
         ],
     )
     assert len(cfg.instrument_slots) == 2
@@ -114,8 +114,8 @@ def test_stacked_slots_warn_when_no_direction_cap_is_set():
         risk={"risk_per_trade_pct": 1.8, "max_concurrent_positions": 15,
               "max_positions_per_symbol": 15},
         instrument_slots=[
-            {"slot_id": "s1", "symbol": "Crash 1000 Index", "strategy_id": "SpikeFade_v1", "enabled": True},
-            {"slot_id": "s2", "symbol": "Crash 1000 Index", "strategy_id": "TrendDrift_v1", "enabled": True},
+            {"slot_id": "s1", "symbol": "Crash 1000 Index", "strategy_id": "APA_v1", "enabled": True},
+            {"slot_id": "s2", "symbol": "Crash 1000 Index", "strategy_id": "VWAP_v1", "enabled": True},
         ],
     )
     warnings = cfg.validate_slot_position_caps()
@@ -131,8 +131,8 @@ def test_no_stacked_warning_once_a_governor_is_set():
         risk={"risk_per_trade_pct": 1.8, "max_concurrent_positions": 15,
               "max_positions_per_symbol": 15, "max_net_direction_risk_pct": 3.6},
         instrument_slots=[
-            {"slot_id": "s1", "symbol": "Crash 1000 Index", "strategy_id": "SpikeFade_v1", "enabled": True},
-            {"slot_id": "s2", "symbol": "Crash 1000 Index", "strategy_id": "TrendDrift_v1", "enabled": True},
+            {"slot_id": "s1", "symbol": "Crash 1000 Index", "strategy_id": "APA_v1", "enabled": True},
+            {"slot_id": "s2", "symbol": "Crash 1000 Index", "strategy_id": "VWAP_v1", "enabled": True},
         ],
     )
     assert not [w for w in cfg.validate_slot_position_caps() if "carries up to" in w]
@@ -143,8 +143,8 @@ def test_one_slot_per_symbol_never_warns_about_stacking():
         risk={"risk_per_trade_pct": 1.8, "max_concurrent_positions": 15,
               "max_positions_per_symbol": 15},
         instrument_slots=[
-            {"slot_id": "s1", "symbol": "Crash 1000 Index", "strategy_id": "SpikeFade_v1", "enabled": True},
-            {"slot_id": "s2", "symbol": "Boom 1000 Index", "strategy_id": "SpikeFade_v1", "enabled": True},
+            {"slot_id": "s1", "symbol": "Crash 1000 Index", "strategy_id": "APA_v1", "enabled": True},
+            {"slot_id": "s2", "symbol": "Boom 1000 Index", "strategy_id": "APA_v1", "enabled": True},
         ],
     )
     assert not [w for w in cfg.validate_slot_position_caps() if "carries up to" in w]
@@ -155,8 +155,8 @@ def test_disabled_slots_do_not_count_toward_stacking():
         risk={"risk_per_trade_pct": 1.8, "max_concurrent_positions": 15,
               "max_positions_per_symbol": 15},
         instrument_slots=[
-            {"slot_id": "s1", "symbol": "Crash 1000 Index", "strategy_id": "SpikeFade_v1", "enabled": True},
-            {"slot_id": "s2", "symbol": "Crash 1000 Index", "strategy_id": "TrendDrift_v1", "enabled": False},
+            {"slot_id": "s1", "symbol": "Crash 1000 Index", "strategy_id": "APA_v1", "enabled": True},
+            {"slot_id": "s2", "symbol": "Crash 1000 Index", "strategy_id": "VWAP_v1", "enabled": False},
         ],
     )
     assert not [w for w in cfg.validate_slot_position_caps() if "carries up to" in w]
@@ -174,11 +174,11 @@ def test_resolved_params_expose_every_gate_that_can_stop_trading():
         spike_k_atr = 3.0
 
     class _Engine:
-        strategy_id = "SpikeFade_v1"
+        strategy_id = "APA_v1"
         params = _Params()
 
     cfg = _cfg(risk={"risk_per_trade_pct": 1.8, "max_daily_trades": 20})
-    slot = InstrumentSlot(slot_id="s1", symbol="Crash 1000 Index", strategy_id="SpikeFade_v1")
+    slot = InstrumentSlot(slot_id="s1", symbol="Crash 1000 Index", strategy_id="APA_v1")
 
     got = bot_service._resolved_slot_params(slot, cfg, _Engine())
     for key in ("risk_per_trade_pct", "max_daily_trades", "allow_pyramiding",
@@ -193,11 +193,11 @@ def test_per_slot_override_shows_through_in_resolved_params():
     from backend.services.bot_service import bot_service
 
     class _Engine:
-        strategy_id = "SpikeFade_v1"
+        strategy_id = "APA_v1"
         params = None
 
     cfg = _cfg(risk={"risk_per_trade_pct": 1.8})
-    slot = InstrumentSlot(slot_id="s1", symbol="X", strategy_id="SpikeFade_v1",
+    slot = InstrumentSlot(slot_id="s1", symbol="X", strategy_id="APA_v1",
                           risk_per_trade_pct=0.5)
     assert bot_service._resolved_slot_params(slot, cfg, _Engine())["risk_per_trade_pct"] == 0.5
 

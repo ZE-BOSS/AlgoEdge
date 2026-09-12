@@ -6,20 +6,12 @@ Per-strategy exit-management and session defaults, derived from measurement.
 WHY THIS EXISTS
 ---------------
 Trailing, break-even and session gating were **global** RiskParams applied
-identically to all seven strategies. The Phase 3 study showed that is wrong in
-both directions:
-
-  * The 15-cell trailing sweep improved 10 cells and made 5 WORSE. Almost the
-    entire book-level gain came from ONE strategy (NYOpenRetest, +1,765 PnL);
-    DriftJumpAlpha, VWAP and CRT netted slightly negative. A single global
-    trailing setting cannot be right for both.
-  * The 43-cell session ablation ranged from **-0.170** (HTFFVGFlip — the gate
-    is actively harmful) to **+0.126** (BiasIFVG — the best gate in the study).
-    Mean contribution across the book was -0.010, i.e. nothing.
-
-So the correct unit is the strategy, not the account. This module holds the
-recommended defaults per strategy; RiskParams keeps the genuinely global
-concerns (position sizing, drawdown caps, concurrency).
+identically to every strategy. The Phase 3 study showed that is wrong in both
+directions: the 15-cell trailing sweep improved 10 cells and made 5 WORSE, and
+the 43-cell session ablation ranged from -0.170 to +0.126 depending on the
+strategy. So the correct unit is the strategy, not the account. This module
+holds the recommended defaults per strategy; RiskParams keeps the genuinely
+global concerns (position sizing, drawdown caps, concurrency).
 
 RESOLUTION ORDER
 ----------------
@@ -28,6 +20,10 @@ RESOLUTION ORDER
 A user override always wins. These are defaults, not constraints — the point is
 that the shipped configuration is the measured-best one, so the parameters do
 not have to be touched to get the recommended behaviour.
+
+2026-09-11: CRT, HTFFVGFlip, BiasIFVG, NYOpenRetest and the five synthetic
+template strategies (SpikeFade, SpikeRide, RangeRevert, RangeBreakout,
+TrendDrift) were removed from the book, and their defaults with them.
 
 EVIDENCE
 --------
@@ -62,32 +58,6 @@ OVERRIDABLE: frozenset[str] = frozenset({
 
 
 STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
-
-    # ── NYOpenRetest — the one strategy trailing clearly helps ────────────
-    #
-    # Best setup quality in the study (P(2R) 34.7%, median MFE 2.92R) and the
-    # worst realised result in the saved book (-11,695). That gap was always
-    # exit management, and the sweep confirms it: +1,765 PnL and +15.5pp win
-    # rate from trailing alone — more than the whole book's improvement.
-    # GBPJPY alone went 2.6% -> 25.6% win rate, +1,353 PnL.
-    "NYOpenRetest_v1": {
-        # [18.3] Measured best fixed R:R — research/16.
-        # 1:2 best ($-46,699; degrades to $-64,059 at 1:5), n=4,978.
-        "tp1_rr": 2.0,
-        "trail_method_tp1": "ATR_TRAIL",
-        "trail_mode": "RR",
-        "trail_trigger_rr": 1.5,
-        "trail_activation_rr": 1.5,
-        "atr_trail_multiplier": 2.5,
-        "atr_trail_multiplier_tp1": 2.5,
-        "trail_require_be_first": False,
-        "be_mode": "RR",
-        "be_trigger_rr": 1.0,
-        "evidence": (
-            "trailing_sweep: +1,765 PnL / +15.5pp WR across 4 cells (best in book). "
-            "session ablation -0.009 (noise) so the session gate is left as-is."
-        ),
-    },
 
     # ── DriftJumpAlpha — trailing HURTS; leave exits alone ────────────────
     #
@@ -131,66 +101,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
         ),
     },
 
-    # ── BiasIFVG — best session gate in the study ─────────────────────────
-    #
-    # +0.126 contribution, the highest measured. Removing it would give 5x the
-    # signals (87 -> 435) and worse expectancy — so the low trade count is the
-    # price of the edge, not a defect to tune away.
-    "BiasIFVG_v1": {
-        # [18.3] Measured best fixed R:R — research/16.
-        # 1:3 best ($-7,480; 1:5 is $-18,943), n=2,757.
-        "tp1_rr": 3.0,
-        "trail_method_tp1": "NONE",
-        "trail_mode": "NONE",
-        "be_mode": "EITHER",
-        "be_trigger_rr": 1.5,
-        "evidence": (
-            "session ablation +0.126 — highest in the study. Keep the gate and accept "
-            "the low frequency. Trailing untested on this strategy (43 signals)."
-        ),
-    },
-
-    # ── CRT — loosen the session gate ─────────────────────────────────────
-    #
-    # session_filter discards 155,455 of 176,155 candidates (88.2%) for a
-    # measured contribution of +0.009 — nothing. Removing it triples the sample
-    # (186 -> 571 signals) at essentially unchanged expectancy, and CRT cannot
-    # be evaluated at 19 trades per symbol.
-    "CRT_v1": {
-        # [18.3] Measured best fixed R:R — research/16.
-        # 1:5 least-bad ($-46,302 vs $-56,569 at 1:3), n=3,372.
-        "tp1_rr": 5.0,
-        "session_filter_enabled": False,
-        "trail_method_tp1": "NONE",
-        "trail_mode": "NONE",
-        "be_mode": "TP_HIT",
-        "evidence": (
-            "session ablation +0.009 while blocking 88.2% of candidates — the most "
-            "expensive no-op in the codebase. Disabled to restore sample size. "
-            "trailing_sweep -11 PnL over 2 cells."
-        ),
-    },
-
-    # ── HTFFVGFlip — session gate is actively harmful ─────────────────────
-    #
-    # -0.170 contribution, positive in only 2 of 9 cells. Removing it gives
-    # 121% MORE signals AND better expectancy — it costs sample size and
-    # quality simultaneously. The clearest single verdict in the study, and the
-    # opposite of what its 89.5% block rate suggests.
-    "HTFFVGFlip_v1": {
-        # [18.3] Measured best fixed R:R — research/16.
-        # 1:4 the only profitable setting ($+540), n=458.
-        "tp1_rr": 4.0,
-        "session_filter_enabled": False,
-        "trail_method_tp1": "NONE",
-        "trail_mode": "NONE",
-        "be_mode": "EITHER",
-        "evidence": (
-            "session ablation -0.170 (2/9 cells positive) — removing the gate improves "
-            "BOTH signal count (+121%) and expectancy. Actively harmful."
-        ),
-    },
-
     # ── APA — was structurally unable to trade ────────────────────────────
     #
     # rejection_candle passed 0 of 1,388 evaluations because require_retest
@@ -211,16 +121,10 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
         ),
     },
 
-    # ── Synthetic-index strategies (research/26) ─────────────────────────────
-    # Every one of these was measured with a SINGLE target, break-even OFF and
-    # trailing OFF. The global defaults are be_mode="EITHER" (break-even arms at
-    # 2 R), tp_count=3 (partial exits) and tp1_rr=1.5 — so without these entries a
-    # live run would use a materially different exit policy from the one the
-    # reported numbers came from, and would not reproduce them.
-    #
-    # Break-even in particular is not neutral here: research/25 §4.1 measured it
-    # costing up to 0.154 R per trade on Boom, and BE_SL exits giving up 2.08 R of
-    # mean favourable excursion. It is off deliberately, not by omission.
+    # ── Boom mirror of DriftJumpAlpha (research/25) ─────────────────────────
+    # Measured with a SINGLE target, break-even OFF and trailing OFF. Break-even
+    # is not neutral here: research/25 §4.1 measured it costing up to 0.154 R per
+    # trade on Boom, and BE_SL exits giving up 2.08 R of mean favourable excursion.
     "BoomDriftJump_v1": {
         "tp_count": 1,
         "tp1_rr": 5.0,
@@ -228,33 +132,21 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
         "trail_method_tp1": "NONE",
         "evidence": "research/25 — Boom mirror of DJA; BE measured harmful (-0.154 R).",
     },
-    "SpikeFade_v1": {
-        "tp_count": 1,
-        "tp1_rr": 5.0,
-        "be_mode": "NONE",
-        "trail_method_tp1": "NONE",
-        "evidence": "research/26 — best on Range Break 100 (+77.7%, PF 1.25, DD 22.2%).",
-    },
-    "RangeRevert_v1": {
-        "tp_count": 1,
-        "tp1_rr": 5.0,
-        "be_mode": "NONE",
-        "trail_method_tp1": "NONE",
-        "evidence": "research/26 — best on Vol 100 (+168.6%, PF 1.36) and Boom 500.",
-    },
-    "RangeBreakout_v1": {
+
+    # ── ORB — opening-range breakout (data/strategy_search, 2026-09-11) ─────
+    # Every number was measured with ONE target, no break-even and no trailing,
+    # plus the session-close exit the engine applies itself.
+    "ORB_v1": {
         "tp_count": 1,
         "tp1_rr": 3.0,
         "be_mode": "NONE",
         "trail_method_tp1": "NONE",
-        "evidence": "research/26 — best on Volatility 25 (+64.3%, PF 1.07, DD 27.9%).",
-    },
-    "TrendDrift_v1": {
-        "tp_count": 1,
-        "tp1_rr": 8.0,
-        "be_mode": "NONE",
-        "trail_method_tp1": "NONE",
-        "evidence": "research/26 — best on Crash 1000 (+120.5%, PF 1.30, DD 20.0%).",
+        "trail_mode": "NONE",
+        "evidence": (
+            "strategy_search walk-forward: GBPJPY London 60m 1:3 profitable 2022-23 (+0.05R), "
+            "2024-25 (+0.08R) and the last 8 months (+0.21R, 8/9 months up); 12/12 settings "
+            "profitable in-sample."
+        ),
     },
 }
 
@@ -268,69 +160,37 @@ SLOT_TP1_RR: dict[str, float] = {
     "GERMANY 40|VWAP_v1": 4.0,                   #  +$5,766  n=167  DD 16.9%
     "GER30|VWAP_v1": 4.0,                        #  FundedNext name for the above
     "XAGUSD|VWAP_v1": 4.0,                       #  +$4,088  n=169  DD 30.0%
-    # "XAUUSD|VWAP_v1": 5.0,   REMOVED — IS +$2,991 but OOS -$144 (n=86)                       #  +$4,077  n=169  DD 13.3%
-
-    # CRT
-    "CRASH 500 INDEX|CRT_v1": 5.0,               # +$11,869  n=220  DD 16.7%
-
-    # NYOpenRetest — 1:5 on the Nasdaq feeds, against its 1:2 strategy default
-    "US TECH 100|NYOpenRetest_v1": 5.0,          #  +$8,944  n=133  DD 10.6%
-    "NDX100|NYOpenRetest_v1": 5.0,               #  +$7,862  n=109  DD 10.8%
-
-    # BiasIFVG — best risk-adjusted cell in the study is USOUSD (Sharpe 6.58)
-    "USOUSD|BiasIFVG_v1": 5.0,                   #  +$8,673  n=57   DD 7.7%
-    # "ETHUSD|BiasIFVG_v1": 5.0,  REMOVED — IS -$817, OOS -$25 (n=23, thin)                   #  +$6,904  n=75   DD 11.1%
-    "UKOUSD|BiasIFVG_v1": 5.0,                   #  +$5,093  n=53   DD 6.0%
+    # "XAUUSD|VWAP_v1": 5.0,   REMOVED — IS +$2,991 but OOS -$144 (n=86)
 
     # APA
     "VOLATILITY 75 INDEX|APA_v1": 4.0,           #  +$5,016  n=113  DD 18.6%
     "XRPUSD|APA_v1": 5.0,                        #  +$4,988  n=116  DD 22.5%
-    # "BTCUSD|APA_v1": 5.0,   REMOVED — IS +$5,292 but OOS -$923 (n=45)                        #  +$4,370  n=85   DD 18.2%
+    # "BTCUSD|APA_v1": 5.0,   REMOVED — IS +$5,292 but OOS -$923 (n=45)
     "CRASH 500 INDEX|APA_v1": 3.0,               #  +$4,310  n=104  DD 6.4%
+
+    # ORB — chosen on 2024-01..2026-01, then held unchanged (avg R per trade)
+    "GBPJPY|ORB_v1": 3.0,     # 2022-23 +0.05  2024-25 +0.08  last 8m +0.21
+    "BTCUSD|ORB_v1": 1.5,     # 2022-23 +0.11  2024-25 +0.07  last 8m +0.05
+    "XAUUSD|ORB_v1": 2.0,     # 2022-23 +0.08  2024-25 +0.02  last 8m +0.04
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SYNTHETIC-INDEX SLOT PARAMETERS  (research/26, 2026-09-04)
+# PER-SYMBOL STRATEGY PARAMETERS
 # ─────────────────────────────────────────────────────────────────────────────
-# Selected by research/data/pick_shipping_defaults.py: a 60-configuration grid
-# per symbol over 1 Jan 2026 -> 4 Sep 2026, executed on RAW TICKS with
-# market-order stop fills and limit-order target fills, then filtered to
-# configurations with max drawdown <= 35% and n >= 100 before taking the best
-# return. The drawdown filter is not cosmetic — the unconstrained best on
-# Crash 1000 returned +176.9% with an 89.5% drawdown, which no risk policy would
-# authorise.
+# Measured per-symbol values laid onto a slot's strategy params block. Both the
+# live path (bot_service, at engine build) and the backtest path
+# (apply_strategy_params) apply this table, and a slot's own override or an
+# explicit request value always wins over it.
 #
-# HOW TO REPRODUCE, exactly:
-#     cd research/data
-#     python run_strategy_search.py          # the full grid, all 12 symbols
-#     python pick_shipping_defaults.py       # the drawdown-filtered choice
-#
-# HEALTH WARNING. research/24 measured every one of these instruments to be a
-# fair martingale with memoryless jump arrival. None of these configurations has
-# a demonstrated statistical edge: independent-sample t runs 0.4-2.3, and picking
-# the best of 60 grid points guarantees a positive number even on noise. They are
-# what performed best in one eight-month window and are shipped for FORWARD
-# TESTING, not as validated alpha. Size accordingly.
+# The name is historical: it first held the research/26 synthetic template
+# strategies, which were removed on 2026-09-11.
 #
 # Format: "SYMBOL|Strategy_id": {param: value}
 SYNTH_SLOT_PARAMS: dict[str, dict[str, Any]] = {
-    # symbol                strategy              stop  tp     n   WR    PF   ret%   DD%
-    "BOOM 1000 INDEX|RangeRevert_v1":   {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "revert_k_atr": 2.0},   # 533  18.8  1.08  +35.5  27.7
-    "BOOM 500 INDEX|RangeRevert_v1":    {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "revert_k_atr": 2.0},   # 397  19.6  1.17  +56.0  19.7
-    "CRASH 1000 INDEX|TrendDrift_v1":   {"stop_atr_multiple": 5.0, "tp1_rr": 8.0},                        # 410  16.1  1.30 +120.5  20.0
-    "CRASH 500 INDEX|RangeRevert_v1":   {"stop_atr_multiple": 1.0, "tp1_rr": 5.0, "revert_k_atr": 2.0},   # 1479 19.9  1.04  +61.7  27.5
-    "VOLATILITY 75 INDEX|TrendDrift_v1": {"stop_atr_multiple": 2.5, "tp1_rr": 5.0},                       # 859  18.0  1.06  +45.3  33.2
-    "VOLATILITY 25 INDEX|RangeBreakout_v1": {"stop_atr_multiple": 2.5, "tp1_rr": 3.0, "breakout_lookback": 20},  # 1256 26.9 1.07 +64.3 27.9
-    "VOLATILITY 100 INDEX|RangeRevert_v1": {"stop_atr_multiple": 2.5, "tp1_rr": 8.0, "revert_k_atr": 2.0},  # 527 15.0 1.36 +168.6 29.1
-    "JUMP 25 INDEX|RangeRevert_v1":     {"stop_atr_multiple": 2.5, "tp1_rr": 8.0, "revert_k_atr": 2.0},   # 646  13.5  1.16  +97.2  32.4
-    "JUMP 100 INDEX|TrendDrift_v1":     {"stop_atr_multiple": 5.0, "tp1_rr": 5.0},                        # 235  19.6  1.18  +35.4  33.9
-    "RANGE BREAK 100 INDEX|SpikeFade_v1": {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "spike_k_atr": 3.0},  # 316  24.7  1.25  +77.7  22.2
-    "RANGE BREAK 200 INDEX|SpikeFade_v1": {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "spike_k_atr": 3.0},  # 230  24.3  1.06  +16.4  24.0
-    # Step Index is deliberately ABSENT. Its best drawdown-constrained
-    # configuration returned +1.1% at PF 1.00 over eight months, and research/24
-    # §1.1 measured the instrument as a fair coin to a precision of 0.009% on
-    # P(up) with no memory at any Markov order to 10. There is nothing to trade.
+    "GBPJPY|ORB_v1": {"session": "london", "range_minutes": 60},
+    "BTCUSD|ORB_v1": {"session": "ny", "range_minutes": 60},
+    "XAUUSD|ORB_v1": {"session": "ny", "range_minutes": 30},
 }
 
 

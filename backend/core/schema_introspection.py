@@ -131,9 +131,7 @@ def build_full_schema() -> list[dict]:
     )
     from backend.strategies.strategy_apa.params import APAParams
     from backend.strategies.strategy_vwap.params import VWAPParams
-    from backend.core.config_schema import CRTParams, HTFFVGFlipParams
-    from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
-    from backend.strategies.strategy_six_ny_open_retest.params import NYOpenRetestParams
+    from backend.strategies.strategy_orb.params import ORBParams
     from backend.core.config_schema import DriftJumpAlphaParams
 
     groups: list[tuple[type, str]] = [
@@ -141,10 +139,7 @@ def build_full_schema() -> list[dict]:
         (PropFirmParams, "prop_firm"),
         (APAParams, "apa"),
         (VWAPParams, "vwap"),
-        (CRTParams, "crt"),
-        (HTFFVGFlipParams, "htf_fvg_flip"),
-        (BiasIFVGParams, "bias_ifvg"),
-        (NYOpenRetestParams, "ny_open_retest"),
+        (ORBParams, "orb"),
         (DriftJumpAlphaParams, "drift_jump_alpha"),
     ]
 

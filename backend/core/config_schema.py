@@ -11,10 +11,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Literal
 
-from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
-from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
-from backend.strategies.strategy_six_ny_open_retest.params import NYOpenRetestParams
 from backend.strategies.strategy_apa.params import APAParams
+from backend.strategies.strategy_orb.params import ORBParams
 from backend.strategies.strategy_vwap.params import VWAPParams
 # ─────────────────────────────────────────────────────────────────────────────
 # RISK MANAGEMENT PARAMETERS
@@ -82,7 +80,7 @@ class RiskParams:
     """
 
     multi_position_mode: bool = True
-    sl_buffer_pips: float = 5.0  # DEPRECATED: now per-strategy (APAParams.sl_buffer_atr, NYOpenRetestParams.stop_buffer_points). Kept for DB compat.
+    sl_buffer_pips: float = 5.0  # DEPRECATED: now per-strategy (e.g. APAParams.sl_buffer_atr). Kept for DB compat.
 
     # ── Global stop / exposure floors (added 2026-08) ────────────────────
     # ENGINE WIRING REQUIRED for both: backend/risk/position_sizer.py has NO minimum-SL
@@ -201,6 +199,37 @@ class RiskParams:
     behaviour) rather than clamping them to some minimum size. Set False to
     instead deploy at the lowest tier's fraction for any score above 0.
     """
+    # ── [P5.1] Volatility-targeted sizing ────────────────────────────────────
+    vol_target_annual_pct: float | None = None
+    """Annualised volatility to size toward, e.g. 15.0 for 15%/yr. None (the
+    default) disables it and every run reproduces fixed-fractional sizing exactly.
+
+    Fixed-fractional risk keeps your DOLLAR risk constant while your VOLATILITY
+    risk swings with the regime. This scales the fraction by
+    `target_vol / realised_vol` so the risk you take matches the risk you meant
+    to take — sizing up when calm, down when violent.
+
+    research/24 §8 identified volatility clustering as the only measured, robust,
+    uncompeted structure in the whole programme, and re-measurement on this
+    repo's own bars put EURUSD D1 at ACF(r²) 0.117 / Ljung-Box 621 against Crash
+    1000's 0.003 / 35. So it is worth real money on live instruments and
+    approximately nothing on the synthetics. It is NOT an edge: a losing
+    strategy sized better still loses. It reduces variance for a given mean.
+
+    See backend/risk/vol_target.py."""
+
+    vol_target_lookback_bars: int = 20
+    """Bars of returns used to measure realised volatility. Short enough to react
+    to a regime change, long enough that the estimate is not itself noise."""
+
+    vol_target_min_scale: float = 0.5
+    vol_target_max_scale: float = 2.0
+    """Clamps on the scale factor, and they are load-bearing rather than
+    decorative: `target/realised` diverges as realised volatility approaches
+    zero, so an unusually quiet window would otherwise size at many multiples of
+    the intended risk — immediately before the regime change that ended the
+    quiet. These bound the damage in both directions."""
+
     post_split_risk_tolerance_pct: float = 5.0
     """
     [2.12/A9] Replaces the hardcoded 1.05/1.10/1.01 post-split risk-cap
@@ -606,46 +635,6 @@ class BoomDriftJumpParams:
     tp1_rr: float = 5.0
 
 
-@dataclass
-class SynthParams:
-    """Shared parameters for SpikeFade_v1, RangeRevert_v1 and RangeBreakout_v1.
-
-    One dataclass covers all three because they share an entry/exit skeleton and
-    differ only in the entry predicate — see strategy_synth/engine.py.
-
-    Stops are wide by default. On jump instruments the stop is what the spike gaps
-    through, and research/24 §4.1 measured ~1 R of unmodelled slippage at
-    0.5 x ATR against ~0.2 R at 5 x ATR, so a tight stop here converts a spike into
-    a multi-R loss. Per-symbol overrides: strategy_defaults.py::SYNTH_SLOT_PARAMS.
-    """
-    stop_atr_multiple: float = 5.0
-    tp1_rr: float = 1.5
-    spike_k_atr: float = 3.0
-    revert_k_atr: float = 2.0
-    breakout_lookback: int = 20
-    ema_fast: int = 20
-    ema_slow: int = 50
-    require_adx: bool = True
-    min_adx_to_trade: int = 20
-    max_trades_per_day: int = 6
-    max_daily_risk_pct: float = 4.0
-
-    # ── SpikeRide_v1 ─────────────────────────────────────────────────────────
-    # Its own stop/target, NOT the shared stop_atr_multiple/tp1_rr above, because
-    # the two sides of a jump are not symmetric. SpikeFade wants a wide stop (the
-    # spike runs into it); SpikeRide wants a tight stop against the grind and a
-    # target sized to the spike itself — research/24 §3.1 measures spike
-    # magnitude at 0.0999-0.1005% of price on average and 0.2264-0.2286% at p95,
-    # roughly 2x and 4.5x M5 ATR on the 1000-variants. Sharing the fade's 5x stop
-    # would make it a 1:0.4 proposition and the measurement meaningless.
-    spike_ride_stop_atr: float = 1.0
-    spike_ride_tp_rr: float = 2.0
-    spike_ride_stretch_atr: float = 1.5
-    """How far price must have run AGAINST the spike side, in ATR, before an
-    entry is taken. This is stop placement, not timing: research/24 §3.1 measured
-    jump arrival to be memoryless, so nothing here predicts when a spike comes."""
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # STRATEGY TWO (CRASHBOOM) PARAMETERS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -763,84 +752,6 @@ class DriftJumpAlphaParams:
     single shared instance across every strategy in a portfolio run, so this
     cannot be a flat global override.
     """
-
-
-@dataclass
-class CRTParams:
-    """
-    Tunable parameters for the Candle Range Theory engine.
-    Spec: CRT_Strategy_Spec.md
-    The SL formula (sl_dist = tp_dist / target_r_multiple) is per-spec (Section 6).
-    min_sl_pips and sl_atr_mult are additional guards added above the spec to prevent
-    microscopic SL values on small HTF candles causing huge lot sizes in live execution.
-    """
-    htf_timeframe: str = "H1"      # spec §2 default 1H ("highest-quality per source")
-    ltf_timeframe: str = "M5"      # spec §2 default 5M
-
-    target_r_multiple: float = 1.5
-    """
-    Spec §2/§6 default 1.5 (valid range 1.5-2.0). HELD at 1.5 — and note this parameter
-    runs BACKWARDS relative to every other strategy's RR setting.
-
-    CRT derives the stop from the target: `sl_distance = tp_distance / target_r_multiple`
-    (spec §6), where tp_distance is fixed by structure (C1's opposite extreme). Raising
-    target_r_multiple therefore TIGHTENS the stop rather than extending the target. At the
-    top of the spec's range (2.0) the stop is 25% tighter than at 1.5 for the identical
-    setup. Given that sub-spread stops were the dominant failure mode across the whole
-    book, the correct default here is the BOTTOM of the doc's range, not the middle.
-    Anyone raising this is buying a better headline R by moving the stop closer to noise.
-    """
-
-    max_trades_per_session: int = 1   # spec §2/§10 — one signal per session by design
-    session_start: str = "09:30"      # spec §7 — NY open, "highest-quality setups"
-    session_cutoff: str = "12:00"     # spec §7 — stop new searches ~12:00-13:00 ET
-    bypass_session_synthetics: bool = True  # spec §8 — 24/7 synthetics have no session anchor
-
-    max_losses_per_day: int = 0
-    """[12.2/Part14] Generic daily loss guardrail, standardised across every strategy (was only on VWAPParams). 0 = disabled."""
-
-    # Minimum SL floors — prevent spec-correct but tiny SLs causing extreme lot sizes.
-    # REVIEWED 2026-08 and retained unchanged. CRT is the ONLY strategy in the book that
-    # already had a cost floor, and it is the reason CRT does not appear in the forensic
-    # review's list of degenerate-stop offenders. These two fields are the pattern that
-    # has now been replicated into APAParams, HTFFVGFlipParams, BiasIFVGParams and
-    # VWAPParams — and unlike those copies, THESE ARE ACTUALLY READ BY THE ENGINE
-    # (strategy_three_crt/engine.py:222-250).
-    min_sl_pips: float = 15.0     # Hard minimum SL distance in pips (~5x FX-major friction)
-    sl_atr_mult: float = 1.0      # SL must be at least N × ATR (0 = disabled)
-
-    bias_neutral_mode: Literal["BLOCK", "REDUCED_SIZE", "ALLOW"] = "REDUCED_SIZE"
-    """
-    [6.8/S9] What to do with a valid C2 sweep when the HTF bias is NEUTRAL
-    (no confirmed trend). CHANGED from a hard BLOCK — measured on real CRT/NDX
-    logs, this discarded 254 of ~900 evaluations outright, the single largest
-    rejection category. `BLOCK` restores the old behaviour exactly. `ALLOW`
-    trades a NEUTRAL-bias C2 sweep at full size (direction taken from the
-    sweep itself, not HTF confirmation). `REDUCED_SIZE` (default) trades it
-    at `bias_neutral_size_modifier` instead of skipping it — the setup is
-    real, just less confirmed without a trend behind it.
-    """
-    bias_neutral_size_modifier: float = 0.5
-    """[6.8/S9] Size multiplier applied when bias_neutral_mode == "REDUCED_SIZE" and the HTF bias was NEUTRAL at trigger time."""
-
-    trigger_grace_bars: int = 2
-    """
-    [6.10/S12] Number of ADDITIONAL HTF candle closes a live c2_trigger may
-    survive without the LTF trigger firing, before being invalidated. CHANGED
-    from 0 (any trigger not fired before the very next HTF close was
-    discarded) — the forensic review flagged this as a real cause of lost
-    setups: "Trigger timeout — LTF did not fire before next HTF close", with
-    no grace at all. 0 restores the old immediate-invalidation behaviour.
-    """
-
-    # ARCHITECTURAL DISCREPANCY (reported, not fixed — outside params scope):
-    # The whole point of CRT's backward SL derivation is to make the structural TP land at
-    # exactly target_r_multiple. But the live/backtest TP ladder is owned by RiskParams
-    # (tp1_rr/tp2_rr/tp3_rr = 1.5/3/5), which overrides the strategy's take_profit. So the
-    # SL is reverse-engineered to hit a 1.5R target that is then discarded and replaced by
-    # a 1.5R/3R/5R grid whose upper tiers sit far beyond C1's extreme — the level the
-    # entire setup thesis says price is travelling to. Either CRT should be exempted from
-    # the grid, or its SL should be placed structurally (beyond the C2 sweep wick).
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1076,13 +987,9 @@ class UserConfigV2(UserConfig):
     """[12.1/12.3/Part14] The authoritative symbol+strategy configuration — see InstrumentSlot."""
     drift_jump_alpha: DriftJumpAlphaParams = field(default_factory=DriftJumpAlphaParams)
     boom_drift_jump: BoomDriftJumpParams = field(default_factory=BoomDriftJumpParams)
-    synth: SynthParams = field(default_factory=SynthParams)
-    crt: CRTParams = field(default_factory=CRTParams)
-    htf_fvg_flip: HTFFVGFlipParams = field(default_factory=HTFFVGFlipParams)
-    bias_ifvg: BiasIFVGParams = field(default_factory=BiasIFVGParams)
-    ny_open_retest: NYOpenRetestParams = field(default_factory=NYOpenRetestParams)
     apa: APAParams = field(default_factory=APAParams)
     vwap: VWAPParams = field(default_factory=VWAPParams)
+    orb: ORBParams = field(default_factory=ORBParams)
     prop_firm: PropFirmParams = field(default_factory=PropFirmParams)
 
     @classmethod
@@ -1092,13 +999,9 @@ class UserConfigV2(UserConfig):
         instrument_slots_data = data.pop("instrument_slots", None)
         drift_jump_alpha_data = data.pop("drift_jump_alpha", {})
         boom_drift_jump_data = data.pop("boom_drift_jump", {})
-        synth_data = data.pop("synth", {})
-        crt_data = data.pop("crt", {})
-        htf_fvg_flip_data = data.pop("htf_fvg_flip", {})
-        bias_ifvg_data = data.pop("bias_ifvg", {})
-        ny_open_retest_data = data.pop("ny_open_retest", {})
         apa_data = data.pop("apa", {})
         vwap_data = data.pop("vwap", {})
+        orb_data = data.pop("orb", {})
         prop_firm_data = data.pop("prop_firm", {})
         import dataclasses
         known_fields = {f.name for f in dataclasses.fields(cls)}
@@ -1114,13 +1017,9 @@ class UserConfigV2(UserConfig):
         config.risk = RiskParams(**filter_kwargs(RiskParams, _sync_trail_rr_aliases(risk_data)))
         config.drift_jump_alpha = DriftJumpAlphaParams(**filter_kwargs(DriftJumpAlphaParams, drift_jump_alpha_data))
         config.boom_drift_jump = BoomDriftJumpParams(**filter_kwargs(BoomDriftJumpParams, boom_drift_jump_data))
-        config.synth = SynthParams(**filter_kwargs(SynthParams, synth_data))
-        config.crt = CRTParams(**filter_kwargs(CRTParams, crt_data))
-        config.htf_fvg_flip = HTFFVGFlipParams(**filter_kwargs(HTFFVGFlipParams, htf_fvg_flip_data))
-        config.bias_ifvg = BiasIFVGParams(**filter_kwargs(BiasIFVGParams, bias_ifvg_data))
-        config.ny_open_retest = NYOpenRetestParams(**filter_kwargs(NYOpenRetestParams, ny_open_retest_data))
         config.apa = APAParams(**filter_kwargs(APAParams, apa_data))
         config.vwap = VWAPParams(**filter_kwargs(VWAPParams, vwap_data))
+        config.orb = ORBParams(**filter_kwargs(ORBParams, orb_data))
         config.prop_firm = PropFirmParams(**filter_kwargs(PropFirmParams, prop_firm_data))
         
 
@@ -1176,19 +1075,12 @@ class UserConfigV2(UserConfig):
         if self.drift_jump_alpha is None:
             self.drift_jump_alpha = DriftJumpAlphaParams()
             self.boom_drift_jump = BoomDriftJumpParams()
-            self.synth = SynthParams()
-        if self.crt is None:
-            self.crt = CRTParams()
-        if self.htf_fvg_flip is None:
-            self.htf_fvg_flip = HTFFVGFlipParams()
-        if self.bias_ifvg is None:
-            self.bias_ifvg = BiasIFVGParams()
-        if self.ny_open_retest is None:
-            self.ny_open_retest = NYOpenRetestParams()
         if self.apa is None:
             self.apa = APAParams()
         if self.vwap is None:
             self.vwap = VWAPParams()
+        if self.orb is None:
+            self.orb = ORBParams()
         if self.prop_firm is None:
             self.prop_firm = PropFirmParams()
 

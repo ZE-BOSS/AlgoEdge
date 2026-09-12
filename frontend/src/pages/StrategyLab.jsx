@@ -33,10 +33,7 @@ import BacktestReplay from '../components/BacktestReplay';
 const STRATEGIES = [
   { id: 'APA_v1', group: 'apa', label: 'APA (H&S inversion)' },
   { id: 'VWAP_v1', group: 'vwap', label: 'VWAP reversion' },
-  { id: 'CRT_v1', group: 'crt', label: 'CRT (candle range theory)' },
-  { id: 'HTFFVGFlip_v1', group: 'htf_fvg_flip', label: 'HTF FVG flip' },
-  { id: 'BiasIFVG_v1', group: 'bias_ifvg', label: 'Bias + key level IFVG' },
-  { id: 'NYOpenRetest_v1', group: 'ny_open_retest', label: 'NY open break & retest' },
+  { id: 'ORB_v1', group: 'orb', label: 'Opening range breakout' },
   { id: 'DriftJumpAlpha_v1', group: 'drift_jump_alpha', label: 'Drift / jump alpha' },
 ];
 

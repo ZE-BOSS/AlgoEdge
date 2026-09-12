@@ -222,3 +222,47 @@ def apply_bar_level_drawdown(
                 f"vs peak: {dd_pct_peak * 100:.2f}%"
             )
     return result
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  [P5.9/P5.10] Statistical significance
+# ──────────────────────────────────────────────────────────────────────────
+
+def compute_significance(
+    grouped_trades: list[dict[str, Any]],
+    n_trials: int = 1,
+) -> dict[str, Any]:
+    """Overlap-aware significance for a finished run.
+
+    Every report until now printed `profit_factor` and `sharpe_ratio` computed as
+    if each trade were an independent observation. They are not: research/24 §4
+    measured RANDOM entries at a real strategy's geometry reading +3.99 t when
+    trades overlapped and +0.56 when they did not. The user's own runs average
+    1.27 concurrent positions, so their reported Sharpe inherits that inflation.
+
+    `n_trials` is how many configurations were compared to arrive at this one. It
+    defaults to 1 — an honest default only if you really did run one backtest.
+    Pass the real number when a result was selected from a sweep, or the
+    threshold it is judged against is far too low.
+    """
+    from backend.analytics.significance import assess
+
+    if not grouped_trades:
+        return {"verdict": "INSUFFICIENT", "reasons": ["no trades"], "n": 0}
+
+    rs, entries, exits = [], [], []
+    for t in grouped_trades:
+        risk = abs(t.get("entry_price", 0) - t.get("initial_stop_loss", t.get("stop_loss", 0)))
+        if risk <= 0:
+            continue
+        move = ((t.get("exit_price", 0) - t.get("entry_price", 0))
+                if str(t.get("direction", "BUY")).upper().startswith("B")
+                else (t.get("entry_price", 0) - t.get("exit_price", 0)))
+        rs.append(move / risk)
+        entries.append(float(t.get("entry_time") or 0))
+        exits.append(float(t.get("exit_time") or t.get("entry_time") or 0))
+
+    if len(rs) < 2:
+        return {"verdict": "INSUFFICIENT", "reasons": ["fewer than 2 priceable trades"],
+                "n": len(rs)}
+    return assess(rs, entries, exits, n_trials=n_trials).to_dict()

@@ -32,6 +32,20 @@ from backend.utils.trade_grouper import group_trades
 logger = get_logger(__name__)
 
 
+def _compute_significance_safe(grouped_trades):
+    """[P5.9/P5.10] Overlap-aware verdict for a finished run.
+
+    Wrapped so a statistics failure can never discard a completed backtest —
+    the run is the expensive part and the verdict is an annotation on it.
+    """
+    try:
+        from backend.backtester.report import compute_significance
+        return compute_significance(grouped_trades)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning(f"[SIGNIFICANCE] not computed: {e}")
+        return {"verdict": "UNAVAILABLE", "reasons": [str(e)]}
+
+
 def _to_epoch_seconds(val) -> float | None:
     """
     Robustly convert an epoch number, python/pandas datetime, or numpy scalar
@@ -1535,6 +1549,11 @@ class BacktestEngine(CostModelMixin):
             "cost_model": self.cost_model,
             # [P1.2] What the fill model actually charged — see portfolio_engine.
             "fill_model": self._fill_model.summary(),
+            # [P5.9/P5.10] Overlap-aware verdict. profit_factor and sharpe_ratio
+            # above treat every trade as independent; these trades are not, and
+            # research/24 §4 measured that inflation turning a fair game into a
+            # 4-sigma "edge". Read `verdict` before reading anything else.
+            "significance": _compute_significance_safe(grouped_trades),
             # [2.24] How many risk-evaluation checks this run spent circuit-breaker
             # paused, and the last reason — makes a drawdown-latched stretch
             # visibly distinct from "the strategy found no setups" in the report.

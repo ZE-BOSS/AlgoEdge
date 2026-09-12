@@ -297,16 +297,16 @@ def test_unknown_strategy_gets_empty_defaults():
 def test_merge_order_user_override_wins():
     from backend.strategies.strategy_defaults import merge_strategy_defaults
     merged = merge_strategy_defaults(
-        "NYOpenRetest_v1",
-        {"trail_method_tp1": "NONE", "risk_per_trade_pct": 0.5},
+        "DriftJumpAlpha_v1",
+        {"trail_method_tp1": "ATR_TRAIL", "risk_per_trade_pct": 0.5},
         {"trail_method_tp1": "FIXED_PIPS"},
     )
     assert merged["trail_method_tp1"] == "FIXED_PIPS", "explicit user override must win"
     assert merged["risk_per_trade_pct"] == 0.5, "global fields must survive untouched"
     # and without an override, the measured default applies
     assert merge_strategy_defaults(
-        "NYOpenRetest_v1", {"trail_method_tp1": "NONE"}
-    )["trail_method_tp1"] == "ATR_TRAIL"
+        "DriftJumpAlpha_v1", {"trail_method_tp1": "ATR_TRAIL"}
+    )["trail_method_tp1"] == "NONE"
 
 
 def test_trailing_verdicts_match_the_measurement():
@@ -315,10 +315,8 @@ def test_trailing_verdicts_match_the_measurement():
     re-enable trailing where it was measured to lose money.
     """
     from backend.strategies.strategy_defaults import get_strategy_defaults
-    # Only NYOpenRetest gained from trailing (+1,765 PnL, +15.5pp WR).
-    assert get_strategy_defaults("NYOpenRetest_v1")["trail_method_tp1"] == "ATR_TRAIL"
-    # These three netted flat-to-negative; DriftJumpAlpha lost 1,299 on Crash 1000.
-    for sid in ("DriftJumpAlpha_v1", "VWAP_v1", "CRT_v1"):
+    # Flat-to-negative in the sweep; DriftJumpAlpha lost 1,299 on Crash 1000.
+    for sid in ("DriftJumpAlpha_v1", "VWAP_v1", "APA_v1", "BoomDriftJump_v1"):
         assert get_strategy_defaults(sid)["trail_method_tp1"] == "NONE", (
             f"{sid} had trailing re-enabled — the sweep measured it as flat or harmful"
         )
@@ -326,13 +324,8 @@ def test_trailing_verdicts_match_the_measurement():
 
 def test_session_verdicts_match_the_measurement():
     from backend.strategies.strategy_defaults import get_strategy_defaults
-    # -0.170 contribution: actively harmful, removing it gains signals AND expectancy.
-    assert get_strategy_defaults("HTFFVGFlip_v1")["session_filter_enabled"] is False
-    # +0.009 while discarding 88.2% of candidates — the most expensive no-op found.
-    assert get_strategy_defaults("CRT_v1")["session_filter_enabled"] is False
-    # +0.064 and +0.126: these earn their place, so they must NOT be disabled.
-    for sid in ("VWAP_v1", "BiasIFVG_v1"):
-        assert "session_filter_enabled" not in get_strategy_defaults(sid)
+    # +0.064: VWAP's session gate earns its place, so it must NOT be disabled.
+    assert "session_filter_enabled" not in get_strategy_defaults("VWAP_v1")
 
 
 def test_live_and_backtest_both_apply_strategy_defaults():

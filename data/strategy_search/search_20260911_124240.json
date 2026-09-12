@@ -1,0 +1,2803 @@
+{
+  "generated": "2026-09-11T12:42:40.123785+00:00",
+  "in_sample": [
+    "2024-01-22",
+    "2026-01-10"
+  ],
+  "out_of_sample": [
+    "2026-01-10",
+    "2026-09-11"
+  ],
+  "balance": 350.0,
+  "risk_pct": 1.0,
+  "markets": {
+    "XAUUSD": [
+      {
+        "family": "donchian",
+        "timeframe": "H1",
+        "description": "trend breakout, ATR stop, trailing or channel exit",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 16,
+        "family_median_oos_avg_r": 0.2497,
+        "chosen": {
+          "n": 55,
+          "k": 2.0,
+          "exit": "channel",
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 97,
+          "win_rate": 0.4124,
+          "avg_r": 0.6309,
+          "total_r": 61.195,
+          "profit_factor": 2.107,
+          "max_dd_r": 8.123,
+          "months": 24,
+          "positive_months": 14,
+          "worst_month_r": -4.786,
+          "final_balance": 618.69,
+          "return_pct": 76.77,
+          "max_dd_pct": 7.84
+        },
+        "out_of_sample": {
+          "n": 25,
+          "win_rate": 0.32,
+          "avg_r": 0.3238,
+          "total_r": 8.096,
+          "profit_factor": 1.506,
+          "max_dd_r": 11.73,
+          "months": 9,
+          "positive_months": 3,
+          "worst_month_r": -4.025,
+          "final_balance": 376.42,
+          "return_pct": 7.55,
+          "max_dd_pct": 11.13
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 39.1,
+          "median_risk_pct_at_min_lot": 11.17
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "ema_pullback",
+        "timeframe": "H1",
+        "description": "trend pullback to the fast EMA, fixed reward:risk",
+        "configs_tried": 20,
+        "configs_profitable_in_sample": 19,
+        "family_median_oos_avg_r": 0.0714,
+        "chosen": {
+          "emas": [
+            50,
+            200
+          ],
+          "rr": 10.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 95,
+          "win_rate": 0.2421,
+          "avg_r": 1.0283,
+          "total_r": 97.685,
+          "profit_factor": 2.328,
+          "max_dd_r": 15.661,
+          "months": 24,
+          "positive_months": 13,
+          "worst_month_r": -5.101,
+          "final_balance": 864.44,
+          "return_pct": 146.98,
+          "max_dd_pct": 14.59
+        },
+        "out_of_sample": {
+          "n": 26,
+          "win_rate": 0.1538,
+          "avg_r": 0.0661,
+          "total_r": 1.717,
+          "profit_factor": 1.078,
+          "max_dd_r": 15.263,
+          "months": 8,
+          "positive_months": 3,
+          "worst_month_r": -4.022,
+          "final_balance": 352.21,
+          "return_pct": 0.63,
+          "max_dd_pct": 14.27
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 38.7,
+          "median_risk_pct_at_min_lot": 11.06
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "vwap",
+        "timeframe": "M15",
+        "description": "session VWAP pullback with the VWAP slope (tick-volume weighted)",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 4,
+        "family_median_oos_avg_r": 0.0121,
+        "chosen": {
+          "session": "ny",
+          "exit": 3.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 373,
+          "win_rate": 0.3995,
+          "avg_r": 0.0528,
+          "total_r": 19.707,
+          "profit_factor": 1.094,
+          "max_dd_r": 19.705,
+          "months": 25,
+          "positive_months": 14,
+          "worst_month_r": -8.725,
+          "final_balance": 410.76,
+          "return_pct": 17.36,
+          "max_dd_pct": 18.05
+        },
+        "out_of_sample": {
+          "n": 130,
+          "win_rate": 0.3538,
+          "avg_r": 0.0186,
+          "total_r": 2.417,
+          "profit_factor": 1.03,
+          "max_dd_r": 17.493,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -3.933,
+          "final_balance": 353.62,
+          "return_pct": 1.03,
+          "max_dd_pct": 16.29
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 2.3,
+          "median_risk_usd_at_min_lot": 11.78,
+          "median_risk_pct_at_min_lot": 3.37
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "vol_breakout",
+        "timeframe": "H1",
+        "description": "breakout confirmed by a tick-volume surge (order-flow proxy)",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 6,
+        "family_median_oos_avg_r": 0.0746,
+        "chosen": {
+          "n": 55,
+          "m": 1.5,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 101,
+          "win_rate": 0.4455,
+          "avg_r": 0.3078,
+          "total_r": 31.085,
+          "profit_factor": 1.626,
+          "max_dd_r": 9.045,
+          "months": 25,
+          "positive_months": 14,
+          "worst_month_r": -3.995,
+          "final_balance": 471.07,
+          "return_pct": 34.59,
+          "max_dd_pct": 8.69
+        },
+        "out_of_sample": {
+          "n": 23,
+          "win_rate": 0.4348,
+          "avg_r": 0.0497,
+          "total_r": 1.143,
+          "profit_factor": 1.09,
+          "max_dd_r": 9.04,
+          "months": 9,
+          "positive_months": 3,
+          "worst_month_r": -2.007,
+          "final_balance": 353.23,
+          "return_pct": 0.92,
+          "max_dd_pct": 8.71
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 38.85,
+          "median_risk_pct_at_min_lot": 11.1
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "rsi2",
+        "timeframe": "H1",
+        "description": "RSI(2) mean reversion with the 200-bar trend",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 6,
+        "family_median_oos_avg_r": 0.0166,
+        "chosen": {
+          "th": 10,
+          "hold": 24,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 326,
+          "win_rate": 0.6656,
+          "avg_r": 0.0268,
+          "total_r": 8.736,
+          "profit_factor": 1.175,
+          "max_dd_r": 6.393,
+          "months": 24,
+          "positive_months": 14,
+          "worst_month_r": -2.521,
+          "final_balance": 380.73,
+          "return_pct": 8.78,
+          "max_dd_pct": 6.27
+        },
+        "out_of_sample": {
+          "n": 83,
+          "win_rate": 0.6386,
+          "avg_r": 0.031,
+          "total_r": 2.577,
+          "profit_factor": 1.266,
+          "max_dd_r": 4.022,
+          "months": 8,
+          "positive_months": 4,
+          "worst_month_r": -1.814,
+          "final_balance": 358.94,
+          "return_pct": 2.55,
+          "max_dd_pct": 3.98
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 58.72,
+          "median_risk_pct_at_min_lot": 16.78
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "bollinger",
+        "timeframe": "H1",
+        "description": "fade back inside the band, exit at the mean",
+        "configs_tried": 4,
+        "configs_profitable_in_sample": 3,
+        "family_median_oos_avg_r": -0.1376,
+        "chosen": {
+          "k": 2.5,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 147,
+          "win_rate": 0.551,
+          "avg_r": 0.1058,
+          "total_r": 15.547,
+          "profit_factor": 1.242,
+          "max_dd_r": 9.892,
+          "months": 24,
+          "positive_months": 17,
+          "worst_month_r": -4.334,
+          "final_balance": 405.0,
+          "return_pct": 15.71,
+          "max_dd_pct": 9.52
+        },
+        "out_of_sample": {
+          "n": 64,
+          "win_rate": 0.3594,
+          "avg_r": -0.1579,
+          "total_r": -10.106,
+          "profit_factor": 0.738,
+          "max_dd_r": 14.044,
+          "months": 9,
+          "positive_months": 2,
+          "worst_month_r": -3.444,
+          "final_balance": 314.85,
+          "return_pct": -10.04,
+          "max_dd_pct": 13.42
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 29.24,
+          "median_risk_pct_at_min_lot": 8.35
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "orb",
+        "timeframe": "M15",
+        "description": "London / New York opening-range breakout",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 8,
+        "family_median_oos_avg_r": 0.0731,
+        "chosen": {
+          "session": "london",
+          "range_min": 30,
+          "exit": "session",
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 478,
+          "win_rate": 0.3013,
+          "avg_r": 0.0452,
+          "total_r": 21.607,
+          "profit_factor": 1.067,
+          "max_dd_r": 29.045,
+          "months": 25,
+          "positive_months": 11,
+          "worst_month_r": -10.438,
+          "final_balance": 395.82,
+          "return_pct": 13.09,
+          "max_dd_pct": 25.92
+        },
+        "out_of_sample": {
+          "n": 166,
+          "win_rate": 0.3193,
+          "avg_r": 0.2123,
+          "total_r": 35.24,
+          "profit_factor": 1.317,
+          "max_dd_r": 14.904,
+          "months": 9,
+          "positive_months": 6,
+          "worst_month_r": -9.058,
+          "final_balance": 480.77,
+          "return_pct": 37.36,
+          "max_dd_pct": 13.91
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 16.05,
+          "median_risk_pct_at_min_lot": 4.59
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "tsmom",
+        "timeframe": "D1",
+        "description": "daily time-series momentum",
+        "configs_tried": 6,
+        "configs_profitable_in_sample": 3,
+        "family_median_oos_avg_r": -0.0437,
+        "chosen": {
+          "lookback": 60,
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 17,
+          "win_rate": 0.4706,
+          "avg_r": 1.6768,
+          "total_r": 28.505,
+          "profit_factor": 16.032,
+          "max_dd_r": 0.783,
+          "months": 10,
+          "positive_months": 6,
+          "worst_month_r": -0.467,
+          "final_balance": 460.18,
+          "return_pct": 31.48,
+          "max_dd_pct": 0.78
+        },
+        "out_of_sample": {
+          "n": 5,
+          "win_rate": 0.2,
+          "avg_r": -0.1106,
+          "total_r": -0.553,
+          "profit_factor": 0.196,
+          "max_dd_r": 0.553,
+          "months": 3,
+          "positive_months": 0,
+          "worst_month_r": -0.324,
+          "final_balance": 348.07,
+          "return_pct": -0.55,
+          "max_dd_pct": 0.55
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 392.58,
+          "median_risk_pct_at_min_lot": 112.16
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      }
+    ],
+    "US Tech 100": [
+      {
+        "family": "donchian",
+        "timeframe": "H1",
+        "description": "trend breakout, ATR stop, trailing or channel exit",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 10,
+        "family_median_oos_avg_r": 0.0195,
+        "chosen": {
+          "n": 55,
+          "k": 2.0,
+          "exit": "trail",
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 142,
+          "win_rate": 0.4014,
+          "avg_r": 0.2156,
+          "total_r": 30.62,
+          "profit_factor": 1.456,
+          "max_dd_r": 12.603,
+          "months": 24,
+          "positive_months": 14,
+          "worst_month_r": -5.592,
+          "final_balance": 465.21,
+          "return_pct": 32.92,
+          "max_dd_pct": 12.06
+        },
+        "out_of_sample": {
+          "n": 48,
+          "win_rate": 0.3542,
+          "avg_r": 0.0701,
+          "total_r": 3.366,
+          "profit_factor": 1.129,
+          "max_dd_r": 7.041,
+          "months": 9,
+          "positive_months": 3,
+          "worst_month_r": -3.694,
+          "final_balance": 359.12,
+          "return_pct": 2.61,
+          "max_dd_pct": 6.84
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 17.61,
+          "median_risk_pct_at_min_lot": 5.03
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "ema_pullback",
+        "timeframe": "H1",
+        "description": "trend pullback to the fast EMA, fixed reward:risk",
+        "configs_tried": 20,
+        "configs_profitable_in_sample": 7,
+        "family_median_oos_avg_r": -0.0372,
+        "chosen": {
+          "emas": [
+            50,
+            200
+          ],
+          "rr": 7.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 97,
+          "win_rate": 0.1959,
+          "avg_r": 0.2253,
+          "total_r": 21.854,
+          "profit_factor": 1.267,
+          "max_dd_r": 14.331,
+          "months": 23,
+          "positive_months": 11,
+          "worst_month_r": -8.075,
+          "final_balance": 420.42,
+          "return_pct": 20.12,
+          "max_dd_pct": 13.73
+        },
+        "out_of_sample": {
+          "n": 33,
+          "win_rate": 0.1212,
+          "avg_r": -0.0476,
+          "total_r": -1.572,
+          "profit_factor": 0.944,
+          "max_dd_r": 15.125,
+          "months": 9,
+          "positive_months": 3,
+          "worst_month_r": -5.017,
+          "final_balance": 341.11,
+          "return_pct": -2.54,
+          "max_dd_pct": 14.1
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 18.35,
+          "median_risk_pct_at_min_lot": 5.24
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "vwap",
+        "timeframe": "M15",
+        "description": "session VWAP pullback with the VWAP slope (tick-volume weighted)",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 3,
+        "family_median_oos_avg_r": -0.0357,
+        "chosen": {
+          "session": "london",
+          "exit": "session",
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 1057,
+          "win_rate": 0.2176,
+          "avg_r": 0.0664,
+          "total_r": 70.232,
+          "profit_factor": 1.084,
+          "max_dd_r": 64.098,
+          "months": 25,
+          "positive_months": 15,
+          "worst_month_r": -17.358,
+          "final_balance": 475.76,
+          "return_pct": 35.93,
+          "max_dd_pct": 50.64
+        },
+        "out_of_sample": {
+          "n": 343,
+          "win_rate": 0.2303,
+          "avg_r": 0.072,
+          "total_r": 24.713,
+          "profit_factor": 1.093,
+          "max_dd_r": 35.053,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -11.268,
+          "final_balance": 391.64,
+          "return_pct": 11.9,
+          "max_dd_pct": 31.81
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 35.6,
+          "median_risk_usd_at_min_lot": 4.39,
+          "median_risk_pct_at_min_lot": 1.25
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "vol_breakout",
+        "timeframe": "H1",
+        "description": "breakout confirmed by a tick-volume surge (order-flow proxy)",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 8,
+        "family_median_oos_avg_r": 0.042,
+        "chosen": {
+          "n": 20,
+          "m": 2.0,
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 254,
+          "win_rate": 0.3504,
+          "avg_r": 0.1303,
+          "total_r": 33.099,
+          "profit_factor": 1.227,
+          "max_dd_r": 20.405,
+          "months": 25,
+          "positive_months": 17,
+          "worst_month_r": -9.75,
+          "final_balance": 466.8,
+          "return_pct": 33.37,
+          "max_dd_pct": 18.63
+        },
+        "out_of_sample": {
+          "n": 37,
+          "win_rate": 0.2703,
+          "avg_r": 0.0519,
+          "total_r": 1.921,
+          "profit_factor": 1.074,
+          "max_dd_r": 7.255,
+          "months": 9,
+          "positive_months": 5,
+          "worst_month_r": -3.284,
+          "final_balance": 354.2,
+          "return_pct": 1.2,
+          "max_dd_pct": 7.09
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 14.34,
+          "median_risk_pct_at_min_lot": 4.1
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "rsi2",
+        "timeframe": "H1",
+        "description": "RSI(2) mean reversion with the 200-bar trend",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 8,
+        "family_median_oos_avg_r": -0.0012,
+        "chosen": {
+          "th": 10,
+          "hold": 24,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 340,
+          "win_rate": 0.6912,
+          "avg_r": 0.0886,
+          "total_r": 30.112,
+          "profit_factor": 1.518,
+          "max_dd_r": 3.291,
+          "months": 24,
+          "positive_months": 15,
+          "worst_month_r": -3.21,
+          "final_balance": 470.42,
+          "return_pct": 34.41,
+          "max_dd_pct": 3.27
+        },
+        "out_of_sample": {
+          "n": 88,
+          "win_rate": 0.625,
+          "avg_r": -0.0231,
+          "total_r": -2.034,
+          "profit_factor": 0.881,
+          "max_dd_r": 5.256,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -2.489,
+          "final_balance": 342.58,
+          "return_pct": -2.12,
+          "max_dd_pct": 5.16
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 23.57,
+          "median_risk_pct_at_min_lot": 6.73
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "bollinger",
+        "timeframe": "H1",
+        "description": "fade back inside the band, exit at the mean",
+        "configs_tried": 4,
+        "configs_profitable_in_sample": 1,
+        "family_median_oos_avg_r": -0.0314,
+        "chosen": {
+          "k": 2.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 315,
+          "win_rate": 0.5556,
+          "avg_r": 0.0276,
+          "total_r": 8.687,
+          "profit_factor": 1.065,
+          "max_dd_r": 23.227,
+          "months": 25,
+          "positive_months": 14,
+          "worst_month_r": -8.322,
+          "final_balance": 374.86,
+          "return_pct": 7.1,
+          "max_dd_pct": 21.21
+        },
+        "out_of_sample": {
+          "n": 109,
+          "win_rate": 0.4679,
+          "avg_r": -0.0169,
+          "total_r": -1.841,
+          "profit_factor": 0.969,
+          "max_dd_r": 13.521,
+          "months": 9,
+          "positive_months": 6,
+          "worst_month_r": -8.217,
+          "final_balance": 340.97,
+          "return_pct": -2.58,
+          "max_dd_pct": 12.77
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 15.68,
+          "median_risk_pct_at_min_lot": 4.48
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "orb",
+        "timeframe": "M15",
+        "description": "London / New York opening-range breakout",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 13,
+        "family_median_oos_avg_r": -0.0109,
+        "chosen": {
+          "session": "london",
+          "range_min": 30,
+          "exit": "session",
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 461,
+          "win_rate": 0.2538,
+          "avg_r": 0.0854,
+          "total_r": 39.356,
+          "profit_factor": 1.116,
+          "max_dd_r": 47.866,
+          "months": 25,
+          "positive_months": 12,
+          "worst_month_r": -13.011,
+          "final_balance": 458.37,
+          "return_pct": 30.96,
+          "max_dd_pct": 38.97
+        },
+        "out_of_sample": {
+          "n": 168,
+          "win_rate": 0.2976,
+          "avg_r": 0.2036,
+          "total_r": 34.202,
+          "profit_factor": 1.291,
+          "max_dd_r": 28.151,
+          "months": 9,
+          "positive_months": 5,
+          "worst_month_r": -9.885,
+          "final_balance": 470.95,
+          "return_pct": 34.56,
+          "max_dd_pct": 24.96
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 8.3,
+          "median_risk_usd_at_min_lot": 7.11,
+          "median_risk_pct_at_min_lot": 2.03
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "tsmom",
+        "timeframe": "D1",
+        "description": "daily time-series momentum",
+        "configs_tried": 6,
+        "configs_profitable_in_sample": 3,
+        "family_median_oos_avg_r": 0.0333,
+        "chosen": {
+          "lookback": 60,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 11,
+          "win_rate": 0.5455,
+          "avg_r": 0.2336,
+          "total_r": 2.569,
+          "profit_factor": 2.819,
+          "max_dd_r": 0.976,
+          "months": 8,
+          "positive_months": 5,
+          "worst_month_r": -0.721,
+          "final_balance": 358.96,
+          "return_pct": 2.56,
+          "max_dd_pct": 0.97
+        },
+        "out_of_sample": {
+          "n": 8,
+          "win_rate": 0.25,
+          "avg_r": -0.0592,
+          "total_r": -0.474,
+          "profit_factor": 0.8,
+          "max_dd_r": 1.756,
+          "months": 5,
+          "positive_months": 2,
+          "worst_month_r": -0.952,
+          "final_balance": 348.27,
+          "return_pct": -0.49,
+          "max_dd_pct": 1.74
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 124.37,
+          "median_risk_pct_at_min_lot": 35.53
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      }
+    ],
+    "US SP 500": [
+      {
+        "family": "donchian",
+        "timeframe": "H1",
+        "description": "trend breakout, ATR stop, trailing or channel exit",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 6,
+        "family_median_oos_avg_r": -0.1486,
+        "chosen": {
+          "n": 55,
+          "k": 2.0,
+          "exit": "trail",
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 159,
+          "win_rate": 0.3899,
+          "avg_r": 0.0894,
+          "total_r": 14.217,
+          "profit_factor": 1.174,
+          "max_dd_r": 17.329,
+          "months": 25,
+          "positive_months": 13,
+          "worst_month_r": -5.696,
+          "final_balance": 395.62,
+          "return_pct": 13.03,
+          "max_dd_pct": 16.29
+        },
+        "out_of_sample": {
+          "n": 47,
+          "win_rate": 0.2979,
+          "avg_r": -0.2226,
+          "total_r": -10.461,
+          "profit_factor": 0.662,
+          "max_dd_r": 12.087,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -6.305,
+          "final_balance": 313.67,
+          "return_pct": -10.38,
+          "max_dd_pct": 11.66
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 74.5,
+          "median_risk_usd_at_min_lot": 2.99,
+          "median_risk_pct_at_min_lot": 0.86
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "ema_pullback",
+        "timeframe": "H1",
+        "description": "trend pullback to the fast EMA, fixed reward:risk",
+        "configs_tried": 20,
+        "configs_profitable_in_sample": 7,
+        "family_median_oos_avg_r": 0.062,
+        "chosen": {
+          "emas": [
+            20,
+            50
+          ],
+          "rr": 7.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 126,
+          "win_rate": 0.1905,
+          "avg_r": 0.2592,
+          "total_r": 32.656,
+          "profit_factor": 1.306,
+          "max_dd_r": 21.308,
+          "months": 24,
+          "positive_months": 13,
+          "worst_month_r": -7.439,
+          "final_balance": 462.51,
+          "return_pct": 32.14,
+          "max_dd_pct": 19.64
+        },
+        "out_of_sample": {
+          "n": 38,
+          "win_rate": 0.2105,
+          "avg_r": 0.1987,
+          "total_r": 7.551,
+          "profit_factor": 1.243,
+          "max_dd_r": 13.876,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -5.105,
+          "final_balance": 372.63,
+          "return_pct": 6.47,
+          "max_dd_pct": 13.02
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 63.2,
+          "median_risk_usd_at_min_lot": 2.91,
+          "median_risk_pct_at_min_lot": 0.83
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "vwap",
+        "timeframe": "M15",
+        "description": "session VWAP pullback with the VWAP slope (tick-volume weighted)",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 1,
+        "family_median_oos_avg_r": -0.0262,
+        "chosen": {
+          "session": "ny",
+          "exit": "session",
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 351,
+          "win_rate": 0.3447,
+          "avg_r": 0.0456,
+          "total_r": 16.021,
+          "profit_factor": 1.07,
+          "max_dd_r": 26.604,
+          "months": 25,
+          "positive_months": 12,
+          "worst_month_r": -7.49,
+          "final_balance": 389.14,
+          "return_pct": 11.18,
+          "max_dd_pct": 24.62
+        },
+        "out_of_sample": {
+          "n": 116,
+          "win_rate": 0.3103,
+          "avg_r": -0.1414,
+          "total_r": -16.405,
+          "profit_factor": 0.782,
+          "max_dd_r": 19.414,
+          "months": 9,
+          "positive_months": 2,
+          "worst_month_r": -9.335,
+          "final_balance": 293.61,
+          "return_pct": -16.11,
+          "max_dd_pct": 18.56
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 94.8,
+          "median_risk_usd_at_min_lot": 1.15,
+          "median_risk_pct_at_min_lot": 0.33
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "vol_breakout",
+        "timeframe": "H1",
+        "description": "breakout confirmed by a tick-volume surge (order-flow proxy)",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 6,
+        "family_median_oos_avg_r": 0.058,
+        "chosen": {
+          "n": 20,
+          "m": 2.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 120,
+          "win_rate": 0.3917,
+          "avg_r": 0.1784,
+          "total_r": 21.413,
+          "profit_factor": 1.329,
+          "max_dd_r": 7.121,
+          "months": 25,
+          "positive_months": 12,
+          "worst_month_r": -3.328,
+          "final_balance": 424.35,
+          "return_pct": 21.24,
+          "max_dd_pct": 6.95
+        },
+        "out_of_sample": {
+          "n": 26,
+          "win_rate": 0.3077,
+          "avg_r": 0.3438,
+          "total_r": 8.939,
+          "profit_factor": 1.519,
+          "max_dd_r": 5.797,
+          "months": 8,
+          "positive_months": 3,
+          "worst_month_r": -1.833,
+          "final_balance": 379.38,
+          "return_pct": 8.39,
+          "max_dd_pct": 5.68
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 84.6,
+          "median_risk_usd_at_min_lot": 2.62,
+          "median_risk_pct_at_min_lot": 0.75
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "rsi2",
+        "timeframe": "H1",
+        "description": "RSI(2) mean reversion with the 200-bar trend",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 8,
+        "family_median_oos_avg_r": 0.0358,
+        "chosen": {
+          "th": 5,
+          "hold": 24,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 183,
+          "win_rate": 0.6339,
+          "avg_r": 0.0603,
+          "total_r": 11.035,
+          "profit_factor": 1.336,
+          "max_dd_r": 5.062,
+          "months": 24,
+          "positive_months": 13,
+          "worst_month_r": -1.881,
+          "final_balance": 389.72,
+          "return_pct": 11.35,
+          "max_dd_pct": 4.98
+        },
+        "out_of_sample": {
+          "n": 51,
+          "win_rate": 0.6471,
+          "avg_r": 0.077,
+          "total_r": 3.925,
+          "profit_factor": 1.548,
+          "max_dd_r": 1.73,
+          "months": 9,
+          "positive_months": 6,
+          "worst_month_r": -1.414,
+          "final_balance": 363.81,
+          "return_pct": 3.94,
+          "max_dd_pct": 1.72
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 41.2,
+          "median_risk_usd_at_min_lot": 3.75,
+          "median_risk_pct_at_min_lot": 1.07
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "bollinger",
+        "timeframe": "H1",
+        "description": "fade back inside the band, exit at the mean",
+        "configs_tried": 4,
+        "configs_profitable_in_sample": 2,
+        "family_median_oos_avg_r": -0.0282,
+        "chosen": {
+          "k": 2.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 294,
+          "win_rate": 0.6054,
+          "avg_r": 0.068,
+          "total_r": 19.978,
+          "profit_factor": 1.173,
+          "max_dd_r": 12.533,
+          "months": 25,
+          "positive_months": 17,
+          "worst_month_r": -5.336,
+          "final_balance": 421.45,
+          "return_pct": 20.41,
+          "max_dd_pct": 11.89
+        },
+        "out_of_sample": {
+          "n": 115,
+          "win_rate": 0.487,
+          "avg_r": -0.1162,
+          "total_r": -13.365,
+          "profit_factor": 0.773,
+          "max_dd_r": 19.999,
+          "months": 9,
+          "positive_months": 3,
+          "worst_month_r": -13.942,
+          "final_balance": 304.31,
+          "return_pct": -13.05,
+          "max_dd_pct": 18.32
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 62.6,
+          "median_risk_usd_at_min_lot": 2.84,
+          "median_risk_pct_at_min_lot": 0.81
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "orb",
+        "timeframe": "M15",
+        "description": "London / New York opening-range breakout",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 9,
+        "family_median_oos_avg_r": -0.019,
+        "chosen": {
+          "session": "ny",
+          "range_min": 30,
+          "exit": 3.0,
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 493,
+          "win_rate": 0.4462,
+          "avg_r": 0.0262,
+          "total_r": 12.941,
+          "profit_factor": 1.058,
+          "max_dd_r": 14.865,
+          "months": 25,
+          "positive_months": 13,
+          "worst_month_r": -9.911,
+          "final_balance": 386.34,
+          "return_pct": 10.38,
+          "max_dd_pct": 13.92
+        },
+        "out_of_sample": {
+          "n": 163,
+          "win_rate": 0.4417,
+          "avg_r": 0.0029,
+          "total_r": 0.48,
+          "profit_factor": 1.008,
+          "max_dd_r": 8.209,
+          "months": 9,
+          "positive_months": 6,
+          "worst_month_r": -5.159,
+          "final_balance": 349.47,
+          "return_pct": -0.15,
+          "max_dd_pct": 8.04
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 58.3,
+          "median_risk_usd_at_min_lot": 3.25,
+          "median_risk_pct_at_min_lot": 0.93
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "tsmom",
+        "timeframe": "D1",
+        "description": "daily time-series momentum",
+        "configs_tried": 6,
+        "configs_profitable_in_sample": 2,
+        "family_median_oos_avg_r": -0.0649,
+        "chosen": {
+          "lookback": 20,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 15,
+          "win_rate": 0.6,
+          "avg_r": 0.3198,
+          "total_r": 4.796,
+          "profit_factor": 6.18,
+          "max_dd_r": 0.523,
+          "months": 11,
+          "positive_months": 7,
+          "worst_month_r": -0.418,
+          "final_balance": 367.08,
+          "return_pct": 4.88,
+          "max_dd_pct": 0.52
+        },
+        "out_of_sample": {
+          "n": 12,
+          "win_rate": 0.5,
+          "avg_r": 0.0908,
+          "total_r": 1.089,
+          "profit_factor": 1.637,
+          "max_dd_r": 0.8,
+          "months": 6,
+          "positive_months": 3,
+          "worst_month_r": -0.731,
+          "final_balance": 353.77,
+          "return_pct": 1.08,
+          "max_dd_pct": 0.8
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 24.64,
+          "median_risk_pct_at_min_lot": 7.04
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      }
+    ],
+    "XAGUSD": [
+      {
+        "family": "donchian",
+        "timeframe": "H1",
+        "description": "trend breakout, ATR stop, trailing or channel exit",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 15,
+        "family_median_oos_avg_r": 0.0529,
+        "chosen": {
+          "n": 55,
+          "k": 3.0,
+          "exit": "channel",
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 86,
+          "win_rate": 0.3372,
+          "avg_r": 0.4177,
+          "total_r": 35.926,
+          "profit_factor": 1.723,
+          "max_dd_r": 10.501,
+          "months": 25,
+          "positive_months": 13,
+          "worst_month_r": -4.782,
+          "final_balance": 487.95,
+          "return_pct": 39.42,
+          "max_dd_pct": 10.02
+        },
+        "out_of_sample": {
+          "n": 23,
+          "win_rate": 0.3043,
+          "avg_r": 0.312,
+          "total_r": 7.176,
+          "profit_factor": 1.555,
+          "max_dd_r": 3.584,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -2.032,
+          "final_balance": 374.15,
+          "return_pct": 6.9,
+          "max_dd_pct": 3.54
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 96.45,
+          "median_risk_pct_at_min_lot": 27.56
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "ema_pullback",
+        "timeframe": "H1",
+        "description": "trend pullback to the fast EMA, fixed reward:risk",
+        "configs_tried": 20,
+        "configs_profitable_in_sample": 18,
+        "family_median_oos_avg_r": 0.0794,
+        "chosen": {
+          "emas": [
+            20,
+            50
+          ],
+          "rr": 10.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 115,
+          "win_rate": 0.2087,
+          "avg_r": 0.6604,
+          "total_r": 75.945,
+          "profit_factor": 1.817,
+          "max_dd_r": 17.886,
+          "months": 24,
+          "positive_months": 15,
+          "worst_month_r": -8.228,
+          "final_balance": 696.61,
+          "return_pct": 99.03,
+          "max_dd_pct": 16.62
+        },
+        "out_of_sample": {
+          "n": 36,
+          "win_rate": 0.1389,
+          "avg_r": -0.1047,
+          "total_r": -3.771,
+          "profit_factor": 0.881,
+          "max_dd_r": 18.857,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -7.115,
+          "final_balance": 333.26,
+          "return_pct": -4.78,
+          "max_dd_pct": 17.3
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 63.56,
+          "median_risk_pct_at_min_lot": 18.16
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "vwap",
+        "timeframe": "M15",
+        "description": "session VWAP pullback with the VWAP slope (tick-volume weighted)",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 0,
+        "family_median_oos_avg_r": -0.0959,
+        "chosen": null,
+        "verdict": "NO SETTING WAS PROFITABLE IN-SAMPLE"
+      },
+      {
+        "family": "vol_breakout",
+        "timeframe": "H1",
+        "description": "breakout confirmed by a tick-volume surge (order-flow proxy)",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 7,
+        "family_median_oos_avg_r": 0.1124,
+        "chosen": {
+          "n": 20,
+          "m": 2.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 129,
+          "win_rate": 0.4031,
+          "avg_r": 0.1929,
+          "total_r": 24.889,
+          "profit_factor": 1.379,
+          "max_dd_r": 11.265,
+          "months": 25,
+          "positive_months": 15,
+          "worst_month_r": -4.241,
+          "final_balance": 442.19,
+          "return_pct": 26.34,
+          "max_dd_pct": 10.72
+        },
+        "out_of_sample": {
+          "n": 24,
+          "win_rate": 0.3333,
+          "avg_r": 0.2474,
+          "total_r": 5.938,
+          "profit_factor": 1.383,
+          "max_dd_r": 8.227,
+          "months": 9,
+          "positive_months": 3,
+          "worst_month_r": -4.047,
+          "final_balance": 368.59,
+          "return_pct": 5.31,
+          "max_dd_pct": 8.05
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 62.95,
+          "median_risk_pct_at_min_lot": 17.99
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "rsi2",
+        "timeframe": "H1",
+        "description": "RSI(2) mean reversion with the 200-bar trend",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 8,
+        "family_median_oos_avg_r": -0.0109,
+        "chosen": {
+          "th": 10,
+          "hold": 24,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 318,
+          "win_rate": 0.7296,
+          "avg_r": 0.0381,
+          "total_r": 12.111,
+          "profit_factor": 1.262,
+          "max_dd_r": 3.714,
+          "months": 24,
+          "positive_months": 16,
+          "worst_month_r": -2.765,
+          "final_balance": 393.81,
+          "return_pct": 12.52,
+          "max_dd_pct": 3.67
+        },
+        "out_of_sample": {
+          "n": 83,
+          "win_rate": 0.6024,
+          "avg_r": -0.0332,
+          "total_r": -2.754,
+          "profit_factor": 0.844,
+          "max_dd_r": 9.398,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -2.234,
+          "final_balance": 340.11,
+          "return_pct": -2.82,
+          "max_dd_pct": 9.02
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 107.14,
+          "median_risk_pct_at_min_lot": 30.61
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "bollinger",
+        "timeframe": "H1",
+        "description": "fade back inside the band, exit at the mean",
+        "configs_tried": 4,
+        "configs_profitable_in_sample": 0,
+        "family_median_oos_avg_r": -0.1291,
+        "chosen": null,
+        "verdict": "NO SETTING WAS PROFITABLE IN-SAMPLE"
+      },
+      {
+        "family": "orb",
+        "timeframe": "M15",
+        "description": "London / New York opening-range breakout",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 1,
+        "family_median_oos_avg_r": -0.0181,
+        "chosen": {
+          "session": "london",
+          "range_min": 30,
+          "exit": 1.5,
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 482,
+          "win_rate": 0.4295,
+          "avg_r": 0.0187,
+          "total_r": 9.008,
+          "profit_factor": 1.032,
+          "max_dd_r": 25.363,
+          "months": 25,
+          "positive_months": 12,
+          "worst_month_r": -10.447,
+          "final_balance": 369.82,
+          "return_pct": 5.66,
+          "max_dd_pct": 22.8
+        },
+        "out_of_sample": {
+          "n": 167,
+          "win_rate": 0.3772,
+          "avg_r": -0.12,
+          "total_r": -20.032,
+          "profit_factor": 0.809,
+          "max_dd_r": 24.23,
+          "months": 9,
+          "positive_months": 2,
+          "worst_month_r": -6.29,
+          "final_balance": 283.23,
+          "return_pct": -19.08,
+          "max_dd_pct": 22.3
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 29.05,
+          "median_risk_pct_at_min_lot": 8.3
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "tsmom",
+        "timeframe": "D1",
+        "description": "daily time-series momentum",
+        "configs_tried": 6,
+        "configs_profitable_in_sample": 4,
+        "family_median_oos_avg_r": -0.048,
+        "chosen": {
+          "lookback": 20,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 36,
+          "win_rate": 0.3611,
+          "avg_r": 0.1137,
+          "total_r": 4.093,
+          "profit_factor": 1.51,
+          "max_dd_r": 2.677,
+          "months": 20,
+          "positive_months": 7,
+          "worst_month_r": -1.254,
+          "final_balance": 363.9,
+          "return_pct": 3.97,
+          "max_dd_pct": 2.65
+        },
+        "out_of_sample": {
+          "n": 12,
+          "win_rate": 0.25,
+          "avg_r": -0.0693,
+          "total_r": -0.832,
+          "profit_factor": 0.654,
+          "max_dd_r": 1.453,
+          "months": 5,
+          "positive_months": 1,
+          "worst_month_r": -0.494,
+          "final_balance": 347.06,
+          "return_pct": -0.84,
+          "max_dd_pct": 1.45
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 465.17,
+          "median_risk_pct_at_min_lot": 132.91
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      }
+    ],
+    "XPTUSD": [
+      {
+        "family": "donchian",
+        "timeframe": "H1",
+        "description": "trend breakout, ATR stop, trailing or channel exit",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 2,
+        "family_median_oos_avg_r": -0.3766,
+        "chosen": {
+          "n": 55,
+          "k": 2.0,
+          "exit": "channel",
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 82,
+          "win_rate": 0.2805,
+          "avg_r": 0.3266,
+          "total_r": 26.777,
+          "profit_factor": 1.42,
+          "max_dd_r": 16.783,
+          "months": 25,
+          "positive_months": 12,
+          "worst_month_r": -7.574,
+          "final_balance": 436.29,
+          "return_pct": 24.65,
+          "max_dd_pct": 15.75
+        },
+        "out_of_sample": {
+          "n": 36,
+          "win_rate": 0.1111,
+          "avg_r": -0.6037,
+          "total_r": -21.734,
+          "profit_factor": 0.374,
+          "max_dd_r": 21.734,
+          "months": 9,
+          "positive_months": 2,
+          "worst_month_r": -7.141,
+          "final_balance": 280.37,
+          "return_pct": -19.89,
+          "max_dd_pct": 19.89
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 34.97,
+          "median_risk_pct_at_min_lot": 9.99
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "ema_pullback",
+        "timeframe": "H1",
+        "description": "trend pullback to the fast EMA, fixed reward:risk",
+        "configs_tried": 20,
+        "configs_profitable_in_sample": 9,
+        "family_median_oos_avg_r": -0.132,
+        "chosen": {
+          "emas": [
+            50,
+            200
+          ],
+          "rr": 10.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 73,
+          "win_rate": 0.2603,
+          "avg_r": 0.4869,
+          "total_r": 35.543,
+          "profit_factor": 1.594,
+          "max_dd_r": 17.444,
+          "months": 22,
+          "positive_months": 10,
+          "worst_month_r": -4.238,
+          "final_balance": 481.63,
+          "return_pct": 37.61,
+          "max_dd_pct": 16.25
+        },
+        "out_of_sample": {
+          "n": 17,
+          "win_rate": 0.2353,
+          "avg_r": -0.0536,
+          "total_r": -0.912,
+          "profit_factor": 0.943,
+          "max_dd_r": 10.171,
+          "months": 8,
+          "positive_months": 3,
+          "worst_month_r": -5.271,
+          "final_balance": 345.43,
+          "return_pct": -1.31,
+          "max_dd_pct": 9.77
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 28.23,
+          "median_risk_pct_at_min_lot": 8.06
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "vwap",
+        "timeframe": "M15",
+        "description": "session VWAP pullback with the VWAP slope (tick-volume weighted)",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 0,
+        "family_median_oos_avg_r": -0.8736,
+        "chosen": null,
+        "verdict": "NO SETTING WAS PROFITABLE IN-SAMPLE"
+      },
+      {
+        "family": "vol_breakout",
+        "timeframe": "H1",
+        "description": "breakout confirmed by a tick-volume surge (order-flow proxy)",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 0,
+        "family_median_oos_avg_r": -0.4819,
+        "chosen": null,
+        "verdict": "NO SETTING WAS PROFITABLE IN-SAMPLE"
+      },
+      {
+        "family": "rsi2",
+        "timeframe": "H1",
+        "description": "RSI(2) mean reversion with the 200-bar trend",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 0,
+        "family_median_oos_avg_r": -0.1199,
+        "chosen": null,
+        "verdict": "NO SETTING WAS PROFITABLE IN-SAMPLE"
+      },
+      {
+        "family": "bollinger",
+        "timeframe": "H1",
+        "description": "fade back inside the band, exit at the mean",
+        "configs_tried": 4,
+        "configs_profitable_in_sample": 0,
+        "family_median_oos_avg_r": -0.4634,
+        "chosen": null,
+        "verdict": "NO SETTING WAS PROFITABLE IN-SAMPLE"
+      },
+      {
+        "family": "orb",
+        "timeframe": "M15",
+        "description": "London / New York opening-range breakout",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 0,
+        "family_median_oos_avg_r": -0.3594,
+        "chosen": null,
+        "verdict": "NO SETTING WAS PROFITABLE IN-SAMPLE"
+      },
+      {
+        "family": "tsmom",
+        "timeframe": "D1",
+        "description": "daily time-series momentum",
+        "configs_tried": 6,
+        "configs_profitable_in_sample": 2,
+        "family_median_oos_avg_r": -0.1074,
+        "chosen": {
+          "lookback": 60,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 23,
+          "win_rate": 0.4783,
+          "avg_r": 0.2509,
+          "total_r": 5.771,
+          "profit_factor": 2.536,
+          "max_dd_r": 3.053,
+          "months": 15,
+          "positive_months": 6,
+          "worst_month_r": -1.218,
+          "final_balance": 369.72,
+          "return_pct": 5.64,
+          "max_dd_pct": 3.02
+        },
+        "out_of_sample": {
+          "n": 7,
+          "win_rate": 0.1429,
+          "avg_r": -0.2569,
+          "total_r": -1.798,
+          "profit_factor": 0.034,
+          "max_dd_r": 1.798,
+          "months": 6,
+          "positive_months": 1,
+          "worst_month_r": -0.456,
+          "final_balance": 343.75,
+          "return_pct": -1.79,
+          "max_dd_pct": 1.79
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 212.23,
+          "median_risk_pct_at_min_lot": 60.64
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      }
+    ],
+    "EURUSD": [
+      {
+        "family": "donchian",
+        "timeframe": "H1",
+        "description": "trend breakout, ATR stop, trailing or channel exit",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 3,
+        "family_median_oos_avg_r": -0.0695,
+        "chosen": {
+          "n": 20,
+          "k": 2.0,
+          "exit": "channel",
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 195,
+          "win_rate": 0.3487,
+          "avg_r": 0.1429,
+          "total_r": 27.857,
+          "profit_factor": 1.259,
+          "max_dd_r": 23.972,
+          "months": 25,
+          "positive_months": 11,
+          "worst_month_r": -8.363,
+          "final_balance": 444.82,
+          "return_pct": 27.09,
+          "max_dd_pct": 21.5
+        },
+        "out_of_sample": {
+          "n": 74,
+          "win_rate": 0.2162,
+          "avg_r": -0.1995,
+          "total_r": -14.76,
+          "profit_factor": 0.685,
+          "max_dd_r": 30.97,
+          "months": 9,
+          "positive_months": 3,
+          "worst_month_r": -8.852,
+          "final_balance": 299.56,
+          "return_pct": -14.41,
+          "max_dd_pct": 26.85
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 93.2,
+          "median_risk_usd_at_min_lot": 2.34,
+          "median_risk_pct_at_min_lot": 0.67
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "ema_pullback",
+        "timeframe": "H1",
+        "description": "trend pullback to the fast EMA, fixed reward:risk",
+        "configs_tried": 20,
+        "configs_profitable_in_sample": 17,
+        "family_median_oos_avg_r": -0.2124,
+        "chosen": {
+          "emas": [
+            20,
+            50
+          ],
+          "rr": 10.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 100,
+          "win_rate": 0.24,
+          "avg_r": 0.3076,
+          "total_r": 30.758,
+          "profit_factor": 1.401,
+          "max_dd_r": 20.604,
+          "months": 24,
+          "positive_months": 10,
+          "worst_month_r": -6.183,
+          "final_balance": 458.44,
+          "return_pct": 30.98,
+          "max_dd_pct": 18.77
+        },
+        "out_of_sample": {
+          "n": 44,
+          "win_rate": 0.0909,
+          "avg_r": -0.0791,
+          "total_r": -3.481,
+          "profit_factor": 0.915,
+          "max_dd_r": 26.318,
+          "months": 9,
+          "positive_months": 3,
+          "worst_month_r": -9.127,
+          "final_balance": 331.7,
+          "return_pct": -5.23,
+          "max_dd_pct": 23.49
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 90.9,
+          "median_risk_usd_at_min_lot": 2.15,
+          "median_risk_pct_at_min_lot": 0.62
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "vwap",
+        "timeframe": "M15",
+        "description": "session VWAP pullback with the VWAP slope (tick-volume weighted)",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 7,
+        "family_median_oos_avg_r": -0.0395,
+        "chosen": {
+          "session": "london",
+          "exit": 3.0,
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 1051,
+          "win_rate": 0.3111,
+          "avg_r": 0.0332,
+          "total_r": 34.851,
+          "profit_factor": 1.049,
+          "max_dd_r": 29.469,
+          "months": 25,
+          "positive_months": 11,
+          "worst_month_r": -8.729,
+          "final_balance": 431.77,
+          "return_pct": 23.36,
+          "max_dd_pct": 26.71
+        },
+        "out_of_sample": {
+          "n": 357,
+          "win_rate": 0.2885,
+          "avg_r": -0.0873,
+          "total_r": -31.148,
+          "profit_factor": 0.878,
+          "max_dd_r": 50.255,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -21.231,
+          "final_balance": 245.54,
+          "return_pct": -29.84,
+          "max_dd_pct": 41.68
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 98.3,
+          "median_risk_usd_at_min_lot": 0.6,
+          "median_risk_pct_at_min_lot": 0.17
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "vol_breakout",
+        "timeframe": "H1",
+        "description": "breakout confirmed by a tick-volume surge (order-flow proxy)",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 0,
+        "family_median_oos_avg_r": 0.0595,
+        "chosen": null,
+        "verdict": "NO SETTING WAS PROFITABLE IN-SAMPLE"
+      },
+      {
+        "family": "rsi2",
+        "timeframe": "H1",
+        "description": "RSI(2) mean reversion with the 200-bar trend",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 8,
+        "family_median_oos_avg_r": 0.0612,
+        "chosen": {
+          "th": 5,
+          "hold": 24,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 147,
+          "win_rate": 0.6871,
+          "avg_r": 0.0865,
+          "total_r": 12.717,
+          "profit_factor": 1.657,
+          "max_dd_r": 2.501,
+          "months": 23,
+          "positive_months": 15,
+          "worst_month_r": -1.27,
+          "final_balance": 396.81,
+          "return_pct": 13.37,
+          "max_dd_pct": 2.5
+        },
+        "out_of_sample": {
+          "n": 45,
+          "win_rate": 0.7333,
+          "avg_r": 0.1077,
+          "total_r": 4.846,
+          "profit_factor": 2.623,
+          "max_dd_r": 1.377,
+          "months": 9,
+          "positive_months": 8,
+          "worst_month_r": -1.015,
+          "final_balance": 367.28,
+          "return_pct": 4.94,
+          "max_dd_pct": 1.37
+        },
+        "oos_significance": "SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 55.6,
+          "median_risk_usd_at_min_lot": 3.26,
+          "median_risk_pct_at_min_lot": 0.93
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "bollinger",
+        "timeframe": "H1",
+        "description": "fade back inside the band, exit at the mean",
+        "configs_tried": 4,
+        "configs_profitable_in_sample": 4,
+        "family_median_oos_avg_r": 0.0238,
+        "chosen": {
+          "k": 2.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 346,
+          "win_rate": 0.5231,
+          "avg_r": 0.0624,
+          "total_r": 21.593,
+          "profit_factor": 1.14,
+          "max_dd_r": 10.172,
+          "months": 25,
+          "positive_months": 16,
+          "worst_month_r": -6.693,
+          "final_balance": 425.07,
+          "return_pct": 21.45,
+          "max_dd_pct": 10.36
+        },
+        "out_of_sample": {
+          "n": 134,
+          "win_rate": 0.4701,
+          "avg_r": -0.0325,
+          "total_r": -4.36,
+          "profit_factor": 0.935,
+          "max_dd_r": 18.45,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -8.342,
+          "final_balance": 332.15,
+          "return_pct": -5.1,
+          "max_dd_pct": 16.99
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 92.5,
+          "median_risk_usd_at_min_lot": 1.62,
+          "median_risk_pct_at_min_lot": 0.46
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "orb",
+        "timeframe": "M15",
+        "description": "London / New York opening-range breakout",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 12,
+        "family_median_oos_avg_r": 0.0571,
+        "chosen": {
+          "session": "london",
+          "range_min": 30,
+          "exit": "session",
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 492,
+          "win_rate": 0.376,
+          "avg_r": 0.098,
+          "total_r": 48.2,
+          "profit_factor": 1.167,
+          "max_dd_r": 41.347,
+          "months": 25,
+          "positive_months": 13,
+          "worst_month_r": -14.84,
+          "final_balance": 525.67,
+          "return_pct": 50.19,
+          "max_dd_pct": 34.39
+        },
+        "out_of_sample": {
+          "n": 167,
+          "win_rate": 0.3713,
+          "avg_r": 0.1344,
+          "total_r": 22.443,
+          "profit_factor": 1.225,
+          "max_dd_r": 10.26,
+          "months": 9,
+          "positive_months": 6,
+          "worst_month_r": -8.237,
+          "final_balance": 426.01,
+          "return_pct": 21.72,
+          "max_dd_pct": 9.87
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 97.6,
+          "median_risk_usd_at_min_lot": 1.19,
+          "median_risk_pct_at_min_lot": 0.34
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "tsmom",
+        "timeframe": "D1",
+        "description": "daily time-series momentum",
+        "configs_tried": 6,
+        "configs_profitable_in_sample": 3,
+        "family_median_oos_avg_r": -0.0838,
+        "chosen": {
+          "lookback": 60,
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 21,
+          "win_rate": 0.2381,
+          "avg_r": 0.1071,
+          "total_r": 2.249,
+          "profit_factor": 1.424,
+          "max_dd_r": 2.358,
+          "months": 11,
+          "positive_months": 3,
+          "worst_month_r": -1.457,
+          "final_balance": 357.26,
+          "return_pct": 2.08,
+          "max_dd_pct": 2.34
+        },
+        "out_of_sample": {
+          "n": 5,
+          "win_rate": 0.2,
+          "avg_r": -0.1872,
+          "total_r": -0.936,
+          "profit_factor": 0.227,
+          "max_dd_r": 1.21,
+          "months": 4,
+          "positive_months": 1,
+          "worst_month_r": -0.688,
+          "final_balance": 346.73,
+          "return_pct": -0.93,
+          "max_dd_pct": 1.21
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 16.11,
+          "median_risk_pct_at_min_lot": 4.6
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      }
+    ],
+    "GBPJPY": [
+      {
+        "family": "donchian",
+        "timeframe": "H1",
+        "description": "trend breakout, ATR stop, trailing or channel exit",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 3,
+        "family_median_oos_avg_r": -0.0188,
+        "chosen": {
+          "n": 20,
+          "k": 3.0,
+          "exit": "channel",
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 189,
+          "win_rate": 0.4074,
+          "avg_r": 0.0677,
+          "total_r": 12.795,
+          "profit_factor": 1.184,
+          "max_dd_r": 11.562,
+          "months": 25,
+          "positive_months": 14,
+          "worst_month_r": -5.369,
+          "final_balance": 393.49,
+          "return_pct": 12.43,
+          "max_dd_pct": 11.27
+        },
+        "out_of_sample": {
+          "n": 61,
+          "win_rate": 0.3279,
+          "avg_r": -0.0818,
+          "total_r": -4.988,
+          "profit_factor": 0.838,
+          "max_dd_r": 11.84,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -4.602,
+          "final_balance": 331.73,
+          "return_pct": -5.22,
+          "max_dd_pct": 11.27
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 26.2,
+          "median_risk_usd_at_min_lot": 4.14,
+          "median_risk_pct_at_min_lot": 1.18
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "ema_pullback",
+        "timeframe": "H1",
+        "description": "trend pullback to the fast EMA, fixed reward:risk",
+        "configs_tried": 20,
+        "configs_profitable_in_sample": 15,
+        "family_median_oos_avg_r": -0.0984,
+        "chosen": {
+          "emas": [
+            20,
+            50
+          ],
+          "rr": 7.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 111,
+          "win_rate": 0.2523,
+          "avg_r": 0.492,
+          "total_r": 54.614,
+          "profit_factor": 1.657,
+          "max_dd_r": 12.35,
+          "months": 25,
+          "positive_months": 13,
+          "worst_month_r": -4.0,
+          "final_balance": 578.37,
+          "return_pct": 65.25,
+          "max_dd_pct": 11.7
+        },
+        "out_of_sample": {
+          "n": 47,
+          "win_rate": 0.1702,
+          "avg_r": -0.107,
+          "total_r": -5.029,
+          "profit_factor": 0.875,
+          "max_dd_r": 9.307,
+          "months": 9,
+          "positive_months": 2,
+          "worst_month_r": -4.059,
+          "final_balance": 329.13,
+          "return_pct": -5.96,
+          "max_dd_pct": 9.01
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 66.0,
+          "median_risk_usd_at_min_lot": 2.98,
+          "median_risk_pct_at_min_lot": 0.85
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "vwap",
+        "timeframe": "M15",
+        "description": "session VWAP pullback with the VWAP slope (tick-volume weighted)",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 7,
+        "family_median_oos_avg_r": 0.0493,
+        "chosen": {
+          "session": "london",
+          "exit": 3.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 578,
+          "win_rate": 0.3235,
+          "avg_r": 0.0529,
+          "total_r": 30.557,
+          "profit_factor": 1.079,
+          "max_dd_r": 34.389,
+          "months": 25,
+          "positive_months": 13,
+          "worst_month_r": -10.905,
+          "final_balance": 440.38,
+          "return_pct": 25.82,
+          "max_dd_pct": 30.03
+        },
+        "out_of_sample": {
+          "n": 183,
+          "win_rate": 0.3224,
+          "avg_r": -0.0322,
+          "total_r": -5.894,
+          "profit_factor": 0.954,
+          "max_dd_r": 23.603,
+          "months": 9,
+          "positive_months": 5,
+          "worst_month_r": -7.935,
+          "final_balance": 322.53,
+          "return_pct": -7.85,
+          "max_dd_pct": 21.81
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 98.4,
+          "median_risk_usd_at_min_lot": 0.86,
+          "median_risk_pct_at_min_lot": 0.24
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "vol_breakout",
+        "timeframe": "H1",
+        "description": "breakout confirmed by a tick-volume surge (order-flow proxy)",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 0,
+        "family_median_oos_avg_r": 0.0293,
+        "chosen": null,
+        "verdict": "NO SETTING WAS PROFITABLE IN-SAMPLE"
+      },
+      {
+        "family": "rsi2",
+        "timeframe": "H1",
+        "description": "RSI(2) mean reversion with the 200-bar trend",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 4,
+        "family_median_oos_avg_r": 0.004,
+        "chosen": {
+          "th": 10,
+          "hold": 24,
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 521,
+          "win_rate": 0.6392,
+          "avg_r": 0.0015,
+          "total_r": 0.774,
+          "profit_factor": 1.009,
+          "max_dd_r": 8.93,
+          "months": 24,
+          "positive_months": 14,
+          "worst_month_r": -5.489,
+          "final_balance": 350.66,
+          "return_pct": 0.19,
+          "max_dd_pct": 8.78
+        },
+        "out_of_sample": {
+          "n": 174,
+          "win_rate": 0.6034,
+          "avg_r": 0.0052,
+          "total_r": 0.901,
+          "profit_factor": 1.03,
+          "max_dd_r": 4.991,
+          "months": 9,
+          "positive_months": 3,
+          "worst_month_r": -2.353,
+          "final_balance": 352.22,
+          "return_pct": 0.63,
+          "max_dd_pct": 4.92
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 25.9,
+          "median_risk_usd_at_min_lot": 4.23,
+          "median_risk_pct_at_min_lot": 1.21
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "bollinger",
+        "timeframe": "H1",
+        "description": "fade back inside the band, exit at the mean",
+        "configs_tried": 4,
+        "configs_profitable_in_sample": 3,
+        "family_median_oos_avg_r": -0.129,
+        "chosen": {
+          "k": 2.5,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 176,
+          "win_rate": 0.5341,
+          "avg_r": 0.0837,
+          "total_r": 14.739,
+          "profit_factor": 1.18,
+          "max_dd_r": 12.745,
+          "months": 25,
+          "positive_months": 13,
+          "worst_month_r": -4.723,
+          "final_balance": 401.01,
+          "return_pct": 14.57,
+          "max_dd_pct": 12.22
+        },
+        "out_of_sample": {
+          "n": 60,
+          "win_rate": 0.5167,
+          "avg_r": -0.0669,
+          "total_r": -4.017,
+          "profit_factor": 0.857,
+          "max_dd_r": 8.138,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -4.851,
+          "final_balance": 335.29,
+          "return_pct": -4.2,
+          "max_dd_pct": 7.86
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 68.3,
+          "median_risk_usd_at_min_lot": 2.5,
+          "median_risk_pct_at_min_lot": 0.71
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "orb",
+        "timeframe": "M15",
+        "description": "London / New York opening-range breakout",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 16,
+        "family_median_oos_avg_r": 0.0093,
+        "chosen": {
+          "session": "london",
+          "range_min": 60,
+          "exit": "session",
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 442,
+          "win_rate": 0.457,
+          "avg_r": 0.0821,
+          "total_r": 36.281,
+          "profit_factor": 1.183,
+          "max_dd_r": 17.193,
+          "months": 25,
+          "positive_months": 13,
+          "worst_month_r": -10.232,
+          "final_balance": 486.01,
+          "return_pct": 38.86,
+          "max_dd_pct": 16.19
+        },
+        "out_of_sample": {
+          "n": 153,
+          "win_rate": 0.5033,
+          "avg_r": 0.1936,
+          "total_r": 29.618,
+          "profit_factor": 1.441,
+          "max_dd_r": 8.231,
+          "months": 9,
+          "positive_months": 7,
+          "worst_month_r": -1.216,
+          "final_balance": 464.15,
+          "return_pct": 32.61,
+          "max_dd_pct": 8.0
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 86.9,
+          "median_risk_usd_at_min_lot": 2.12,
+          "median_risk_pct_at_min_lot": 0.6
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "tsmom",
+        "timeframe": "D1",
+        "description": "daily time-series momentum",
+        "configs_tried": 6,
+        "configs_profitable_in_sample": 2,
+        "family_median_oos_avg_r": -0.1511,
+        "chosen": {
+          "lookback": 20,
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 32,
+          "win_rate": 0.5,
+          "avg_r": 0.0257,
+          "total_r": 0.822,
+          "profit_factor": 1.23,
+          "max_dd_r": 1.507,
+          "months": 20,
+          "positive_months": 10,
+          "worst_month_r": -0.695,
+          "final_balance": 352.79,
+          "return_pct": 0.8,
+          "max_dd_pct": 1.5
+        },
+        "out_of_sample": {
+          "n": 8,
+          "win_rate": 0.375,
+          "avg_r": -0.1306,
+          "total_r": -1.045,
+          "profit_factor": 0.468,
+          "max_dd_r": 1.058,
+          "months": 6,
+          "positive_months": 2,
+          "worst_month_r": -0.747,
+          "final_balance": 346.33,
+          "return_pct": -1.05,
+          "max_dd_pct": 1.06
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 24.13,
+          "median_risk_pct_at_min_lot": 6.89
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      }
+    ],
+    "BTCUSD": [
+      {
+        "family": "donchian",
+        "timeframe": "H1",
+        "description": "trend breakout, ATR stop, trailing or channel exit",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 16,
+        "family_median_oos_avg_r": 0.1207,
+        "chosen": {
+          "n": 55,
+          "k": 2.0,
+          "exit": "channel",
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 140,
+          "win_rate": 0.2571,
+          "avg_r": 0.2507,
+          "total_r": 35.092,
+          "profit_factor": 1.366,
+          "max_dd_r": 16.69,
+          "months": 25,
+          "positive_months": 12,
+          "worst_month_r": -6.549,
+          "final_balance": 468.37,
+          "return_pct": 33.82,
+          "max_dd_pct": 15.57
+        },
+        "out_of_sample": {
+          "n": 46,
+          "win_rate": 0.1957,
+          "avg_r": 0.0867,
+          "total_r": 3.989,
+          "profit_factor": 1.122,
+          "max_dd_r": 26.057,
+          "months": 9,
+          "positive_months": 1,
+          "worst_month_r": -8.027,
+          "final_balance": 347.66,
+          "return_pct": -0.67,
+          "max_dd_pct": 23.05
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 2.2,
+          "median_risk_usd_at_min_lot": 8.75,
+          "median_risk_pct_at_min_lot": 2.5
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "ema_pullback",
+        "timeframe": "H1",
+        "description": "trend pullback to the fast EMA, fixed reward:risk",
+        "configs_tried": 20,
+        "configs_profitable_in_sample": 20,
+        "family_median_oos_avg_r": 0.0524,
+        "chosen": {
+          "emas": [
+            50,
+            200
+          ],
+          "rr": 10.0,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 109,
+          "win_rate": 0.211,
+          "avg_r": 0.4669,
+          "total_r": 50.89,
+          "profit_factor": 1.59,
+          "max_dd_r": 16.083,
+          "months": 25,
+          "positive_months": 12,
+          "worst_month_r": -6.011,
+          "final_balance": 551.33,
+          "return_pct": 57.52,
+          "max_dd_pct": 15.03
+        },
+        "out_of_sample": {
+          "n": 30,
+          "win_rate": 0.2,
+          "avg_r": 0.0892,
+          "total_r": 2.676,
+          "profit_factor": 1.115,
+          "max_dd_r": 11.436,
+          "months": 9,
+          "positive_months": 3,
+          "worst_month_r": -6.418,
+          "final_balance": 356.18,
+          "return_pct": 1.77,
+          "max_dd_pct": 10.86
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 3.3,
+          "median_risk_usd_at_min_lot": 7.87,
+          "median_risk_pct_at_min_lot": 2.25
+        },
+        "verdict": "PROFITABLE BUT LUMPY"
+      },
+      {
+        "family": "vwap",
+        "timeframe": "M15",
+        "description": "session VWAP pullback with the VWAP slope (tick-volume weighted)",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 13,
+        "family_median_oos_avg_r": -0.0458,
+        "chosen": {
+          "session": "ny",
+          "exit": "session",
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 964,
+          "win_rate": 0.3143,
+          "avg_r": 0.085,
+          "total_r": 81.9,
+          "profit_factor": 1.131,
+          "max_dd_r": 50.729,
+          "months": 25,
+          "positive_months": 12,
+          "worst_month_r": -12.686,
+          "final_balance": 634.85,
+          "return_pct": 81.39,
+          "max_dd_pct": 41.26
+        },
+        "out_of_sample": {
+          "n": 341,
+          "win_rate": 0.3109,
+          "avg_r": -0.1041,
+          "total_r": -35.489,
+          "profit_factor": 0.843,
+          "max_dd_r": 46.631,
+          "months": 9,
+          "positive_months": 4,
+          "worst_month_r": -16.533,
+          "final_balance": 235.02,
+          "return_pct": -32.85,
+          "max_dd_pct": 39.2
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 69.8,
+          "median_risk_usd_at_min_lot": 2.38,
+          "median_risk_pct_at_min_lot": 0.68
+        },
+        "verdict": "LOST MONEY OUT OF SAMPLE"
+      },
+      {
+        "family": "vol_breakout",
+        "timeframe": "H1",
+        "description": "breakout confirmed by a tick-volume surge (order-flow proxy)",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 8,
+        "family_median_oos_avg_r": 2.4628,
+        "chosen": {
+          "n": 20,
+          "m": 2.0,
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 210,
+          "win_rate": 0.3333,
+          "avg_r": 0.2592,
+          "total_r": 54.434,
+          "profit_factor": 1.471,
+          "max_dd_r": 16.748,
+          "months": 24,
+          "positive_months": 16,
+          "worst_month_r": -4.779,
+          "final_balance": 571.51,
+          "return_pct": 63.29,
+          "max_dd_pct": 15.77
+        },
+        "out_of_sample": {
+          "n": 9,
+          "win_rate": 0.3333,
+          "avg_r": 3.8493,
+          "total_r": 34.643,
+          "profit_factor": 8.405,
+          "max_dd_r": 4.001,
+          "months": 4,
+          "positive_months": 2,
+          "worst_month_r": -1.104,
+          "final_balance": 471.33,
+          "return_pct": 34.67,
+          "max_dd_pct": 3.94
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 11.1,
+          "median_risk_usd_at_min_lot": 7.03,
+          "median_risk_pct_at_min_lot": 2.01
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "rsi2",
+        "timeframe": "H1",
+        "description": "RSI(2) mean reversion with the 200-bar trend",
+        "configs_tried": 8,
+        "configs_profitable_in_sample": 2,
+        "family_median_oos_avg_r": 0.0324,
+        "chosen": {
+          "th": 5,
+          "hold": 24,
+          "side": "long"
+        },
+        "in_sample": {
+          "n": 193,
+          "win_rate": 0.6528,
+          "avg_r": 0.001,
+          "total_r": 0.194,
+          "profit_factor": 1.006,
+          "max_dd_r": 6.681,
+          "months": 25,
+          "positive_months": 13,
+          "worst_month_r": -2.322,
+          "final_balance": 350.01,
+          "return_pct": 0.0,
+          "max_dd_pct": 6.55
+        },
+        "out_of_sample": {
+          "n": 61,
+          "win_rate": 0.6885,
+          "avg_r": 0.034,
+          "total_r": 2.073,
+          "profit_factor": 1.26,
+          "max_dd_r": 2.928,
+          "months": 9,
+          "positive_months": 7,
+          "worst_month_r": -1.049,
+          "final_balance": 357.15,
+          "return_pct": 2.04,
+          "max_dd_pct": 2.92
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 1.6,
+          "median_risk_usd_at_min_lot": 12.48,
+          "median_risk_pct_at_min_lot": 3.57
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "bollinger",
+        "timeframe": "H1",
+        "description": "fade back inside the band, exit at the mean",
+        "configs_tried": 4,
+        "configs_profitable_in_sample": 0,
+        "family_median_oos_avg_r": -0.0314,
+        "chosen": null,
+        "verdict": "NO SETTING WAS PROFITABLE IN-SAMPLE"
+      },
+      {
+        "family": "orb",
+        "timeframe": "M15",
+        "description": "London / New York opening-range breakout",
+        "configs_tried": 16,
+        "configs_profitable_in_sample": 12,
+        "family_median_oos_avg_r": 0.0503,
+        "chosen": {
+          "session": "ny",
+          "range_min": 60,
+          "exit": 1.5,
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 604,
+          "win_rate": 0.5132,
+          "avg_r": 0.0659,
+          "total_r": 39.778,
+          "profit_factor": 1.215,
+          "max_dd_r": 10.008,
+          "months": 25,
+          "positive_months": 22,
+          "worst_month_r": -5.041,
+          "final_balance": 510.41,
+          "return_pct": 45.83,
+          "max_dd_pct": 9.67
+        },
+        "out_of_sample": {
+          "n": 190,
+          "win_rate": 0.4632,
+          "avg_r": 0.049,
+          "total_r": 9.311,
+          "profit_factor": 1.154,
+          "max_dd_r": 7.184,
+          "months": 9,
+          "positive_months": 5,
+          "worst_month_r": -3.383,
+          "final_balance": 381.63,
+          "return_pct": 9.04,
+          "max_dd_pct": 6.98
+        },
+        "oos_significance": "NOT SIGNIFICANT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 18.4,
+          "median_risk_usd_at_min_lot": 7.81,
+          "median_risk_pct_at_min_lot": 2.23
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      },
+      {
+        "family": "tsmom",
+        "timeframe": "D1",
+        "description": "daily time-series momentum",
+        "configs_tried": 6,
+        "configs_profitable_in_sample": 6,
+        "family_median_oos_avg_r": 0.1804,
+        "chosen": {
+          "lookback": 60,
+          "side": "both"
+        },
+        "in_sample": {
+          "n": 24,
+          "win_rate": 0.375,
+          "avg_r": 0.6011,
+          "total_r": 14.426,
+          "profit_factor": 4.376,
+          "max_dd_r": 2.07,
+          "months": 13,
+          "positive_months": 4,
+          "worst_month_r": -0.957,
+          "final_balance": 402.33,
+          "return_pct": 14.95,
+          "max_dd_pct": 2.05
+        },
+        "out_of_sample": {
+          "n": 4,
+          "win_rate": 0.5,
+          "avg_r": 0.3933,
+          "total_r": 1.573,
+          "profit_factor": 2.247,
+          "max_dd_r": 1.0,
+          "months": 3,
+          "positive_months": 2,
+          "worst_month_r": -1.0,
+          "final_balance": 355.43,
+          "return_pct": 1.55,
+          "max_dd_pct": 1.0
+        },
+        "oos_significance": "INSUFFICIENT",
+        "capital_adequacy": {
+          "risk_budget_usd": 3.5,
+          "expressible_pct": 0.0,
+          "median_risk_usd_at_min_lot": 65.3,
+          "median_risk_pct_at_min_lot": 18.66
+        },
+        "verdict": "PROFITABLE OUT OF SAMPLE"
+      }
+    ]
+  }
+}

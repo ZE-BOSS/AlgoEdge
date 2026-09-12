@@ -1,0 +1,37 @@
+{
+  "date": "2026-09-11",
+  "input_tokens": 520072,
+  "output_tokens": 211896,
+  "cost_usd": 1.5795519999999994,
+  "calls": 480,
+  "tripped": false,
+  "trip_reason": "",
+  "by_model": {
+    "claude-haiku-4-5": {
+      "calls": 480,
+      "cost_usd": 1.579552,
+      "input_tokens": 520072,
+      "output_tokens": 211896
+    }
+  },
+  "by_caller": {
+    "forecast:XAUUSD": {
+      "calls": 160,
+      "cost_usd": 0.527159,
+      "input_tokens": 173144,
+      "output_tokens": 70803
+    },
+    "forecast:US Tech 100": {
+      "calls": 160,
+      "cost_usd": 0.524954,
+      "input_tokens": 173464,
+      "output_tokens": 70298
+    },
+    "forecast:US SP 500": {
+      "calls": 160,
+      "cost_usd": 0.527439,
+      "input_tokens": 173464,
+      "output_tokens": 70795
+    }
+  }
+}

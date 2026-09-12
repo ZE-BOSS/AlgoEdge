@@ -50,8 +50,14 @@ FAST_MODELS = {
 }
 
 # Environment variables consulted when no key is passed to the constructor.
+#
+# CLAUDE_API_KEY is included because that is what the shipped `.env` actually
+# uses, and the mismatch was silent: the key was present, valid and 108
+# characters of `sk-ant-...`, resolve_key() returned "" because it only looked
+# for the other two names, and every request failed authentication with nothing
+# in the logs to say the key had simply been looked up under the wrong name.
 _KEY_ENV = {
-    "anthropic": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
+    "anthropic": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_API_KEY"),
     "openai": ("OPENAI_API_KEY",),
     "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
 }
@@ -183,8 +189,12 @@ def _join(system: str | None, prompt: str) -> str:
 class LLMService:
     """Multi-provider LLM analysis service."""
 
-    def __init__(self, api_keys: dict[str, str] | None = None):
+    def __init__(self, api_keys: dict[str, str] | None = None, caller: str = "unknown"):
         self.api_keys = api_keys or {}
+        # [P3.12] Tags this service's spend in the daily budget breakdown, so
+        # "which instrument / which feature is expensive" is answerable rather
+        # than a single undifferentiated total.
+        self.caller = caller
 
     def resolve_key(self, provider: str) -> str:
         """
@@ -375,6 +385,19 @@ Provide:
                 "backend environment — the key stays server-side and is never "
                 "sent to the browser."
             )
+        # [P3.12] Budget gate. Enforced HERE, at the point of spend, rather than
+        # in whichever caller happens to remember — the Phase 3 agent design is
+        # 8 instruments on a 15-minute trigger, and the expensive failures
+        # (a retry loop, a double-firing scheduler, a context builder that stops
+        # truncating) are exactly the ones no caller would guard against.
+        from backend.services.llm_budget import BudgetExceeded, llm_budget
+        _requested = resolve_max_tokens("anthropic", model, max_tokens)
+        try:
+            llm_budget.check("anthropic", model, _requested)
+        except BudgetExceeded as e:
+            logger.error(f"[LLM] refused: {e}")
+            return f"LLM call refused — {e}"
+
         client = anthropic.AsyncAnthropic(api_key=key)
         info = model_info("anthropic", model)
         kwargs: dict = {
@@ -397,6 +420,23 @@ Provide:
 
         async with client.messages.stream(**kwargs) as stream:
             message = await stream.get_final_message()
+
+        # [P3.12] Book the actual spend from the API's own usage figures, not an
+        # estimate of the prompt — thinking tokens and cache reads only show up
+        # here, and they are most of the cost on the 5-family.
+        try:
+            _u = getattr(message, "usage", None)
+            _st = llm_budget.record(
+                "anthropic", model,
+                int(getattr(_u, "input_tokens", 0) or 0),
+                int(getattr(_u, "output_tokens", 0) or 0),
+                caller=self.caller,
+            )
+            logger.info(f"[LLM] {model} {getattr(_u, 'input_tokens', 0)}in/"
+                        f"{getattr(_u, 'output_tokens', 0)}out | day "
+                        f"${_st['cost_usd']:.4f}/${_st['daily_cost_cap_usd']:.2f}")
+        except Exception as _e:  # never let accounting kill a completed call
+            logger.warning(f"[LLM_BUDGET] spend not recorded: {_e}")
 
         if getattr(message, "stop_reason", None) == "refusal":
             detail = getattr(message, "stop_details", None)

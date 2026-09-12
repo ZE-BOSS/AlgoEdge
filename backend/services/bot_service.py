@@ -877,6 +877,22 @@ class BotService:
                         if strategy_id == "SMC_v1":
                             strategy_id = "APA_v1"
 
+                        # A saved slot can outlive its strategy — nine were removed
+                        # on 2026-09-11. Without this, get_strategy() raises into the
+                        # per-slot handler below, which reports it as a "data fetch
+                        # error" on every scan cycle. Say what it is, once, and skip.
+                        from backend.strategies.registry import list_strategies
+                        if strategy_id not in list_strategies():
+                            _warned = self.__dict__.setdefault("_missing_strategy_warned", set())
+                            if slot.slot_id not in _warned:
+                                _warned.add(slot.slot_id)
+                                self._log_event(
+                                    f"[{symbol}] slot {slot.slot_id}: strategy {strategy_id} no longer "
+                                    f"exists — slot skipped. Remove it or choose another strategy in Settings.",
+                                    "WARN", "BOT",
+                                )
+                            continue
+
                         # Instantiate engine if not exists — keyed by slot_id so
                         # two slots on the same symbol never share one engine's
                         # (and therefore one strategy's) internal state dict.
@@ -938,12 +954,7 @@ class BotService:
                                 from backend.strategies.strategy_defaults import get_strategy_defaults
                                 _sd_live = get_strategy_defaults(strategy_id)
                                 if "session_filter_enabled" in _sd_live:
-                                    _blk_name = {
-                                        "APA_v1": "apa", "VWAP_v1": "vwap", "CRT_v1": "crt",
-                                        "BiasIFVG_v1": "bias_ifvg",
-                                        "HTFFVGFlip_v1": "htf_fvg_flip",
-                                        "NYOpenRetest_v1": "ny_open_retest",
-                                    }.get(strategy_id)
+                                    _blk_name = {"APA_v1": "apa", "VWAP_v1": "vwap"}.get(strategy_id)
                                     _blk = getattr(config, _blk_name, None) if _blk_name else None
                                     if _blk is not None and hasattr(_blk, "session_filter_enabled"):
                                         _blk.session_filter_enabled = _sd_live["session_filter_enabled"]
@@ -1251,6 +1262,12 @@ class BotService:
                                         "allow_pyramiding": getattr(config.risk, "allow_pyramiding", False),
                                         "min_bars_between_entries": getattr(config.risk, "min_bars_between_entries", 0),
                                         "min_sl_pips": getattr(config.risk, "min_sl_pips", 0.0),
+                                        # [P5.1] Volatility targeting. None = off (the default),
+                                        # so nothing changes for anyone who has not opted in.
+                                        "vol_target_annual_pct": getattr(config.risk, "vol_target_annual_pct", None),
+                                        "vol_target_lookback_bars": getattr(config.risk, "vol_target_lookback_bars", 20),
+                                        "vol_target_min_scale": getattr(config.risk, "vol_target_min_scale", 0.5),
+                                        "vol_target_max_scale": getattr(config.risk, "vol_target_max_scale", 2.0),
                                         # [Phase 4 parity]
                                         "sizing_basis": getattr(config.risk, "sizing_basis", "STATIC"),
                                         "be_spread_multiple": getattr(config.risk, "be_spread_multiple", 2.0),

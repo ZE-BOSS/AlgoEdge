@@ -449,7 +449,7 @@ def _derive_commission_per_lot(symbol: str, defaults: dict) -> tuple[float, bool
                 deals = None
 
         if not deals:
-            return float(defaults.get("commission_per_lot", 0.0)), False
+            return _account_wide_commission(symbol, defaults)
 
         entry_in = getattr(mt5, "DEAL_ENTRY_IN", 0)
         entry_out = getattr(mt5, "DEAL_ENTRY_OUT", 1)
@@ -481,7 +481,7 @@ def _derive_commission_per_lot(symbol: str, defaults: dict) -> tuple[float, bool
                 continue
 
         if in_volume <= 0 or round_turns < _MIN_COMMISSION_DEALS:
-            return float(defaults.get("commission_per_lot", 0.0)), False
+            return _account_wide_commission(symbol, defaults)
 
         per_lot = total_commission / in_volume
 
@@ -502,6 +502,77 @@ def _derive_commission_per_lot(symbol: str, defaults: dict) -> tuple[float, bool
         return round(per_lot, 4), True
     except Exception as e:
         logger.debug(f"[COSTS] {symbol}: commission history derivation failed: {e}")
+        return float(defaults.get("commission_per_lot", 0.0)), False
+
+
+def _looks_like_fx(symbol: str) -> bool:
+    """A plain six-letter pair (EURUSD, GBPJPY). Indices, metals with an X prefix,
+    crypto and Deriv synthetics all fail this, so FX history is never mixed with
+    theirs."""
+    s = (symbol or "").strip().upper()
+    return len(s) == 6 and s.isalpha() and not s.startswith(("XA", "XP", "XC"))
+
+
+def _account_wide_commission(symbol: str, defaults: dict) -> tuple[float, bool]:
+    """Per-lot commission this ACCOUNT was actually charged on comparable symbols.
+
+    A symbol the account has never traded used to fall straight through to the
+    asset-class average — $7/lot on FX crosses — even when the entire deal history
+    says the broker charges nothing. Measured on this Deriv account 2026-09-12:
+    CADJPY, AUDJPY, BTCUSD and every synthetic booked $0.00 commission, while a
+    GBPJPY backtest was being charged $7/lot (~0.03 R per trade at 1.8% risk, on
+    top of an already conservative spread+slippage model).
+
+    Same-kind only (FX with FX), a year of history because a small account may
+    trade a symbol class only a few times, and the same sanity band and
+    round-turn minimum as the per-symbol derivation. Returns (per_lot, ok);
+    ok=False means the asset-class default still applies.
+    """
+    if mt5 is None:
+        return float(defaults.get("commission_per_lot", 0.0)), False
+    try:
+        to_dt = datetime.now(timezone.utc)
+        deals = mt5.history_deals_get(to_dt - timedelta(days=365), to_dt)
+        if not deals:
+            return float(defaults.get("commission_per_lot", 0.0)), False
+
+        want_fx = _looks_like_fx(symbol)
+        entry_in = getattr(mt5, "DEAL_ENTRY_IN", 0)
+        entry_out = getattr(mt5, "DEAL_ENTRY_OUT", 1)
+        total, in_volume, round_turns = 0.0, 0.0, 0
+        in_with, out_with = 0, 0
+        for d in deals:
+            try:
+                d_symbol = getattr(d, "symbol", "") or ""
+                if not d_symbol or _looks_like_fx(d_symbol) != want_fx:
+                    continue
+                commission = abs(float(getattr(d, "commission", 0.0) or 0.0))
+                total += commission
+                if getattr(d, "entry", None) == entry_in:
+                    in_volume += float(getattr(d, "volume", 0.0) or 0.0)
+                    round_turns += 1
+                    if commission > 0:
+                        in_with += 1
+                elif getattr(d, "entry", None) == entry_out and commission > 0:
+                    out_with += 1
+            except Exception:
+                continue
+
+        if in_volume <= 0 or round_turns < _MIN_COMMISSION_DEALS:
+            return float(defaults.get("commission_per_lot", 0.0)), False
+        per_lot = total / in_volume
+        if in_with > 0 and out_with == 0:
+            per_lot *= 2.0
+        if not (_COMMISSION_SANITY_MIN <= per_lot <= _COMMISSION_SANITY_MAX):
+            return float(defaults.get("commission_per_lot", 0.0)), False
+        logger.info(
+            f"[COSTS] {symbol}: no own deal history — using this account's observed "
+            f"{'FX' if want_fx else 'non-FX'} commission ${per_lot:.2f}/lot "
+            f"({round_turns} round turns) instead of the ${float(defaults.get('commission_per_lot', 0.0)):.2f} default."
+        )
+        return round(per_lot, 4), True
+    except Exception as e:
+        logger.debug(f"[COSTS] {symbol}: account-wide commission derivation failed: {e}")
         return float(defaults.get("commission_per_lot", 0.0)), False
 
 

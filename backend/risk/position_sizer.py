@@ -176,14 +176,22 @@ def get_pip_size(symbol: str) -> float:
     # IS pipette-scale and correctly becomes 0.01 pip after the *10.0 below). Applying
     # the blanket *10.0 to these 4 already-pip-scale profiles produced a 10x-too-large
     # pip size (0.1 instead of 0.01), corrupting breakeven/trailing pip-based distances.
-    _JPY_PIP_ALREADY_FULL_PIP = {"GBPJPY", "EURJPY", "AUDJPY", "CADJPY"}
+    #
+    # 2026-09-11: that exception keyed on symbol NAMES, but the profile is not
+    # always the static table. With MT5 connected, get_instrument_profile returns
+    # the broker's pipette (0.001) for those same four pairs, and the name-based
+    # exception then skipped the *10 — GBPJPY/EURJPY/AUDJPY/CADJPY got a 0.001
+    # pip, 10x too SMALL, shrinking every pip-denominated distance (break-even
+    # buffers, trailing, spread and slippage costs, min-stop floors) on the pairs.
+    # A JPY pip is 0.01 whichever scale the profile arrived in, so decide on the
+    # value, not the name.
     try:
         from backend.risk.compounding import get_instrument_profile
         profile = get_instrument_profile(symbol)
         if profile and profile.point_size:
             if profile.instrument_type == "FOREX":
-                if symbol_upper in _JPY_PIP_ALREADY_FULL_PIP:
-                    size = profile.point_size  # already a full pip, do not re-scale
+                if "JPY" in symbol_upper:
+                    size = 0.01 if profile.point_size <= 0.01 else profile.point_size
                 else:
                     size = profile.point_size * 10.0
             elif profile.instrument_type == "COMMODITY" and "XAU" in symbol_upper:

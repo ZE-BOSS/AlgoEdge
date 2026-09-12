@@ -33,9 +33,20 @@ from backend.backtester.engine import (
     _breakeven_stop,
 )
 from backend.backtester.fill_model import build_stop_fill_model
-from backend.backtester.report import apply_bar_level_drawdown, apply_leg_level_hit_rates
+from backend.backtester.report import apply_bar_level_drawdown, apply_leg_level_hit_rates, compute_significance
 
 logger = get_logger(__name__)
+
+
+def _compute_significance_safe(grouped_trades):
+    """Never let a statistics failure discard a completed backtest."""
+    try:
+        from backend.backtester.report import compute_significance
+        return compute_significance(grouped_trades)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning(f"[SIGNIFICANCE] not computed: {e}")
+        return {"verdict": "UNAVAILABLE", "reasons": [str(e)]}
+
 
 # [P1.11] Gates that drop a signal BEFORE `rejection_funnel["total_evaluated"]`
 # is incremented. Everything here is counted into `pre_risk_rejections` instead,
@@ -1127,6 +1138,11 @@ class PortfolioBacktestEngine(CostModelMixin):
             # configured. `gapped_pct` near 0 on a jump instrument means the model
             # is off or miscalibrated, and the run's P&L should not be trusted.
             "fill_model": self._fill_model.summary(),
+            # [P5.9/P5.10] Overlap-aware verdict. profit_factor and sharpe_ratio
+            # above treat every trade as independent; these trades are not, and
+            # research/24 §4 measured that inflation turning a fair game into a
+            # 4-sigma "edge". Read `verdict` before reading anything else.
+            "significance": _compute_significance_safe(grouped_trades),
             # [2.24] Distinguishes a drawdown-latched stretch from "no setups".
             "circuit_breaker_summary": {
                 "paused_checks": self.risk_engine.circuit.paused_bars,

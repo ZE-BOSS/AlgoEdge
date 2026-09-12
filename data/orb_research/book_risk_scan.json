@@ -1,0 +1,104 @@
+[
+ {
+  "risk_pct": 1.0,
+  "return_pct": 39.78,
+  "avg_month_pct": 6.08,
+  "worst_month_pct": -4.29,
+  "max_dd_pct": 25.07,
+  "shuffled": {
+   "paths": 200,
+   "return_pct_p5": 23.33,
+   "return_pct_p50": 81.05,
+   "return_pct_p95": 162.43,
+   "max_dd_pct_p50": 15.93,
+   "max_dd_pct_p95": 24.62,
+   "worst_month_pct_p5": -15.58,
+   "prob_loss": 0.005
+  }
+ },
+ {
+  "risk_pct": 1.8,
+  "return_pct": 34.63,
+  "avg_month_pct": 5.85,
+  "worst_month_pct": -9.18,
+  "max_dd_pct": 37.16,
+  "shuffled": {
+   "paths": 200,
+   "return_pct_p5": -1.73,
+   "return_pct_p50": 81.88,
+   "return_pct_p95": 343.27,
+   "max_dd_pct_p50": 23.6,
+   "max_dd_pct_p95": 38.16,
+   "worst_month_pct_p5": -23.43,
+   "prob_loss": 0.055
+  }
+ },
+ {
+  "risk_pct": 3.0,
+  "return_pct": 26.59,
+  "avg_month_pct": 5.16,
+  "worst_month_pct": -0.01,
+  "max_dd_pct": 42.84,
+  "shuffled": {
+   "paths": 200,
+   "return_pct_p5": -30.56,
+   "return_pct_p50": 81.01,
+   "return_pct_p95": 470.08,
+   "max_dd_pct_p50": 31.9,
+   "max_dd_pct_p95": 50.54,
+   "worst_month_pct_p5": -35.46,
+   "prob_loss": 0.13
+  }
+ },
+ {
+  "risk_pct": 5.0,
+  "return_pct": 8.14,
+  "avg_month_pct": 3.7,
+  "worst_month_pct": -19.31,
+  "max_dd_pct": 42.07,
+  "shuffled": {
+   "paths": 200,
+   "return_pct_p5": -44.29,
+   "return_pct_p50": 41.16,
+   "return_pct_p95": 600.26,
+   "max_dd_pct_p50": 41.91,
+   "max_dd_pct_p95": 58.22,
+   "worst_month_pct_p5": -42.92,
+   "prob_loss": 0.285
+  }
+ },
+ {
+  "risk_pct": 8.0,
+  "return_pct": -28.53,
+  "avg_month_pct": -7.58,
+  "worst_month_pct": -37.99,
+  "max_dd_pct": 53.19,
+  "shuffled": {
+   "paths": 200,
+   "return_pct_p5": -54.59,
+   "return_pct_p50": 23.42,
+   "return_pct_p95": 597.8,
+   "max_dd_pct_p50": 48.8,
+   "max_dd_pct_p95": 66.25,
+   "worst_month_pct_p5": -56.14,
+   "prob_loss": 0.375
+  }
+ },
+ {
+  "risk_pct": 12.0,
+  "return_pct": -46.19,
+  "avg_month_pct": -13.22,
+  "worst_month_pct": -52.19,
+  "max_dd_pct": 65.85,
+  "shuffled": {
+   "paths": 200,
+   "return_pct_p5": -65.14,
+   "return_pct_p50": 8.95,
+   "return_pct_p95": 1773.17,
+   "max_dd_pct_p50": 57.05,
+   "max_dd_pct_p95": 74.28,
+   "worst_month_pct_p5": -65.07,
+   "prob_loss": 0.45
+  }
+ }
+]
