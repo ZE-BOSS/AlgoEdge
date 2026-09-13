@@ -241,7 +241,42 @@ class APAEngine(BaseStrategy):
         return time_str >= start or time_str <= cutoff
 
     def get_required_timeframes(self) -> list[str]:
+        if self._breakout_mode:
+            return ["M5"]
         return [self.params.structure_timeframe, self.params.entry_timeframe]
+
+    # ── SESSION_BREAKOUT_TREND (see APAParams.setup_mode) ─────────────────
+    @property
+    def _breakout_mode(self) -> bool:
+        return str(getattr(self.params, "setup_mode", "HEAD_AND_SHOULDERS")).upper() == "SESSION_BREAKOUT_TREND"
+
+    @property
+    def WINDOW_BARS(self) -> dict[str, int]:  # noqa: N802 — read by strategies.windows
+        return {"M5": 5000} if self._breakout_mode else {}
+
+    @property
+    def LIVE_POSITION_EXITS(self) -> bool:  # noqa: N802 — read by position_manager
+        return self._breakout_mode
+
+    def _breakout_engine(self, symbol: str):
+        from backend.analytics.edge_lab import session_for
+        from backend.strategies.strategy_orb.engine import ORBStrategy
+        from backend.strategies.strategy_orb.params import ORBParams
+
+        s = str(getattr(self.params, "breakout_session", "native"))
+        sess = session_for(symbol, s) if s in ("native", "alt") else s
+        cache = self.__dict__.setdefault("_breakout_engines", {})
+        eng = cache.get((symbol, sess))
+        if eng is None:
+            eng = ORBStrategy(self.config)
+            eng.params = ORBParams(session=sess, range_minutes=60, breakout_window_minutes=180, side="both",
+                                   min_stop_atr=0.5, close_at_session_end=True,
+                                   breakout_timeframe="M5", require_trend=True)
+            eng.strategy_id = "APA_v1"          # APA's slot, target and trade ownership
+            eng.gates = self.gates
+            cache[(symbol, sess)] = eng
+        eng.is_backtesting = self.is_backtesting
+        return eng
 
     @staticmethod
     def _pattern_identity(pattern: dict) -> tuple:
@@ -285,6 +320,8 @@ class APAEngine(BaseStrategy):
             return True
 
     async def on_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
+        if self._breakout_mode:
+            return await self._breakout_engine(symbol).on_bar(symbol, timeframe, candles)
         # [T1.3] Open a confluence-telemetry record for this bar.
         # No-op unless self.gates.enabled (live default is off).
         self.begin_candidate(
@@ -847,7 +884,12 @@ class APAEngine(BaseStrategy):
 
     # ── Phase 14 B2.3: Hard invalidation exit ────────────────────────────────
 
-    def on_position_bar(
+    def on_position_bar(self, symbol: str, timeframe: str, candles: "pd.DataFrame", position: dict):
+        if self._breakout_mode:
+            return self._breakout_engine(symbol).on_position_bar(symbol, timeframe, candles, position)
+        return self._hs_on_position_bar(symbol, timeframe, candles, position)
+
+    def _hs_on_position_bar(
         self,
         symbol: str,
         timeframe: str,

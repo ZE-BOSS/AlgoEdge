@@ -101,6 +101,8 @@ def test_orb_is_wired_everywhere_a_strategy_must_be():
     assert STRATEGY_PARAM_SECTION["ORB_v1"] == "orb"
     assert UserConfigV2.from_dict({"orb": {"session": "ny"}}).orb.session == "ny"
     assert get_strategy_defaults("ORB_v1")["tp_count"] == 1
-    assert get_synth_slot_params("GBPJPY", "ORB_v1") == {"session": "london", "range_minutes": 60}
+    assert get_synth_slot_params("GBPJPY", "ORB_v1") == {
+        "session": "london", "range_minutes": 60, "breakout_timeframe": "M5",
+        "require_trend": True, "min_stop_atr": 0.5}
     assert get_synth_slot_params("btcusd", "ORB_v1")["session"] == "ny"
-    assert SLOT_TP1_RR["BTCUSD|ORB_v1"] == 1.5
+    assert SLOT_TP1_RR["BTCUSD|ORB_v1"] == 3.0

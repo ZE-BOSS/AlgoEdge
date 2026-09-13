@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from backend.strategies.strategy_apa.params import APAParams
+from backend.strategies.strategy_classic.params import (
+    BollingerFadeParams, DonchianParams, EMAPullbackParams, RSI2Params, TSMOMParams, VolBreakoutParams,
+)
 from backend.strategies.strategy_orb.params import ORBParams
 from backend.strategies.strategy_vwap.params import VWAPParams
 # ─────────────────────────────────────────────────────────────────────────────
@@ -834,6 +837,14 @@ class InstrumentSlot:
     global Params unchanged.
     """
 
+    use_measured_params: bool = True
+    """True: the measured per-symbol parameters (strategy_defaults.SYNTH_SLOT_PARAMS)
+    are laid onto this slot's strategy params before its own override — the
+    Backtester's "Use the measured settings for this symbol" box ticked. False:
+    the slot runs the strategy's Settings block as saved (plus its own
+    override), which is what the Backtester runs with that box unticked. The
+    two paths configure the engine identically either way."""
+
     # Carried over from InstrumentSettings — same meaning, same field names,
     # so the 12.4 migration is a direct 1:1 copy for these two.
     max_lot_override: float | None = None
@@ -976,7 +987,18 @@ def _sync_trail_rr_aliases(risk_data: dict) -> dict:
     return risk_data
 
 
-@dataclass 
+# The six classic families (strategy_classic): config block name -> params class.
+_CLASSIC_BLOCKS: dict[str, type] = {
+    "donchian": DonchianParams,
+    "ema_pullback": EMAPullbackParams,
+    "rsi2": RSI2Params,
+    "bollinger_fade": BollingerFadeParams,
+    "vol_breakout": VolBreakoutParams,
+    "tsmom": TSMOMParams,
+}
+
+
+@dataclass
 class UserConfigV2(UserConfig):
     """
     Extended UserConfig with instrument settings and multi-strategy support.
@@ -990,6 +1012,12 @@ class UserConfigV2(UserConfig):
     apa: APAParams = field(default_factory=APAParams)
     vwap: VWAPParams = field(default_factory=VWAPParams)
     orb: ORBParams = field(default_factory=ORBParams)
+    donchian: DonchianParams = field(default_factory=DonchianParams)
+    ema_pullback: EMAPullbackParams = field(default_factory=EMAPullbackParams)
+    rsi2: RSI2Params = field(default_factory=RSI2Params)
+    bollinger_fade: BollingerFadeParams = field(default_factory=BollingerFadeParams)
+    vol_breakout: VolBreakoutParams = field(default_factory=VolBreakoutParams)
+    tsmom: TSMOMParams = field(default_factory=TSMOMParams)
     prop_firm: PropFirmParams = field(default_factory=PropFirmParams)
 
     @classmethod
@@ -1002,6 +1030,7 @@ class UserConfigV2(UserConfig):
         apa_data = data.pop("apa", {})
         vwap_data = data.pop("vwap", {})
         orb_data = data.pop("orb", {})
+        classic_data = {k: data.pop(k, {}) for k in _CLASSIC_BLOCKS}
         prop_firm_data = data.pop("prop_firm", {})
         import dataclasses
         known_fields = {f.name for f in dataclasses.fields(cls)}
@@ -1020,6 +1049,8 @@ class UserConfigV2(UserConfig):
         config.apa = APAParams(**filter_kwargs(APAParams, apa_data))
         config.vwap = VWAPParams(**filter_kwargs(VWAPParams, vwap_data))
         config.orb = ORBParams(**filter_kwargs(ORBParams, orb_data))
+        for _k, _cls in _CLASSIC_BLOCKS.items():
+            setattr(config, _k, _cls(**filter_kwargs(_cls, classic_data.get(_k) or {})))
         config.prop_firm = PropFirmParams(**filter_kwargs(PropFirmParams, prop_firm_data))
         
 
@@ -1081,6 +1112,9 @@ class UserConfigV2(UserConfig):
             self.vwap = VWAPParams()
         if self.orb is None:
             self.orb = ORBParams()
+        for _k, _cls in _CLASSIC_BLOCKS.items():
+            if getattr(self, _k, None) is None:
+                setattr(self, _k, _cls())
         if self.prop_firm is None:
             self.prop_firm = PropFirmParams()
 

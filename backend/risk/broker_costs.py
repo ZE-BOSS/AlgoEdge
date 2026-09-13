@@ -100,8 +100,10 @@ ASSET_CLASS_COST_DEFAULTS: dict[str, dict[str, float]] = {
     # commission $7/lot round turn: the near-universal ECN rate ($3.50/side).
     # swap: -2.0/-1.0 USD per lot per day is a mid-range carry cost; both sides
     #   modelled negative because on most retail books both sides pay.
-    # slippage 0.4 pips: typical market-order slippage on a liquid major at
-    #   normal size; entries and exits each pay roughly this.
+    # slippage 0.1 pips: MEASURED 2026-09-13 on MT5 ticks (7-11 Sep) as the mean
+    #   adverse mid move over a 500 ms execution delay — EURUSD 0.04p, GBPUSD
+    #   0.06p, USDJPY 0.11p — and matching this account's live stop fills
+    #   (CADJPY 0.1 pip, AUDJPY 0). The old 0.4 was 4-10x reality.
     # stops_level 0.5 pips: most FX brokers set stops level to 0, but a 0.5-pip
     #   floor stops the backtester from modelling stops the broker would reject.
     "FOREX": {
@@ -109,7 +111,7 @@ ASSET_CLASS_COST_DEFAULTS: dict[str, dict[str, float]] = {
         "commission_per_lot": 7.0,
         "swap_long_per_lot_per_day": -2.0,
         "swap_short_per_lot_per_day": -1.0,
-        "slippage_pips": 0.4,
+        "slippage_pips": 0.1,
         "stops_level_pips": 0.5,
         "spread_min_pips": 0.1,
         "spread_max_pips": 5.0,
@@ -210,7 +212,8 @@ FOREX_CROSS_COST_DEFAULTS: dict[str, float] = {
     "commission_per_lot": 7.0,
     "swap_long_per_lot_per_day": -3.0,
     "swap_short_per_lot_per_day": -2.0,
-    "slippage_pips": 0.7,
+    # measured 500 ms adverse move: GBPJPY 0.12p, EURJPY 0.09p (was 0.7)
+    "slippage_pips": 0.2,
     "stops_level_pips": 0.5,
     "spread_min_pips": 0.3,
     "spread_max_pips": 10.0,
@@ -228,7 +231,7 @@ FOREX_MAJORS: frozenset[str] = frozenset({
 CRYPTO_SPREAD_PCT_OF_PRICE = 0.0006
 # Crypto slippage as a fraction of price (0.03% — half the spread, which is the
 # usual relationship on thin crypto books).
-CRYPTO_SLIPPAGE_PCT_OF_PRICE = 0.0003
+CRYPTO_SLIPPAGE_PCT_OF_PRICE = 0.00002   # measured 2026-09-13: BTCUSD mean adverse move $0.91 over 500 ms, $1.64 over 1 s at ~$115k (0.001%); 0.002% keeps a margin
 
 # Order-of-magnitude reference prices, used ONLY to turn the percentage spread
 # above into a pip count when there is no live price (i.e. offline backtests).
@@ -262,7 +265,7 @@ SYMBOL_COST_OVERRIDES: dict[str, dict[str, float]] = {
     "XAUUSD": {"spread_pips": 3.0, "slippage_pips": 1.0, "spread_min_pips": 1.0,
                "spread_max_pips": 20.0},
     # Silver: pip = 0.001 → typical 2-3 cent spread = 20-30 pips.
-    "XAGUSD": {"spread_pips": 25.0, "slippage_pips": 10.0, "spread_min_pips": 5.0,
+    "XAGUSD": {"spread_pips": 25.0, "slippage_pips": 2.0, "spread_min_pips": 5.0,
                "spread_max_pips": 150.0},
     "XPTUSD": {"spread_pips": 200.0, "slippage_pips": 50.0, "spread_min_pips": 20.0,
                "spread_max_pips": 900.0},
@@ -274,13 +277,15 @@ SYMBOL_COST_OVERRIDES: dict[str, dict[str, float]] = {
                "spread_max_pips": 60.0},
     # NAS100 pip resolves to its 0.25 tick, so a 2.0-index-point spread is
     # 8 "pips"; GER40 pip is 0.1 index points → a 1.5-point spread is 15 pips.
-    "NAS100": {"spread_pips": 8.0, "slippage_pips": 4.0, "spread_min_pips": 2.0,
+    # slippage MEASURED 2026-09-13 (mean 500 ms adverse move): US Tech 100 1.43p,
+    # US SP 500 0.53p, Germany 40 2.13p — the old 4/3/6 were 2.8-5.7x that.
+    "NAS100": {"spread_pips": 8.0, "slippage_pips": 1.5, "spread_min_pips": 2.0,
                "spread_max_pips": 60.0},
-    "US500": {"spread_pips": 6.0, "slippage_pips": 3.0, "spread_min_pips": 1.0,
+    "US500": {"spread_pips": 6.0, "slippage_pips": 0.6, "spread_min_pips": 1.0,
               "spread_max_pips": 50.0},
     "US2000": {"spread_pips": 10.0, "slippage_pips": 4.0, "spread_min_pips": 2.0,
                "spread_max_pips": 60.0},
-    "GER40": {"spread_pips": 15.0, "slippage_pips": 6.0, "spread_min_pips": 3.0,
+    "GER40": {"spread_pips": 15.0, "slippage_pips": 2.5, "spread_min_pips": 3.0,
               "spread_max_pips": 90.0},
 }
 

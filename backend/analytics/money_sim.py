@@ -84,6 +84,8 @@ def simulate_account(legs: Sequence[Leg], contracts: dict[str, Contract],
     taken: list[tuple[Leg, float]] = []
     month_start: dict[str, float] = {}
     month_pnl: dict[str, float] = {}
+    day_start: dict[int, float] = {}
+    day_pnl_all: dict[int, float] = {}
     counts = {"skipped_unsizable": 0, "blocked_daily_cap": 0, "blocked_concurrency": 0,
               "adds_taken": 0, "adds_skipped": 0}
 
@@ -103,6 +105,8 @@ def simulate_account(legs: Sequence[Leg], contracts: dict[str, Contract],
             m = _month(t)
             month_start.setdefault(m, balance)
             month_pnl[m] = month_pnl.get(m, 0.0) + pnl
+            day_start.setdefault(d, balance)
+            day_pnl_all[d] = day_pnl_all.get(d, 0.0) + pnl
             balance += pnl
             day_pnl += pnl
             taken.append((leg, pnl))
@@ -144,10 +148,38 @@ def simulate_account(legs: Sequence[Leg], contracts: dict[str, Contract],
         else:
             open_groups[leg.group] = k
 
-    return _summary(rules, balance, taken, max_dd, max_dd_usd, month_start, month_pnl, counts)
+    first_day = min((_day(l.t_entry) for l in legs), default=None)
+    last_day = max((_day(l.t_exit) for l in legs), default=None)
+    return _summary(rules, balance, taken, max_dd, max_dd_usd, month_start, month_pnl, counts,
+                    _risk_ratios(day_start, day_pnl_all, first_day, last_day))
 
 
-def _summary(rules, balance, taken, max_dd, max_dd_usd, month_start, month_pnl, counts):
+def _risk_ratios(day_start: dict[int, float], day_pnl: dict[int, float],
+                 first_day: int | None, last_day: int | None) -> dict[str, Any]:
+    """Annualised Sharpe and Sortino from DAILY account returns.
+
+    Every calendar day from the first entry to the last exit counts, a day with
+    no closed trade being a 0% return — dropping flat days would divide by a
+    smaller count and flatter both ratios. Calendar days, so sqrt(365): crypto
+    trades on weekends and one convention keeps markets comparable.
+    """
+    if first_day is None or last_day is None or last_day < first_day:
+        return {"sharpe": None, "sortino": None}
+    rets = np.zeros(last_day - first_day + 1)
+    for d, pnl in day_pnl.items():
+        if first_day <= d <= last_day and day_start.get(d, 0) > 0:
+            rets[d - first_day] = pnl / day_start[d]
+    if len(rets) < 2 or rets.std() == 0:
+        return {"sharpe": None, "sortino": None}
+    downside = math.sqrt(float(np.mean(np.minimum(rets, 0.0) ** 2)))
+    ann = math.sqrt(365.0)
+    return {
+        "sharpe": round(float(rets.mean() / rets.std(ddof=1) * ann), 2),
+        "sortino": round(float(rets.mean() / downside * ann), 2) if downside > 0 else None,
+    }
+
+
+def _summary(rules, balance, taken, max_dd, max_dd_usd, month_start, month_pnl, counts, ratios=None):
     pnls = [p for _, p in taken]
     gw = sum(p for p in pnls if p > 0)
     gl = -sum(p for p in pnls if p < 0)
@@ -165,6 +197,7 @@ def _summary(rules, balance, taken, max_dd, max_dd_usd, month_start, month_pnl, 
         "expectancy_r": round(statistics.mean(l.r for l, _ in taken), 4) if taken else None,
         "max_dd_pct": round(100.0 * max_dd, 2),
         "max_dd_usd": round(max_dd_usd, 2),
+        **(ratios or {"sharpe": None, "sortino": None}),
         "months": len(mv),
         "positive_months": sum(v > 0 for v in mv),
         "avg_month_pct": round(statistics.mean(mv), 2) if mv else None,

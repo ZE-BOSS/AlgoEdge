@@ -142,6 +142,8 @@ def build_full_schema() -> list[dict]:
         (ORBParams, "orb"),
         (DriftJumpAlphaParams, "drift_jump_alpha"),
     ]
+    from backend.core.config_schema import _CLASSIC_BLOCKS
+    groups += [(cls, name) for name, cls in _CLASSIC_BLOCKS.items()]
 
     schema: list[dict] = []
     for cls, group in groups:

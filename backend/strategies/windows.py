@@ -31,6 +31,26 @@ STRATEGY_WINDOW_BARS: dict[str, int] = {
 DEFAULT_WINDOW_BARS = 500
 
 
-def window_bars(timeframe: str) -> int:
-    """Bars of history for `timeframe`; the M5 value for anything unrecognised."""
-    return STRATEGY_WINDOW_BARS.get(str(timeframe).upper(), DEFAULT_WINDOW_BARS)
+def window_bars(timeframe: str, strategy: object | None = None) -> int:
+    """Bars of history for `timeframe`; the M5 value for anything unrecognised.
+
+    A strategy may declare `WINDOW_BARS = {"H1": 1500}` when its indicators
+    need more history than the shared table gives — a 200-bar EMA seeded on a
+    200-bar window still carries ~13% of its starting value, so it would not be
+    the EMA the research measured. The larger of the two wins, on BOTH paths.
+    """
+    base = STRATEGY_WINDOW_BARS.get(str(timeframe).upper(), DEFAULT_WINDOW_BARS)
+    extra = (getattr(strategy, "WINDOW_BARS", None) or {}).get(str(timeframe).upper(), 0)
+    return max(base, int(extra))
+
+
+_TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
+
+
+def warmup_days(timeframe: str, strategy: object | None, base_days: float) -> float:
+    """Calendar days of history to fetch before a backtest starts so the first
+    bar already has `window_bars(timeframe, strategy)` bars behind it. Markets
+    close at weekends and some trade ~23h, hence the 1.6x slack."""
+    bars = window_bars(timeframe, strategy)
+    need = bars * _TF_MINUTES.get(str(timeframe).upper(), 5) / 1440.0 * 1.6 + 3
+    return max(float(base_days), need)

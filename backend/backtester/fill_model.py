@@ -104,6 +104,9 @@ class OvershootProfile:
     quantiles: tuple[tuple[float, float], ...]
     source: str
     calibration: str
+    # When set, the overshoot is an ABSOLUTE price distance rather than a
+    # fraction of the trade's stop. `mean`/`quantiles` are then in price units.
+    absolute: bool = False
 
     def sample(self, u: float) -> float:
         """Piecewise-linear inverse CDF at u ∈ [0, 1]."""
@@ -131,13 +134,37 @@ _GENERIC = (
     (0.00, 0.000), (0.50, 0.010), (0.90, 0.060), (0.99, 0.250), (1.00, 1.000),
 )
 
+# ── Crash: ABSOLUTE overshoot, measured on this account's own live stop fills ──
+#
+# 2026-09-13, MT5 history (200 days), every position closed by DEAL_REASON_SL:
+#
+#   Crash 1000  n=146  overshoot (price) median 3.04  mean 3.82  p90 6.85  p99 12.41
+#                      overshoot / stop: median 0.141  mean 0.225
+#                      corr(overshoot, stop distance) = -0.06
+#   Crash 300   n=8    median 1.93  mean 2.25  p90 3.81  p99 5.06
+#
+# The correlation is the finding: how far a spike carries past a stop has
+# nothing to do with how wide that stop was. A spike is a fixed-size jump of the
+# index, so charging a FRACTION of the stop (the old 0.403 R) over-charged every
+# wide stop and under-charged every tight one — a 10-point stop hit by a 4-point
+# overshoot pays 0.4 R, a 60-point stop 0.07 R. The profile is therefore in index
+# points, and still clamped to the bar's extreme: a bar that only grazed the
+# stop cannot pay a spike's overshoot.
+_CRASH_1000_ABS = (
+    (0.00, 0.0), (0.25, 1.2), (0.50, 3.04), (0.75, 5.0), (0.90, 6.85),
+    (0.99, 12.41), (1.00, 18.0),
+)
+_CRASH_300_ABS = (
+    (0.00, 0.0), (0.50, 1.93), (0.90, 3.81), (0.99, 5.06), (1.00, 6.0),
+)
+
 _PROFILES: dict[str, OvershootProfile] = {
     "CRASH 1000 INDEX": OvershootProfile(
-        0.403, _JUMP_1000, "research/27 §1.2 (n=2,190 tick-repriced stop exits)", "interpolated"),
+        3.82, _CRASH_1000_ABS, "live MT5 stop fills, n=146 (2026-09-13)", "measured", absolute=True),
     "CRASH 500 INDEX": OvershootProfile(
-        0.403, _JUMP_1000, "research/27 §1.2, Crash 1000 profile (shared spike-size dist, research/24 §3.1)", "assumed"),
+        0.225, _JUMP_1000, "no fills of its own — Crash 1000's live overshoot/stop mean (0.225)", "assumed"),
     "CRASH 300 INDEX": OvershootProfile(
-        0.403, _JUMP_1000, "research/27 §1.2, Crash 1000 profile (shared spike-size dist, research/24 §3.1)", "assumed"),
+        2.25, _CRASH_300_ABS, "live MT5 stop fills, n=8 (2026-09-13) — small sample", "measured", absolute=True),
     "BOOM 1000 INDEX": OvershootProfile(
         0.353, _JUMP_1000_BOOM, "research/27 §1.2 (n=2,230 tick-repriced stop exits)", "interpolated"),
     "BOOM 500 INDEX": OvershootProfile(
@@ -245,7 +272,7 @@ class StopFillModel:
         else:
             frac = profile.sample(_stable_u(self.seed, position_key))
 
-        overshoot = frac * stop_distance
+        overshoot = frac if profile.absolute else frac * stop_distance
         raw = (stop_level - overshoot) if is_buy else (stop_level + overshoot)
 
         # 3. Clamp to what actually traded. A bar that merely grazed the stop

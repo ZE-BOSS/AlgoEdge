@@ -504,7 +504,88 @@ class CostModelMixin:
     def _backtest_only_exits(self) -> bool:
         return bool(self.risk_config.get("simulate_backtest_only_exits", False))
 
+    # ── Per-bar spread ─────────────────────────────────────────────────────
+    # The resolved `spread_pips` is ONE number per symbol: the live quote at the
+    # moment the run started (a weekend or rollover quote, clamped), or an
+    # asset-class guess. Measured 2026-09-13 against MT5 ticks (7-11 Sep), each
+    # M5 bar's own recorded `spread` equals the tick spread at that bar's open
+    # (ratio 1.00 on EURUSD, XAUUSD, US Tech 100, BTCUSD, Crash 1000; 0.80 on
+    # GBPJPY), while the resolved figure ran 2-3x the real spread on GBPJPY,
+    # XAUUSD and US Tech 100. So a trade pays the spread its own entry bar
+    # recorded; the resolved figure is only the fallback for data without a
+    # spread column. An explicit user spread still wins over both.
+    @staticmethod
+    def _tkey(t: Any) -> Any:
+        if isinstance(t, (int, float, np.integer, np.floating)):
+            return round(float(t), 3)
+        try:
+            return int(pd.Timestamp(t).value // 10**6) / 1000.0
+        except Exception:
+            return str(t)
+
+    def _note_entry_spread(self, pos: dict[str, Any], bar_spread_points: Any) -> None:
+        try:
+            pts = float(bar_spread_points)
+        except (TypeError, ValueError):
+            return
+        if not np.isfinite(pts) or pts <= 0:
+            return
+        symbol = pos.get("symbol", "")
+        from backend.risk.position_sizer import get_symbol_info
+        point = float(get_symbol_info(symbol).get("point") or 0.0)
+        pip = float(get_pip_size(symbol) or 0.0)
+        if point <= 0 or pip <= 0:
+            return
+        pips = pts * point / pip
+        self._entry_spreads[((symbol or "").upper(), self._tkey(pos.get("entry_time")))] = pips
+        pos["entry_spread_pips"] = round(pips, 4)
+
+    def _spread_pips_for(self, symbol: str, entry_time: Any, costs: dict[str, Any]) -> float:
+        if entry_time is None or costs.get("sources", {}).get("spread_pips") == "USER":
+            return costs["spread_pips"]
+        return self._entry_spreads.get(((symbol or "").upper(), self._tkey(entry_time)), costs["spread_pips"])
+
+    # ── Entry-bar exits ────────────────────────────────────────────────────
+    # Live places the stop and target WITH the order, so the bar a trade fills
+    # on can already hit either. Both engines used to open legs after the bar's
+    # SL/TP pass, so the first check ran on the NEXT bar: a stop touched on the
+    # entry bar was booked wherever the next bar traded. Measured on the
+    # BTCUSD session-pullback book (Jan-Sep 2026): 10 of 113 trades filled at
+    # -1.35R to -2.37R instead of ~-1.02R at the stop, taking the book from
+    # +0.09R to +0.01R per trade. The leg is resolved here with the same
+    # tie-break and fill model as any other bar, then handed to the normal
+    # close pipeline on the next pass with this bar as its exit time.
+    def _check_entry_bar_exit(self, pos: dict[str, Any], open_p: float, high: float, low: float,
+                              bar_time: Any) -> bool:
+        sl_hit, tp_hit = _resolve_sl_tp_hit(
+            pos["direction"], open_p, high, low, pos["stop_loss"], pos["take_profit"],
+            getattr(self, "_simulate_wicks", True),
+        )
+        if not (sl_hit or tp_hit):
+            return False
+        sym = pos.get("symbol", "")
+        if sl_hit:
+            fill, gapped, ov = self._fill_model.resolve_stop_fill(
+                direction=pos["direction"], open_p=open_p, high=high, low=low,
+                stop_level=pos["stop_loss"],
+                stop_distance=abs(pos["entry_price"] - pos.get("initial_stop_loss", pos["stop_loss"])),
+                symbol=sym, slippage_pips=self._costs_for(sym)["exit_slippage_pips"],
+                position_key=pos["id"],
+            )
+            pos["exit_price"], pos["gap_fill"], pos["stop_overshoot_r"] = fill, gapped, round(ov, 6)
+            pos["exit_reason"] = "SL"
+        else:
+            pos["exit_price"] = pos["take_profit"]
+            pos["exit_reason"] = f"TP{pos.get('tp_level', 1)}"
+        pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"],
+                                    pos["volume"], sym, pos.get("entry_time"), bar_time)
+        pos["_entry_bar_exit"] = True
+        pos["_exit_time_override"] = bar_time
+        pos["same_bar_entry_exit"] = True
+        return True
+
     def _init_cost_model(self) -> None:
+        self._entry_spreads: dict[tuple[str, Any], float] = {}
         self._cost_cache: dict[str, dict[str, Any]] = {}
         # Snapshot of everything actually used, surfaced in the run results so a
         # saved backtest records the cost assumptions it was produced under.
@@ -823,6 +904,8 @@ class BacktestEngine(CostModelMixin):
         opens_arr = candles["open"].values.astype(float)
         highs_arr = candles["high"].values.astype(float)
         lows_arr = candles["low"].values.astype(float)
+        # each bar's recorded spread (MT5 points) — see CostModelMixin._note_entry_spread
+        spreads_arr = candles["spread"].values if "spread" in candles.columns else None
         closes_arr = candles["close"].values.astype(float)
         atr_period = 14
 
@@ -899,7 +982,7 @@ class BacktestEngine(CostModelMixin):
             # the tp1_hit_groups BE block has moved the SL to entry+buffer.
             _tp1_closing_this_bar: set = set()
             for _p in self.open_positions:
-                if _p.get("tp_level") != 1:
+                if _p.get("tp_level") != 1 or _p.get("_entry_bar_exit"):
                     continue
                 # Item 3.7: reuse the same ambiguity-resolved tp_hit determination
                 # as the real close logic below, instead of a naive TP-touch-only
@@ -913,6 +996,9 @@ class BacktestEngine(CostModelMixin):
                     _tp1_closing_this_bar.add(_p.get("group_id"))
 
             for pos in self.open_positions[:]:
+                if pos.get("_entry_bar_exit"):          # resolved on its entry bar
+                    closed_this_bar.append(pos)
+                    continue
                 # Update highest/lowest price tracking for trailing
                 if pos["direction"] == "BUY":
                     pos["highest_price"] = max(pos.get("highest_price", pos["entry_price"]), high)
@@ -1088,7 +1174,10 @@ class BacktestEngine(CostModelMixin):
                         # `i` is the current bar index; pass the last 50 bars so
                         # the strategy has enough context without copying the full
                         # DataFrame on every position per bar.
-                        _start = max(0, i - 49)
+                        # A strategy whose exit looks further back (TSMOM's
+                        # 120-day return) declares POSITION_BAR_WINDOW.
+                        _pbw = max(50, int(getattr(self._strategy, "POSITION_BAR_WINDOW", 50) or 50))
+                        _start = max(0, i - (_pbw - 1))
                         _candle_slice = candles.iloc[_start : i + 1]
                         _pos_action = self._strategy.on_position_bar(
                             pos.get("symbol", ""),
@@ -1096,7 +1185,17 @@ class BacktestEngine(CostModelMixin):
                             _candle_slice,
                             pos,
                         )
-                        if _pos_action is not None and _pos_action.action == "CLOSE":
+                        if _pos_action is not None and _pos_action.action == "MODIFY_SL" and _pos_action.new_sl:
+                            # A strategy-owned trailing stop (the classic families'
+                            # ATR trail). Computed from THIS bar's close, so it
+                            # first applies to the next bar — the same timing the
+                            # research simulator uses. Never loosens the stop.
+                            _new = float(_pos_action.new_sl)
+                            _cur = float(pos["stop_loss"])
+                            if (pos["direction"] == "BUY" and _new > _cur) or (pos["direction"] == "SELL" and _new < _cur):
+                                pos["stop_loss"] = _new
+                                pos["trail_applied"] = True
+                        elif _pos_action is not None and _pos_action.action == "CLOSE":
                             _exit_slip = self._costs_for(pos.get("symbol", ""))["exit_slippage_pips"]
                             pos["exit_price"] = _apply_exit_slippage(
                                 pos["direction"], current_price,
@@ -1145,7 +1244,7 @@ class BacktestEngine(CostModelMixin):
             # FIX 2: Collect positions to remove after the loop (avoids O(n) list.remove in hot loop)
             positions_to_remove = []
             for pos in closed_this_bar:
-                pos["exit_time"] = current_time
+                pos["exit_time"] = pos.pop("_exit_time_override", current_time)
                 # Task 6: leg records kept status="OPEN" forever, even once
                 # exit_price/exit_reason/pnl/exit_time were all populated.
                 pos["status"] = "CLOSED"
@@ -1363,6 +1462,8 @@ class BacktestEngine(CostModelMixin):
                             continue
 
                         position = self._create_position(sig, tp, current_time, bar_open_price, group_id, balance)
+                        if position is not None and spreads_arr is not None:
+                            self._note_entry_spread(position, spreads_arr[i])
                         if position is None:
                             # Rejection reason already recorded in rejection_funnel.
                             dropped_legs += 1
@@ -1379,6 +1480,8 @@ class BacktestEngine(CostModelMixin):
                         continue
 
                     self.open_positions.extend(staged_positions)
+                    for _leg in staged_positions:
+                        self._check_entry_bar_exit(_leg, float(open_p), float(high), float(low), current_time)
                     self._last_entry_bar_by_symbol[_slot_key] = i  # [P2.4] slot-keyed
 
                     self.run_logs.append({
@@ -1430,10 +1533,15 @@ class BacktestEngine(CostModelMixin):
         last_price = closes_arr[-1] if len(closes_arr) > 0 else 0
         last_time = time_arr[-1] if len(time_arr) > 0 else 0
         for pos in self.open_positions[:]:
-            pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], last_price, pos["volume"], pos.get("symbol", ""), pos.get("entry_time"), last_time)
-            pos["exit_price"] = last_price
-            pos["exit_reason"] = "END_OF_DATA"
-            pos["exit_time"] = last_time
+            if pos.get("_entry_bar_exit"):
+                # resolved on the final bar it entered on: keep that exit
+                _px, _reason, _t = pos["exit_price"], pos["exit_reason"], pos.pop("_exit_time_override", last_time)
+            else:
+                _px, _reason, _t = last_price, "END_OF_DATA", last_time
+                pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], last_price, pos["volume"], pos.get("symbol", ""), pos.get("entry_time"), last_time)
+            pos["exit_price"] = _px
+            pos["exit_reason"] = _reason
+            pos["exit_time"] = _t
             pos["status"] = "CLOSED"  # Task 6
             pos["duration_minutes"] = _calc_duration_minutes(pos.get("entry_time"), last_time)
             pos["entry_time_iso"] = _epoch_to_iso(pos.get("entry_time"))
@@ -1810,7 +1918,7 @@ class BacktestEngine(CostModelMixin):
             raw_pnl = -raw_pnl
 
         # Deduct spread cost (pip cost of crossing bid/ask at entry)
-        spread_pips = costs["spread_pips"]
+        spread_pips = self._spread_pips_for(symbol, entry_time, costs)
         if spread_pips > 0 and pip_size > 0:
             spread_cost = spread_pips * pip_size * value_per_unit_move * volume
             raw_pnl -= spread_cost

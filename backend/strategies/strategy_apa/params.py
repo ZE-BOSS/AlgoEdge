@@ -18,6 +18,22 @@ class APAParams:
     All timeframes use AlgoEdge standard format (M5, M15, H1, H4, D1).
     """
 
+    # ── Setup (2026-09-13) ──────────────────────────────────────────────
+    setup_mode: str = "HEAD_AND_SHOULDERS"
+    """"HEAD_AND_SHOULDERS": the structural reversal this strategy was built on.
+    Taken apart confluence by confluence on 26 markets (2026-09-13) it had no
+    configuration that crossed zero, and its retest gate cost -0.56R per trade.
+    "SESSION_BREAKOUT_TREND": the price-action setup that DID hold — Crabel's
+    opening-range breakout (60-minute range, first M5 close beyond it) taken
+    only WITH the higher-timeframe trend, 1:3, flat at the session close.
+    Positive on US Tech 100, XAUUSD, BTCUSD and GBPJPY in 2022-23, 2024-25 and
+    2026 (backend/analytics/edge_lab.py). Traded through ORB_v1's engine, under
+    APA's slot, target and risk."""
+
+    breakout_session: str = "native"
+    """SESSION_BREAKOUT_TREND only: "native" (London for GBP/EUR crosses and
+    European indices, New York otherwise), "alt", "london" or "ny"."""
+
     # ── Timeframes ──────────────────────────────────────────────────────
     structure_timeframe: str = "M15"
     """Timeframe for swing/structure analysis (Shoulder & Head detection)."""

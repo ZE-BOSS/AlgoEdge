@@ -132,6 +132,19 @@ class PortfolioBacktestEngine(CostModelMixin):
         # a symbol must throttle independently.
         self._last_entry_bar_by_slot: dict[str, int] = {}
 
+    def _exit_engine(self, strategy_id: str | None) -> RiskEngine:
+        """The RiskEngine whose break-even / trailing settings apply to this
+        strategy's legs — the shared one unless the strategy has measured exits."""
+        ov = getattr(self, "_exit_overrides", {}).get(strategy_id or "")
+        if not ov:
+            return self.risk_engine
+        eng = self._exit_engines.get(strategy_id)
+        if eng is None:
+            eng = RiskEngine({**self.risk_config, **ov})
+            eng.prop_firm_validator = self.prop_firm_validator
+            self._exit_engines[strategy_id] = eng
+        return eng
+
     def _calc_pnl(
         self,
         direction: str,
@@ -182,7 +195,7 @@ class PortfolioBacktestEngine(CostModelMixin):
             raw_pnl = -raw_pnl
 
         # Deduct spread cost (pip cost of crossing bid/ask at entry)
-        spread_pips = costs["spread_pips"]
+        spread_pips = self._spread_pips_for(symbol, entry_time, costs)
         if spread_pips > 0 and pip_size > 0:
             spread_cost = spread_pips * pip_size * value_per_unit_move * volume
             raw_pnl -= spread_cost
@@ -234,6 +247,8 @@ class PortfolioBacktestEngine(CostModelMixin):
         portfolio_data_m5: dict[str, pd.DataFrame] = None,
         symbol_map: dict[str, str] | None = None,
         progress_cb: Any = None,
+        strategies: dict[str, Any] | None = None,
+        exit_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """
         [12.8/Part14] `portfolio_data`/`portfolio_signals` are keyed by a
@@ -251,6 +266,9 @@ class PortfolioBacktestEngine(CostModelMixin):
         behaviour exactly — this parameter is purely additive.
         """
         symbol_map = symbol_map or {}
+        # strategy_id -> exit fields (be_mode, trail_*) for that strategy's legs.
+        self._exit_overrides = exit_overrides or {}
+        self._exit_engines: dict[str, Any] = {}
 
         def _real_symbol(cache_key: str) -> str:
             return symbol_map.get(cache_key, cache_key)
@@ -333,6 +351,8 @@ class PortfolioBacktestEngine(CostModelMixin):
                     swing_dict[time_vals[i]] = points
 
             symbol_cache[sym] = {
+                "df": df,
+                "pos_index": {t: k for k, t in enumerate(time_vals)},
                 "bars": bar_dict,
                 "atr": atr_dict,
                 "swings": swing_dict,
@@ -404,7 +424,7 @@ class PortfolioBacktestEngine(CostModelMixin):
             # full-SL loss) instead of the near-zero BE_SL exit expected.
             _tp1_closing_this_bar: set = set()
             for _p in self.open_positions:
-                if _p.get("tp_level") != 1:
+                if _p.get("tp_level") != 1 or _p.get("_entry_bar_exit"):
                     continue
                 _ckey = _p.get("_cache_key", _p.get("symbol"))  # [12.8]
                 if _ckey not in symbol_cache or current_time not in symbol_cache[_ckey]["bars"]:
@@ -424,6 +444,9 @@ class PortfolioBacktestEngine(CostModelMixin):
             for pos in self.open_positions[:]:
                 sym = pos.get("symbol")  # real symbol
                 _ckey = pos.get("_cache_key", sym)  # [12.8]
+                if pos.get("_entry_bar_exit"):          # resolved on its entry bar (engine.py)
+                    closed_this_bar.append(pos)
+                    continue
                 if _ckey not in symbol_cache or current_time not in symbol_cache[_ckey]["bars"]:
                     continue # No tick for this symbol at this time
 
@@ -563,7 +586,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                 current_atr = symbol_cache[_ckey]["atr"].get(current_time, 0.0)  # [12.8]
                 swing_points = symbol_cache[_ckey]["swings"].get(current_time, [])
 
-                actions = self.risk_engine.manage_open_position(
+                actions = self._exit_engine(pos.get("strategy_id")).manage_open_position(
                     pos, current_price,
                     atr_value=current_atr,
                     swing_points=swing_points,
@@ -577,10 +600,43 @@ class PortfolioBacktestEngine(CostModelMixin):
                         elif action.get("reason") == "TRAIL":
                             pos["trail_applied"] = True
 
+                # Strategy-owned exits (session close, ATR trail, channel / mean /
+                # flip, time limit). engine.py has always called on_position_bar;
+                # portfolio runs never did, so an ORB leg held past its session
+                # close and a Donchian leg never trailed in a basket while the same
+                # leg run alone did both. `strategies` is keyed like the bar cache.
+                _strat = (strategies or {}).get(_ckey)
+                if _strat is not None and hasattr(_strat, "on_position_bar"):
+                    try:
+                        _sc = symbol_cache[_ckey]
+                        _j = _sc["pos_index"].get(current_time)
+                        if _j is not None:
+                            _pbw = max(50, int(getattr(_strat, "POSITION_BAR_WINDOW", 50) or 50))
+                            _slice = _sc["df"].iloc[max(0, _j - (_pbw - 1)):_j + 1]
+                            _act = _strat.on_position_bar(sym, pos.get("timeframe", ""), _slice, pos)
+                            if _act is not None and _act.action == "MODIFY_SL" and _act.new_sl:
+                                _new, _cur = float(_act.new_sl), float(pos["stop_loss"])
+                                if (pos["direction"] == "BUY" and _new > _cur) or (pos["direction"] == "SELL" and _new < _cur):
+                                    pos["stop_loss"] = _new
+                                    pos["trail_applied"] = True
+                            elif _act is not None and _act.action == "CLOSE":
+                                from backend.backtester.engine import _apply_exit_slippage
+                                pos["exit_price"] = _apply_exit_slippage(
+                                    pos["direction"], current_price, sym, self._costs_for(sym)["exit_slippage_pips"])
+                                pos["exit_reason"] = getattr(_act, "close_reason", "STRATEGY_EXIT")
+                                pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"],
+                                                            pos["volume"], sym, pos.get("entry_time"), current_time)
+                                closed_this_bar.append(pos)
+                    except Exception as _e:
+                        logger.debug(f"[PORTFOLIO] on_position_bar raised (non-fatal): {_e}")
+
             # [4.7/D8/F5] Was unconditional — now gated on be_mode, matching engine.py.
             _be_mode_cascade = self.risk_config.get("be_mode", "EITHER")
-            if tp1_hit_groups and _be_mode_cascade in ("TP_HIT", "EITHER"):
+            if tp1_hit_groups:
                 for pos in self.open_positions:
+                    _pos_be_mode = self._exit_overrides.get(pos.get("strategy_id"), {}).get("be_mode", _be_mode_cascade)
+                    if _pos_be_mode not in ("TP_HIT", "EITHER"):
+                        continue
                     if pos.get("group_id") in tp1_hit_groups and pos not in closed_this_bar:
                         _sym = pos.get("symbol", "")
                         pip_size = get_pip_size(_sym)
@@ -613,7 +669,7 @@ class PortfolioBacktestEngine(CostModelMixin):
 
             positions_to_remove = []
             for pos in closed_this_bar:
-                pos["exit_time"] = current_time
+                pos["exit_time"] = pos.pop("_exit_time_override", current_time)
                 # Task 6: leg records kept status="OPEN" even after exit_price/
                 # exit_reason/pnl/exit_time were all populated.
                 pos["status"] = "CLOSED"
@@ -1006,6 +1062,11 @@ class PortfolioBacktestEngine(CostModelMixin):
                         "_last_known_close": bar_open_price
                     }
                     self.open_positions.append(new_pos)
+                    if _bar_for_fill and _bar_for_fill.get("spread") is not None:
+                        self._note_entry_spread(new_pos, _bar_for_fill.get("spread"))
+                    if _bar_for_fill and "high" in _bar_for_fill and "low" in _bar_for_fill:
+                        self._check_entry_bar_exit(new_pos, float(bar_open_price), float(_bar_for_fill["high"]),
+                                                   float(_bar_for_fill["low"]), current_time)
 
                 # [P1.6] Stamp the slot's last entry bar once per signal, not
                 # per TP leg — a 3-TP signal is one entry, not three.
@@ -1035,6 +1096,17 @@ class PortfolioBacktestEngine(CostModelMixin):
             for pos in self.open_positions:
                 sym = pos.get("symbol")
                 _ckey = pos.get("_cache_key", sym)  # [12.8]
+                if pos.get("_entry_bar_exit"):
+                    # resolved on the final bar it entered on: keep that exit
+                    pos["exit_time"] = pos.pop("_exit_time_override", global_timeline[-1])
+                    pos["status"] = "CLOSED"
+                    pos["duration_minutes"] = _calc_duration_minutes(pos.get("entry_time"), pos.get("exit_time"))
+                    pos["entry_time_iso"] = _epoch_to_iso(pos.get("entry_time"))
+                    pos["exit_time_iso"] = _epoch_to_iso(pos.get("exit_time"))
+                    balance += pos.get("pnl", 0)
+                    pos["balance_after"] = balance
+                    self.trades.append(pos)
+                    continue
                 if _ckey in symbol_cache:
                     last_time = max(symbol_cache[_ckey]["bars"].keys())
                     bar = symbol_cache[_ckey]["bars"][last_time]

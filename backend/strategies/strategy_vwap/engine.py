@@ -342,6 +342,85 @@ class VWAPEngine(BaseStrategy):
     def get_required_timeframes(self) -> list[str]:
         return [self.params.entry_timeframe]
 
+    # ── Session modes (2026-09-13, backend/analytics/edge_lab.py) ───────────
+    # SESSION_TREND    Zarattini & Aziz (2023, SSRN 4631351): trade the M5 close
+    #                  that crosses the session VWAP, in its direction.
+    # SESSION_PULLBACK the VWAP pullback in its research form: VWAP sloping,
+    #                  a bar dips to it and closes back on the trend side.
+    # Both: one trade per session (the first candidate passing the gates), stop
+    # |close-VWAP|+ATR (trend) or beyond the trigger bar (pullback), flat at the
+    # session close. The engine calls the research generator itself, so what
+    # trades is what was measured (tests/test_session_modes.py).
+    _SESSION_MODES = {"SESSION_TREND": "vwap_trend", "SESSION_PULLBACK": "vwap_pullback"}
+
+    @property
+    def _session_mode(self) -> str | None:
+        return self._SESSION_MODES.get(str(getattr(self.params, "entry_mode", "")))
+
+    @property
+    def WINDOW_BARS(self) -> dict[str, int]:  # noqa: N802 — read by strategies.windows
+        return {"M5": 5000} if self._session_mode else {}
+
+    @property
+    def LIVE_POSITION_EXITS(self) -> bool:  # noqa: N802 — read by position_manager
+        return bool(self._session_mode)
+
+    def _session_name(self, symbol: str) -> str:
+        from backend.analytics.edge_lab import session_for
+        s = str(getattr(self.params, "session_mode_session", "native"))
+        return session_for(symbol, s) if s in ("native", "alt") else s
+
+    def _session_mode_signal(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
+        from backend.analytics import edge_lab as lab
+        from backend.strategies.strategy_classic.engine import _epoch_seconds, candles_to_bars
+        from backend.strategies.strategy_defaults import SLOT_TP1_RR, get_strategy_defaults
+        from backend.strategies.strategy_orb.engine import SESSIONS, session_bounds
+
+        if not self.gate("session_mode_m5", timeframe == "M5") or candles is None or len(candles) < 30:
+            return None
+        sess = self._session_name(symbol)
+        if sess not in SESSIONS:
+            return None
+        ti = int(_epoch_seconds(candles)[-1])
+        open_ts, close_ts = session_bounds(sess, ti)
+        if not self.gate("in_session_window", open_ts + 900 <= ti < close_ts - 1800):
+            return None
+        gates = tuple(g for g in (getattr(self.params, "session_mode_gates", None) or []) if g in lab.LIVE_GATES)
+        b = candles_to_bars(symbol, "M5", candles, pad=False)
+        ctx = lab.build_ctx(b, sess, live=True)
+        res = lab.live_signal(self._session_mode, ctx, gates)
+        if not self.gate("session_candidate_passes", res is not None):
+            return None
+        long = res["direction"] > 0
+        c = float(b.close[-1])
+        stop = float(res["stop_dist"])
+        rr = float(SLOT_TP1_RR.get(f"{symbol.upper()}|VWAP_v1", get_strategy_defaults("VWAP_v1").get("tp1_rr", 4.0)))
+        return self._tag_signal(TradeSignal(
+            strategy_id="VWAP_v1", symbol=symbol, direction="BUY" if long else "SELL",
+            signal_type=f"VWAP_{self.params.entry_mode}", timeframe="M5", entry_price=c,
+            stop_loss=c - stop if long else c + stop, take_profit=c + rr * stop if long else c - rr * stop,
+            confluence_score=80, timestamp=float(ti),  # measured at full risk; gates are pass/fail, not a grade
+            metadata={"size_modifier": 1.0, "trail_method": "NONE", "setup": self._session_mode,
+                      "session": sess, "session_close_ts": close_ts, "vwap": res["vwap"], "tp1_rr": rr,
+                      "gates": list(gates),
+                      "reason": f"VWAP {self.params.entry_mode.lower()} {'long' if long else 'short'} "
+                                f"({sess} session, gates: {', '.join(gates) or 'none'})"},
+        ))
+
+    def on_position_bar(self, symbol: str, timeframe: str, candles: pd.DataFrame, position: dict):
+        """Session modes flatten at the session close — part of the measured rule."""
+        if not self._session_mode or candles is None or not len(candles):
+            return None
+        from backend.strategies.base_strategy import TradeAction
+        from backend.strategies.strategy_classic.engine import _epoch_seconds
+        from backend.strategies.strategy_orb.engine import session_bounds
+        t = _epoch_seconds(candles)
+        last = int(t[-1])
+        open_ts, close_ts = session_bounds(self._session_name(symbol), last)
+        if last + 300 >= close_ts or last < open_ts:
+            return TradeAction(ticket=int(position.get("ticket") or 0), action="CLOSE", close_reason="SESSION_END")
+        return None
+
     # Index instruments where `sl_points` is a native unit and the fixed-point method
     # from the source strategy is meaningful. Everything else resolves to ATR.
     _INDEX_TOKENS = (
@@ -493,6 +572,9 @@ class VWAPEngine(BaseStrategy):
         # [T1.3] Open a confluence-telemetry record for this bar. No-op when
         # `self.gates.enabled` is False (the live default).
         self.begin_candidate(symbol, timeframe, bar_time=candles.index[-1] if len(candles) else None)
+
+        if self._session_mode:
+            return self._session_mode_signal(symbol, timeframe, candles)
 
         self._init_state(symbol)
         state = self.state[symbol]

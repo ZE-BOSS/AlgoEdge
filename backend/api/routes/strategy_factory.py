@@ -174,11 +174,42 @@ async def get_all_strategy_defaults(current_user: User = Depends(get_current_use
     """
     from backend.strategies.strategy_defaults import STRATEGY_DEFAULTS, OVERRIDABLE
 
+    # `live_applies`: the measured fields the LIVE bot will actually lay on this
+    # account's trades — bot_service applies a strategy default only where the
+    # saved RiskParams value is still the shipped default. The Backtester
+    # pre-fills exactly these (and the saved value for the rest), so a backtest
+    # runs the exit ladder live runs.
+    saved_risk = None
+    try:
+        import json as _json
+
+        from sqlalchemy import select
+
+        from backend.core.config_schema import UserConfigV2
+        from backend.data.database import async_session
+        from backend.data.models import UserConfigModel
+
+        async with async_session() as _db:
+            row = (await _db.execute(select(UserConfigModel).where(
+                UserConfigModel.user_id == current_user.id))).scalar_one_or_none()
+        if row and row.config_json:
+            saved_risk = UserConfigV2.from_dict(_json.loads(row.config_json)).risk
+    except Exception as e:
+        logger.warning(f"[strategy-defaults] saved config not read; live_applies = every measured field: {e}")
+
+    from backend.core.config_schema import RiskParams
+    _base = RiskParams()
     out = {}
     for sid, cfg in STRATEGY_DEFAULTS.items():
+        defaults = {k: v for k, v in cfg.items() if k != "evidence"}
         out[sid] = {
-            "defaults": {k: v for k, v in cfg.items() if k != "evidence"},
+            "defaults": defaults,
             "evidence": cfg.get("evidence", ""),
+            "live_applies": [
+                k for k in defaults if k != "session_filter_enabled" and (
+                    saved_risk is None or not hasattr(_base, k)
+                    or getattr(saved_risk, k, None) == getattr(_base, k))
+            ],
         }
     return {
         "strategy_defaults": out,

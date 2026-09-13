@@ -917,7 +917,8 @@ class BotService:
                             _slot_measured = {}
                             try:
                                 from backend.strategies.strategy_defaults import get_synth_slot_params
-                                _slot_measured = get_synth_slot_params(symbol, strategy_id)
+                                if getattr(slot, "use_measured_params", True) is not False:
+                                    _slot_measured = get_synth_slot_params(symbol, strategy_id)
                             except Exception as _e:
                                 logger.warning(f"[LIVE] per-symbol synth params not loaded: {_e}")
                             _override = getattr(slot, "strategy_params_override", None) or {}
@@ -1012,7 +1013,7 @@ class BotService:
                                 # percentile) computes one thing here and another
                                 # there, on identical data, undetectably. Live was
                                 # passing 5,000 M5 bars against the backtest's 500.
-                                _win = window_bars(tf)
+                                _win = window_bars(tf, current_engine)
                                 if len(closed_data) > _win:
                                     closed_data = closed_data.iloc[-_win:]
 

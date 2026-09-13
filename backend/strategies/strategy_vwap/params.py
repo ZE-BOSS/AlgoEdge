@@ -70,7 +70,19 @@ class VWAPParams:
     vwap_band_lookback: int = 0
     """[8.1] 0 = bands computed since the session anchor (matching the VWAP line itself); >0 = a rolling N-bar lookback instead. 0 is the doc-faithful default."""
 
-    entry_mode: Literal["PULLBACK_TO_VALUE", "BAND_REVERSION", "BOTH"] = "PULLBACK_TO_VALUE"
+    session_mode_session: str = "native"
+    """SESSION_TREND / SESSION_PULLBACK only: which cash session anchors the VWAP.
+    "native" = London for GBP/EUR crosses and European indices, New York for
+    everything else; "alt" = the other one; or "london" / "ny" explicitly."""
+
+    session_mode_gates: list[str] = field(default_factory=lambda: ["day_dir", "early"])
+    """SESSION_TREND / SESSION_PULLBACK only: confluences a candidate must pass
+    (backend/analytics/edge_lab.LIVE_GATES). The session's FIRST candidate that
+    passes them all is the one trade. Measured per market 2026-09-13 — see
+    strategy_defaults.SYNTH_SLOT_PARAMS for the values that held in every window."""
+
+    entry_mode: Literal["PULLBACK_TO_VALUE", "BAND_REVERSION", "BOTH",
+                        "SESSION_TREND", "SESSION_PULLBACK"] = "PULLBACK_TO_VALUE"
     """
     CHANGED "BOTH" -> "PULLBACK_TO_VALUE" (2026-08, Phase 3).
 

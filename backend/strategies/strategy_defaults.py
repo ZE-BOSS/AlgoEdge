@@ -90,14 +90,20 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     "VWAP_v1": {
         # [18.3] Measured best fixed R:R — research/16.
         # 1:4 best ($-45,994 vs $-54,794 at 1:3), n=7,604.
+        # 2026-09-13: one target, no break-even, no trailing — how the shipped
+        # SESSION_TREND / SESSION_PULLBACK books were measured (edge_lab). The
+        # old EITHER break-even at 1.5R turned 16 of 113 BTCUSD session-pullback
+        # trades into BE_SL exits the research never took. The original
+        # PULLBACK_TO_VALUE mode has no edge on any of 26 markets either way.
+        "tp_count": 1,
         "tp1_rr": 4.0,
         "trail_method_tp1": "NONE",
         "trail_mode": "NONE",
-        "be_mode": "EITHER",
-        "be_trigger_rr": 1.5,
+        "be_mode": "NONE",
         "evidence": (
-            "session ablation +0.064 (keep gate). trailing_sweep -4 PnL over 6 cells; "
-            "Hong Kong 50 -542 on a HIGHER win rate."
+            "edge_lab 2026-09-13: session modes measured with one target, no BE, flat at the "
+            "session close — XAUUSD SESSION_TREND +0.26R / +0.36R / +0.42R, BTCUSD SESSION_PULLBACK "
+            "+0.30R / +0.37R / +0.13R (2022-23 / 2024-25 / 2026)."
         ),
     },
 
@@ -143,10 +149,49 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
         "trail_method_tp1": "NONE",
         "trail_mode": "NONE",
         "evidence": (
-            "strategy_search walk-forward: GBPJPY London 60m 1:3 profitable 2022-23 (+0.05R), "
-            "2024-25 (+0.08R) and the last 8 months (+0.21R, 8/9 months up); 12/12 settings "
-            "profitable in-sample."
+            "edge_lab 2026-09-13: M5 break of the 60m range with the H1 trend, 1:3, ONE setting for "
+            "US Tech 100 / XAUUSD / BTCUSD / GBPJPY — pooled 2022-23 +0.13R (t 3.3), 2024-25 +0.09R "
+            "(t 3.0), 2026 +0.09R (PF 1.29), positive on all four in every window. Earlier M15 form: "
+            "GBPJPY London 60m 1:3 +0.05R / +0.08R / +0.21R."
         ),
+    },
+
+    # ── Classic families (strategy_classic, data/edge_lab/classic_book.json) ──
+    # Settings chosen on 2024-01..2025-12 per market, then held unchanged over
+    # 2022-23 (never seen) and 2026-01..09. Families the research ran with no
+    # target carry tp1_rr 10 so the strategy's own exit closes them.
+    "Donchian_v1": {
+        "tp_count": 1, "tp1_rr": 10.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
+        "evidence": (
+            "classic_book: N55 long, channel exit — XAUUSD 2022-23 -0.00R / 2024-25 +0.63R / 2026 +0.47R; "
+            "BTCUSD +0.63R / +0.25R / +0.08R. US Tech 100 N55 trail +0.22R / +0.07R."
+        ),
+    },
+    "EMAPullback_v1": {
+        "tp_count": 1, "tp1_rr": 3.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
+        "evidence": (
+            "classic_book: EMA 50/200 long 1:10 — XAUUSD 2022-23 +0.32R / 2024-25 +1.03R / 2026 +0.38R; "
+            "BTCUSD +0.08R / +0.49R / +0.20R. Shared 20/50 1:3 failed in 2026 on 3 of 4 markets."
+        ),
+    },
+    "RSI2_v1": {
+        "tp_count": 1, "tp1_rr": 10.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
+        "evidence": "classic_book: RSI(2)<10 long, 24h hold — between -0.05R and +0.03R on all four markets in all windows. No edge.",
+    },
+    "BollingerFade_v1": {
+        "tp_count": 1, "tp1_rr": 10.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
+        "evidence": "classic_book: every per-market pick lost in 2026 (-0.16R to -0.00R); no shared setting passed selection.",
+    },
+    "VolBreakout_v1": {
+        "tp_count": 1, "tp1_rr": 10.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
+        "evidence": (
+            "classic_book: BTCUSD N20 x2.0 volume 2022-23 +0.46R / 2024-25 +0.28R / 2026 +3.7R on only 10 trades; "
+            "XAUUSD N55 x1.5 long -0.05R / +0.31R / +0.18R."
+        ),
+    },
+    "TSMOM_v1": {
+        "tp_count": 1, "tp1_rr": 10.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
+        "evidence": "classic_book: 4-15 trades per market per window — too few to measure anything.",
     },
 }
 
@@ -169,9 +214,21 @@ SLOT_TP1_RR: dict[str, float] = {
     "CRASH 500 INDEX|APA_v1": 3.0,               #  +$4,310  n=104  DD 6.4%
 
     # ORB — chosen on 2024-01..2026-01, then held unchanged (avg R per trade)
-    "GBPJPY|ORB_v1": 3.0,     # 2022-23 +0.05  2024-25 +0.08  last 8m +0.21
-    "BTCUSD|ORB_v1": 1.5,     # 2022-23 +0.11  2024-25 +0.07  last 8m +0.05
-    "XAUUSD|ORB_v1": 2.0,     # 2022-23 +0.08  2024-25 +0.02  last 8m +0.04
+    # ORB — 2026-09-13 edge lab: ONE shared setting (M5 break of the 60m range
+    # WITH the H1 trend, 1:3), chosen on 2022-23 AND 2024-25, then 2026 unseen
+    "GBPJPY|ORB_v1": 3.0,       # 2022-23 +0.09  2024-25 +0.12  2026 +0.23
+    "BTCUSD|ORB_v1": 3.0,       # 2022-23 +0.25  2024-25 +0.11  2026 +0.01
+    "XAUUSD|ORB_v1": 3.0,       # 2022-23 +0.05  2024-25 +0.07  2026 +0.11
+    "US TECH 100|ORB_v1": 3.0,  #   (no data)    2024-25 +0.04  2026 +0.05
+
+    # VWAP session modes — per-market picks positive in every window (edge lab)
+    "XAUUSD|VWAP_v1": 5.0,       # SESSION_TREND day_dir+gap_dir+early: +0.26 / +0.36 / +0.42
+    "US TECH 100|VWAP_v1": 10.0, # SESSION_TREND day_dir+rel_vol_open+early: 2024-25 +0.59 / 2026 +0.39
+    "BTCUSD|VWAP_v1": 5.0,       # SESSION_PULLBACK gap_dir+early: +0.30 / +0.37 / +0.13
+
+    # Classic families — per-market picks that held in every window (classic_book)
+    "XAUUSD|EMAPullback_v1": 10.0,    # 50/200 long: +0.32 / +1.03 / +0.38
+    "BTCUSD|EMAPullback_v1": 10.0,    # 50/200 long: +0.08 / +0.49 / +0.20
 }
 
 
@@ -188,9 +245,31 @@ SLOT_TP1_RR: dict[str, float] = {
 #
 # Format: "SYMBOL|Strategy_id": {param: value}
 SYNTH_SLOT_PARAMS: dict[str, dict[str, Any]] = {
-    "GBPJPY|ORB_v1": {"session": "london", "range_minutes": 60},
-    "BTCUSD|ORB_v1": {"session": "ny", "range_minutes": 60},
-    "XAUUSD|ORB_v1": {"session": "ny", "range_minutes": 30},
+    "GBPJPY|ORB_v1": {"session": "london", "range_minutes": 60, "breakout_timeframe": "M5",
+                      "require_trend": True, "min_stop_atr": 0.5},
+    "BTCUSD|ORB_v1": {"session": "ny", "range_minutes": 60, "breakout_timeframe": "M5",
+                      "require_trend": True, "min_stop_atr": 0.5},
+    "XAUUSD|ORB_v1": {"session": "ny", "range_minutes": 60, "breakout_timeframe": "M5",
+                      "require_trend": True, "min_stop_atr": 0.5},
+    "US TECH 100|ORB_v1": {"session": "ny", "range_minutes": 60, "breakout_timeframe": "M5",
+                           "require_trend": True, "min_stop_atr": 0.5},
+
+    # VWAP session modes (data/edge_lab/search_robust_*.json, per market)
+    "XAUUSD|VWAP_v1": {"entry_mode": "SESSION_TREND", "session_mode_session": "native",
+                       "session_mode_gates": ["day_dir", "gap_dir", "early"]},
+    "US TECH 100|VWAP_v1": {"entry_mode": "SESSION_TREND", "session_mode_session": "native",
+                            "session_mode_gates": ["day_dir", "rel_vol_open", "early"]},
+    "BTCUSD|VWAP_v1": {"entry_mode": "SESSION_PULLBACK", "session_mode_session": "native",
+                       "session_mode_gates": ["gap_dir", "early"]},
+
+    # Classic families (data/edge_lab/classic_book.json)
+    "XAUUSD|Donchian_v1": {"channel_bars": 55, "stop_atr": 2.0, "exit_mode": "channel", "side": "long"},
+    "BTCUSD|Donchian_v1": {"channel_bars": 55, "stop_atr": 2.0, "exit_mode": "channel", "side": "long"},
+    "US TECH 100|Donchian_v1": {"channel_bars": 55, "stop_atr": 2.0, "exit_mode": "trail", "side": "long"},
+    "XAUUSD|EMAPullback_v1": {"fast_ema": 50, "slow_ema": 200, "side": "long"},
+    "BTCUSD|EMAPullback_v1": {"fast_ema": 50, "slow_ema": 200, "side": "long"},
+    "XAUUSD|VolBreakout_v1": {"channel_bars": 55, "volume_mult": 1.5, "side": "long"},
+    "BTCUSD|VolBreakout_v1": {"channel_bars": 20, "volume_mult": 2.0, "side": "both"},
 }
 
 

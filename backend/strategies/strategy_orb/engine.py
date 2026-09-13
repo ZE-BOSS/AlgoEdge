@@ -89,7 +89,61 @@ class ORBStrategy(BaseStrategy):
         self.params = getattr(config, "orb", None) or ORBParams()
 
     def get_required_timeframes(self) -> list[str]:
-        return ["M15"]
+        return ["M5"] if self._m5 else ["M15"]
+
+    @property
+    def _m5(self) -> bool:
+        return str(getattr(self.params, "breakout_timeframe", "M15")).upper() == "M5"
+
+    @property
+    def WINDOW_BARS(self) -> dict[str, int]:  # noqa: N802 — read by strategies.windows
+        # the trend EMA spans 600 M5 bars; 5,000 lets it forget its seed and
+        # gives the stop discard its 14 prior sessions
+        return {"M5": 5000} if self._m5 else {}
+
+    def _m5_signal(self, symbol: str, candles: pd.DataFrame) -> TradeSignal | None:
+        from backend.analytics import edge_lab as lab
+        from backend.strategies.strategy_classic.engine import candles_to_bars
+
+        p = self.params
+        t = _epoch_seconds(candles)
+        ti = int(t[-1])
+        open_ts, close_ts = session_bounds(p.session, ti)
+        range_end = open_ts + int(p.range_minutes) * 60
+        window_end = min(range_end + int(p.breakout_window_minutes) * 60, close_ts - 1800)
+        # cheap pre-check before building the session context
+        if not self.gate("in_breakout_window", range_end <= ti < window_end):
+            return None
+        b = candles_to_bars(symbol, "M5", candles, pad=False)
+        ctx = lab.build_ctx(b, p.session, live=True)
+        res = lab.live_signal("orb_break", ctx, ("htf_trend",) if p.require_trend else (),
+                              mins=int(p.range_minutes), window_bars=int(p.breakout_window_minutes) // 5,
+                              min_stop_atr=float(p.min_stop_atr))
+        if not self.gate("first_breakout_passes", res is not None):
+            return None
+        d = int(res["direction"])
+        if not self.gate("side_allowed", p.side == "both" or (p.side == "long") == (d > 0)):
+            return None
+        from backend.strategies.strategy_defaults import SLOT_TP1_RR, get_strategy_defaults
+        rr = float(SLOT_TP1_RR.get(f"{symbol.upper()}|{self.strategy_id}",
+                                   get_strategy_defaults(self.strategy_id).get("tp1_rr", 2.0)))
+        c = float(b.close[-1])
+        stop = float(res["stop_dist"])
+        long = d > 0
+        f = res["features"]
+        return self._tag_signal(TradeSignal(
+            strategy_id=self.strategy_id, symbol=symbol, direction="BUY" if long else "SELL",
+            signal_type="ORB_BREAKOUT", timeframe="M5", entry_price=c,
+            entry_zone_top=float(f["range_high"]), entry_zone_bottom=float(f["range_low"]),
+            stop_loss=c - stop if long else c + stop, take_profit=c + rr * stop if long else c - rr * stop,
+            confluence_score=80, timestamp=float(ti),  # binary rule, measured at full risk: top tier of confluence_risk_tiers
+            metadata={"size_modifier": 1.0, "trail_method": "NONE", "setup": "orb_m5",
+                      "session": p.session, "range_minutes": int(p.range_minutes),
+                      "range_high": float(f["range_high"]), "range_low": float(f["range_low"]),
+                      "session_close_ts": close_ts, "tp1_rr": rr, "trend_aligned": bool(f["htf_trend"]),
+                      "reason": f"ORB M5 {p.session} {p.range_minutes}m range broke {'up' if long else 'down'}"
+                                f"{' with the H1 trend' if p.require_trend else ''}"},
+        ))
 
     async def initialize(self):
         return None
@@ -102,10 +156,12 @@ class ORBStrategy(BaseStrategy):
             symbol, timeframe,
             bar_time=candles.index[-1] if candles is not None and len(candles) else None,
         )
-        if timeframe != "M15" or candles is None or len(candles) < 20:
-            return None
         p = self.params
-        if p.session not in SESSIONS:
+        if p.session not in SESSIONS or candles is None or len(candles) < 20:
+            return None
+        if self._m5:
+            return self._m5_signal(symbol, candles) if timeframe == "M5" else None
+        if timeframe != "M15":
             return None
 
         t = _epoch_seconds(candles)
@@ -166,7 +222,9 @@ class ORBStrategy(BaseStrategy):
             entry_zone_bottom=rl,
             stop_loss=c - stop if long else c + stop,
             take_profit=c + rr * stop if long else c - rr * stop,
-            confluence_score=70,
+            # ORB has no graded confluence: the rule either fires or it does not,
+            # and it was measured at full risk. 70 fell in the default 75% tier.
+            confluence_score=80,
             timestamp=float(ti),
             metadata={
                 "size_modifier": 1.0,

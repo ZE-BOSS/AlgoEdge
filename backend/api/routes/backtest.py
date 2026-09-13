@@ -140,6 +140,12 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
     "DriftJumpAlpha_v1": "drift_jump_alpha",
     "BoomDriftJump_v1": "boom_drift_jump",
     "ORB_v1": "orb",
+    "Donchian_v1": "donchian",
+    "EMAPullback_v1": "ema_pullback",
+    "RSI2_v1": "rsi2",
+    "BollingerFade_v1": "bollinger_fade",
+    "VolBreakout_v1": "vol_breakout",
+    "TSMOM_v1": "tsmom",
 }
 
 
@@ -423,6 +429,14 @@ class PortfolioSymbolConfig(BaseModel):
 class PortfolioBacktestRequest(BaseModel):
     """Request model for a portfolio (multi-symbol) backtest."""
     symbols: list[PortfolioSymbolConfig]
+    # Risk knobs with no field of their own (trail_activation_rr, per-TP ATR trail
+    # multipliers, min_stop_cost_multiple, ...), merged LAST like the single-symbol
+    # request's risk_config — so a basket can run the account's saved settings.
+    risk_config: dict[str, Any] = {}
+    # Each strategy's measured exits (tp_count, tp1_rr, break-even, trailing) per
+    # row, as the live bot applies them per signal. A row's own tp1_rr/tp_count
+    # still wins. False = one portfolio-wide exit ladder for every strategy.
+    use_strategy_exit_defaults: bool = True
     start_date: str | None = None
     end_date: str | None = None
     # Raised from 5000 after measuring the live terminal (build 6140,
@@ -880,9 +894,10 @@ async def run_backtest_endpoint(
                 if req.start_date and req.end_date:
                     start_dt = datetime.fromisoformat(req.start_date)
                     end_dt = datetime.fromisoformat(req.end_date)
+                    from backend.strategies.windows import warmup_days as _warmup_days
                     for tf in required_tfs:
                         meta = TF_META.get(tf, TF_META["M5"])
-                        tf_start = start_dt - pd.Timedelta(days=meta["warmup_days"])
+                        tf_start = start_dt - pd.Timedelta(days=_warmup_days(tf, engine, meta["warmup_days"]))
                         candles_by_tf[tf] = await DataFetcher.get_data_range(req.symbol, tf, tf_start, end_dt)
                 else:
                     for tf in required_tfs:
@@ -1044,7 +1059,7 @@ async def run_backtest_endpoint(
                         if last_tf_time is None or last_tf_time == prev_time_by_tf[tf]:
                             continue
 
-                        slice_tf = sorted_tf.iloc[max(0, tf_end - meta["window"]):tf_end]
+                        slice_tf = sorted_tf.iloc[max(0, tf_end - _window_bars(tf, engine)):tf_end]
                         if len(slice_tf) < 20:
                             continue
 
@@ -1546,14 +1561,37 @@ async def run_portfolio_backtest_endpoint(
                         "strategy_risk_budget_pct": req.strategy_risk_budget_pct,
                     }.items() if v is not None
                 },
+                **(req.risk_config or {}),
             }
 
+            # Per-strategy measured exits, applied per ROW. Live builds its risk
+            # config per signal and lays each strategy's defaults on it
+            # (bot_service); a basket used to run ONE exit ladder for every leg,
+            # so ORB (measured: 1 TP, no break-even) ran with three TP legs and
+            # break-even beside APA. Row-level tp1_rr / tp_count still win.
+            portfolio_exit_overrides: dict[str, dict] = {}
+            if req.use_strategy_exit_defaults:
+                from backend.strategies.strategy_defaults import OVERRIDABLE, get_strategy_defaults
+                for sym_cfg in req.symbols:
+                    _sd = get_strategy_defaults(sym_cfg.strategy_id)
+                    if not _sd:
+                        continue
+                    _row = f"{sym_cfg.symbol.upper()}|{sym_cfg.strategy_id}"
+                    if "tp1_rr" in _sd and sym_cfg.tp1_rr is None:
+                        merged_risk_config["tp1_rr_overrides_by_slot"].setdefault(_row, _sd["tp1_rr"])
+                    if "tp_count" in _sd and sym_cfg.tp_count is None:
+                        merged_risk_config["tp_count_overrides_by_slot"].setdefault(_row, _sd["tp_count"])
+                    _ex = {k: v for k, v in _sd.items()
+                           if k in OVERRIDABLE and k not in ("tp1_rr", "tp_count")}
+                    if _ex:
+                        portfolio_exit_overrides[sym_cfg.strategy_id] = _ex
 
             # ── Fetch data & generate signals per symbol ──
             portfolio_data = {}
             portfolio_data_m15 = {}
             portfolio_data_m5 = {}
             portfolio_signals = {}
+            portfolio_strategies = {}  # slot_key -> engine, for strategy-owned exits
             # [12.8/Part14] cache_key (usually slot_id) -> real symbol, passed
             # to PortfolioBacktestEngine.run() so it can resolve costs/pip-size
             # against the real symbol while keying its internal per-slot dicts
@@ -1632,9 +1670,10 @@ async def run_portfolio_backtest_endpoint(
                     if req.start_date and req.end_date:
                         start_dt = datetime.fromisoformat(req.start_date)
                         end_dt = datetime.fromisoformat(req.end_date)
+                        from backend.strategies.windows import warmup_days as _warmup_days
                         for tf in required_tfs:
                             meta = TF_META.get(tf, TF_META["M5"])
-                            tf_start = start_dt - pd.Timedelta(days=meta["warmup_days"])
+                            tf_start = start_dt - pd.Timedelta(days=_warmup_days(tf, strategy_engine, meta["warmup_days"]))
                             candles_by_tf[tf] = await DataFetcher.get_data_range(sym, tf, tf_start, end_dt)
                     else:
                         for tf in required_tfs:
@@ -1741,7 +1780,7 @@ async def run_portfolio_backtest_endpoint(
                         if last_tf_time is None or last_tf_time == prev_time_by_tf[tf]:
                             continue
 
-                        slice_tf = sorted_tf.iloc[max(0, tf_end - meta["window"]):tf_end]
+                        slice_tf = sorted_tf.iloc[max(0, tf_end - _window_bars(tf, strategy_engine)):tf_end]
                         if len(slice_tf) < 20:
                             continue
 
@@ -1811,6 +1850,7 @@ async def run_portfolio_backtest_endpoint(
                 if "M5" in indexed_by_tf:
                     portfolio_data_m5[slot_key] = indexed_by_tf["M5"]
                 portfolio_signals[slot_key] = sym_signals
+                portfolio_strategies[slot_key] = strategy_engine
 
                 # Capture this symbol's strategy-engine logs before it goes out
                 # of scope — without this, portfolio backtests never surface
@@ -1881,6 +1921,8 @@ async def run_portfolio_backtest_endpoint(
                 portfolio_data_m5,
                 symbol_map,  # [12.8]
                 _pf_progress,
+                portfolio_strategies,
+                portfolio_exit_overrides,
             )
 
             # ── Sanitize and broadcast results ──

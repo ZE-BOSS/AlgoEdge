@@ -103,3 +103,8 @@ research/data/__pycache__/
 # Tick archives — 1.2 GB of raw Deriv ticks (research/24). Regenerate with
 # research/data/synth_tick_harvest.py rather than committing them.
 research/data/ticks/
+
+# Research candidate caches over GitHub's 100 MB file limit (regenerate with
+# scripts/run_vwap_research.py). Everything else under data/ is committed.
+data/vwap_research/vwap_a.pkl
+data/vwap_research/vwap_b.pkl

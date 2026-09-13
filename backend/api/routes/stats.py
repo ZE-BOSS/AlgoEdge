@@ -146,6 +146,10 @@ async def get_user_stats(
                     "pnl": d["profit"] + d["commission"] + d["swap"],
                     "exit_reason": mapped_reason,
                     "be_applied": False,
+                    # closing-deal time: orders the equity curve and gives
+                    # Sharpe/Sortino the real trade rate (metrics.trades_per_year)
+                    "entry_time": d.get("time"),
+                    "exit_time": d.get("time"),
                 })
             
             return compute_portfolio_stats(trade_dicts, initial_balance=initial_balance, sizing_basis=sizing_basis)
@@ -171,6 +175,9 @@ async def get_user_stats(
         "pnl": t.pnl,
         "exit_reason": t.exit_reason,
         "be_applied": False,
+        "entry_time": t.entry_time,
+        "exit_time": t.exit_time,
+        "balance_after": t.balance_after,
     } for t in trades]
 
     return compute_portfolio_stats(trade_dicts, initial_balance=initial_balance, sizing_basis=sizing_basis)

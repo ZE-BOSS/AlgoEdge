@@ -19,7 +19,8 @@ from backend.strategies.strategy_defaults import (
     OVERRIDABLE,
 )
 
-STRATEGIES = ["APA_v1", "DriftJumpAlpha_v1", "ORB_v1", "VWAP_v1"]
+STRATEGIES = ["APA_v1", "DriftJumpAlpha_v1", "ORB_v1", "VWAP_v1",
+              "Donchian_v1", "EMAPullback_v1", "RSI2_v1", "BollingerFade_v1", "VolBreakout_v1", "TSMOM_v1"]
 
 
 @pytest.mark.parametrize("sid", STRATEGIES)

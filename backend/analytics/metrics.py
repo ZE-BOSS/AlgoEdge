@@ -171,6 +171,42 @@ def calculate_max_drawdown_of_peak(equity_curve: list[float]) -> float:
     return max_dd_pct
 
 
+def _epoch(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        v = float(value)
+        return v / 1000.0 if v > 1e11 else v          # tolerate epoch milliseconds
+    try:
+        import pandas as pd
+        return pd.Timestamp(value).value / 1e9
+    except Exception:
+        return None
+
+
+def trades_per_year(trades: list[dict[str, Any]]) -> float:
+    """How many trade returns a year actually holds — the annualisation factor.
+
+    Sharpe and Sortino here are computed from PER-TRADE returns, so annualising
+    with sqrt(252) is only right for a strategy that closes exactly one trade a
+    trading day. ORB takes ~130 a year (sqrt(252) overstated its Sharpe by 39%);
+    a scalper taking 2,000 a year was understated by 2.8x. The factor is the
+    observed trade rate over the span from the first entry to the last exit,
+    which is what makes the ratio comparable to a daily-returns Sharpe and to
+    frontend summaryEngine.tradesPerYear (they must match).
+    """
+    if len(trades) < 2:
+        return 252.0
+    starts = [x for x in (_epoch(t.get("entry_time")) for t in trades) if x]
+    ends = [x for x in (_epoch(t.get("exit_time") or t.get("entry_time")) for t in trades) if x]
+    if not starts or not ends:
+        return 252.0
+    span_years = (max(ends) - min(starts)) / (365.25 * 86400.0)
+    if span_years <= 0:
+        return 252.0
+    return float(min(max(len(trades) / max(span_years, 1.0 / 365.25), 1.0), 100_000.0))
+
+
 def max_consecutive(values: list[bool]) -> int:
     """Return max consecutive True values."""
     max_count = 0
@@ -269,6 +305,8 @@ def compute_portfolio_stats(
             for t in sorted_trades
         ]
 
+    ppy = trades_per_year(sorted_trades)
+
     # TP breakdown
     exit_reasons = [t.get("exit_reason", "") for t in trades]
     total = len(trades)
@@ -287,8 +325,9 @@ def compute_portfolio_stats(
         "avg_loss": avg_loss,
         "profit_factor": gross_profit / gross_loss if gross_loss > 0 else 999.0,
         "expectancy": (win_rate * avg_win) - ((1 - win_rate) * avg_loss),
-        "sharpe_ratio": calculate_sharpe(pct_returns),
-        "sortino_ratio": calculate_sortino(pct_returns),
+        "sharpe_ratio": calculate_sharpe(pct_returns, ppy),
+        "sortino_ratio": calculate_sortino(pct_returns, ppy),
+        "sharpe_periods_per_year": ppy,
         "max_drawdown_pct": max_dd_pct,
         "max_drawdown_abs": max_dd_abs,
         "max_drawdown_pct_of_peak": max_dd_pct_of_peak,

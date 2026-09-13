@@ -77,7 +77,8 @@ async def run(args) -> dict:
     start_dt, end_dt = datetime.fromisoformat(req.start_date), datetime.fromisoformat(req.end_date)
     by_tf = {}
     for tf in required:
-        df = await DataFetcher.get_data_range(req.symbol, tf, start_dt - pd.Timedelta(days=warmup[tf]), end_dt)
+        from backend.strategies.windows import warmup_days
+        df = await DataFetcher.get_data_range(req.symbol, tf, start_dt - pd.Timedelta(days=warmup_days(tf, engine, warmup[tf])), end_dt)
         by_tf[tf] = (df.set_index(pd.to_datetime(df["time"], unit="s")) if "time" in df.columns else df).sort_index()
     primary = sorted(required, key=lambda t: tf_min.get(t, 999))[0]
 
@@ -105,7 +106,7 @@ async def run(args) -> dict:
                 last_tf_time = tf_times[tf][tf_end - 1] if tf_end > 0 else None
             if last_tf_time is None or last_tf_time == prev_time_by_tf[tf]:
                 continue
-            sl = by_tf[tf].iloc[max(0, tf_end - window_bars(tf)):tf_end]
+            sl = by_tf[tf].iloc[max(0, tf_end - window_bars(tf, engine)):tf_end]
             if len(sl) < 20:
                 continue
             s = await engine.on_bar(req.symbol, tf, sl)
@@ -143,7 +144,7 @@ async def run(args) -> dict:
                 # variant analytically: a target is reached exactly when favourable
                 # excursion gets there before the stop.
                 "mae_pips", "mfe_pips", "mae_r", "mfe_r", "risk_pips", "initial_stop_loss",
-                "original_sl", "tp_level", "group_id", "symbol", "confluence_score")
+                "original_sl", "tp_level", "group_id", "symbol", "confluence_score", "entry_spread_pips")
         Path(args.dump).write_text(json.dumps([{k: t.get(k) for k in keep} for t in res.get("trades", [])],
                                               default=str, indent=1), encoding="utf-8")
         out["dumped_trades_to"] = args.dump

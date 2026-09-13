@@ -365,7 +365,25 @@ export default function StrategySettings() {
                       <option value="ORB_v1">Opening Range Breakout</option>
                       <option value="DriftJumpAlpha_v1">Drift &amp; Jump Alpha</option>
                       <option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option>
+                      <option value="Donchian_v1">Donchian Breakout</option>
+                      <option value="EMAPullback_v1">EMA Trend Pullback</option>
+                      <option value="RSI2_v1">RSI(2) Reversion</option>
+                      <option value="BollingerFade_v1">Bollinger Fade</option>
+                      <option value="VolBreakout_v1">Tick-Volume Breakout</option>
+                      <option value="TSMOM_v1">Daily Momentum (TSMOM)</option>
                 </select>
+                <label
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', whiteSpace: 'nowrap', cursor: 'pointer' }}
+                  title="On: this slot runs the settings measured for this symbol (the Backtester's 'Use the measured settings' box). Off: it runs the strategy parameters below, exactly as the Backtester does with that box unticked."
+                >
+                  <input
+                    type="checkbox"
+                    checked={slot.use_measured_params !== false}
+                    onChange={e => updateSlot(slot.slot_id, 'use_measured_params', e.target.checked)}
+                    style={{ width: 14, height: 14 }}
+                  />
+                  Measured settings
+                </label>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => duplicateSlot(slot.slot_id)}
@@ -412,6 +430,8 @@ export default function StrategySettings() {
       <div className="card">
         <div className="card-header"><span className="card-title">APA (Advanced Price Action) Parameters</span></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div><label>Setup</label><select value={config.apa?.setup_mode || 'HEAD_AND_SHOULDERS'} onChange={e => updateNested('apa', 'setup_mode', e.target.value)}><option value="HEAD_AND_SHOULDERS">Head &amp; shoulders (original)</option><option value="SESSION_BREAKOUT_TREND">Session breakout with the trend (edge lab)</option></select><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Session breakout = the ORB-trend price-action setup under this APA slot. Don't also run ORB_v1 on the same symbol, or both take the same trade.</div></div>
+          <div><label>Breakout Session</label><select value={config.apa?.breakout_session || 'native'} onChange={e => updateNested('apa', 'breakout_session', e.target.value)}><option value="native">Native</option><option value="alt">The other one</option><option value="london">London</option><option value="ny">New York</option></select></div>
           <div><label>Structure Timeframe</label><input type="text" value={config.apa?.structure_timeframe || 'M15'} onChange={e => updateNested('apa', 'structure_timeframe', e.target.value)} /></div>
           <div><label>Entry Timeframe</label><input type="text" value={config.apa?.entry_timeframe || 'M5'} onChange={e => updateNested('apa', 'entry_timeframe', e.target.value)} /></div>
           <div><label>Minor Fractal (M)</label><input type="number" value={config.apa?.minor_fractal_m ?? 3} onChange={e => updateNested('apa', 'minor_fractal_m', +e.target.value)} /></div>
@@ -468,6 +488,9 @@ export default function StrategySettings() {
           <div><label>Max Trades / Day</label><input type="number" value={config.vwap?.max_trades_per_day ?? 4} onChange={e => updateNested('vwap', 'max_trades_per_day', +e.target.value)} /></div>
           <div><label>Max Losses / Day</label><input type="number" value={config.vwap?.max_losses_per_day ?? 2} onChange={e => updateNested('vwap', 'max_losses_per_day', +e.target.value)} /></div>
           <div><label>Drawdown Kill (%)</label><input type="number" step="0.5" value={config.vwap?.drawdown_kill_pct ?? 10.0} onChange={e => updateNested('vwap', 'drawdown_kill_pct', +e.target.value)} /></div>
+          <div><label>Entry Mode</label><select value={config.vwap?.entry_mode || 'PULLBACK_TO_VALUE'} onChange={e => updateNested('vwap', 'entry_mode', e.target.value)}><option value="PULLBACK_TO_VALUE">Pullback to value (original)</option><option value="BAND_REVERSION">Band reversion</option><option value="BOTH">Both</option><option value="SESSION_TREND">Session trend (Zarattini &amp; Aziz)</option><option value="SESSION_PULLBACK">Session pullback</option></select></div>
+          <div><label>Session-Mode Session</label><select value={config.vwap?.session_mode_session || 'native'} onChange={e => updateNested('vwap', 'session_mode_session', e.target.value)}><option value="native">Native</option><option value="alt">The other one</option><option value="london">London</option><option value="ny">New York</option></select></div>
+          <div><label>Session-Mode Confluences</label><input type="text" value={(config.vwap?.session_mode_gates || ['day_dir', 'early']).join(', ')} onChange={e => updateNested('vwap', 'session_mode_gates', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Session modes only: day_dir, gap_dir, prev_day_dir, early, htf_trend, vwap_slope, vwap_side, vol_surge, rel_vol_open, strong_body, noise_out, nr7, inside_day.</div></div>
         </div>
       </div>
 
@@ -503,7 +526,7 @@ export default function StrategySettings() {
 
       <div className="card">
         <div className="card-header"><span className="card-title">Opening Range Breakout Parameters</span></div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 12 }}>Trades the first M15 close beyond the opening range, once per session, and flattens at the session close. Target = the slot TP1 R:R. Measured per-symbol settings apply automatically: GBPJPY London 60m 1:3, BTCUSD New York 60m 1:1.5, XAUUSD New York 30m 1:2.</div>
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 12 }}>Trades the first close beyond the opening range, once per session, and flattens at the session close. Target = the slot TP1 R:R. On slots with "Measured settings" on, the measured per-symbol values apply instead of these: M5 break of the 60-minute range only with the H1 trend, 1:3 — GBPJPY London; US Tech 100, XAUUSD, BTCUSD New York.</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <div><label>Session</label><select value={config.orb?.session || 'london'} onChange={e => updateNested('orb', 'session', e.target.value)}><option value="london">London (08:00 UK)</option><option value="ny">New York (09:30 ET)</option></select></div>
           <div><label>Range (minutes)</label><select value={config.orb?.range_minutes ?? 60} onChange={e => updateNested('orb', 'range_minutes', +e.target.value)}>{[15, 30, 45, 60, 90, 120].map(m => <option key={m} value={m}>{m}</option>)}</select></div>
@@ -516,6 +539,33 @@ export default function StrategySettings() {
               Close at session end (part of the tested rule)
             </label>
           </div>
+          <div><label>Breakout Timeframe</label><select value={config.orb?.breakout_timeframe || 'M15'} onChange={e => updateNested('orb', 'breakout_timeframe', e.target.value)}><option value="M15">M15 (original)</option><option value="M5">M5 (edge lab)</option></select></div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 24, fontSize: '0.8rem' }}>
+              <input type="checkbox" checked={config.orb?.require_trend ?? false} onChange={e => updateNested('orb', 'require_trend', e.target.checked)} />
+              Only with the H1 trend (M5 form)
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Classic Strategy Families</span></div>
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+          Donchian, EMA pullback, RSI(2), Bollinger fade, tick-volume breakout and daily momentum. Each engine runs the research code itself; exits (ATR trail, channel, mean, flip, time limit) are the strategy's own and run live as well as in backtests. Slots with "Measured settings" on use the per-symbol values instead of these.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div><label>Donchian Channel (H1 bars)</label><input type="number" min="5" value={config.donchian?.channel_bars ?? 20} onChange={e => updateNested('donchian', 'channel_bars', parseInt(e.target.value, 10))} /></div>
+          <div><label>Donchian Stop (× ATR)</label><input type="number" step="0.5" min="0.5" value={config.donchian?.stop_atr ?? 2.0} onChange={e => updateNested('donchian', 'stop_atr', +e.target.value)} /></div>
+          <div><label>Donchian Exit / Side</label><div style={{ display: 'flex', gap: 6 }}><select value={config.donchian?.exit_mode || 'trail'} onChange={e => updateNested('donchian', 'exit_mode', e.target.value)}><option value="trail">3×ATR trail</option><option value="channel">Channel</option></select><select value={config.donchian?.side || 'both'} onChange={e => updateNested('donchian', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div></div>
+          <div><label>EMA Pullback Fast / Slow</label><div style={{ display: 'flex', gap: 6 }}><input type="number" min="2" value={config.ema_pullback?.fast_ema ?? 20} onChange={e => updateNested('ema_pullback', 'fast_ema', parseInt(e.target.value, 10))} /><input type="number" min="3" value={config.ema_pullback?.slow_ema ?? 50} onChange={e => updateNested('ema_pullback', 'slow_ema', parseInt(e.target.value, 10))} /></div></div>
+          <div><label>EMA Pullback Side</label><select value={config.ema_pullback?.side || 'both'} onChange={e => updateNested('ema_pullback', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div>
+          <div><label>RSI(2) Threshold / Max Hold (H1)</label><div style={{ display: 'flex', gap: 6 }}><input type="number" step="1" min="1" value={config.rsi2?.threshold ?? 10} onChange={e => updateNested('rsi2', 'threshold', +e.target.value)} /><input type="number" min="1" value={config.rsi2?.max_hold_bars ?? 24} onChange={e => updateNested('rsi2', 'max_hold_bars', parseInt(e.target.value, 10))} /></div></div>
+          <div><label>RSI(2) Side</label><select value={config.rsi2?.side || 'both'} onChange={e => updateNested('rsi2', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div>
+          <div><label>Bollinger Band (σ) / Side</label><div style={{ display: 'flex', gap: 6 }}><input type="number" step="0.1" min="0.5" value={config.bollinger_fade?.band_sigma ?? 2.0} onChange={e => updateNested('bollinger_fade', 'band_sigma', +e.target.value)} /><select value={config.bollinger_fade?.side || 'both'} onChange={e => updateNested('bollinger_fade', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div></div>
+          <div><label>Vol Breakout Channel / Volume ×</label><div style={{ display: 'flex', gap: 6 }}><input type="number" min="5" value={config.vol_breakout?.channel_bars ?? 20} onChange={e => updateNested('vol_breakout', 'channel_bars', parseInt(e.target.value, 10))} /><input type="number" step="0.1" min="1" value={config.vol_breakout?.volume_mult ?? 1.5} onChange={e => updateNested('vol_breakout', 'volume_mult', +e.target.value)} /></div></div>
+          <div><label>Vol Breakout Side</label><select value={config.vol_breakout?.side || 'both'} onChange={e => updateNested('vol_breakout', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div>
+          <div><label>TSMOM Lookback (days) / Side</label><div style={{ display: 'flex', gap: 6 }}><input type="number" min="5" value={config.tsmom?.lookback_days ?? 60} onChange={e => updateNested('tsmom', 'lookback_days', parseInt(e.target.value, 10))} /><select value={config.tsmom?.side || 'both'} onChange={e => updateNested('tsmom', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div></div>
         </div>
       </div>
 

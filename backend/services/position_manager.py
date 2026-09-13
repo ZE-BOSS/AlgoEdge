@@ -594,6 +594,10 @@ class PositionManager:
                 if await self._check_orb_session_close(pos, live_pos, session, config):
                     continue
 
+                # --- Strategy-owned exits (classic families, VWAP/APA session modes) ---
+                if await self._check_strategy_position_exit(pos, live_pos, session, config):
+                    continue
+
                 # --- 1. BREAKEVEN LOGIC ---
                 # [5.1/5.5/Part4] be_mode: RR-triggered BE only fires under RR/EITHER —
                 # TP_HIT is handled entirely by the CASCADE block further down, which
@@ -1015,6 +1019,86 @@ class PositionManager:
             logger.error(f"Error enforcing VWAP hard close for ticket {getattr(live_pos, 'ticket', '?')}: {e}")
             return False
 
+    async def _check_strategy_position_exit(self, pos, live_pos, session, config) -> bool:
+        """
+        Live half of BaseStrategy.on_position_bar for strategies whose measured
+        rule includes its own exit — the backtester calls that hook every bar,
+        and without this a live position would only ever leave at SL/TP:
+
+          * classic families: 3xATR trail (MODIFY_SL, tightening only), channel,
+            mean and flip exits, maximum holding period;
+          * VWAP_v1 / APA_v1 session modes: flat at the session close.
+
+        A strategy opts in with a truthy LIVE_POSITION_EXITS. The engine is built
+        from the live config with the same per-symbol table and slot override
+        bot_service applies. Returns True if the position was closed.
+        """
+        try:
+            import dataclasses
+
+            import pandas as pd
+
+            from backend.data.models import Trade
+            from backend.strategies.registry import get_strategy, list_strategies
+
+            trade = await session.get(Trade, pos.parent_trade_id)
+            if not trade or trade.strategy_id not in list_strategies():
+                return False
+            symbol = live_pos.symbol
+            engine = get_strategy(trade.strategy_id)(config)
+            params = getattr(engine, "params", None)
+            if dataclasses.is_dataclass(params):
+                from backend.strategies.strategy_defaults import get_synth_slot_params
+                overrides = {}
+                _slot = next((s for s in getattr(config, "instrument_slots", None) or []
+                              if s.symbol == symbol and s.strategy_id == trade.strategy_id), None)
+                if _slot is None or getattr(_slot, "use_measured_params", True) is not False:
+                    overrides = get_synth_slot_params(symbol, trade.strategy_id)
+                if _slot is not None:
+                    overrides.update(getattr(_slot, "strategy_params_override", None) or {})
+                engine.params = dataclasses.replace(params)
+                for k, v in overrides.items():
+                    if hasattr(engine.params, k):
+                        setattr(engine.params, k, v)
+            if not getattr(engine, "LIVE_POSITION_EXITS", False):
+                return False
+
+            from backend.mt5.data_fetcher import DataFetcher
+            from backend.mt5.order_manager import OrderManager
+
+            tf = getattr(engine, "TIMEFRAME", None) or engine.get_required_timeframes()[-1]
+            count = max(60, int(getattr(engine, "POSITION_BAR_WINDOW", 50) or 50) + 5)
+            df = await DataFetcher.get_historical_data(symbol, tf, count=count)
+            if df is None or len(df) < 3:
+                return False
+            closed = df.iloc[:-1]
+            closed = closed.set_index(pd.to_datetime(closed["time"], unit="s")) if "time" in closed.columns else closed
+            is_buy = live_pos.type == 0
+            position = {"ticket": live_pos.ticket, "direction": "BUY" if is_buy else "SELL",
+                        "entry_time": trade.entry_time or datetime.utcfromtimestamp(live_pos.time),
+                        "stop_loss": live_pos.sl}
+            act = engine.on_position_bar(symbol, tf, closed, position)
+            if act is None:
+                return False
+            if act.action == "CLOSE":
+                ok = await OrderManager.close_position(live_pos.ticket)
+                if ok:
+                    logger.info(f"[{trade.strategy_id}] {act.close_reason}: ticket {live_pos.ticket} ({symbol}) closed")
+                else:
+                    logger.warning(f"[{trade.strategy_id}] exit for ticket {live_pos.ticket} failed — will retry next cycle")
+                return ok
+            if act.action == "MODIFY_SL" and act.new_sl:
+                cur = float(live_pos.sl or 0.0)
+                new = float(act.new_sl)
+                tighter = (is_buy and (cur == 0.0 or new > cur)) or (not is_buy and (cur == 0.0 or new < cur))
+                beyond_market = (is_buy and new >= live_pos.price_current) or (not is_buy and new <= live_pos.price_current)
+                if tighter and not beyond_market:
+                    await self._modify_sl(live_pos.ticket, symbol, new)
+            return False
+        except Exception as e:
+            logger.error(f"Error in strategy exit for ticket {getattr(live_pos, 'ticket', '?')}: {e}")
+            return False
+
     async def _check_orb_session_close(self, pos, live_pos, session, config) -> bool:
         """
         ORB_v1 flattens at the close of the session it entered in. The backtester
@@ -1044,11 +1128,13 @@ class PositionManager:
             from backend.strategies.strategy_orb.engine import SESSIONS, session_bounds
 
             symbol = live_pos.symbol
-            sess = get_synth_slot_params(symbol, "ORB_v1").get("session", getattr(orb, "session", "london"))
-            for slot in getattr(config, "instrument_slots", None) or []:
-                if slot.symbol == symbol and slot.strategy_id == "ORB_v1":
-                    sess = (getattr(slot, "strategy_params_override", None) or {}).get("session", sess)
-                    break
+            sess = getattr(orb, "session", "london")
+            _slot = next((s for s in getattr(config, "instrument_slots", None) or []
+                          if s.symbol == symbol and s.strategy_id == "ORB_v1"), None)
+            if _slot is None or getattr(_slot, "use_measured_params", True) is not False:
+                sess = get_synth_slot_params(symbol, "ORB_v1").get("session", sess)
+            if _slot is not None:
+                sess = (getattr(_slot, "strategy_params_override", None) or {}).get("session", sess)
             if sess not in SESSIONS:
                 return False
 

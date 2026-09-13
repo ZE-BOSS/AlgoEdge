@@ -61,7 +61,26 @@ def test_buy_side_mirror():
     )
     assert gapped is True
     assert fill < 5_960.0
-    assert ov == pytest.approx(get_overshoot_profile("Crash 1000 Index").mean, rel=1e-6)
+    # Crash overshoot is ABSOLUTE (index points, measured on live fills), so a
+    # 40-point stop pays mean/40 R — not a fixed fraction of the stop.
+    prof = get_overshoot_profile("Crash 1000 Index")
+    assert prof.absolute
+    assert fill == pytest.approx(5_960.0 - prof.mean)
+    assert ov == pytest.approx(prof.mean / 40.0, rel=1e-6)
+
+
+def test_crash_overshoot_does_not_scale_with_the_stop():
+    """146 live Crash 1000 stop fills: corr(overshoot, stop distance) = -0.06."""
+    m = _model()
+    fills = []
+    for dist in (10.0, 60.0):
+        fill, _, ov = m.resolve_stop_fill(
+            direction="BUY", open_p=6_000.0, high=6_005.0, low=5_800.0,
+            stop_level=5_960.0, stop_distance=dist, symbol="Crash 1000 Index",
+            slippage_pips=0.0, position_key=f"d{dist}")
+        fills.append((fill, ov))
+    assert fills[0][0] == pytest.approx(fills[1][0])          # same price overshoot
+    assert fills[0][1] == pytest.approx(6 * fills[1][1])      # 6x the R on a 6x tighter stop
 
 
 # ── the clamp is what stops the model inventing prices ───────────────────────
@@ -153,9 +172,14 @@ def test_empirical_quantiles_are_monotonic_and_hit_the_measured_anchors():
     p = get_overshoot_profile("Crash 1000 Index")
     vals = [p.sample(u) for u in (0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 1.0)]
     assert vals == sorted(vals)
-    assert p.sample(0.50) == pytest.approx(0.158)   # research/27 §1.2 median
-    assert p.sample(0.99) == pytest.approx(7.360)   # research/27 §1.2 p99
-    assert p.sample(1.00) == pytest.approx(18.540)  # research/27 §1.2 max
+    # Crash 1000 is now ABSOLUTE index points from 146 live MT5 stop fills
+    assert p.absolute
+    assert p.sample(0.50) == pytest.approx(3.04)    # live median
+    assert p.sample(0.90) == pytest.approx(6.85)    # live p90
+    assert p.sample(0.99) == pytest.approx(12.41)   # live p99
+    # Boom keeps the research/27 tick-study anchors (no live Boom fills exist)
+    q = get_overshoot_profile("Boom 1000 Index")
+    assert not q.absolute and q.sample(0.50) == pytest.approx(0.159) and q.sample(0.99) == pytest.approx(4.94)
 
 
 # ── the economic claim ───────────────────────────────────────────────────────
@@ -189,8 +213,9 @@ def test_zero_stop_distance_degrades_safely():
 
 
 def test_non_jump_instruments_get_a_small_default_not_a_jump_sized_one():
-    assert get_overshoot_profile("EURUSD").mean < 0.05
-    assert get_overshoot_profile("Crash 1000 Index").mean > 0.3
+    assert get_overshoot_profile("EURUSD").mean < 0.05 and not get_overshoot_profile("EURUSD").absolute
+    assert get_overshoot_profile("GBPJPY").mean < 0.05
+    assert get_overshoot_profile("Crash 1000 Index").absolute and get_overshoot_profile("Crash 1000 Index").mean > 3
     assert get_overshoot_profile("Boom 500 Index").mean == pytest.approx(0.353)
 
 

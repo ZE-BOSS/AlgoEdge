@@ -176,7 +176,28 @@ export function isCompoundingBasis(sizingBasis) {
  * risk really did scale with the account. Mixing the two is what breaks it
  * (see computePeriodStats).
  */
-export function sharpe(returns) {
+/**
+ * Trade returns per year — the annualisation factor for per-trade Sharpe and
+ * Sortino. sqrt(252) is only right for one trade a trading day; this uses the
+ * observed trade rate between the first entry and the last exit. Must match
+ * backend/analytics/metrics.py::trades_per_year exactly.
+ */
+export function tradesPerYear(trades) {
+  if (!trades || trades.length < 2) return 252;
+  let first = Infinity, last = -Infinity;
+  for (const t of trades) {
+    const e = t.entry_time ? new Date(t.entry_time).getTime() : NaN;
+    const x = realizedAt(t);
+    if (Number.isFinite(e) && e > 0 && e < first) first = e;
+    if (Number.isFinite(x) && x > 0 && x > last) last = x;
+  }
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return 252;
+  const spanYears = (last - first) / (365.25 * 86400000);
+  if (spanYears <= 0) return 252;
+  return Math.min(Math.max(trades.length / Math.max(spanYears, 1 / 365.25), 1), 100000);
+}
+
+export function sharpe(returns, periodsPerYear = 252) {
   if (returns.length < 2) return 0;
   const sum = returns.reduce((a, b) => a + b, 0);
   const mean = sum / returns.length;
@@ -189,14 +210,14 @@ export function sharpe(returns) {
   const std = Math.sqrt(variance);
 
   if (std === 0) return 0;
-  const val = (mean / std) * Math.sqrt(252);
+  const val = (mean / std) * Math.sqrt(periodsPerYear);
   return Number.isFinite(val) ? val : 0;
 }
 
 /**
  * Annualized Sortino ratio
  */
-export function sortino(returns) {
+export function sortino(returns, periodsPerYear = 252) {
   if (returns.length < 2) return 0;
   const sum = returns.reduce((a, b) => a + b, 0);
   const mean = sum / returns.length;
@@ -212,7 +233,7 @@ export function sortino(returns) {
   const downStd = Math.sqrt(varianceSq / (downside.length - 1));
 
   if (downStd === 0) return 999.0;
-  const val = (mean / downStd) * Math.sqrt(252);
+  const val = (mean / downStd) * Math.sqrt(periodsPerYear);
   return Number.isFinite(val) ? val : 999.0;
 }
 
@@ -420,8 +441,9 @@ export function computePeriodStats(trades, initialBalance = 10000, accountInitia
   // correct while dollar risk is fixed), peak basis once sizing compounds.
   // Both are returned above so a consumer can show either.
   const maxDdPct = compounding ? maxDdPctOfPeak : maxDdPctOfCapital;
-  const sh = sharpe(returns);
-  const so = sortino(returns);
+  const ppy = tradesPerYear(byExit);
+  const sh = sharpe(returns, ppy);
+  const so = sortino(returns, ppy);
 
   const totalReturnPct = startBalance > 0 ? (currentBal - startBalance) / startBalance : 0;
   // Calmar rides the headline drawdown, or it silently keeps the basis the

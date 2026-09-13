@@ -25,6 +25,7 @@ def _load_strategies():
         import backend.strategies.strategy_two.engine  # noqa: F401
         import backend.strategies.strategy_boom.engine  # noqa: F401
         import backend.strategies.strategy_orb.engine  # noqa: F401
+        import backend.strategies.strategy_classic.engine  # noqa: F401
         _LOADED = True
 
 def register_strategy(name: str):

@@ -6,6 +6,33 @@ import { decimate } from '../utils/decimate';
 // module scope: as a value inside the component it would be a fresh array on
 // every render, and it is a dependency of the prefill effect below.
 const MEASURED_EXIT_FIELDS = ['tp_count', 'tp1_rr', 'be_mode', 'trail_method_tp1'];
+
+// Live risk settings (Settings -> Risk) the Backtester form has no field for.
+// They are sent from the SAVED config in the request's risk_config, so a
+// backtest runs the same trailing/sizing rules the live bot runs. Anything the
+// form does show is seeded from the saved config instead (see the seeding
+// effect), so the user can still change it for a run.
+const LIVE_RISK_PASSTHROUGH = [
+  'trail_activation_rr', 'atr_trail_multiplier_tp1', 'atr_trail_multiplier_tp2',
+  'atr_trail_multiplier_tp3', 'atr_trail_multiplier_tp4', 'atr_trail_multiplier_tp5',
+  'trail_pct', 'trail_step_pips', 'trail_structure_bars', 'min_stop_cost_multiple',
+  'max_margin_utilisation_pct', 'min_deployable_risk_pct', 'min_stop_spread_multiple',
+  'confluence_risk_tiers', 'reject_below_confluence', 'post_split_risk_tolerance_pct',
+  'exit_slippage_pips', 'open_risk_weight', 'be_spread_multiple', 'trail_require_be_first',
+  'be_trigger_tp_level', 'trail_trigger_tp_level', 'tp_volume_pcts', 'max_cluster_risk_pct',
+  'max_net_direction_risk_pct', 'symbol_cluster_overrides', 'strategy_risk_budget_pct',
+  'vol_target_annual_pct', 'vol_target_lookback_bars', 'vol_target_min_scale', 'vol_target_max_scale',
+];
+
+function savedRiskPassthrough(savedConfig, formKeys) {
+  const risk = savedConfig?.risk || {};
+  const out = {};
+  for (const k of LIVE_RISK_PASSTHROUGH) {
+    if (formKeys && k in formKeys) continue;          // the form's own value wins
+    if (risk[k] !== undefined && risk[k] !== null) out[k] = risk[k];
+  }
+  return out;
+}
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Clock, Target, Shield, Terminal, Settings2, Zap, LayoutDashboard, PlusCircle, MinusCircle, Download } from 'lucide-react';
 import { runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, getBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts, getStrategyDefaults } from '../services/api';
@@ -69,6 +96,15 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
   const updateOrb = (k, v) => setForm({ ...form, orb: { ...orb, [k]: v } });
   const boom = form.boom_drift_jump || {};
   const updateBoom = (k, v) => setForm({ ...form, boom_drift_jump: { ...boom, [k]: v } });
+  // Classic families (backend/strategies/strategy_classic): [config block, [field, label, kind]]
+  const CLASSIC_PANELS = {
+    Donchian_v1: ['donchian', [['channel_bars', 'Channel (H1 bars)', 'int'], ['stop_atr', 'Stop (× ATR)', 'num'], ['exit_mode', 'Exit', ['trail', 'channel']], ['side', 'Side', ['both', 'long']]]],
+    EMAPullback_v1: ['ema_pullback', [['fast_ema', 'Fast EMA', 'int'], ['slow_ema', 'Slow EMA', 'int'], ['side', 'Side', ['both', 'long']]]],
+    RSI2_v1: ['rsi2', [['threshold', 'RSI(2) threshold', 'num'], ['max_hold_bars', 'Max hold (H1 bars)', 'int'], ['side', 'Side', ['both', 'long']]]],
+    BollingerFade_v1: ['bollinger_fade', [['band_sigma', 'Band (σ)', 'num'], ['side', 'Side', ['both', 'long']]]],
+    VolBreakout_v1: ['vol_breakout', [['channel_bars', 'Channel (H1 bars)', 'int'], ['volume_mult', 'Tick-volume surge (×)', 'num'], ['side', 'Side', ['both', 'long']]]],
+    TSMOM_v1: ['tsmom', [['lookback_days', 'Lookback (days)', 'int'], ['side', 'Side', ['both', 'long']]]],
+  };
 
   if (strategyId === 'APA_v1') {
     return (
@@ -156,6 +192,10 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
       <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={vwap.min_sl_pips} onChange={e => updateVwap('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor for the low-volatility tail. 0 disables.</div></div>
       <div><label style={{ fontSize: '0.7rem' }}>Min SL (× spread)</label><input type="number" step="0.5" min="0" value={vwap.min_sl_spread_mult} onChange={e => updateVwap('min_sl_spread_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Instrument-neutral stop floor: SL must be at least this × the modelled spread. Adapts to news-time blowouts.</div></div>
       <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" min="0" value={vwap.target_rr} onChange={e => updateVwap('target_rr', +e.target.value)} /></div>
+      <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={vwap.use_symbol_defaults ?? true} onChange={e => updateVwap('use_symbol_defaults', e.target.checked)} /> Use the measured entry mode &amp; confluences for this symbol (XAUUSD, US Tech 100: session trend; BTCUSD: session pullback)</label></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Entry Mode</label><select value={vwap.entry_mode || 'PULLBACK_TO_VALUE'} disabled={vwap.use_symbol_defaults ?? true} onChange={e => updateVwap('entry_mode', e.target.value)}><option value="PULLBACK_TO_VALUE">Pullback to value (original)</option><option value="BAND_REVERSION">Band reversion</option><option value="BOTH">Both</option><option value="SESSION_TREND">Session trend (Zarattini &amp; Aziz)</option><option value="SESSION_PULLBACK">Session pullback</option></select></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Session</label><select value={vwap.session_mode_session || 'native'} disabled={vwap.use_symbol_defaults ?? true} onChange={e => updateVwap('session_mode_session', e.target.value)}><option value="native">Native</option><option value="alt">The other one</option><option value="london">London</option><option value="ny">New York</option></select></div>
+      <div style={{ gridColumn: 'span 3' }}><label style={{ fontSize: '0.7rem' }}>Session-mode confluences (comma-separated)</label><input type="text" disabled={vwap.use_symbol_defaults ?? true} value={(vwap.session_mode_gates || ['day_dir', 'early']).join(', ')} onChange={e => updateVwap('session_mode_gates', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>day_dir, gap_dir, prev_day_dir, early, htf_trend, vwap_slope, vwap_side, vol_surge, rel_vol_open, strong_body, noise_out, nr7, inside_day. The session's first candidate passing all of them is its one trade; flat at the session close.</div></div>
     </div>
   );
   if (strategyId === 'ORB_v1') {
@@ -167,9 +207,31 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
         <div><label style={{ fontSize: '0.7rem' }}>Range (minutes)</label><select value={orb.range_minutes ?? 60} disabled={useSym} style={useSym ? { opacity: 0.5 } : undefined} onChange={e => updateOrb('range_minutes', +e.target.value)}>{[15, 30, 45, 60, 90, 120].map(m => <option key={m} value={m}>{m}</option>)}</select></div>
         <div><label style={{ fontSize: '0.7rem' }}>Breakout Window (min)</label><input type="number" step="15" min="15" value={orb.breakout_window_minutes ?? 180} onChange={e => updateOrb('breakout_window_minutes', +e.target.value)} /></div>
         <div><label style={{ fontSize: '0.7rem' }}>Side</label><select value={orb.side || 'both'} onChange={e => updateOrb('side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option><option value="short">Short only</option></select></div>
-        <div><label style={{ fontSize: '0.7rem' }}>Min Stop (× ATR)</label><input type="number" step="0.05" min="0" value={orb.min_stop_atr ?? 0.25} onChange={e => updateOrb('min_stop_atr', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Min Stop (× ATR)</label><input type="number" step="0.05" min="0" value={orb.min_stop_atr ?? 0.25} disabled={useSym} style={useSym ? { opacity: 0.5 } : undefined} onChange={e => updateOrb('min_stop_atr', +e.target.value)} /></div>
         <div><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 18, fontSize: '0.75rem' }}><input type="checkbox" checked={orb.close_at_session_end ?? true} onChange={e => updateOrb('close_at_session_end', e.target.checked)} /> Close at session end</label></div>
-        <div style={{ gridColumn: '1 / -1', fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 6 }}>Trades the first M15 close beyond the opening range, once per session, and flattens at the session close. Target = the slot TP1 R:R. Measured per-symbol settings apply automatically: GBPJPY London 60m 1:3, BTCUSD New York 60m 1:1.5, XAUUSD New York 30m 1:2.</div>
+        <div><label style={{ fontSize: '0.7rem' }}>Breakout Timeframe</label><select value={orb.breakout_timeframe || 'M15'} disabled={useSym} style={useSym ? { opacity: 0.5 } : undefined} onChange={e => updateOrb('breakout_timeframe', e.target.value)}><option value="M15">M15 (original)</option><option value="M5">M5 (edge lab)</option></select></div>
+        <div><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 18, fontSize: '0.75rem' }}><input type="checkbox" disabled={useSym} checked={orb.require_trend ?? false} onChange={e => updateOrb('require_trend', e.target.checked)} /> Only with the H1 trend (M5 form)</label></div>
+        <div style={{ gridColumn: '1 / -1', fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 6 }}>Trades the first close beyond the opening range, once per session, and flattens at the session close. Target = the slot TP1 R:R. Measured per-symbol settings apply automatically (2026-09-13): M5 break of the 60-minute range only with the H1 trend, 1:3 — GBPJPY on London, US Tech 100 / XAUUSD / BTCUSD on New York.</div>
+      </div>
+    );
+  }
+
+  if (CLASSIC_PANELS[strategyId]) {
+    const [sec, fields] = CLASSIC_PANELS[strategyId];
+    const blk = form[sec] || {};
+    const useSym = blk.use_symbol_defaults ?? true;
+    const upd = (k, v) => setForm({ ...form, [sec]: { ...blk, [k]: v } });
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={useSym} onChange={e => upd('use_symbol_defaults', e.target.checked)} /> Use the measured settings for this symbol where there are any (recommended)</label></div>
+        {fields.map(([k, label, kind]) => (
+          <div key={k}><label style={{ fontSize: '0.7rem' }}>{label}</label>
+            {Array.isArray(kind)
+              ? <select value={blk[k] ?? kind[0]} disabled={useSym} style={useSym ? { opacity: 0.5 } : undefined} onChange={e => upd(k, e.target.value)}>{kind.map(o => <option key={o} value={o}>{o}</option>)}</select>
+              : <input type="number" step={kind === 'int' ? 1 : 0.1} disabled={useSym} style={useSym ? { opacity: 0.5 } : undefined} value={blk[k] ?? ''} onChange={e => upd(k, kind === 'int' ? parseInt(e.target.value, 10) : +e.target.value)} />}
+          </div>
+        ))}
+        <div style={{ gridColumn: '1 / -1', fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 6 }}>Classic family from the strategy search, rebuilt as a live strategy. The engine runs the research code itself, so this backtest trades what was measured; exits (trail, channel, mean, flip, time) are the strategy's own. Evidence per market: Implementation/STRATEGY-EDGE-LAB-2026-09-13.md.</div>
       </div>
     );
   }
@@ -1209,11 +1271,23 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
           balance, so a run that grows a lot can print >100% without ever
           having come close to blowing up — the peak basis is the readable one
           there, and computePeriodStats already switches when sizing compounds. */}
-      <MetricCard
-        title={`Max DD (${filteredStats.sizingBasis === 'STATIC' ? 'of capital' : 'of peak'})`}
-        value={`${(filteredStats.maxDdPct * 100).toFixed(1)}%`}
-        color="var(--red)"
-      />
+      {/* Unfiltered, the headline is the ENGINE's bar-level drawdown (balance +
+          floating P&L on every bar) — the same figure the saved report carries.
+          Once a filter removes trades there is no bar-level curve for the
+          subset, so it falls back to the closed-trade curve and says so. */}
+      {(() => {
+        const unfiltered = activeFilter === 'All' && symbolFilter === 'All' && strategyFilter === 'All';
+        const compounding = filteredStats.sizingBasis !== 'STATIC';
+        const engineDd = compounding ? report.max_drawdown_pct_of_peak : report.max_drawdown_pct;
+        const useEngine = unfiltered && engineDd != null;
+        return (
+          <MetricCard
+            title={`Max DD (${compounding ? 'of peak' : 'of capital'}${useEngine ? '' : ', closed trades'})`}
+            value={`${((useEngine ? engineDd : filteredStats.maxDdPct) * 100).toFixed(1)}%`}
+            color="var(--red)"
+          />
+        );
+      })()}
       <MetricCard title="Expectancy (R)" value={filteredStats.expectancyR.toFixed(2)} />
       <MetricCard title="Sortino" value={filteredStats.sortino >= 999 ? '∞' : filteredStats.sortino.toFixed(2)} />
     </div>
@@ -1443,6 +1517,18 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
 
 const TRAIL_METHODS = [{ v: 'NONE', l: 'None' }, { v: 'ATR_TRAIL', l: 'ATR Trail' }, { v: 'FIXED_PIPS', l: 'Fixed Pips' }, { v: 'STRUCTURE_TRAIL', l: 'Structure Trail' }, { v: 'PCT_TRAIL', l: '% Trail' }];
 
+const CLASSIC_SECTIONS = {
+  Donchian_v1: 'donchian', EMAPullback_v1: 'ema_pullback', RSI2_v1: 'rsi2',
+  BollingerFade_v1: 'bollinger_fade', VolBreakout_v1: 'vol_breakout', TSMOM_v1: 'tsmom',
+};
+const STRATEGY_OPTIONS = [
+  ['APA_v1', 'APA (Adv. Price Action)'], ['VWAP_v1', 'VWAP Institutional'], ['DriftJumpAlpha_v1', 'Drift & Jump Alpha'],
+  ['ORB_v1', 'Opening Range Breakout'], ['BoomDriftJump_v1', 'Boom Drift & Jump'],
+  ['Donchian_v1', 'Donchian Breakout'], ['EMAPullback_v1', 'EMA Trend Pullback'], ['RSI2_v1', 'RSI(2) Reversion'],
+  ['BollingerFade_v1', 'Bollinger Fade'], ['VolBreakout_v1', 'Tick-Volume Breakout'], ['TSMOM_v1', 'Daily Momentum (TSMOM)'],
+];
+const VALID_STRATEGIES = STRATEGY_OPTIONS.map(([id]) => id);
+
 // Builds the backend strategy_params payload for one portfolio symbol/strategy
 // pairing. Portfolio backtests previously only forwarded tuned params for
 // APA_v1/DriftJumpAlpha_v1/CRT_v1 — any other strategy silently got
@@ -1456,14 +1542,26 @@ function buildPortfolioStrategyParams(strategyId, form) {
       return form.apa || {};
     case 'DriftJumpAlpha_v1':
       return form.drift_jump_alpha || {};
-    case 'VWAP_v1':
-      return form.vwap || {};
+    case 'VWAP_v1': {
+      // Same idea as ORB: with measured defaults on, the per-symbol entry mode
+      // and confluences (SYNTH_SLOT_PARAMS) apply instead of the form's.
+      const { use_symbol_defaults = true, ...vwapParams } = form.vwap || {};
+      if (use_symbol_defaults) { delete vwapParams.entry_mode; delete vwapParams.session_mode_session; delete vwapParams.session_mode_gates; }
+      return vwapParams;
+    }
     case 'ORB_v1': {
-      // With measured defaults on, leave session/range out so the backend's
+      // With measured defaults on, leave the measured keys out so the backend's
       // per-symbol table (strategy_defaults.SYNTH_SLOT_PARAMS) applies.
       const { use_symbol_defaults = true, ...orbParams } = form.orb || {};
-      if (use_symbol_defaults) { delete orbParams.session; delete orbParams.range_minutes; }
+      if (use_symbol_defaults) {
+        for (const k of ['session', 'range_minutes', 'breakout_timeframe', 'require_trend', 'min_stop_atr']) delete orbParams[k];
+      }
       return orbParams;
+    }
+    case 'Donchian_v1': case 'EMAPullback_v1': case 'RSI2_v1':
+    case 'BollingerFade_v1': case 'VolBreakout_v1': case 'TSMOM_v1': {
+      const { use_symbol_defaults = true, ...p } = form[CLASSIC_SECTIONS[strategyId]] || {};
+      return use_symbol_defaults ? {} : p;
     }
     case 'BoomDriftJump_v1':
       return form.boom_drift_jump || {};
@@ -1551,7 +1649,8 @@ const costOrAuto = (v) => (v === '' || v === null || v === undefined ? null : +v
 
 // Form slices that are objects. The localStorage restore merges these one level
 // deep so a newly-added strategy parameter is not lost behind a stale blob.
-const NESTED_FORM_KEYS = ['apa', 'drift_jump_alpha', 'vwap', 'orb', 'boom_drift_jump', 'prop_firm'];
+const NESTED_FORM_KEYS = ['apa', 'drift_jump_alpha', 'vwap', 'orb', 'boom_drift_jump', 'prop_firm',
+  'donchian', 'ema_pullback', 'rsi2', 'bollinger_fade', 'vol_breakout', 'tsmom'];
 
 // Bump this whenever a default below changes in a way a cached blob would
 // override. Old keys are purged on load — see the `form` initialiser.
@@ -1599,7 +1698,14 @@ const DEFAULT_FORM = {
   orb: {
     use_symbol_defaults: true, session: 'london', range_minutes: 60,
     breakout_window_minutes: 180, side: 'both', min_stop_atr: 0.25, close_at_session_end: true,
+    breakout_timeframe: 'M15', require_trend: false,
   },
+  donchian: { use_symbol_defaults: true, channel_bars: 20, stop_atr: 2.0, exit_mode: 'trail', side: 'both' },
+  ema_pullback: { use_symbol_defaults: true, fast_ema: 20, slow_ema: 50, side: 'both' },
+  rsi2: { use_symbol_defaults: true, threshold: 10, max_hold_bars: 24, side: 'both' },
+  bollinger_fade: { use_symbol_defaults: true, band_sigma: 2.0, side: 'both' },
+  vol_breakout: { use_symbol_defaults: true, channel_bars: 20, volume_mult: 1.5, side: 'both' },
+  tsmom: { use_symbol_defaults: true, lookback_days: 60, side: 'both' },
   // Boom mirror of DriftJumpAlpha — mirrors BoomDriftJumpParams.
   boom_drift_jump: {
     drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20,
@@ -1650,6 +1756,7 @@ const DEFAULT_FORM = {
   target_profit_enabled: false, max_daily_profit: 500.0, max_weekly_profit: 2000.0,
   manual_bias: 'NONE',
   strategy_id: 'APA_v1',
+  use_strategy_exit_defaults: true,
   // Simulation Costs (BUG-8/BUG-9) — '' means "auto, from broker data".
   slippage_pips: '', commission_per_lot: '', spread_pips: '', simulate_wicks: true,
 };
@@ -1748,6 +1855,11 @@ export default function Backtester() {
         commission_per_lot: costOrAuto(form.commission_per_lot),
         spread_pips: costOrAuto(form.spread_pips),
         simulate_wicks: form.simulate_wicks ?? true,
+        risk_config: savedRiskPassthrough(remoteConfig?.config, form),
+        // Each row's strategy runs its own measured exits (1 TP / no break-even
+        // for ORB and the classic families), as the live bot applies them per
+        // signal. A row's own TP1 R:R still wins.
+        use_strategy_exit_defaults: form.use_strategy_exit_defaults ?? true,
       });
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['backtests'] }),
@@ -1921,19 +2033,31 @@ export default function Backtester() {
   //
   // Only fires when the strategy actually changes, so a value the user has
   // typed is not overwritten while they work.
+  //
+  // Which of them, though, is decided the way LIVE decides it: bot_service lays a
+  // measured default on a trade only where the account's saved RiskParams value
+  // is still the shipped default. The server says which fields that is
+  // (`live_applies`); for the others the saved value is what live trades, so
+  // that is what the form gets. Re-runs once the saved config arrives.
   const lastStratRef = useRef(null);
   useEffect(() => {
     const sid = form.strategy_id;
-    if (!sid || lastStratRef.current === sid) return;
-    const measured = allStrategyDefaults[sid]?.defaults;
-    lastStratRef.current = sid;
+    const entry = allStrategyDefaults[sid];
+    const key = `${sid}|${entry ? 1 : 0}|${userCfg?.config ? 1 : 0}`;
+    if (!sid || lastStratRef.current === key) return;
+    lastStratRef.current = key;
+    const measured = entry?.defaults;
     if (!measured) return;
+    const liveApplies = entry?.live_applies;
+    const savedRisk = userCfg?.config?.risk || {};
     const patch = {};
     MEASURED_EXIT_FIELDS.forEach(k => {
-      if (measured[k] != null) patch[k] = measured[k];
+      if (measured[k] == null) return;
+      if (!liveApplies || liveApplies.includes(k)) patch[k] = measured[k];
+      else if (savedRisk[k] !== undefined && savedRisk[k] !== null) patch[k] = savedRisk[k];
     });
     if (Object.keys(patch).length) setForm(prev => ({ ...prev, ...patch }));
-  }, [form.strategy_id, allStrategyDefaults]);
+  }, [form.strategy_id, allStrategyDefaults, userCfg]);
   useEffect(() => {
       if (userCfg?.config && !configLoaded) {
         const c = userCfg.config;
@@ -1959,12 +2083,28 @@ export default function Backtester() {
         setForm(prev => {
           const merged = { ...prev };
           merged.max_risk_hard_cap_pct = c.risk?.max_risk_hard_cap_pct ?? prev.max_risk_hard_cap_pct ?? 3.0;
+          // Every flat risk field the form shows starts at the account's SAVED
+          // value (what the live bot is running), not at this page's own
+          // defaults — risk %, sizing basis, drawdown caps, TP ladder, break-even
+          // and trailing. The measured exit fields are resolved separately
+          // (live_applies, above), exactly as live resolves them.
+          Object.keys(DEFAULT_FORM).forEach(k => {
+            if (MEASURED_EXIT_FIELDS.includes(k)) return;
+            const v = c.risk?.[k];
+            if (v !== undefined && v !== null && typeof v !== 'object') merged[k] = v;
+          });
           merged.prop_firm = { ...(prev.prop_firm || {}), ...(c.prop_firm || {}) };
           merged.apa = { ...(prev.apa || {}), ...(c.apa || {}) };
           merged.drift_jump_alpha = { ...(prev.drift_jump_alpha || {}), ...(c.drift_jump_alpha || {}) };
           merged.vwap = { ...(prev.vwap || {}), ...(c.vwap || {}) };
           merged.orb = { ...(prev.orb || {}), ...(c.orb || {}) };
           merged.boom_drift_jump = { ...(prev.boom_drift_jump || {}), ...(c.boom_drift_jump || {}) };
+          merged.donchian = { ...(prev.donchian || {}), ...(c.donchian || {}) };
+          merged.ema_pullback = { ...(prev.ema_pullback || {}), ...(c.ema_pullback || {}) };
+          merged.rsi2 = { ...(prev.rsi2 || {}), ...(c.rsi2 || {}) };
+          merged.bollinger_fade = { ...(prev.bollinger_fade || {}), ...(c.bollinger_fade || {}) };
+          merged.vol_breakout = { ...(prev.vol_breakout || {}), ...(c.vol_breakout || {}) };
+          merged.tsmom = { ...(prev.tsmom || {}), ...(c.tsmom || {}) };
           return merged;
         });
       }
@@ -2051,7 +2191,7 @@ export default function Backtester() {
       setResult(null);
       setEvents([]);
       setBtError(null);
-      const validStrats = ['APA_v1', 'VWAP_v1', 'ORB_v1', 'DriftJumpAlpha_v1', 'BoomDriftJump_v1'];
+      const validStrats = VALID_STRATEGIES;
       const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'APA_v1';
       const sp = buildPortfolioStrategyParams(payload_strategy, form);
 
@@ -2064,6 +2204,7 @@ export default function Backtester() {
         // `risk_config` last into the engine's merged risk config, so this is the
         // supported channel for RiskParams fields the request model does not name.
         risk_config: {
+          ...savedRiskPassthrough(userCfg?.config, form),
           prop_firm: form.prop_firm,
           min_sl_pips: form.min_sl_pips,
           max_account_leverage: form.max_account_leverage,
@@ -2199,7 +2340,7 @@ export default function Backtester() {
         <div style={{ display: 'grid', gap: 14 }}>
           {activeTab === 'single' ? (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label>Strategy Engine</label><select value={['APA_v1', 'VWAP_v1', 'ORB_v1', 'DriftJumpAlpha_v1', 'BoomDriftJump_v1'].includes(form.strategy_id) ? form.strategy_id : 'APA_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}><option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="ORB_v1">Opening Range Breakout</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option></select></div>
+              <div><label>Strategy Engine</label><select value={VALID_STRATEGIES.includes(form.strategy_id) ? form.strategy_id : 'APA_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}>{STRATEGY_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></div>
               <div>
                 <label>Symbol</label>
                 <SymbolAutocomplete
@@ -2231,7 +2372,7 @@ export default function Backtester() {
                     <div style={{ flex: 1 }}>
                       <label style={{ fontSize: '0.7rem' }}>Strategy</label>
                       <select value={item.strategy_id} onChange={e => updatePortfolioSymbol(idx, 'strategy_id', e.target.value)}>
-                        <option value="APA_v1">APA (Adv. Price Action)</option><option value="VWAP_v1">VWAP Institutional</option><option value="DriftJumpAlpha_v1">Drift & Jump Alpha</option><option value="ORB_v1">Opening Range Breakout</option><option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option>
+                        {STRATEGY_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
                       </select>
                     </div>
                     {/* [17.1] Per-row R:R. Research 16 measured the optimum as
