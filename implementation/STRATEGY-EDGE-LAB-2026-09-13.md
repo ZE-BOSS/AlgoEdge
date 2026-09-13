@@ -2,6 +2,8 @@
 
 ## 1. The short answer
 
+> **Update, same day (parity audit):** the dollar figures below come from the research simulator. It charged spread but no execution slippage, and a backtester defect booked stops touched on the entry bar a bar late. Re-run through the app's own engine with measured costs, GBPJPY ORB made **+$1,604** (vs +$1,919 here), XAUUSD VWAP trend **+$1,553** at the old 75% sizing, and BTCUSD VWAP pullback **+$455** (vs +$2,998). The trades themselves match; the costs are the difference. See `Implementation/BACKTEST-LIVE-PARITY-2026-09-13.md` §3 before sizing anything.
+
 The main markets are US Tech 100, XAUUSD, BTCUSD and GBPJPY. Everything below was chosen **only** on 2022–2025 data and then run unchanged on **1 Jan – 12 Sep 2026** (8 months nothing was picked on).
 
 | What to trade | Where | Last 8 months, $10,000 at 1% (fixed risk) | Max DD | PF | Sharpe | Sortino | Evidence |

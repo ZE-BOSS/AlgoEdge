@@ -71,7 +71,7 @@ Each run was then compared with the research trade list (`scripts/check_app_rese
 | ORB_v1 M5 + trend, GBPJPY | 86 | 86 | **86** | none. At full risk, with per-bar spread: **+$1,604, PF 1.43, max DD 5.1%** against research +$1,919. The gap is real costs; trades average +0.25R before costs |
 | ORB_v1 M5 + trend, XAUUSD | 85 | 81 | **78** | 7 fired but were **refused by the sizer** (below the broker's minimum lot at $10k with the 75% confluence tier, now fixed); 3 app-only on **US half-days** (see below) |
 | VWAP_v1 SESSION_TREND, XAUUSD | 67 | 69 | **67** | 2 app-only, both **US half-days** (19 Jan, 25 May). Every trade paid its own bar's spread (1.0–1.4 pips) instead of the 5.9-pip weekend quote; +$1,553, PF 1.48 |
-| VWAP_v1 SESSION_PULLBACK, BTCUSD | _pending_ | | | |
+| VWAP_v1 SESSION_PULLBACK, BTCUSD | 114 | 113 | **113**, and **113/113 exit on the same bar** | 1 refused (stop inside the minimum viable stop). Price R on identical trades: research +0.088R, app +0.076R. After measured costs (the bar's $2.4 spread plus $1.5–2 slippage a side on ~$190 stops): **+$455, PF 1.06, max DD 16.5%** |
 | Donchian_v1, XAUUSD (H1, research builder on the same MT5 bars) | 26 | 27 | **25** | 1 refused by the minimum lot; with one position at a time, a slightly different exit bar (the channel exit is evaluated on the engine's bar close) shifts when the next breakout can be taken — 1 research-only, 2 app-only. Every signal the strategy emitted is identical (91 signals, one position at a time) |
 
 **Why the half-days differ, and why the app is the right one:**
@@ -79,6 +79,20 @@ Each run was then compared with the research trade list (`scripts/check_app_rese
 - On 19 Jan (MLK Day), 25 May (Memorial Day) and 3 Jul, the breakout happened before the early close.
 - A live bot can't know at 10:30 ET that the session will end at 13:00, so it trades them. The app does the same.
 - The backtest therefore matches what live will do; the research was the one looking ahead.
+
+### What the app numbers mean for the 13 Sep edge-lab report
+
+The research simulator charged each bar's spread at entry and half a spread on stops, with no execution slippage. The app charges both at measured levels. That gap matters more the tighter the stop:
+
+| Book, Jan–Sep 2026, $10k at 1% | Research money sim | App backtest (this audit) |
+|---|---|---|
+| ORB_v1 M5 + trend, GBPJPY | +$1,919 | **+$1,604** |
+| VWAP_v1 SESSION_TREND, XAUUSD | +$2,864 | **+$1,553** (run at the old 75% sizing; the same trades at full risk would be roughly +$2,070) |
+| VWAP_v1 SESSION_PULLBACK, BTCUSD | +$2,998 | **+$455** |
+
+- **Use the app figures**: they are the ones live will reproduce.
+- **BTCUSD VWAP pullback**: the edge is real but thin once execution costs are paid. Treat it as the weakest of the shipped books; run it at reduced size or leave it off until live fills confirm it.
+- **ORB on GBPJPY and the VWAP trend on XAUUSD** survive costs comfortably.
 
 ---
 
