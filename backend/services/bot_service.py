@@ -1002,31 +1002,40 @@ class BotService:
 
                         # Try to run strategy engine
                         try:
-                            # ── ENFORCE CLOSED CANDLE LOGIC (Fix Repainting) ──
-                            signal = None
-                            for i, tf in enumerate(req_tfs):
-                                tf_data = fetched_data[tf]
-                                closed_data = tf_data.iloc[:-1] if len(tf_data) > 1 else tf_data
-                                # [P1.8] Trim to the SAME window the backtester
-                                # slices, or an indicator that depends on how much
-                                # history it can see (ADX, a long EMA, a lookback
-                                # percentile) computes one thing here and another
-                                # there, on identical data, undetectably. Live was
-                                # passing 5,000 M5 bars against the backtest's 500.
-                                _win = window_bars(tf, current_engine)
-                                if len(closed_data) > _win:
-                                    closed_data = closed_data.iloc[-_win:]
-
-
-                                await asyncio.sleep(0.01)
-                                res = await current_engine.on_bar(symbol, tf, _index_candles(closed_data))
-                                # Inject live context not available to the backtester engine directly
-                                if hasattr(current_engine, 'context'):
-                                    current_engine.context["news_blocked"] = self.news_filter.is_blocked(symbol) if hasattr(self, 'news_filter') else False
-                                
-                                # Only the last timeframe might return a signal in hierarchical strategies
-                                if i == len(req_tfs) - 1:
-                                    signal = res
+                            # ── The backtest's bar sequence, live ─────────────────────────
+                            # [2026-09-15] Every closed bar reaches the engine exactly once, in
+                            # order, through the same feeder the backtest routes use. This loop
+                            # used to call on_bar for every timeframe on every scan (re-feeding
+                            # bars the engine had already processed) and skipped any bar that
+                            # closed during a slow scan or while the bot was offline, so engines
+                            # that count bars (HTF FVG, Bias IFVG, APA, DriftJumpAlpha,
+                            # BoomDriftJump, VWAP) drifted away from their backtests.
+                            from backend.strategies.bar_feed import LiveBarFeed
+                            _feeds = self.__dict__.setdefault("_bar_feeds", {})
+                            _feed = _feeds.get(slot.slot_id)
+                            if _feed is None or _feed.engine is not current_engine:
+                                _feed = _feeds[slot.slot_id] = LiveBarFeed(current_engine, symbol, req_tfs)
+                            if hasattr(current_engine, 'context'):
+                                current_engine.context["news_blocked"] = self.news_filter.is_blocked(symbol) if hasattr(self, 'news_filter') else False
+                            _fed = await _feed.advance({tf: _index_candles(fetched_data[tf]).sort_index() for tf in req_tfs})
+                            if _fed.history_gap:
+                                self._log_event(
+                                    f"[{symbol}] {strategy_id}: offline longer than the fetched history — "
+                                    f"rebuilding the engine and warming it up again", "WARN", "BOT")
+                                self.engines.pop(slot.slot_id, None)
+                                _feeds.pop(slot.slot_id, None)
+                                continue
+                            if _fed.primed:
+                                self._log_event(
+                                    f"[{symbol}] {strategy_id}: warmed up on {_fed.stepped} {_feed.primary} bars "
+                                    f"(the same warm-up a backtest uses)", category="BOT")
+                            for _bar_time, _missed in _fed.missed:
+                                self._suppressed("missed_bar_signal", slot.slot_id)
+                                self._log_event(
+                                    f"[{symbol}] {strategy_id}: {_missed.direction} signal on the bar opening "
+                                    f"{pd.Timestamp(_bar_time)} was only seen late (bot offline or a slow scan) — "
+                                    f"not traded; the backtest would have taken it", "WARN", "SIGNAL")
+                            signal = _fed.signal
                                     
                             await asyncio.sleep(0.01)
                             
@@ -1053,7 +1062,7 @@ class BotService:
                                 # direction) on one bar — entirely possible for
                                 # SpikeFade and RangeRevert at the same
                                 # stop_atr_multiple — silently drop the second.
-                                _sig_fp = (round(signal.entry_price, 5), round(signal.stop_loss, 5), signal.direction)
+                                _sig_fp = (str(_feed.last_time), round(signal.entry_price, 5), round(signal.stop_loss, 5), signal.direction)
                                 _dedupe_key = slot.slot_id
                                 if _sig_fp == self._last_signal_time.get(_dedupe_key):
                                     self._suppressed("duplicate_signal_same_bar", slot.slot_id)
@@ -1172,168 +1181,18 @@ class BotService:
                                         continue
                                     account_balance = broker.account_info.balance
 
-                                    risk_config = {
-                                        "risk_per_trade_pct": config.risk.risk_per_trade_pct,
-                                        "min_rr": config.risk.min_rr,
-                                        "tp1_rr": config.risk.tp1_rr,
-                                        "tp2_rr": config.risk.tp2_rr,
-                                        "tp3_rr": config.risk.tp3_rr,
-                                        "tp4_rr": config.risk.tp4_rr,
-                                        "tp5_rr": config.risk.tp5_rr,
-                                        "tp_count": config.risk.tp_count,
-                                        "tp_splits": config.risk.tp_splits,
-                                        # [17.1] Per-symbol/per-strategy R:R.
-                                        # Built from InstrumentSlot.tp1_rr by the
-                                        # same helper the backtest routes use, so
-                                        # a target measured in a backtest is the
-                                        # target actually traded live.
-                                        # [18.3] Measured per-symbol R:R first,
-                                        # then anything the user set explicitly
-                                        # on the slot — user always wins.
-                                        "tp1_rr_overrides_by_slot": {
-                                            **get_slot_tp1_rr_defaults(),
-                                            **slot_overrides_from_config(
-                                                getattr(config, "instrument_slots", None)
-                                            )["tp1_rr_overrides_by_slot"],
-                                        },
-                                        **{k: v for k, v in slot_overrides_from_config(
-                                            getattr(config, "instrument_slots", None)
-                                        ).items() if k != "tp1_rr_overrides_by_slot"},
-                                        "multi_position_mode": True,
-
-                                        "max_daily_drawdown_pct": config.risk.max_daily_drawdown_pct,
-                                        "max_weekly_drawdown_pct": config.risk.max_weekly_drawdown_pct,
-                                        "max_daily_trades": config.risk.max_daily_trades,
-                                        "max_concurrent_positions": config.risk.max_concurrent_positions,
-                                        "max_positions_per_symbol": config.risk.max_positions_per_symbol,
-                                        "prop_firm": {
-                                            "account_mode": getattr(config.prop_firm, "account_mode", "personal"),
-                                            "max_lot_sizes": getattr(config.prop_firm, "max_lot_sizes", {}),
-                                            "initial_balance": getattr(config.prop_firm, "initial_balance", 10000.0),
-                                            # [3.10/3.11] real, user-editable settings — see PropFirmParams.
-                                            "default_max_lot": getattr(config.prop_firm, "default_max_lot", None),
-                                            "max_positions_per_symbol": getattr(config.prop_firm, "max_positions_per_symbol", 5),
-                                            "max_total_positions": getattr(config.prop_firm, "max_total_positions", 13),
-                                            "trading_day_rule": getattr(config.prop_firm, "trading_day_rule", "PROFIT_PCT"),
-                                            "trading_day_profit_pct": getattr(config.prop_firm, "trading_day_profit_pct", 0.5),
-                                        },
-                                        # max_risk_hard_cap_pct: user-configurable absolute safety cap from RiskParams.
-                                        # Active for ALL account modes (personal and prop_firm).
-                                        "max_risk_hard_cap_pct": getattr(config.risk, "max_risk_hard_cap_pct", 3.0),
-                                        "target_profit_enabled": config.risk.target_profit_enabled,
-                                        "max_daily_profit": config.risk.max_daily_profit,
-                                        "max_weekly_profit": config.risk.max_weekly_profit,
-                                        # Break-even settings
-                                        "be_trigger_rr": config.risk.be_trigger_rr,
-                                        "be_buffer_pips": config.risk.be_buffer_pips,
-                                        "be_buffer_atr_mult": config.risk.be_buffer_atr_mult,
-                                        # Trailing stop settings — all previously missing, causing
-                                        # TrailingManager to silently use its hardcoded defaults
-                                        # regardless of what the user configured in the Settings panel.
-                                        "trail_method_tp1": getattr(config.risk, "trail_method_tp1", "NONE"),
-                                        "trail_method_tp2": config.risk.trail_method_tp2,
-                                        "trail_method_tp3": config.risk.trail_method_tp3,
-                                        "trail_method_tp4": config.risk.trail_method_tp4,
-                                        "trail_method_tp5": config.risk.trail_method_tp5,
-                                        "atr_trail_multiplier": getattr(config.risk, "atr_trail_multiplier", 1.5),
-                                        "atr_trail_multiplier_tp1": getattr(config.risk, "atr_trail_multiplier_tp1", 1.5),
-                                        "atr_trail_multiplier_tp2": getattr(config.risk, "atr_trail_multiplier_tp2", 1.5),
-                                        "atr_trail_multiplier_tp3": getattr(config.risk, "atr_trail_multiplier_tp3", 1.5),
-                                        "atr_trail_multiplier_tp4": getattr(config.risk, "atr_trail_multiplier_tp4", 1.5),
-                                        "atr_trail_multiplier_tp5": getattr(config.risk, "atr_trail_multiplier_tp5", 1.5),
-                                        "trail_pips": getattr(config.risk, "trail_pips", 15.0),
-                                        "trail_pct": getattr(config.risk, "trail_pct", 0.5),
-                                        "trail_activation_rr": getattr(config.risk, "trail_activation_rr", 1.0),
-                                        "trail_step_pips": getattr(config.risk, "trail_step_pips", 5.0),
-                                        "trail_structure_bars": getattr(config.risk, "trail_structure_bars", 3),
-                                        # [Phase 2 sizing-truth] real, user-editable settings that used to
-                                        # be hardcoded module constants — see core/config_schema.py::RiskParams.
-                                        # getattr(..., None) so an older saved config without these fields
-                                        # still resolves to the position_sizer.py fallback default, not 0/False.
-                                        "max_margin_utilisation_pct": getattr(config.risk, "max_margin_utilisation_pct", None),
-                                        "max_account_leverage": getattr(config.risk, "max_account_leverage", None),
-                                        "min_deployable_risk_pct": getattr(config.risk, "min_deployable_risk_pct", 0.0),
-                                        "min_stop_spread_multiple": getattr(config.risk, "min_stop_spread_multiple", None),
-                                        "min_stop_cost_multiple": getattr(config.risk, "min_stop_cost_multiple", 0.0),
-                                        "confluence_risk_tiers": getattr(config.risk, "confluence_risk_tiers", None),
-                                        "reject_below_confluence": getattr(config.risk, "reject_below_confluence", True),
-                                        "post_split_risk_tolerance_pct": getattr(config.risk, "post_split_risk_tolerance_pct", 5.0),
-                                        "exit_slippage_pips": getattr(config.risk, "exit_slippage_pips", None),
-                                        "open_risk_weight": getattr(config.risk, "open_risk_weight", 0.5),
-                                        "allow_pyramiding": getattr(config.risk, "allow_pyramiding", False),
-                                        "min_bars_between_entries": getattr(config.risk, "min_bars_between_entries", 0),
-                                        "min_sl_pips": getattr(config.risk, "min_sl_pips", 0.0),
-                                        # [P5.1] Volatility targeting. None = off (the default),
-                                        # so nothing changes for anyone who has not opted in.
-                                        "vol_target_annual_pct": getattr(config.risk, "vol_target_annual_pct", None),
-                                        "vol_target_lookback_bars": getattr(config.risk, "vol_target_lookback_bars", 20),
-                                        "vol_target_min_scale": getattr(config.risk, "vol_target_min_scale", 0.5),
-                                        "vol_target_max_scale": getattr(config.risk, "vol_target_max_scale", 2.0),
-                                        # [Phase 4 parity]
-                                        "sizing_basis": getattr(config.risk, "sizing_basis", "STATIC"),
-                                        "be_spread_multiple": getattr(config.risk, "be_spread_multiple", 2.0),
-                                        "trail_require_be_first": getattr(config.risk, "trail_require_be_first", False),
-                                        # [Phase 5 exit-architecture]
-                                        "be_mode": getattr(config.risk, "be_mode", "EITHER"),
-                                        "be_trigger_tp_level": getattr(config.risk, "be_trigger_tp_level", 1),
-                                        "trail_method_tp1": getattr(config.risk, "trail_method_tp1", "NONE"),
-                                        "trail_mode": getattr(config.risk, "trail_mode", "RR"),
-                                        "trail_trigger_rr": getattr(config.risk, "trail_trigger_rr", 1.5),
-                                        "trail_trigger_tp_level": getattr(config.risk, "trail_trigger_tp_level", 1),
-                                        "tp_volume_pcts": getattr(config.risk, "tp_volume_pcts", None),
-                                        # [Phase 9 portfolio governor]
-                                        "max_cluster_risk_pct": getattr(config.risk, "max_cluster_risk_pct", 0.0),
-                                        "max_net_direction_risk_pct": getattr(config.risk, "max_net_direction_risk_pct", 0.0),
-                                        "symbol_cluster_overrides": getattr(config.risk, "symbol_cluster_overrides", None),
-                                        "strategy_risk_budget_pct": getattr(config.risk, "strategy_risk_budget_pct", None),
-                                        # [2.15] Per-strategy TP1 RR override — see DriftJumpAlphaParams.tp1_rr_override.
-                                        "tp1_rr_overrides_by_strategy": (
-                                            {"DriftJumpAlpha": config.drift_jump_alpha.tp1_rr_override}
-                                            if getattr(config.drift_jump_alpha, "tp1_rr_override", None) is not None
-                                            else {}
-                                        ),
-                                    }
-
-                                    # ── Per-strategy exit defaults (LIVE) ────────────────
-                                    # Same registry the backtester uses, applied to the live
-                                    # risk config so live and backtest cannot diverge — a
-                                    # strategy trailed in backtest but not live (or the
-                                    # reverse) would make every backtest result unusable as a
-                                    # prediction of live behaviour.
-                                    #
-                                    # Only fills fields the user left at the RiskParams
-                                    # default; an explicit setting always wins. See
-                                    # backend/strategies/strategy_defaults.py for the
-                                    # measurement behind each value.
-                                    try:
-                                        from backend.strategies.strategy_defaults import (
-                                            get_strategy_defaults, get_strategy_evidence,
-                                        )
-                                        from backend.core.config_schema import RiskParams as _RP
-                                        _sd = get_strategy_defaults(strategy_id)
-                                        _base = _RP()
-                                        _applied = {}
-                                        for _k, _v in _sd.items():
-                                            if _k == "session_filter_enabled":
-                                                continue  # strategy params, applied at engine build
-                                            # "User did not change it" == still equal to the
-                                            # shipped RiskParams default.
-                                            if hasattr(_base, _k) and getattr(config.risk, _k, None) == getattr(_base, _k):
-                                                risk_config[_k] = _v
-                                                _applied[_k] = _v
-                                        if _applied and not getattr(self, "_logged_sdefaults", set()) & {strategy_id}:
-                                            if not hasattr(self, "_logged_sdefaults"):
-                                                self._logged_sdefaults = set()
-                                            self._logged_sdefaults.add(strategy_id)
-                                            self._log_event(
-                                                f"[{symbol}] {strategy_id}: applied measured exit defaults "
-                                                f"{_applied} — {get_strategy_evidence(strategy_id)}",
-                                                category="RISK",
-                                            )
-                                    except Exception as _e:
-                                        logger.warning(
-                                            f"[LIVE] strategy exit defaults not applied for "
-                                            f"{strategy_id}: {_e}"
+                                    # The entry and the live management of this trade (position_manager ->
+                                    # risk/exit_replay.py) both run under this one config, including the
+                                    # strategy's measured exits — see risk/live_risk_config.py.
+                                    from backend.risk.live_risk_config import build_live_risk_config
+                                    risk_config, _applied = build_live_risk_config(config, strategy_id)
+                                    if _applied and strategy_id not in self.__dict__.setdefault("_logged_sdefaults", set()):
+                                        from backend.strategies.strategy_defaults import get_strategy_evidence
+                                        self._logged_sdefaults.add(strategy_id)
+                                        self._log_event(
+                                            f"[{symbol}] {strategy_id}: applied measured exit defaults "
+                                            f"{_applied} — {get_strategy_evidence(strategy_id)}",
+                                            category="RISK",
                                         )
 
                                     # Cache RiskEngine across scan cycles — only rebuild when key settings change.
@@ -1795,8 +1654,14 @@ class BotService:
                         f"checked — next scan in {self.scan_interval}s",
                         category="BOT"
                     )
-                    # Wait for next cycle
-                    await asyncio.sleep(self.scan_interval)
+                    # Wake ~2 s after the next bar of the fastest timeframe opens, so an
+                    # entry lands near that bar's open — the price a backtest fills at —
+                    # instead of up to a whole scan interval later. Never sleeps longer
+                    # than scan_interval.
+                    _sleep = float(self.scan_interval)
+                    if _budget:
+                        _sleep = max(1.0, min(_sleep, _budget - (time.time() % _budget) + 2.0))
+                    await asyncio.sleep(_sleep)
 
             except asyncio.CancelledError:
                 self._log_event("Scan loop cancelled", category="BOT")

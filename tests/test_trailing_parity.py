@@ -1,21 +1,10 @@
-"""[17.5] Locks the backtest and live trailing implementations together.
+"""[17.5] Locks the trailing ratchet to the rule live used to run.
 
-There are two trailing implementations:
-  backtest : backend/risk/trailing_manager.py  TrailingManager.calculate_trailing_sl
-  live     : backend/services/position_manager.py  _calculate_trailing_sl
-
-They are NOT shared code. They agree today, but nothing enforced that, so an
-edit to one could silently diverge the other — and a divergence means a
-backtested result stops describing what live will do.
-
-Consolidating them into one implementation would be the ideal fix, but the live
-one is `async`, fetches its own ATR over the network, and sits directly in the
-order-modification path. Rewriting that carries more risk than the drift it
-prevents. This test is the cheaper guarantee: it re-implements the live gate
-(which is pure arithmetic) and asserts both produce identical stops.
-
-If you DO consolidate later, this test is what proves the merge was behaviour
-preserving.
+Consolidated 2026-09-15: position_manager's own `_calculate_trailing_sl` is
+gone. Live now runs TrailingManager through risk/exit_replay.py, the same code
+both backtest engines use (tests/test_live_exit_parity.py proves the decisions
+match bar for bar). This test keeps the old live ratchet gate as a port, so the
+merge is shown to be behaviour-preserving for the gate itself.
 """
 import pytest
 

@@ -26,7 +26,7 @@ def _m15(start="2025-03-17", days=21, seed=7):
     open_ = np.r_[close[0], close[:-1]]
     high = np.maximum(open_, close) + np.abs(rng.normal(0.03, 0.02, n))
     low = np.minimum(open_, close) - np.abs(rng.normal(0.03, 0.02, n))
-    t = idx.asi8 // 10**9
+    t = idx.as_unit("s").asi8
     df = pd.DataFrame({"open": open_, "high": high, "low": low, "close": close},
                       index=pd.to_datetime(t, unit="s"))
     bars = Bars("GBPJPY", "M15", t.astype(np.int64), open_, high, low, close, np.zeros(n))

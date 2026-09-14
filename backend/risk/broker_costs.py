@@ -733,8 +733,23 @@ def _convert_swap_impl(
     elif mode in (_SWAP_MODE_INTEREST_CURRENT, _SWAP_MODE_INTEREST_OPEN):
         if notional <= 0:
             return 0.0, 0.0, False
-        long_usd = notional * (swap_long / 100.0) / 360.0
-        short_usd = notional * (swap_short / 100.0) / 360.0
+        # The financed amount is the lot's MONEY value, price x tick value / tick
+        # size, with tick value already in the account currency. That equals
+        # price x contract on Crash/Boom, Volatility 25/100, Jump, Step, BTC, ETH
+        # and the US indices, but not on Volatility 75 (tick value 0.0001 on a
+        # 0.01 tick): price x contract over-stated its swap 100x — ~$150 a night
+        # on 15 lots instead of ~$1.50, which turned +2.3R holds into -5.8R.
+        # Measured 2026-09-14 on this account's Crash 1000 fills: one rollover =
+        # money value x rate / 360.
+        tick_value = float(getattr(info, "trade_tick_value", 0.0) or 0.0)
+        tick_size = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
+        if tick_value > 0 and tick_size > 0:
+            money = price * tick_value / tick_size
+            needs_fx = False
+        else:
+            money = notional
+        long_usd = money * (swap_long / 100.0) / 360.0
+        short_usd = money * (swap_short / 100.0) / 360.0
     else:  # CURRENCY_SYMBOL / CURRENCY_MARGIN / CURRENCY_DEPOSIT
         # Per lot per day, but in the SYMBOL's currency — not necessarily the
         # account's. This branch previously used the number as-is and said so:

@@ -142,8 +142,10 @@ def build_full_schema() -> list[dict]:
         (ORBParams, "orb"),
         (DriftJumpAlphaParams, "drift_jump_alpha"),
     ]
-    from backend.core.config_schema import _CLASSIC_BLOCKS
-    groups += [(cls, name) for name, cls in _CLASSIC_BLOCKS.items()]
+    from backend.core.config_schema import SynthParams
+    from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
+    from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
+    groups += [(SynthParams, "synth"), (HTFFVGFlipParams, "htf_fvg_flip"), (BiasIFVGParams, "bias_ifvg")]
 
     schema: list[dict] = []
     for cls, group in groups:

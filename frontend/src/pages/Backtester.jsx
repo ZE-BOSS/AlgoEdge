@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { decimate } from '../utils/decimate';
+import ConfluenceFields from '../components/ConfluenceFields';
+import { CONFLUENCE_DEFAULTS } from '../components/confluenceSpec';
 
 // The exit settings the live bot applies from strategy_defaults.py. Kept at
 // module scope: as a value inside the component it would be a fresh array on
@@ -96,15 +98,14 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
   const updateOrb = (k, v) => setForm({ ...form, orb: { ...orb, [k]: v } });
   const boom = form.boom_drift_jump || {};
   const updateBoom = (k, v) => setForm({ ...form, boom_drift_jump: { ...boom, [k]: v } });
-  // Classic families (backend/strategies/strategy_classic): [config block, [field, label, kind]]
-  const CLASSIC_PANELS = {
-    Donchian_v1: ['donchian', [['channel_bars', 'Channel (H1 bars)', 'int'], ['stop_atr', 'Stop (× ATR)', 'num'], ['exit_mode', 'Exit', ['trail', 'channel']], ['side', 'Side', ['both', 'long']]]],
-    EMAPullback_v1: ['ema_pullback', [['fast_ema', 'Fast EMA', 'int'], ['slow_ema', 'Slow EMA', 'int'], ['side', 'Side', ['both', 'long']]]],
-    RSI2_v1: ['rsi2', [['threshold', 'RSI(2) threshold', 'num'], ['max_hold_bars', 'Max hold (H1 bars)', 'int'], ['side', 'Side', ['both', 'long']]]],
-    BollingerFade_v1: ['bollinger_fade', [['band_sigma', 'Band (σ)', 'num'], ['side', 'Side', ['both', 'long']]]],
-    VolBreakout_v1: ['vol_breakout', [['channel_bars', 'Channel (H1 bars)', 'int'], ['volume_mult', 'Tick-volume surge (×)', 'num'], ['side', 'Side', ['both', 'long']]]],
-    TSMOM_v1: ['tsmom', [['lookback_days', 'Lookback (days)', 'int'], ['side', 'Side', ['both', 'long']]]],
-  };
+  const htfFvg = form.htf_fvg_flip || {};
+  const updateHtfFvg = (k, v) => setForm({ ...form, htf_fvg_flip: { ...htfFvg, [k]: v } });
+  const biasIfvg = form.bias_ifvg || {};
+  const updateBiasIfvg = (k, v) => setForm({ ...form, bias_ifvg: { ...biasIfvg, [k]: v } });
+  // SpikeFade / RangeRevert / RangeBreakout / TrendDrift all read the same
+  // backend dataclass (SynthParams), so one slice serves all four.
+  const synth = form.synth || {};
+  const updateSynth = (k, v) => setForm({ ...form, synth: { ...synth, [k]: v } });
 
   if (strategyId === 'APA_v1') {
     return (
@@ -216,22 +217,60 @@ const StrategyParamsEditor = ({ strategyId, form, setForm, u }) => {
     );
   }
 
-  if (CLASSIC_PANELS[strategyId]) {
-    const [sec, fields] = CLASSIC_PANELS[strategyId];
-    const blk = form[sec] || {};
-    const useSym = blk.use_symbol_defaults ?? true;
-    const upd = (k, v) => setForm({ ...form, [sec]: { ...blk, [k]: v } });
+  if (strategyId === 'HTFFVGFlip_v1') return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+      <div><label style={{ fontSize: '0.7rem' }}>HTF Timeframe</label><select value={htfFvg.htf_timeframe} onChange={e => updateHtfFvg('htf_timeframe', e.target.value)}>{['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Entry Confirm TF</label><select value={htfFvg.entry_confirmation_tf} onChange={e => updateHtfFvg('entry_confirmation_tf', e.target.value)}>{['M1', 'M5', 'M15'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={htfFvg.target_rr} onChange={e => updateHtfFvg('target_rr', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={htfFvg.session_start} onChange={e => updateHtfFvg('session_start', e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={htfFvg.session_cutoff} onChange={e => updateHtfFvg('session_cutoff', e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={htfFvg.sl_buffer_atr_mult} onChange={e => updateHtfFvg('sl_buffer_atr_mult', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={htfFvg.min_sl_pips} onChange={e => updateHtfFvg('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor. 0 disables.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={htfFvg.min_sl_atr_mult} onChange={e => updateHtfFvg('min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative floor. Larger floor wins. 0 disables.</div></div>
+      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 16 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}><input type="checkbox" checked={htfFvg.require_unfilled_htf_fvg ?? true} onChange={e => updateHtfFvg('require_unfilled_htf_fvg', e.target.checked)} /> Require Unfilled HTF FVG</label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12, fontSize: '0.75rem' }}><input type="checkbox" checked={htfFvg.session_filter_enabled ?? true} onChange={e => updateHtfFvg('session_filter_enabled', e.target.checked)} /> Session Filter Enabled</label>
+      </div>
+      <ConfluenceFields block="htf_fvg_flip" values={htfFvg} onChange={updateHtfFvg} labelStyle={{ fontSize: '0.7rem' }} />
+    </div>
+  );
+  if (strategyId === 'BiasIFVG_v1') return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+      <div><label style={{ fontSize: '0.7rem' }}>Target RR</label><input type="number" step="0.1" value={biasIfvg.target_rr} onChange={e => updateBiasIfvg('target_rr', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" value={biasIfvg.max_trades_per_day} onChange={e => updateBiasIfvg('max_trades_per_day', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>A+ Confluence Threshold</label><input type="number" min="0" max="100" value={biasIfvg.a_plus_confluence_threshold} onChange={e => updateBiasIfvg('a_plus_confluence_threshold', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Score a setup must reach to be taken (0–100).</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Session Start</label><input type="text" value={biasIfvg.session_start} onChange={e => updateBiasIfvg('session_start', e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Session Cutoff</label><input type="text" value={biasIfvg.session_cutoff} onChange={e => updateBiasIfvg('session_cutoff', e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Rejection Min Body (× ATR)</label><input type="number" step="0.05" min="0" value={biasIfvg.rejection_min_body_atr_mult} onChange={e => updateBiasIfvg('rejection_min_body_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Minimum rejection-candle body size, so a doji cannot count as displacement.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={biasIfvg.sl_buffer_atr_mult} onChange={e => updateBiasIfvg('sl_buffer_atr_mult', +e.target.value)} /></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Min SL (pips)</label><input type="number" step="0.5" min="0" value={biasIfvg.min_sl_pips} onChange={e => updateBiasIfvg('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor. 0 disables.</div></div>
+      <div><label style={{ fontSize: '0.7rem' }}>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={biasIfvg.min_sl_atr_mult} onChange={e => updateBiasIfvg('min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative floor. Larger floor wins. 0 disables.</div></div>
+      <ConfluenceFields block="bias_ifvg" values={biasIfvg} onChange={updateBiasIfvg} labelStyle={{ fontSize: '0.7rem' }} />
+    </div>
+  );
+  if (strategyId === 'SpikeFade_v1' || strategyId === 'RangeRevert_v1'
+      || strategyId === 'RangeBreakout_v1' || strategyId === 'TrendDrift_v1') {
+    const isSpike = strategyId === 'SpikeFade_v1';
+    const isRevert = strategyId === 'RangeRevert_v1';
+    const isBreak = strategyId === 'RangeBreakout_v1';
+    const isDrift = strategyId === 'TrendDrift_v1';
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-        <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.75rem' }}><input type="checkbox" checked={useSym} onChange={e => upd('use_symbol_defaults', e.target.checked)} /> Use the measured settings for this symbol where there are any (recommended)</label></div>
-        {fields.map(([k, label, kind]) => (
-          <div key={k}><label style={{ fontSize: '0.7rem' }}>{label}</label>
-            {Array.isArray(kind)
-              ? <select value={blk[k] ?? kind[0]} disabled={useSym} style={useSym ? { opacity: 0.5 } : undefined} onChange={e => upd(k, e.target.value)}>{kind.map(o => <option key={o} value={o}>{o}</option>)}</select>
-              : <input type="number" step={kind === 'int' ? 1 : 0.1} disabled={useSym} style={useSym ? { opacity: 0.5 } : undefined} value={blk[k] ?? ''} onChange={e => upd(k, kind === 'int' ? parseInt(e.target.value, 10) : +e.target.value)} />}
-          </div>
-        ))}
-        <div style={{ gridColumn: '1 / -1', fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 6 }}>Classic family from the strategy search, rebuilt as a live strategy. The engine runs the research code itself, so this backtest trades what was measured; exits (trail, channel, mean, flip, time) are the strategy's own. Evidence per market: Implementation/STRATEGY-EDGE-LAB-2026-09-13.md.</div>
+        <div><label style={{ fontSize: '0.7rem' }}>Stop (x ATR)</label><input type="number" step="0.5" min="0.1" value={synth.stop_atr_multiple ?? 5.0} onChange={e => updateSynth('stop_atr_multiple', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Keep wide: at 0.5x ATR the unmodelled spike gap is ~1 R/trade.</div></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Target R:R</label><input type="number" step="0.5" min="0.1" value={synth.tp1_rr ?? 5.0} onChange={e => updateSynth('tp1_rr', +e.target.value)} /></div>
+        <div><label style={{ fontSize: '0.7rem' }}>Max Trades / Day</label><input type="number" min="0" value={synth.max_trades_per_day ?? 6} onChange={e => updateSynth('max_trades_per_day', +e.target.value)} /></div>
+        {isSpike && <div><label style={{ fontSize: '0.7rem' }}>Spike Size (x ATR)</label><input type="number" step="0.5" min="0.5" value={synth.spike_k_atr ?? 3.0} onChange={e => updateSynth('spike_k_atr', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Bar must move this far one way to count as a spike.</div></div>}
+        {isRevert && <div><label style={{ fontSize: '0.7rem' }}>Stretch (x ATR)</label><input type="number" step="0.5" min="0.5" value={synth.revert_k_atr ?? 2.0} onChange={e => updateSynth('revert_k_atr', +e.target.value)} /><div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Distance from the slow EMA before entering back toward it.</div></div>}
+        {isBreak && <div><label style={{ fontSize: '0.7rem' }}>Breakout Lookback (bars)</label><input type="number" min="2" value={synth.breakout_lookback ?? 20} onChange={e => updateSynth('breakout_lookback', +e.target.value)} /></div>}
+        {(isRevert || isDrift) && <div><label style={{ fontSize: '0.7rem' }}>EMA Fast</label><input type="number" min="2" value={synth.ema_fast ?? 20} onChange={e => updateSynth('ema_fast', +e.target.value)} /></div>}
+        {(isRevert || isDrift) && <div><label style={{ fontSize: '0.7rem' }}>EMA Slow</label><input type="number" min="3" value={synth.ema_slow ?? 50} onChange={e => updateSynth('ema_slow', +e.target.value)} /></div>}
+        {isDrift && <div><label style={{ fontSize: '0.7rem' }}>Min ADX to Trade</label><input type="number" min="0" value={synth.min_adx_to_trade ?? 20} onChange={e => updateSynth('min_adx_to_trade', +e.target.value)} disabled={!(synth.require_adx ?? true)} style={{ opacity: (synth.require_adx ?? true) ? 1 : 0.5 }} /></div>}
+        <div><label style={{ fontSize: '0.7rem' }}>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={synth.max_daily_risk_pct ?? 4.0} onChange={e => updateSynth('max_daily_risk_pct', +e.target.value)} /></div>
+        {isDrift && <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 8, fontSize: '0.75rem' }}><input type="checkbox" checked={synth.require_adx ?? true} onChange={e => updateSynth('require_adx', e.target.checked)} /> Require ADX trend filter</label></div>}
+        <ConfluenceFields block="synth" values={synth} onChange={updateSynth} labelStyle={{ fontSize: '0.7rem' }} />
+        <div style={{ gridColumn: '1 / -1', fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 6 }}>
+          These four strategies share one backend params block (SynthParams), so a change here applies to all of them. Per-symbol shipped values live in strategy_defaults.py (SYNTH_SLOT_PARAMS).
+        </div>
       </div>
     );
   }
@@ -1517,15 +1556,12 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
 
 const TRAIL_METHODS = [{ v: 'NONE', l: 'None' }, { v: 'ATR_TRAIL', l: 'ATR Trail' }, { v: 'FIXED_PIPS', l: 'Fixed Pips' }, { v: 'STRUCTURE_TRAIL', l: 'Structure Trail' }, { v: 'PCT_TRAIL', l: '% Trail' }];
 
-const CLASSIC_SECTIONS = {
-  Donchian_v1: 'donchian', EMAPullback_v1: 'ema_pullback', RSI2_v1: 'rsi2',
-  BollingerFade_v1: 'bollinger_fade', VolBreakout_v1: 'vol_breakout', TSMOM_v1: 'tsmom',
-};
 const STRATEGY_OPTIONS = [
   ['APA_v1', 'APA (Adv. Price Action)'], ['VWAP_v1', 'VWAP Institutional'], ['DriftJumpAlpha_v1', 'Drift & Jump Alpha'],
   ['ORB_v1', 'Opening Range Breakout'], ['BoomDriftJump_v1', 'Boom Drift & Jump'],
-  ['Donchian_v1', 'Donchian Breakout'], ['EMAPullback_v1', 'EMA Trend Pullback'], ['RSI2_v1', 'RSI(2) Reversion'],
-  ['BollingerFade_v1', 'Bollinger Fade'], ['VolBreakout_v1', 'Tick-Volume Breakout'], ['TSMOM_v1', 'Daily Momentum (TSMOM)'],
+  ['HTFFVGFlip_v1', 'HTF FVG Flip'], ['BiasIFVG_v1', 'Bias KeyLevel IFVG'],
+  ['SpikeFade_v1', 'Spike Fade'], ['RangeRevert_v1', 'Range Revert'],
+  ['RangeBreakout_v1', 'Range Breakout'], ['TrendDrift_v1', 'Trend Drift'],
 ];
 const VALID_STRATEGIES = STRATEGY_OPTIONS.map(([id]) => id);
 
@@ -1558,11 +1594,12 @@ function buildPortfolioStrategyParams(strategyId, form) {
       }
       return orbParams;
     }
-    case 'Donchian_v1': case 'EMAPullback_v1': case 'RSI2_v1':
-    case 'BollingerFade_v1': case 'VolBreakout_v1': case 'TSMOM_v1': {
-      const { use_symbol_defaults = true, ...p } = form[CLASSIC_SECTIONS[strategyId]] || {};
-      return use_symbol_defaults ? {} : p;
-    }
+    case 'HTFFVGFlip_v1':
+      return form.htf_fvg_flip || {};
+    case 'BiasIFVG_v1':
+      return form.bias_ifvg || {};
+    case 'SpikeFade_v1': case 'RangeRevert_v1': case 'RangeBreakout_v1': case 'TrendDrift_v1':
+      return form.synth || {};
     case 'BoomDriftJump_v1':
       return form.boom_drift_jump || {};
     default:
@@ -1650,7 +1687,7 @@ const costOrAuto = (v) => (v === '' || v === null || v === undefined ? null : +v
 // Form slices that are objects. The localStorage restore merges these one level
 // deep so a newly-added strategy parameter is not lost behind a stale blob.
 const NESTED_FORM_KEYS = ['apa', 'drift_jump_alpha', 'vwap', 'orb', 'boom_drift_jump', 'prop_firm',
-  'donchian', 'ema_pullback', 'rsi2', 'bollinger_fade', 'vol_breakout', 'tsmom'];
+  'htf_fvg_flip', 'bias_ifvg', 'synth'];
 
 // Bump this whenever a default below changes in a way a cached blob would
 // override. Old keys are purged on load — see the `form` initialiser.
@@ -1700,12 +1737,28 @@ const DEFAULT_FORM = {
     breakout_window_minutes: 180, side: 'both', min_stop_atr: 0.25, close_at_session_end: true,
     breakout_timeframe: 'M15', require_trend: false,
   },
-  donchian: { use_symbol_defaults: true, channel_bars: 20, stop_atr: 2.0, exit_mode: 'trail', side: 'both' },
-  ema_pullback: { use_symbol_defaults: true, fast_ema: 20, slow_ema: 50, side: 'both' },
-  rsi2: { use_symbol_defaults: true, threshold: 10, max_hold_bars: 24, side: 'both' },
-  bollinger_fade: { use_symbol_defaults: true, band_sigma: 2.0, side: 'both' },
-  vol_breakout: { use_symbol_defaults: true, channel_bars: 20, volume_mult: 1.5, side: 'both' },
-  tsmom: { use_symbol_defaults: true, lookback_days: 60, side: 'both' },
+  htf_fvg_flip: {
+    htf_timeframe: 'H1', entry_confirmation_tf: 'M5', target_rr: 2.0,
+    require_unfilled_htf_fvg: true, session_filter_enabled: true,
+    session_start: '09:30', session_cutoff: '16:00',
+    sl_buffer_atr_mult: 0.5, min_sl_pips: 12.0, min_sl_atr_mult: 1.0,
+    ...CONFLUENCE_DEFAULTS.htf_fvg_flip,
+  },
+  bias_ifvg: {
+    session_start: '09:30', session_cutoff: '11:00', max_trades_per_day: 2, target_rr: 2.0,
+    sl_buffer_atr_mult: 0.5, min_sl_pips: 12.0, min_sl_atr_mult: 1.0,
+    a_plus_confluence_threshold: 90, rejection_min_body_atr_mult: 0.15,
+    ...CONFLUENCE_DEFAULTS.bias_ifvg,
+  },
+  // Shared by SpikeFade / RangeRevert / RangeBreakout / TrendDrift — they all
+  // read SynthParams, so one slice serves all four (see buildPortfolioStrategyParams).
+  synth: {
+    stop_atr_multiple: 5.0, tp1_rr: 5.0, spike_k_atr: 3.0, revert_k_atr: 2.0,
+    breakout_lookback: 20, ema_fast: 20, ema_slow: 50,
+    require_adx: true, min_adx_to_trade: 20,
+    max_trades_per_day: 6, max_daily_risk_pct: 4.0,
+    ...CONFLUENCE_DEFAULTS.synth,
+  },
   // Boom mirror of DriftJumpAlpha — mirrors BoomDriftJumpParams.
   boom_drift_jump: {
     drift_ema_fast: 20, drift_ema_slow: 50, min_adx_to_trade: 20,
@@ -2099,12 +2152,9 @@ export default function Backtester() {
           merged.vwap = { ...(prev.vwap || {}), ...(c.vwap || {}) };
           merged.orb = { ...(prev.orb || {}), ...(c.orb || {}) };
           merged.boom_drift_jump = { ...(prev.boom_drift_jump || {}), ...(c.boom_drift_jump || {}) };
-          merged.donchian = { ...(prev.donchian || {}), ...(c.donchian || {}) };
-          merged.ema_pullback = { ...(prev.ema_pullback || {}), ...(c.ema_pullback || {}) };
-          merged.rsi2 = { ...(prev.rsi2 || {}), ...(c.rsi2 || {}) };
-          merged.bollinger_fade = { ...(prev.bollinger_fade || {}), ...(c.bollinger_fade || {}) };
-          merged.vol_breakout = { ...(prev.vol_breakout || {}), ...(c.vol_breakout || {}) };
-          merged.tsmom = { ...(prev.tsmom || {}), ...(c.tsmom || {}) };
+          merged.htf_fvg_flip = { ...(prev.htf_fvg_flip || {}), ...(c.htf_fvg_flip || {}) };
+          merged.bias_ifvg = { ...(prev.bias_ifvg || {}), ...(c.bias_ifvg || {}) };
+          merged.synth = { ...(prev.synth || {}), ...(c.synth || {}) };
           return merged;
         });
       }

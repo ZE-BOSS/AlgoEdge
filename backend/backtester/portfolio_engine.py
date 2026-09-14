@@ -312,41 +312,21 @@ class PortfolioBacktestEngine(CostModelMixin):
             closes_arr = df["close"].values.astype(float)
             atr_period = 14
 
-            # Bug 8 fix: Vectorized ATR via pandas rolling mean — replaces the
-            # O(N) Python loop that used np.mean on a slice every bar (~10x slower).
-            highs_s  = pd.Series(highs_arr)
-            lows_s   = pd.Series(lows_arr)
-            closes_s = pd.Series(closes_arr)
-            prev_c   = closes_s.shift(1).fillna(closes_s.iloc[0])
-            tr_s = pd.concat(
-                [highs_s - lows_s, (highs_s - prev_c).abs(), (lows_s - prev_c).abs()],
-                axis=1,
-            ).max(axis=1)
-            atr_series = tr_s.rolling(atr_period, min_periods=1).mean()
-            atr_array  = atr_series.values
+            # ATR and swing points shared with engine.py and the live position
+            # manager (risk/exit_replay.py). This was a rolling mean INCLUDING the
+            # current bar with min_periods=1, while engine.py averaged the 14 bars
+            # BEFORE it — so the same leg broke even and trailed at different
+            # levels run alone and run in a basket.
+            from backend.risk.exit_replay import atr_series, swing_length, swing_points_at
+            atr_array = atr_series(highs_arr, lows_arr, closes_arr, atr_period)
 
             time_vals = df['time'].values
             atr_dict = dict(zip(time_vals, atr_array))
 
-            # Bug 7 fix: Swing-point cache — algorithm is identical to engine.py's
-            # single-symbol cache (O(N × lookback × sw_len)), keyed by timestamp.
-            # The previous portfolio code computed the same loop PLUS an extra outer
-            # loop over (swing_lookback, len(df)) that re-scanned already-processed
-            # bars, causing roughly O(N²) behaviour for large datasets.
-            sw_len = self.risk_config.get("trail_structure_bars", self.risk_config.get("swing_length", 5))
-            swing_lookback = 20
+            sw_len = swing_length(self.risk_config)
             swing_dict: dict = {}
-            for i in range(swing_lookback, len(df)):
-                points = []
-                for j in range(max(sw_len, i - swing_lookback), i - sw_len):
-                    if j - sw_len < 0:
-                        continue
-                    window_h = highs_arr[j - sw_len:j + sw_len + 1]
-                    window_l = lows_arr[j - sw_len:j + sw_len + 1]
-                    if highs_arr[j] == window_h.max():
-                        points.append({"type": "HIGH", "price": float(highs_arr[j])})
-                    if lows_arr[j] == window_l.min():
-                        points.append({"type": "LOW", "price": float(lows_arr[j])})
+            for i in range(len(df)):
+                points = swing_points_at(highs_arr, lows_arr, i, sw_len)
                 if points:
                     swing_dict[time_vals[i]] = points
 

@@ -62,8 +62,10 @@ def test_window_table_is_the_single_source_for_both_paths():
 
     bt_src = inspect.getsource(bt_routes)
     assert '_window_bars("M5")' in bt_src, "backtest TF_META must read the shared table"
-    assert "from backend.strategies.windows import window_bars" in inspect.getsource(bs), \
-        "the live scan loop must trim to the shared window"
+    # Both paths slice through strategies/bar_feed.py, which reads window_bars.
+    from backend.strategies import bar_feed
+    assert "window_bars(tf, self.engine)" in inspect.getsource(bar_feed)
+    assert "LiveBarFeed(" in inspect.getsource(bs), "the live scan loop must feed through the shared feeder"
 
 
 # ── [P1.6] allow_pyramiding behaved differently in three code paths ──────────

@@ -12,9 +12,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from backend.strategies.strategy_apa.params import APAParams
-from backend.strategies.strategy_classic.params import (
-    BollingerFadeParams, DonchianParams, EMAPullbackParams, RSI2Params, TSMOMParams, VolBreakoutParams,
-)
+from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
+from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
 from backend.strategies.strategy_orb.params import ORBParams
 from backend.strategies.strategy_vwap.params import VWAPParams
 # ─────────────────────────────────────────────────────────────────────────────
@@ -619,6 +618,58 @@ class RiskParams:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
+class SynthParams:
+    """Shared parameters for SpikeFade_v1, RangeRevert_v1, RangeBreakout_v1 and TrendDrift_v1.
+
+    One dataclass covers all three because they share an entry/exit skeleton and
+    differ only in the entry predicate — see strategy_synth/engine.py.
+
+    Stops are wide by default. On jump instruments the stop is what the spike gaps
+    through, and research/24 §4.1 measured ~1 R of unmodelled slippage at
+    0.5 x ATR against ~0.2 R at 5 x ATR, so a tight stop here converts a spike into
+    a multi-R loss. Per-symbol overrides: strategy_defaults.py::SYNTH_SLOT_PARAMS.
+    """
+    stop_atr_multiple: float = 5.0
+    tp1_rr: float = 1.5
+    spike_k_atr: float = 3.0
+    revert_k_atr: float = 2.0
+    breakout_lookback: int = 20
+    ema_fast: int = 20
+    ema_slow: int = 50
+    require_adx: bool = True
+    min_adx_to_trade: int = 20
+    max_trades_per_day: int = 6
+    max_daily_risk_pct: float = 4.0
+
+    # ── Optional confluences (2026-09-14 study) ──────────────────────────────
+    # Each is OFF by default, so a saved config behaves exactly as before. They
+    # are the flags backend/analytics/synth_research.py records on every
+    # candidate, evaluated on the signal bar with the same arithmetic, so a
+    # combination measured there reproduces here. All are checked BEFORE the
+    # daily budget is charged: a filtered signal costs no budget.
+    side: str = "both"
+    """"both", "long" or "short"."""
+    require_trend_with: bool = False
+    """EMA fast/slow regime must point the trade's way."""
+    require_htf_trend: bool = False
+    """Close on the trade's side of a 600-bar M5 EMA that also slopes that way
+    over 12 bars (ORB_v1's trend confluence). Widens the M5 window to 3000."""
+    adx_filter: str = "OFF"
+    """"OFF", "TREND" (ADX(14) >= 20) or "RANGE" (ADX(14) < 20)."""
+    require_vol_high: bool = False
+    """ATR(14) at or above its median of the last 288 bars (one day)."""
+    require_candle_confirm: bool = False
+    """The signal bar closed in the trade's direction."""
+    require_strong_close: bool = False
+    """The signal bar closed in its outer 30% on the trade's side."""
+    time_filter: str = "ALL"
+    """"ALL", "LONDON" (07:00-16:00 UTC) or "NEWYORK" (12:30-21:00 UTC), on the signal bar."""
+    max_hold_bars: int = 0
+    """Close a position still open this many M5 bars after entry, at that bar's
+    close. 0 = off. The 2026-09-14 study measured every result with 288 (one day)."""
+
+
+@dataclass
 class BoomDriftJumpParams:
     """Tunable parameters for BoomDriftJump_v1 — the Boom mirror of DriftJumpAlpha.
 
@@ -987,15 +1038,6 @@ def _sync_trail_rr_aliases(risk_data: dict) -> dict:
     return risk_data
 
 
-# The six classic families (strategy_classic): config block name -> params class.
-_CLASSIC_BLOCKS: dict[str, type] = {
-    "donchian": DonchianParams,
-    "ema_pullback": EMAPullbackParams,
-    "rsi2": RSI2Params,
-    "bollinger_fade": BollingerFadeParams,
-    "vol_breakout": VolBreakoutParams,
-    "tsmom": TSMOMParams,
-}
 
 
 @dataclass
@@ -1012,12 +1054,9 @@ class UserConfigV2(UserConfig):
     apa: APAParams = field(default_factory=APAParams)
     vwap: VWAPParams = field(default_factory=VWAPParams)
     orb: ORBParams = field(default_factory=ORBParams)
-    donchian: DonchianParams = field(default_factory=DonchianParams)
-    ema_pullback: EMAPullbackParams = field(default_factory=EMAPullbackParams)
-    rsi2: RSI2Params = field(default_factory=RSI2Params)
-    bollinger_fade: BollingerFadeParams = field(default_factory=BollingerFadeParams)
-    vol_breakout: VolBreakoutParams = field(default_factory=VolBreakoutParams)
-    tsmom: TSMOMParams = field(default_factory=TSMOMParams)
+    synth: SynthParams = field(default_factory=SynthParams)
+    htf_fvg_flip: HTFFVGFlipParams = field(default_factory=HTFFVGFlipParams)
+    bias_ifvg: BiasIFVGParams = field(default_factory=BiasIFVGParams)
     prop_firm: PropFirmParams = field(default_factory=PropFirmParams)
 
     @classmethod
@@ -1030,7 +1069,9 @@ class UserConfigV2(UserConfig):
         apa_data = data.pop("apa", {})
         vwap_data = data.pop("vwap", {})
         orb_data = data.pop("orb", {})
-        classic_data = {k: data.pop(k, {}) for k in _CLASSIC_BLOCKS}
+        synth_data = data.pop("synth", {})
+        htf_fvg_flip_data = data.pop("htf_fvg_flip", {})
+        bias_ifvg_data = data.pop("bias_ifvg", {})
         prop_firm_data = data.pop("prop_firm", {})
         import dataclasses
         known_fields = {f.name for f in dataclasses.fields(cls)}
@@ -1049,8 +1090,9 @@ class UserConfigV2(UserConfig):
         config.apa = APAParams(**filter_kwargs(APAParams, apa_data))
         config.vwap = VWAPParams(**filter_kwargs(VWAPParams, vwap_data))
         config.orb = ORBParams(**filter_kwargs(ORBParams, orb_data))
-        for _k, _cls in _CLASSIC_BLOCKS.items():
-            setattr(config, _k, _cls(**filter_kwargs(_cls, classic_data.get(_k) or {})))
+        config.synth = SynthParams(**filter_kwargs(SynthParams, synth_data))
+        config.htf_fvg_flip = HTFFVGFlipParams(**filter_kwargs(HTFFVGFlipParams, htf_fvg_flip_data))
+        config.bias_ifvg = BiasIFVGParams(**filter_kwargs(BiasIFVGParams, bias_ifvg_data))
         config.prop_firm = PropFirmParams(**filter_kwargs(PropFirmParams, prop_firm_data))
         
 
@@ -1112,9 +1154,12 @@ class UserConfigV2(UserConfig):
             self.vwap = VWAPParams()
         if self.orb is None:
             self.orb = ORBParams()
-        for _k, _cls in _CLASSIC_BLOCKS.items():
-            if getattr(self, _k, None) is None:
-                setattr(self, _k, _cls())
+        if self.synth is None:
+            self.synth = SynthParams()
+        if self.htf_fvg_flip is None:
+            self.htf_fvg_flip = HTFFVGFlipParams()
+        if self.bias_ifvg is None:
+            self.bias_ifvg = BiasIFVGParams()
         if self.prop_firm is None:
             self.prop_firm = PropFirmParams()
 

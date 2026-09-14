@@ -372,7 +372,7 @@ class VWAPEngine(BaseStrategy):
 
     def _session_mode_signal(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> TradeSignal | None:
         from backend.analytics import edge_lab as lab
-        from backend.strategies.strategy_classic.engine import _epoch_seconds, candles_to_bars
+        from backend.strategies.core.bars import _epoch_seconds, candles_to_bars
         from backend.strategies.strategy_defaults import SLOT_TP1_RR, get_strategy_defaults
         from backend.strategies.strategy_orb.engine import SESSIONS, session_bounds
 
@@ -412,7 +412,7 @@ class VWAPEngine(BaseStrategy):
         if not self._session_mode or candles is None or not len(candles):
             return None
         from backend.strategies.base_strategy import TradeAction
-        from backend.strategies.strategy_classic.engine import _epoch_seconds
+        from backend.strategies.core.bars import _epoch_seconds
         from backend.strategies.strategy_orb.engine import session_bounds
         t = _epoch_seconds(candles)
         last = int(t[-1])

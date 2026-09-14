@@ -122,12 +122,13 @@ def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     if pd.api.types.is_datetime64_any_dtype(df['time']):
         if df['time'].dt.tz is not None:
             df['time'] = df['time'].dt.tz_localize(None)
-        df['time'] = df['time'].astype('int64') // 10**9
+        # as_unit('s'): correct whatever resolution pandas stored (ns on 2.x, us on 3.x).
+        df['time'] = df['time'].dt.as_unit('s').astype('int64')
     elif not pd.api.types.is_integer_dtype(df['time']):
         time_series = pd.to_datetime(df['time'])
         if time_series.dt.tz is not None:
             time_series = time_series.dt.tz_localize(None)
-        df['time'] = time_series.astype('int64') // 10**9
+        df['time'] = time_series.dt.as_unit('s').astype('int64')
     # Shift broker server time -> true UTC. Everything downstream (ET session gates,
     # VWAP session anchoring, swap rollover boundaries) assumes UTC and is wrong by
     # exactly this offset without it.

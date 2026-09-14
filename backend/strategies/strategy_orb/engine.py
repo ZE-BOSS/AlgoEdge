@@ -70,8 +70,9 @@ def _epoch_seconds(candles: pd.DataFrame) -> np.ndarray:
     if "time" in candles.columns:
         return candles["time"].to_numpy(dtype=np.int64)
     # A naive index is UTC (both the backtest route and the live loop build it
-    # with pd.to_datetime(unit="s")); asi8 is UTC nanoseconds either way.
-    return pd.DatetimeIndex(candles.index).asi8 // 10**9
+    # with pd.to_datetime(unit="s")). as_unit("s") keeps this right whatever unit
+    # pandas stored the index in (asi8 is ns on pandas 2, us or s on pandas 3).
+    return pd.DatetimeIndex(candles.index).as_unit("s").asi8
 
 
 def _atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, n: int = 14) -> np.ndarray:
@@ -103,7 +104,7 @@ class ORBStrategy(BaseStrategy):
 
     def _m5_signal(self, symbol: str, candles: pd.DataFrame) -> TradeSignal | None:
         from backend.analytics import edge_lab as lab
-        from backend.strategies.strategy_classic.engine import candles_to_bars
+        from backend.strategies.core.bars import candles_to_bars
 
         p = self.params
         t = _epoch_seconds(candles)

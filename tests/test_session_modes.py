@@ -28,7 +28,7 @@ def _m5(days=36, seed=3):
     high = np.maximum(open_, close) + np.abs(rng.normal(0.15, 0.08, n))
     low = np.minimum(open_, close) - np.abs(rng.normal(0.15, 0.08, n))
     vol = rng.integers(40, 200, n).astype(float)
-    t = (idx.asi8 // 10**9).astype(np.int64)
+    t = idx.as_unit("s").asi8.astype(np.int64)
     df = pd.DataFrame({"time": t, "open": open_, "high": high, "low": low, "close": close, "tick_volume": vol},
                       index=pd.to_datetime(t, unit="s"))
     b = Bars("XAUUSD", "M5", t, open_, high, low, close, np.zeros(n), vol)

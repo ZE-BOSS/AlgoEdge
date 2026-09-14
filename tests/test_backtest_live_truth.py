@@ -130,7 +130,7 @@ def test_portfolio_engine_applies_strategy_owned_exits():
 
     uk = pytz.timezone("Europe/London")
     idx = pd.date_range(uk.localize(datetime(2025, 7, 2, 7, 0)), periods=120, freq="5min")
-    t = (idx.tz_convert("UTC").asi8 // 10**9).astype(np.int64)
+    t = idx.tz_convert("UTC").as_unit("s").asi8.astype(np.int64)
     px = np.full(len(t), 190.0)
     df = pd.DataFrame({"time": t, "open": px, "high": px + 0.02, "low": px - 0.02, "close": px,
                        "spread": np.full(len(t), 10)})

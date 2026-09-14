@@ -1,0 +1,827 @@
+[
+ {
+  "market": "EURUSD",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 540,
+    "avg_r": 0.1639,
+    "total_r": 88.49,
+    "win_rate": 0.3611,
+    "pf": 1.263,
+    "t": 2.05
+   },
+   "validate_2025": {
+    "n": 267,
+    "avg_r": 0.0048,
+    "total_r": 1.28,
+    "win_rate": 0.3296,
+    "pf": 1.007,
+    "t": 0.04
+   },
+   "unseen_2026": {
+    "n": 175,
+    "avg_r": 0.0776,
+    "total_r": 13.58,
+    "win_rate": 0.3714,
+    "pf": 1.124,
+    "t": 0.59
+   },
+   "quarters_positive": "10/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "both",
+   "require_strong_close": true,
+   "time_filter": "LONDON"
+  },
+  "app": {
+   "signals": 724,
+   "trades": 175,
+   "net_pnl": 717.92,
+   "win_rate": 0.3657,
+   "profit_factor": 1.093,
+   "expectancy_r": null,
+   "max_dd_pct": 7.96,
+   "rejections": {
+    "Max positions reached for EURUSD (1/1)": 95
+   },
+   "exit_reasons": {
+    "MAX_HOLD": 68,
+    "SL": 104,
+    "TP1": 2,
+    "END_OF_DATA": 1
+   }
+  }
+ },
+ {
+  "market": "GBPJPY",
+  "strategy": "RangeRevert_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 538,
+    "avg_r": 0.2905,
+    "total_r": 156.28,
+    "win_rate": 0.223,
+    "pf": 1.349,
+    "t": 2.63
+   },
+   "validate_2025": {
+    "n": 223,
+    "avg_r": 0.0918,
+    "total_r": 20.48,
+    "win_rate": 0.1973,
+    "pf": 1.102,
+    "t": 0.55
+   },
+   "unseen_2026": {
+    "n": 149,
+    "avg_r": 0.3801,
+    "total_r": 56.64,
+    "win_rate": 0.2081,
+    "pf": 1.395,
+    "t": 1.24
+   },
+   "quarters_positive": "12/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "revert_k_atr": 3.0,
+   "stop_atr_multiple": 1.0,
+   "tp1_rr": 5.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "short",
+   "require_strong_close": true,
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 217,
+   "trades": 136,
+   "net_pnl": 2205.61,
+   "win_rate": 0.2132,
+   "profit_factor": 1.281,
+   "expectancy_r": null,
+   "max_dd_pct": 15.17,
+   "rejections": {
+    "Stop distance is inside the minimum viable stop (spread/stops-level would consume it)": 14,
+    "sub_minimum_stop": 1
+   },
+   "exit_reasons": {
+    "SL": 107,
+    "TP1": 29
+   }
+  }
+ },
+ {
+  "market": "GBPJPY",
+  "strategy": "RangeBreakout_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 657,
+    "avg_r": 0.2578,
+    "total_r": 169.39,
+    "win_rate": 0.2816,
+    "pf": 1.352,
+    "t": 2.98
+   },
+   "validate_2025": {
+    "n": 347,
+    "avg_r": 0.0422,
+    "total_r": 14.63,
+    "win_rate": 0.2305,
+    "pf": 1.052,
+    "t": 0.35
+   },
+   "unseen_2026": {
+    "n": 231,
+    "avg_r": 0.0693,
+    "total_r": 16.02,
+    "win_rate": 0.2641,
+    "pf": 1.087,
+    "t": 0.49
+   },
+   "quarters_positive": "13/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "breakout_lookback": 10,
+   "stop_atr_multiple": 2.5,
+   "tp1_rr": 5.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "require_vol_high": true,
+   "time_filter": "LONDON"
+  },
+  "app": {
+   "signals": 656,
+   "trades": 231,
+   "net_pnl": 918.01,
+   "win_rate": 0.2641,
+   "profit_factor": 1.073,
+   "expectancy_r": null,
+   "max_dd_pct": 17.43,
+   "rejections": {},
+   "exit_reasons": {
+    "SL": 167,
+    "TP1": 26,
+    "MAX_HOLD": 37,
+    "END_OF_DATA": 1
+   }
+  }
+ },
+ {
+  "market": "GBPUSD",
+  "strategy": "RangeRevert_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 544,
+    "avg_r": 0.2316,
+    "total_r": 125.99,
+    "win_rate": 0.2077,
+    "pf": 1.279,
+    "t": 2.13
+   },
+   "validate_2025": {
+    "n": 254,
+    "avg_r": 0.0545,
+    "total_r": 13.85,
+    "win_rate": 0.189,
+    "pf": 1.062,
+    "t": 0.36
+   },
+   "unseen_2026": {
+    "n": 143,
+    "avg_r": 0.2569,
+    "total_r": 36.74,
+    "win_rate": 0.2168,
+    "pf": 1.307,
+    "t": 1.2
+   },
+   "quarters_positive": "12/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "revert_k_atr": 3.0,
+   "stop_atr_multiple": 1.0,
+   "tp1_rr": 5.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "short",
+   "require_candle_confirm": true,
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 219,
+   "trades": 140,
+   "net_pnl": 1329.35,
+   "win_rate": 0.2071,
+   "profit_factor": 1.173,
+   "expectancy_r": null,
+   "max_dd_pct": 13.25,
+   "rejections": {
+    "Stop distance is inside the minimum viable stop (spread/stops-level would consume it)": 4
+   },
+   "exit_reasons": {
+    "SL": 110,
+    "TP1": 28,
+    "MAX_HOLD": 2
+   }
+  }
+ },
+ {
+  "market": "GBPUSD",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 1132,
+    "avg_r": 0.0659,
+    "total_r": 74.55,
+    "win_rate": 0.4417,
+    "pf": 1.112,
+    "t": 1.74
+   },
+   "validate_2025": {
+    "n": 543,
+    "avg_r": 0.0751,
+    "total_r": 40.76,
+    "win_rate": 0.4567,
+    "pf": 1.128,
+    "t": 1.39
+   },
+   "unseen_2026": {
+    "n": 377,
+    "avg_r": 0.1138,
+    "total_r": 42.89,
+    "win_rate": 0.4748,
+    "pf": 1.2,
+    "t": 1.75
+   },
+   "quarters_positive": "12/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": true,
+   "min_adx_to_trade": 20,
+   "stop_atr_multiple": 1.0,
+   "tp1_rr": 1.5,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "short",
+   "require_candle_confirm": true,
+   "time_filter": "LONDON"
+  },
+  "app": {
+   "signals": 573,
+   "trades": 376,
+   "net_pnl": 2007.83,
+   "win_rate": 0.4761,
+   "profit_factor": 1.152,
+   "expectancy_r": null,
+   "max_dd_pct": 7.92,
+   "rejections": {
+    "Stop distance is inside the minimum viable stop (spread/stops-level would consume it)": 1
+   },
+   "exit_reasons": {
+    "SL": 197,
+    "TP1": 179
+   }
+  }
+ },
+ {
+  "market": "GBPUSD",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 168,
+    "avg_r": 0.3225,
+    "total_r": 54.18,
+    "win_rate": 0.3155,
+    "pf": 1.473,
+    "t": 1.88
+   },
+   "validate_2025": {
+    "n": 79,
+    "avg_r": 0.1571,
+    "total_r": 12.41,
+    "win_rate": 0.2911,
+    "pf": 1.224,
+    "t": 0.68
+   },
+   "unseen_2026": {
+    "n": 40,
+    "avg_r": 0.2273,
+    "total_r": 9.09,
+    "win_rate": 0.325,
+    "pf": 1.335,
+    "t": 0.66
+   },
+   "quarters_positive": "12/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": false,
+   "target_rr": 5.0,
+   "side": "both",
+   "require_vol_high": true,
+   "time_filter": "LONDON"
+  },
+  "app": {
+   "signals": 47,
+   "trades": 39,
+   "net_pnl": 221.79,
+   "win_rate": 0.5385,
+   "profit_factor": 1.156,
+   "expectancy_r": null,
+   "max_dd_pct": 6.19,
+   "rejections": {
+    "Max positions reached for GBPUSD (1/1)": 1
+   },
+   "exit_reasons": {
+    "BE_SL": 14,
+    "SL": 17,
+    "MAX_HOLD": 5,
+    "TP1": 3
+   }
+  }
+ },
+ {
+  "market": "GBPUSD",
+  "strategy": "BiasIFVG_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 143,
+    "avg_r": 0.3904,
+    "total_r": 55.83,
+    "win_rate": 0.5385,
+    "pf": 1.9,
+    "t": 3.19
+   },
+   "validate_2025": {
+    "n": 81,
+    "avg_r": 0.0065,
+    "total_r": 0.53,
+    "win_rate": 0.3457,
+    "pf": 1.01,
+    "t": 0.04
+   },
+   "unseen_2026": {
+    "n": 63,
+    "avg_r": 0.0351,
+    "total_r": 2.21,
+    "win_rate": 0.381,
+    "pf": 1.056,
+    "t": 0.18
+   },
+   "quarters_positive": "10/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "bias_mode": "OFF",
+   "ifvg_leg_mode": "BOTH",
+   "key_levels": "CISD_REJ",
+   "session_cutoff": "11:00",
+   "session_filter_enabled": true,
+   "session_start": "09:30",
+   "target_rr": 3.0,
+   "side": "both",
+   "max_trades_per_day": 4,
+   "day_stop_enabled": false,
+   "min_inversion_disp_atr": 0.25,
+   "require_adx_trend": true
+  },
+  "app": {
+   "signals": 71,
+   "trades": 63,
+   "net_pnl": 483.78,
+   "win_rate": 0.4286,
+   "profit_factor": 1.149,
+   "expectancy_r": null,
+   "max_dd_pct": 5.9,
+   "rejections": {
+    "Max positions reached for GBPUSD (1/1)": 1
+   },
+   "exit_reasons": {
+    "MAX_HOLD": 17,
+    "SL": 31,
+    "TP1": 10,
+    "BE_SL": 5
+   }
+  }
+ },
+ {
+  "market": "US SP 500",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 246,
+    "avg_r": 0.2006,
+    "total_r": 49.36,
+    "win_rate": 0.2317,
+    "pf": 1.247,
+    "t": 1.18
+   },
+   "validate_2025": {
+    "n": 237,
+    "avg_r": 0.3124,
+    "total_r": 74.04,
+    "win_rate": 0.3122,
+    "pf": 1.438,
+    "t": 2.02
+   },
+   "unseen_2026": {
+    "n": 171,
+    "avg_r": 0.2279,
+    "total_r": 38.98,
+    "win_rate": 0.3392,
+    "pf": 1.334,
+    "t": 1.39
+   },
+   "quarters_positive": "10/11"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "require_candle_confirm": true,
+   "require_strong_close": true
+  },
+  "app": {
+   "signals": 766,
+   "trades": 167,
+   "net_pnl": 2325.51,
+   "win_rate": 0.3473,
+   "profit_factor": 1.283,
+   "expectancy_r": null,
+   "max_dd_pct": 8.04,
+   "rejections": {},
+   "exit_reasons": {
+    "SL": 108,
+    "MAX_HOLD": 54,
+    "TP1": 4,
+    "END_OF_DATA": 1
+   }
+  }
+ },
+ {
+  "market": "US SP 500",
+  "strategy": "BiasIFVG_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 173,
+    "avg_r": 0.3833,
+    "total_r": 66.32,
+    "win_rate": 0.3873,
+    "pf": 1.617,
+    "t": 2.39
+   },
+   "validate_2025": {
+    "n": 173,
+    "avg_r": 0.0005,
+    "total_r": 0.09,
+    "win_rate": 0.3468,
+    "pf": 1.001,
+    "t": 0.0
+   },
+   "unseen_2026": {
+    "n": 112,
+    "avg_r": 0.0274,
+    "total_r": 3.07,
+    "win_rate": 0.2946,
+    "pf": 1.04,
+    "t": 0.16
+   },
+   "quarters_positive": "7/11"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "bias_mode": "OFF",
+   "ifvg_leg_mode": "BOTH",
+   "key_levels": "CISD_REJ",
+   "session_cutoff": "16:00",
+   "session_filter_enabled": true,
+   "session_start": "08:00",
+   "target_rr": 5.0,
+   "side": "long",
+   "max_trades_per_day": 4,
+   "day_stop_enabled": false
+  },
+  "app": {
+   "signals": 184,
+   "trades": 114,
+   "net_pnl": -8.64,
+   "win_rate": 0.2456,
+   "profit_factor": 0.999,
+   "expectancy_r": null,
+   "max_dd_pct": 14.55,
+   "rejections": {},
+   "exit_reasons": {
+    "MAX_HOLD": 29,
+    "TP1": 5,
+    "SL": 60,
+    "BE_SL": 19,
+    "END_OF_DATA": 1
+   }
+  }
+ },
+ {
+  "market": "US Tech 100",
+  "strategy": "SpikeFade_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 112,
+    "avg_r": 0.3383,
+    "total_r": 37.89,
+    "win_rate": 0.2143,
+    "pf": 1.416,
+    "t": 1.24
+   },
+   "validate_2025": {
+    "n": 125,
+    "avg_r": 0.2505,
+    "total_r": 31.31,
+    "win_rate": 0.24,
+    "pf": 1.319,
+    "t": 1.09
+   },
+   "unseen_2026": {
+    "n": 63,
+    "avg_r": 0.0394,
+    "total_r": 2.48,
+    "win_rate": 0.1905,
+    "pf": 1.046,
+    "t": 0.13
+   },
+   "quarters_positive": "9/11"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "spike_k_atr": 3.0,
+   "stop_atr_multiple": 2.5,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 70,
+   "trades": 63,
+   "net_pnl": -51.9,
+   "win_rate": 0.1905,
+   "profit_factor": 0.986,
+   "expectancy_r": null,
+   "max_dd_pct": 7.12,
+   "rejections": {},
+   "exit_reasons": {
+    "SL": 51,
+    "MAX_HOLD": 10,
+    "TP1": 2
+   }
+  }
+ },
+ {
+  "market": "US Tech 100",
+  "strategy": "RangeRevert_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 86,
+    "avg_r": 1.0299,
+    "total_r": 88.58,
+    "win_rate": 0.2442,
+    "pf": 2.295,
+    "t": 2.54
+   },
+   "validate_2025": {
+    "n": 79,
+    "avg_r": 0.2184,
+    "total_r": 17.26,
+    "win_rate": 0.1646,
+    "pf": 1.251,
+    "t": 0.65
+   },
+   "unseen_2026": {
+    "n": 65,
+    "avg_r": 0.3726,
+    "total_r": 24.22,
+    "win_rate": 0.2,
+    "pf": 1.451,
+    "t": 0.98
+   },
+   "quarters_positive": "9/11"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "revert_k_atr": 3.0,
+   "stop_atr_multiple": 2.5,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "short",
+   "require_htf_trend": true,
+   "require_candle_confirm": true
+  },
+  "app": {
+   "signals": 158,
+   "trades": 65,
+   "net_pnl": 1734.36,
+   "win_rate": 0.2,
+   "profit_factor": 1.461,
+   "expectancy_r": null,
+   "max_dd_pct": 7.85,
+   "rejections": {},
+   "exit_reasons": {
+    "SL": 52,
+    "TP1": 8,
+    "MAX_HOLD": 5
+   }
+  }
+ },
+ {
+  "market": "US Tech 100",
+  "strategy": "RangeBreakout_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 227,
+    "avg_r": 0.5054,
+    "total_r": 114.73,
+    "win_rate": 0.4229,
+    "pf": 1.917,
+    "t": 3.43
+   },
+   "validate_2025": {
+    "n": 257,
+    "avg_r": 0.0494,
+    "total_r": 12.69,
+    "win_rate": 0.3152,
+    "pf": 1.074,
+    "t": 0.42
+   },
+   "unseen_2026": {
+    "n": 178,
+    "avg_r": 0.2197,
+    "total_r": 39.11,
+    "win_rate": 0.3371,
+    "pf": 1.339,
+    "t": 1.39
+   },
+   "quarters_positive": "9/11"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "breakout_lookback": 10,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "both",
+   "require_strong_close": true,
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 721,
+   "trades": 176,
+   "net_pnl": 2674.58,
+   "win_rate": 0.3409,
+   "profit_factor": 1.364,
+   "expectancy_r": null,
+   "max_dd_pct": 9.72,
+   "rejections": {
+    "Max positions reached for US Tech 100 (1/1)": 189
+   },
+   "exit_reasons": {
+    "SL": 107,
+    "MAX_HOLD": 65,
+    "TP1": 3,
+    "END_OF_DATA": 1
+   }
+  }
+ },
+ {
+  "market": "US Tech 100",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "select_2023_24": {
+    "n": 252,
+    "avg_r": 0.423,
+    "total_r": 106.59,
+    "win_rate": 0.254,
+    "pf": 1.545,
+    "t": 2.31
+   },
+   "validate_2025": {
+    "n": 272,
+    "avg_r": 0.0385,
+    "total_r": 10.48,
+    "win_rate": 0.2059,
+    "pf": 1.047,
+    "t": 0.26
+   },
+   "unseen_2026": {
+    "n": 187,
+    "avg_r": 0.2539,
+    "total_r": 47.48,
+    "win_rate": 0.2139,
+    "pf": 1.313,
+    "t": 1.25
+   },
+   "quarters_positive": "9/11"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 2.5,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "both",
+   "require_htf_trend": true,
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 700,
+   "trades": 178,
+   "net_pnl": 3327.82,
+   "win_rate": 0.2191,
+   "profit_factor": 1.332,
+   "expectancy_r": null,
+   "max_dd_pct": 14.12,
+   "rejections": {
+    "Max positions reached for US Tech 100 (1/1)": 8
+   },
+   "exit_reasons": {
+    "SL": 137,
+    "TP1": 16,
+    "MAX_HOLD": 24,
+    "END_OF_DATA": 1
+   }
+  }
+ }
+]

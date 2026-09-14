@@ -28,8 +28,10 @@ class PositionManager:
         self._ghost_strike_counts: dict = {}  # ticket -> consecutive empty-history poll count
         self._notified_closes: set = set()    # tickets already notified, prevents duplicate telegrams
         self.GHOST_GRACE_POLLS = 10           # require 10 consecutive polls (~200s) before marking ghost
-        self._cached_atr = {}
-        self._cached_structure = {}
+        # parent trade id -> open time of the last closed bar its exits were replayed on
+        self._last_exit_bar: dict = {}
+        self._primary_tf_by_strategy: dict = {}
+        self._exit_risk_engines: dict = {}
         # UserConfig.magic_base — set by bot_service so the ownership gates
         # below use the user's configured magic range, not just the default.
         self.magic_base: int = 1001
@@ -598,265 +600,16 @@ class PositionManager:
                 if await self._check_strategy_position_exit(pos, live_pos, session, config):
                     continue
 
-                # --- 1. BREAKEVEN LOGIC ---
-                # [5.1/5.5/Part4] be_mode: RR-triggered BE only fires under RR/EITHER —
-                # TP_HIT is handled entirely by the CASCADE block further down, which
-                # already triggers off a sibling TP closing. NONE disables BE outright.
-                be_mode = getattr(risk, 'be_mode', 'EITHER')
-                if (
-                    be_mode in ("RR", "EITHER")
-                    and hasattr(risk, 'be_trigger_rr') and risk.be_trigger_rr > 0
-                    and not pos.be_applied
-                ):
-                    pips_in_profit = (current_price - entry_price) / pip_size_val if is_buy else (entry_price - current_price) / pip_size_val
-
-                    # Phase-5 fix: use the TRUE original SL from the parent Trade as
-                    # the risk basis, not pos.stop_loss (which may have already been
-                    # modified by a prior BE/trailing move) — matches the adjacent
-                    # trailing-stop code's pattern below.
-                    original_sl = 0.0
-                    tq_be = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
-                    pt_be = tq_be.scalars().first()
-                    if pt_be:
-                        original_sl = pt_be.stop_loss
-
-                    # [4.4/D5] Was `risk_pips = 20.0` when the parent's original stop
-                    # couldn't be resolved — a fabricated risk basis that silently
-                    # mis-triggers (or fails to trigger) BE at the wrong R-multiple for
-                    # whatever this symbol's actual stop distance really is. Skip this
-                    # tick instead; it will re-resolve once the parent Trade row is
-                    # consistent (a transient DB race, not a permanent condition).
-                    if original_sl == 0.0:
-                        logger.warning(
-                            f"[BE] {live_pos.ticket} ({symbol}): parent trade's original "
-                            f"stop_loss could not be resolved (parent_trade_id="
-                            f"{pos.parent_trade_id}). Skipping BE check this tick."
-                        )
-                    else:
-                        risk_pips = abs(entry_price - original_sl) / pip_size_val
-
-                        if risk_pips > 0:
-                            current_rr = pips_in_profit / risk_pips
-                            if current_rr >= risk.be_trigger_rr:
-                                be_atr_mult = getattr(risk, 'be_buffer_atr_mult', 0.0)
-                                be_pips = getattr(risk, 'be_buffer_pips', 2.0)
-                                be_spread_mult = getattr(risk, 'be_spread_multiple', 2.0)
-                                atr_val = await self._get_or_fetch_atr(symbol, pip_size_val)
-
-                                # Ensure BE buffer covers spread + commission to prevent net loss
-                                sym_info = mt5.symbol_info(symbol)
-                                tick = mt5.symbol_info_tick(symbol)
-
-                                real_spread = 0.0
-                                if tick and tick.ask > tick.bid:
-                                    real_spread = tick.ask - tick.bid
-                                elif sym_info and sym_info.spread > 0:
-                                    real_spread = sym_info.spread * sym_info.point
-
-                                if real_spread <= 0:
-                                    real_spread = 2.0 * pip_size_val # fallback 2 pips
-
-                                # [4.5/D6/F4] Shared formula with backtest — was an
-                                # independent max(atr, pips) then a SEPARATE max(.., spread*2x)
-                                # bolted on after, diverging from both other BE-buffer
-                                # implementations in this codebase.
-                                from backend.risk.breakeven_manager import resolve_be_buffer
-                                be_buffer = resolve_be_buffer(
-                                    spread_price=real_spread,
-                                    atr=atr_val,
-                                    pip_size=pip_size_val,
-                                    be_buffer_pips=be_pips,
-                                    be_buffer_atr_mult=be_atr_mult,
-                                    be_spread_multiple=be_spread_mult,
-                                )
-
-                                new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
-
-                                move_sl = False
-                                if is_buy and new_sl > current_sl or not is_buy and (current_sl == 0.0 or new_sl < current_sl):
-                                    move_sl = True
-
-                                if move_sl:
-                                    success = await self._modify_sl(live_pos.ticket, symbol, new_sl)
-                                    if success:
-                                        modifications_made = True
-                                        pos.stop_loss = new_sl
-                                        pos.be_applied = True
-                                        logger.info(f"Moved SL to Breakeven: {live_pos.ticket} -> {new_sl}")
-                                    continue  # Skip trailing SL this tick — BE was attempted (success or fail)
-
-                # --- 2. TRAILING SL LOGIC ---
-                tp_level = getattr(pos, 'tp_level', 1) if pos else 1
-                # [5.1/5.5/F2] trail_method_tp1 now resolves like every other
-                # level (getattr on the RiskParams instance) — it used to be
-                # meaningless because the field didn't exist; the fix was
-                # adding it to RiskParams (5.1), not here.
-                trail_method = getattr(risk, f'trail_method_tp{tp_level}', 'NONE')
-                # [4.6/D7/F3] Was unconditional — trailing could start before
-                # break-even no matter what, the opposite of backtest's old
-                # (also wrong) always-require-BE default. Both now honour the
-                # same flag.
-                trail_require_be_first = getattr(risk, 'trail_require_be_first', False)
-                be_gate_ok = (not trail_require_be_first) or pos.be_applied
-                trail_mode = getattr(risk, 'trail_mode', 'RR')
-                if trail_method != "NONE" and be_gate_ok and trail_mode != "NONE":
-                    if trail_mode not in ("RR", "TP_HIT", "EITHER"):
-                        trail_mode = "RR"
-                    # [L1] TP_HIT / EITHER activation is now wired: the trail
-                    # cascade below (mirroring the BE cascade) sets
-                    # `trail_activated` on every surviving sibling once a
-                    # qualifying TP level closes, and the check immediately
-                    # below already honours that flag. The old
-                    # "not yet implemented, falling back to RR" warning has been
-                    # removed rather than left to cry wolf.
-
-                    if pos and getattr(pos, 'trail_activated', False):
-                        current_rr = 999.0
-                        activation_rr = 0.0
-                    else:
-                        original_sl = 0.0
-                        if pos:
-                            tq = await session.execute(select(Trade).where(Trade.id == pos.parent_trade_id))
-                            pt = tq.scalars().first()
-                            if pt: original_sl = pt.stop_loss
-
-                        # [4.4/D5] Was `risk_pips = 20.0` — a fabricated risk
-                        # basis. Skip this tick's trailing check instead of
-                        # trailing against a made-up distance.
-                        if original_sl == 0.0:
-                            logger.warning(
-                                f"[TRAIL] {live_pos.ticket} ({symbol}): parent trade's original "
-                                f"stop_loss could not be resolved (parent_trade_id="
-                                f"{pos.parent_trade_id}). Skipping trailing check this tick."
-                            )
-                            continue
-                        risk_pips = abs(entry_price - original_sl) / pip_size_val
-
-                        pips_in_profit = (current_price - entry_price) / pip_size_val if is_buy else (entry_price - current_price) / pip_size_val
-                        current_rr = pips_in_profit / risk_pips if risk_pips > 0 else 0
-                        activation_rr = getattr(risk, 'trail_trigger_rr', getattr(risk, 'trail_activation_rr', 1.0))
-
-                    if current_rr >= activation_rr:
-                        new_trail_sl = await self._calculate_trailing_sl(symbol, is_buy, current_price, entry_price, current_sl, risk, trail_method, tp_level)
-                        if new_trail_sl is not None:
-                            move_sl = False
-                            if is_buy and new_trail_sl > current_sl or not is_buy and (current_sl == 0.0 or new_trail_sl < current_sl):
-                                move_sl = True
-                                
-                            if move_sl:
-                                success = await self._modify_sl(live_pos.ticket, symbol, new_trail_sl)
-                                if success:
-                                    modifications_made = True
-                                    pos.stop_loss = new_trail_sl
-                                    logger.info(f"Trailed SL: {live_pos.ticket} -> {new_trail_sl}")
-                                    
-                                    if not getattr(pos, 'trail_activated', False):
-                                        pos.trail_activated = True
-
-            # --- BREAKEVEN CASCADE CHECK ---
-            # [5.1/5.5] This IS the live implementation of the TP_HIT BE
-            # trigger (a sibling TP closing) — it used to run unconditionally,
-            # regardless of be_mode or even be_on_tp1_hit, so a user setting
-            # be_mode="RR" (RR-only) still got BE forced on every TP close.
-            # Trigger off the LOWEST tp_level sub-position that has closed, not hardcoded TP1.
-            # This handles partial fills where TP1's order failed but TP2/TP3 succeeded.
-            _be_mode_cascade = getattr(risk, 'be_mode', 'EITHER')
-            for parent_id, positions in ({} if _be_mode_cascade in ("RR", "NONE") else trades_map).items():
-                sorted_positions = sorted(positions, key=lambda p: p.tp_level)
-                trigger_pos = None
-                for sp in sorted_positions:
-                    if sp.mt5_ticket not in mt5_tickets and sp.status in ("CLOSED", "RECONCILE_FAILED"):
-                        trigger_pos = sp
-                        break
-
-                if trigger_pos:
-                    alive_positions = [p for p in positions if p.mt5_ticket in mt5_tickets]
-                    if alive_positions:
-                        is_buy = alive_positions[0].entry_price < alive_positions[0].take_profit if alive_positions[0].take_profit else (mt5_tickets[alive_positions[0].mt5_ticket].type == mt5.POSITION_TYPE_BUY)
-                        entry_price = alive_positions[0].entry_price
-                        symbol = mt5_tickets[alive_positions[0].mt5_ticket].symbol
-                        pip_size_val = get_pip_size(symbol)
-                        # Use both ATR and Pip relative buffers, taking the max
-                        be_atr_mult = getattr(risk, 'be_buffer_atr_mult', 0.0)
-                        be_pips = getattr(risk, 'be_buffer_pips', 2.0)
-                        be_spread_mult = getattr(risk, 'be_spread_multiple', 2.0)
-                        # Fetch real ATR
-                        atr_val = await self._get_or_fetch_atr(symbol, pip_size_val)
-
-                        # Ensure BE buffer covers spread + commission to prevent net loss
-                        sym_info = mt5.symbol_info(symbol)
-                        tick = mt5.symbol_info_tick(symbol)
-
-                        real_spread = 0.0
-                        if tick and tick.ask > tick.bid:
-                            real_spread = tick.ask - tick.bid
-                        elif sym_info and sym_info.spread > 0:
-                            real_spread = sym_info.spread * sym_info.point
-
-                        if real_spread <= 0:
-                            real_spread = 2.0 * pip_size_val # fallback 2 pips
-
-                        # [4.5/D6/F4] Shared formula — see resolve_be_buffer().
-                        from backend.risk.breakeven_manager import resolve_be_buffer
-                        be_buffer = resolve_be_buffer(
-                            spread_price=real_spread,
-                            atr=atr_val,
-                            pip_size=pip_size_val,
-                            be_buffer_pips=be_pips,
-                            be_buffer_atr_mult=be_atr_mult,
-                            be_spread_multiple=be_spread_mult,
-                        )
-
-                        new_sl = entry_price + be_buffer if is_buy else entry_price - be_buffer
-                        
-                        for alive_pos in alive_positions:
-                            current_sl = alive_pos.stop_loss
-                            move_sl = False
-                            if is_buy and new_sl > current_sl or not is_buy and (current_sl == 0.0 or new_sl < current_sl):
-                                move_sl = True
-                            
-                            if move_sl and not alive_pos.be_applied:
-                                success = await self._modify_sl(alive_pos.mt5_ticket, symbol, new_sl)
-                                if success:
-                                    alive_pos.stop_loss = new_sl
-                                    alive_pos.be_applied = True
-                                    modifications_made = True
-                                    logger.info(f"Cascade BE (triggered by TP{trigger_pos.tp_level}): {alive_pos.mt5_ticket} -> {new_sl}")
-
-            # ── [L1] TP_HIT trail-activation cascade ─────────────────────
-            # Mirrors the break-even cascade directly above. A position cannot
-            # see its siblings on its own tick, so `trail_mode="TP_HIT"` (and
-            # the TP_HIT half of "EITHER") had no way to fire in live trading
-            # and silently degraded to the RR condition.
-            #
-            # Rule: once the LOWEST closed TP level for a group reaches
-            # `trail_trigger_tp_level`, every still-open sibling is marked
-            # trail_activated. The per-position check above then treats that as
-            # the activation condition, exactly as the backtester does.
-            _trail_mode_cascade = getattr(risk, 'trail_mode', 'EITHER')
-            _trail_trigger_level = getattr(risk, 'trail_trigger_tp_level', 1) or 1
-            if _trail_mode_cascade in ("TP_HIT", "EITHER"):
-                for parent_id, positions in trades_map.items():
-                    closed_levels = [
-                        sp.tp_level for sp in positions
-                        if sp.mt5_ticket not in mt5_tickets
-                        and sp.status in ("CLOSED", "RECONCILE_FAILED")
-                        and sp.tp_level is not None
-                    ]
-                    if not closed_levels or min(closed_levels) > _trail_trigger_level:
-                        continue
-                    for alive_pos in positions:
-                        if alive_pos.mt5_ticket not in mt5_tickets:
-                            continue
-                        if getattr(alive_pos, 'trail_activated', False):
-                            continue
-                        alive_pos.trail_activated = True
-                        modifications_made = True
-                        logger.info(
-                            f"[TRAIL] Cascade activation (TP{min(closed_levels)} closed, "
-                            f"trigger level {_trail_trigger_level}): "
-                            f"{alive_pos.mt5_ticket} trail armed."
-                        )
+            # --- Break-even / trailing: exactly as a backtest of each trade applies them ---
+            # One pass per newly closed bar through risk/exit_replay.py (the code both
+            # backtest engines run), under the trade's own strategy exits. This replaced
+            # a per-tick implementation that read the global risk settings, trailed from
+            # the tick price and computed its own ATR and swings.
+            try:
+                if await self._apply_backtest_exits(session, config, trades_map, mt5_tickets):
+                    modifications_made = True
+            except Exception as e:
+                logger.error(f"[EXITS] backtest-parity exit management failed: {e}")
 
             if modifications_made:
                 await session.commit()
@@ -883,91 +636,134 @@ class PositionManager:
                     "data": live_data
                 })
 
-    async def _calculate_trailing_sl(self, symbol: str, is_buy: bool, current_price: float, entry_price: float, current_sl: float, risk, trail_method: str, tp_level: int = 1) -> float | None:
-        """
-        Calculate the trailing SL based on user method.
-        Returns the new SL price, or None if no trailing adjustment should be made.
-        """
-        pip_size_val = get_pip_size(symbol)
-        step = getattr(risk, 'trail_step_pips', 5.0) * pip_size_val
-        if step <= 0: step = pip_size_val
+    async def _apply_backtest_exits(self, session, config, trades_map, mt5_tickets) -> bool:
+        """Move each bot trade's stops to where a backtest of that trade holds them.
 
-        if trail_method == "FIXED_PIPS":
-            trail_distance = getattr(risk, 'trail_pips', 15.0) * pip_size_val
-            new_sl = current_price - trail_distance if is_buy else current_price + trail_distance
-            
-            if is_buy:
-                if new_sl >= current_sl + step: return new_sl
-            else:
-                if current_sl == 0.0 or new_sl <= current_sl - step: return new_sl
-            return None
+        For every trade group with an open leg, once per newly closed bar of the
+        strategy's primary timeframe: replay the closed bars since entry through
+        risk/exit_replay.replay_stops — highest/lowest, RiskEngine.manage_open_position
+        with the shared ATR and swing points, the TP1 break-even cascade — under the
+        risk config the entry was placed with (risk/live_risk_config.py, strategy
+        exits included), then tighten any leg whose stop is behind the replay.
+        Stateless: a restart or a skipped pass lands on the same stops.
+        Returns True if a stop or a flag changed."""
+        import hashlib
+        import json
+        import time
 
-        elif trail_method == "ATR_TRAIL":
-            atr_val = await self._get_or_fetch_atr(symbol, pip_size_val)
-            if not atr_val: return None
-            atr = atr_val
-            
-            multiplier = 0.5 if tp_level == "aggressive" else getattr(risk, f'atr_trail_multiplier_tp{tp_level}', getattr(risk, 'atr_trail_multiplier', 1.5))
-            trail_distance = atr * multiplier
-            new_sl = current_price - trail_distance if is_buy else current_price + trail_distance
-            
-            if is_buy:
-                if new_sl >= current_sl + step: return new_sl
-            else:
-                if current_sl == 0.0 or new_sl <= current_sl - step: return new_sl
-            return None
-            
-        elif trail_method == "PCT_TRAIL":
-            trail_pct = getattr(risk, 'trail_pct', 0.5) / 100.0
-            trail_distance = current_price * trail_pct
-            new_sl = current_price - trail_distance if is_buy else current_price + trail_distance
-            
-            if is_buy:
-                if new_sl >= current_sl + step: return new_sl
-            else:
-                if current_sl == 0.0 or new_sl <= current_sl - step: return new_sl
-            return None
+        import pandas as pd
 
-        elif trail_method == "STRUCTURE_TRAIL":
-            now = datetime.utcnow().timestamp()
-            struct_data = self._cached_structure.get(symbol)
-            
-            if not struct_data or (now - struct_data['time']) > 300: # 5 min cache
+        from backend.backtester.engine import resolve_effective_costs
+        from backend.data.models import Trade
+        from backend.mt5.data_fetcher import DataFetcher
+        from backend.risk.engine import RiskEngine
+        from backend.risk.exit_replay import LegState, replay_stops
+        from backend.risk.live_risk_config import build_live_risk_config
+        from backend.strategies.bar_feed import TF_MINUTES, primary_timeframe
+        from backend.strategies.registry import get_strategy, list_strategies
+
+        changed = False
+        for parent_id, legs in trades_map.items():
+            alive = [lp for lp in legs if lp.mt5_ticket in mt5_tickets]
+            if not alive:
+                self._last_exit_bar.pop(parent_id, None)
+                continue
+            trade = await session.get(Trade, parent_id)
+            if trade is None or not trade.entry_time or not trade.stop_loss or not trade.entry_price:
+                continue
+            if trade.strategy_id not in list_strategies():
+                continue  # manual / adopted trades have no backtest to follow
+
+            tf = self._primary_tf_by_strategy.get(trade.strategy_id)
+            if tf is None:
                 try:
-                    from backend.mt5.data_fetcher import DataFetcher
-                    from backend.strategies.core.market_structure import (
-                        MarketStructureDetector,
-                    )
-                    candles = await DataFetcher.get_historical_data(symbol, "M15", 100)
-                    if not candles.empty:
-                        bars = getattr(risk, 'trail_structure_bars', 3)
-                        structure = MarketStructureDetector(swing_length=bars)
-                        structure.update(candles)
-                        self._cached_structure[symbol] = {'swings': structure.swings, 'time': now}
-                        struct_data = self._cached_structure[symbol]
-                except Exception as e:
-                    logger.warning(f"Failed to fetch structure for trailing SL on {symbol}: {e}")
-            
-            if not struct_data: return None
-            swings = struct_data['swings']
-            
-            if is_buy:
-                recent_lows = [s for s in swings if s["type"] == "LOW" and s["price"] < current_price]
-                if recent_lows:
-                    last_low = recent_lows[-1]["price"]
-                    buffer = 2.0 * pip_size_val
-                    new_sl = last_low - buffer
-                    if new_sl > current_sl + step: return new_sl
+                    tf = primary_timeframe(get_strategy(trade.strategy_id)(config).get_required_timeframes())
+                except Exception:
+                    tf = "M5"
+                self._primary_tf_by_strategy[trade.strategy_id] = tf
+            tf_sec = TF_MINUTES.get(tf, 5) * 60
+            entry_ts = int(pd.Timestamp(trade.entry_time).timestamp())  # stored naive UTC
+            entry_bar = entry_ts - entry_ts % tf_sec
+            count = int(min(5000, max(80, (int(time.time()) - entry_bar) // tf_sec + 60)))
+            df = await DataFetcher.get_historical_data(trade.symbol, tf, count=count)
+            if df is None or len(df) < 3:
+                continue
+            df = df.iloc[:-1]  # the last row is still forming
+            if "time" in df.columns:
+                times = pd.to_numeric(df["time"]).to_numpy(dtype="int64")
             else:
-                recent_highs = [s for s in swings if s["type"] == "HIGH" and s["price"] > current_price]
-                if recent_highs:
-                    last_high = recent_highs[-1]["price"]
-                    buffer = 2.0 * pip_size_val
-                    new_sl = last_high + buffer
-                    if current_sl == 0.0 or new_sl < current_sl - step: return new_sl
-            return None
+                times = pd.DatetimeIndex(df.index).as_unit("s").asi8
+            last_closed = int(times[-1])
+            if last_closed <= entry_bar or self._last_exit_bar.get(parent_id) == last_closed:
+                continue
 
-        return None
+            risk_config, _ = build_live_risk_config(config, trade.strategy_id)
+            fp = hashlib.sha256(json.dumps(risk_config, sort_keys=True, default=str).encode()).hexdigest()
+            engine = self._exit_risk_engines.get(fp)
+            if engine is None:
+                engine = self._exit_risk_engines[fp] = RiskEngine(risk_config)
+
+            is_buy = str(trade.direction).upper() in ("BUY", "BULLISH", "LONG")
+            base = mt5_tickets[min(alive, key=lambda lp: lp.tp_level or 1).mt5_ticket]
+            entry_px = float(base.price_open)
+            dist = float(trade.entry_price) - float(trade.stop_loss)  # order_manager keeps it across the fill
+            states = []
+            for lp in legs:
+                live = mt5_tickets.get(lp.mt5_ticket)
+                closed_at, by_target = None, False
+                if live is None:
+                    if lp.exit_time is None:
+                        continue  # closed but not reconciled yet — the next pass picks it up
+                    ts = int(pd.Timestamp(lp.exit_time).timestamp())
+                    closed_at = ts - ts % tf_sec
+                    by_target = str(lp.exit_reason or "").upper().startswith("TP")
+                states.append(LegState(level=int(lp.tp_level or 1), stop_loss=entry_px - dist,
+                                       closed_at=closed_at, closed_by_target=by_target))
+            costs = resolve_effective_costs(trade.symbol, risk_config)
+            replayed = replay_stops(
+                direction="BUY" if is_buy else "SELL", entry_price=entry_px, initial_stop=entry_px - dist,
+                legs=states, times=times, high=df["high"].to_numpy(dtype=float),
+                low=df["low"].to_numpy(dtype=float), close=df["close"].to_numpy(dtype=float),
+                entry_bar_time=entry_bar, risk_config=risk_config, symbol=trade.symbol,
+                spread_pips=float(costs.get("spread_pips") or 0.0), risk_engine=engine,
+            )
+            self._last_exit_bar[parent_id] = last_closed
+
+            info = mt5.symbol_info(trade.symbol)
+            point = float(getattr(info, "point", 0.0) or 0.0)
+            tick = mt5.symbol_info_tick(trade.symbol)
+            for lp in alive:
+                st = replayed.get(int(lp.tp_level or 1))
+                if st is None:
+                    continue
+                live = mt5_tickets[lp.mt5_ticket]
+                target = st.stop_loss + (float(live.price_open) - entry_px)
+                current = float(live.sl or 0.0)
+                tighter = (target > current + point / 2) if is_buy else (current == 0.0 or target < current - point / 2)
+                if tighter:
+                    beyond = tick is not None and ((is_buy and target >= tick.bid) or (not is_buy and target <= tick.ask))
+                    if beyond:
+                        # The backtest's stop for the next bar is already through the
+                        # market, so it fills at that bar's open — close now.
+                        from backend.mt5.order_manager import OrderManager
+                        if await OrderManager.close_position(lp.mt5_ticket):
+                            logger.info(f"[EXITS] {lp.mt5_ticket} ({trade.symbol}) closed: replayed stop "
+                                        f"{target} is through the market, as the backtest would fill it")
+                            changed = True
+                        continue
+                    if await self._modify_sl(lp.mt5_ticket, trade.symbol, target):
+                        lp.stop_loss = target
+                        changed = True
+                        logger.info(f"[EXITS] {lp.mt5_ticket} ({trade.symbol}) stop -> {target} "
+                                    f"({'break-even' if st.be_applied else ''}{' trail' if st.trail_applied else ''})")
+                if st.be_applied and not lp.be_applied:
+                    lp.be_applied = True
+                    changed = True
+                if st.trail_applied and not getattr(lp, "trail_activated", False):
+                    lp.trail_activated = True
+                    changed = True
+        return changed
+
 
     async def _check_vwap_hard_close(self, pos, live_pos, session, config) -> bool:
         """
@@ -1167,31 +963,5 @@ class PositionManager:
         except Exception as e:
             logger.error(f"Error modifying SL for {ticket}: {e}")
             return False
-
-    async def _get_or_fetch_atr(self, symbol: str, pip_size_val: float) -> float:
-        now = datetime.utcnow().timestamp()
-        atr_data = self._cached_atr.get(symbol)
-        
-        if not atr_data or (now - atr_data['time']) > 60:
-            try:
-                import pandas as pd
-                from backend.mt5.data_fetcher import DataFetcher
-                candles = await DataFetcher.get_historical_data(symbol, "M5", 30)
-                if not candles.empty:
-                    candles['prev_close'] = candles['close'].shift(1)
-                    candles['tr1'] = candles['high'] - candles['low']
-                    candles['tr2'] = abs(candles['high'] - candles['prev_close'])
-                    candles['tr3'] = abs(candles['low'] - candles['prev_close'])
-                    candles['tr'] = candles[['tr1', 'tr2', 'tr3']].max(axis=1)
-                    atr_val = candles['tr'].rolling(window=14).mean().iloc[-1]
-                    if not pd.isna(atr_val):
-                        self._cached_atr[symbol] = {'atr': atr_val, 'time': now}
-                        return atr_val
-            except Exception as e:
-                logger.warning(f"Failed to fetch ATR for {symbol}: {e}")
-        elif atr_data:
-            return atr_data['atr']
-            
-        return 10.0 * pip_size_val
 
 position_manager = PositionManager()

@@ -48,7 +48,7 @@ async def run(args) -> dict:
         max_daily_drawdown_pct=args.daily_dd, max_weekly_drawdown_pct=args.weekly_dd,
         max_concurrent_positions=args.max_positions, max_positions_per_symbol=args.max_per_symbol,
         max_daily_trades=args.max_daily_trades, tp_count=1, tp1_rr=args.tp1_rr,
-        strategy_params=json.loads(args.strategy_params), replay_enabled=False,
+        strategy_params=json.loads(args.strategy_params), replay_enabled=False, min_rr=args.min_rr,
         sizing_basis=args.sizing_basis, allow_pyramiding=args.pyramiding or None,
         stop_fill_model=args.fill_model, max_risk_hard_cap_pct=max(3.0, args.risk),
         # None = let broker_costs resolve it (what the Backtester page does).
@@ -60,6 +60,8 @@ async def run(args) -> dict:
     # ── engine, exactly as the route builds it ──
     config = UserConfigV2()
     config.risk.min_rr = req.min_rr
+    config.risk.tp_count = 1
+    config.risk.tp1_rr = req.tp1_rr
     config.risk.risk_per_trade_pct = req.risk_per_trade_pct
     config.risk.max_daily_drawdown_pct = req.max_daily_drawdown_pct
     config.risk.max_weekly_drawdown_pct = req.max_weekly_drawdown_pct
@@ -82,37 +84,18 @@ async def run(args) -> dict:
         by_tf[tf] = (df.set_index(pd.to_datetime(df["time"], unit="s")) if "time" in df.columns else df).sort_index()
     primary = sorted(required, key=lambda t: tf_min.get(t, 999))[0]
 
-    # ── the route's signal loop, multi-timeframe ──
-    # The fastest timeframe is the clock. A higher timeframe is fed only when it has
-    # produced a NEW fully-closed bar as of the current moment (the same cutoff the
-    # route uses), so an H4 strategy never sees a half-formed H4 candle.
-    np_td = {"M1": (1, "m"), "M5": (5, "m"), "M15": (15, "m"), "M30": (30, "m"),
-             "H1": (1, "h"), "H4": (4, "h"), "D1": (1, "D")}
+    # ── the route's signal loop, multi-timeframe — the shared feeder ──
+    from backend.strategies.bar_feed import BarFeed
+
+    feed = BarFeed(engine, req.symbol, required)
+    feed.bind(by_tf)
     df = by_tf[primary]
     times = df.index.values
-    tf_times = {tf: by_tf[tf].index.values for tf in required}
-    prev_time_by_tf: dict[str, object] = {tf: None for tf in required}
     cutoff = np.datetime64(start_dt)
     signals = []
     for i in range(300, len(times)):
         current_time = times[i]
-        sig = None
-        for tf in required:
-            if tf == primary:
-                tf_end, last_tf_time = i, times[i]
-            else:
-                htf_cut = current_time - np.timedelta64(*np_td[tf])
-                tf_end = int(np.searchsorted(tf_times[tf], htf_cut, side="right"))
-                last_tf_time = tf_times[tf][tf_end - 1] if tf_end > 0 else None
-            if last_tf_time is None or last_tf_time == prev_time_by_tf[tf]:
-                continue
-            sl = by_tf[tf].iloc[max(0, tf_end - window_bars(tf, engine)):tf_end]
-            if len(sl) < 20:
-                continue
-            s = await engine.on_bar(req.symbol, tf, sl)
-            if s:
-                sig = s
-            prev_time_by_tf[tf] = last_tf_time
+        sig = await feed.step(i)
         if sig and current_time >= cutoff:
             # Same stamping rule as the route: the signal belongs to the last bar in
             # the slice (i-1), so the engine fills it at bar i's open — live's price.
@@ -185,6 +168,8 @@ def main() -> int:
     ap.add_argument("--balance", type=float, default=10000.0)
     ap.add_argument("--risk", type=float, default=1.0)
     ap.add_argument("--tp1-rr", type=float, default=3.0)
+    ap.add_argument("--min-rr", type=float, default=None,
+                    help="RiskEngine minimum R:R; defaults to the target so a chosen 1:2 is not rejected by the 3.0 default")
     ap.add_argument("--daily-dd", type=float, default=10.0)
     ap.add_argument("--weekly-dd", type=float, default=30.0)
     ap.add_argument("--max-positions", type=int, default=10)
@@ -201,6 +186,8 @@ def main() -> int:
     ap.add_argument("--slippage", type=float, default=None)
     ap.add_argument("--max-margin-pct", type=float, default=None)
     args = ap.parse_args()
+    if args.min_rr is None:
+        args.min_rr = min(args.tp1_rr, 3.0)
     print(json.dumps(asyncio.run(run(args)), indent=2, default=str))
     return 0
 

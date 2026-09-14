@@ -140,12 +140,12 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
     "DriftJumpAlpha_v1": "drift_jump_alpha",
     "BoomDriftJump_v1": "boom_drift_jump",
     "ORB_v1": "orb",
-    "Donchian_v1": "donchian",
-    "EMAPullback_v1": "ema_pullback",
-    "RSI2_v1": "rsi2",
-    "BollingerFade_v1": "bollinger_fade",
-    "VolBreakout_v1": "vol_breakout",
-    "TSMOM_v1": "tsmom",
+    "HTFFVGFlip_v1": "htf_fvg_flip",
+    "BiasIFVG_v1": "bias_ifvg",
+    "SpikeFade_v1": "synth",
+    "RangeRevert_v1": "synth",
+    "RangeBreakout_v1": "synth",
+    "TrendDrift_v1": "synth",
 }
 
 
@@ -872,14 +872,15 @@ async def run_backtest_endpoint(
             # scan loop also reads — the two used to be independent literals and
             # live handed strategies 5,000 M5 bars against this 500.
             from backend.strategies.windows import window_bars as _window_bars
+            from backend.strategies.windows import WARMUP_BASE_DAYS
             TF_META = {
-                "M1":  {"np_td": (1,  'm'), "warmup_days": 1,   "window": _window_bars("M1")},
-                "M5":  {"np_td": (5,  'm'), "warmup_days": 5,   "window": _window_bars("M5")},
-                "M15": {"np_td": (15, 'm'), "warmup_days": 10,  "window": _window_bars("M15")},
-                "M30": {"np_td": (30, 'm'), "warmup_days": 15,  "window": _window_bars("M30")},
-                "H1":  {"np_td": (1,  'h'), "warmup_days": 30,  "window": _window_bars("H1")},
-                "H4":  {"np_td": (4,  'h'), "warmup_days": 150, "window": _window_bars("H4")},
-                "D1":  {"np_td": (1,  'D'), "warmup_days": 365, "window": _window_bars("D1")},
+                "M1":  {"np_td": (1,  'm'), "warmup_days": WARMUP_BASE_DAYS["M1"],   "window": _window_bars("M1")},
+                "M5":  {"np_td": (5,  'm'), "warmup_days": WARMUP_BASE_DAYS["M5"],   "window": _window_bars("M5")},
+                "M15": {"np_td": (15, 'm'), "warmup_days": WARMUP_BASE_DAYS["M15"],  "window": _window_bars("M15")},
+                "M30": {"np_td": (30, 'm'), "warmup_days": WARMUP_BASE_DAYS["M30"],  "window": _window_bars("M30")},
+                "H1":  {"np_td": (1,  'h'), "warmup_days": WARMUP_BASE_DAYS["H1"],  "window": _window_bars("H1")},
+                "H4":  {"np_td": (4,  'h'), "warmup_days": WARMUP_BASE_DAYS["H4"], "window": _window_bars("H4")},
+                "D1":  {"np_td": (1,  'D'), "warmup_days": WARMUP_BASE_DAYS["D1"], "window": _window_bars("D1")},
             }
 
             # The fastest (primary clock) timeframe drives the simulation loop.
@@ -948,7 +949,11 @@ async def run_backtest_endpoint(
                 primary_times = primary_sorted.index.values
 
                 # Prev-time trackers per TF to avoid calling on_bar for the same candle twice
-                prev_time_by_tf: dict = {tf: None for tf in required_tfs}
+                # The shared feeder (strategies/bar_feed.py) — the same bar sequence the live
+                # scan loop hands its engines, so a backtest and live see identical calls.
+                from backend.strategies.bar_feed import BarFeed
+                _feed = BarFeed(engine, req.symbol, required_tfs)
+                _feed.bind(indexed_by_tf)
 
                 last_yield_time = time.monotonic()
 
@@ -1027,46 +1032,7 @@ async def run_backtest_endpoint(
                             "close": float(_rep_c[i]),
                         })
 
-                    sig = None
-
-                    for tf in required_tfs:
-                        meta = TF_META.get(tf, TF_META["M5"])
-                        sorted_tf = indexed_by_tf[tf]
-                        tf_times = _tf_times_by_tf[tf]
-
-                        if tf == primary_tf:
-                            # Primary TF: use current bar index minus 1 (closed candle)
-                            tf_end = i
-                            last_tf_time = primary_times[i]
-                        else:
-                            # HTF: find fully closed candle before current_time
-                            np_td, np_unit = meta["np_td"]
-                            cutoff = current_time - np.timedelta64(np_td, np_unit)
-                            tf_end = int(np.searchsorted(tf_times, cutoff, side='right'))
-                            last_tf_time = tf_times[tf_end - 1] if tf_end > 0 else None
-
-                        # Build the DataFrame slice ONLY once this timeframe has
-                        # actually produced a new bar.
-                        #
-                        # The slice used to be built on every iteration and then
-                        # thrown away unless the timeframe had advanced — so on
-                        # M5-driven data an H4 slice was constructed ~48x more
-                        # often than it was used. Measured on XAUUSD/APA over
-                        # 1,200 bars (scripts/profile_signal_loop.py):
-                        #     slice every bar   18.22s   2,400 slices / 1,602 used
-                        #     slice on advance   8.66s   1,602 slices / 1,602 used
-                        # Identical signals out; 2.1x faster.
-                        if last_tf_time is None or last_tf_time == prev_time_by_tf[tf]:
-                            continue
-
-                        slice_tf = sorted_tf.iloc[max(0, tf_end - _window_bars(tf, engine)):tf_end]
-                        if len(slice_tf) < 20:
-                            continue
-
-                        s = await engine.on_bar(req.symbol, tf, slice_tf)
-                        if s:
-                            sig = s
-                        prev_time_by_tf[tf] = last_tf_time
+                    sig = await _feed.step(i)
 
                     if sig and not is_warmup:
                         # [P6.1] Stamp the signal with the bar that PRODUCED it, not with
@@ -1455,14 +1421,15 @@ async def run_portfolio_backtest_endpoint(
             # scan loop also reads — the two used to be independent literals and
             # live handed strategies 5,000 M5 bars against this 500.
             from backend.strategies.windows import window_bars as _window_bars
+            from backend.strategies.windows import WARMUP_BASE_DAYS
             TF_META = {
-                "M1":  {"np_td": (1,  'm'), "warmup_days": 1,   "window": _window_bars("M1")},
-                "M5":  {"np_td": (5,  'm'), "warmup_days": 5,   "window": _window_bars("M5")},
-                "M15": {"np_td": (15, 'm'), "warmup_days": 10,  "window": _window_bars("M15")},
-                "M30": {"np_td": (30, 'm'), "warmup_days": 15,  "window": _window_bars("M30")},
-                "H1":  {"np_td": (1,  'h'), "warmup_days": 30,  "window": _window_bars("H1")},
-                "H4":  {"np_td": (4,  'h'), "warmup_days": 150, "window": _window_bars("H4")},
-                "D1":  {"np_td": (1,  'D'), "warmup_days": 365, "window": _window_bars("D1")},
+                "M1":  {"np_td": (1,  'm'), "warmup_days": WARMUP_BASE_DAYS["M1"],   "window": _window_bars("M1")},
+                "M5":  {"np_td": (5,  'm'), "warmup_days": WARMUP_BASE_DAYS["M5"],   "window": _window_bars("M5")},
+                "M15": {"np_td": (15, 'm'), "warmup_days": WARMUP_BASE_DAYS["M15"],  "window": _window_bars("M15")},
+                "M30": {"np_td": (30, 'm'), "warmup_days": WARMUP_BASE_DAYS["M30"],  "window": _window_bars("M30")},
+                "H1":  {"np_td": (1,  'h'), "warmup_days": WARMUP_BASE_DAYS["H1"],  "window": _window_bars("H1")},
+                "H4":  {"np_td": (4,  'h'), "warmup_days": WARMUP_BASE_DAYS["H4"], "window": _window_bars("H4")},
+                "D1":  {"np_td": (1,  'D'), "warmup_days": WARMUP_BASE_DAYS["D1"], "window": _window_bars("D1")},
             }
             TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
 
@@ -1691,7 +1658,11 @@ async def run_portfolio_backtest_endpoint(
                 indexed_by_tf = {tf: _index_candles(df).sort_index() for tf, df in candles_by_tf.items()}
                 primary_sorted = indexed_by_tf[primary_tf]
                 primary_times = primary_sorted.index.values
-                prev_time_by_tf = {tf: None for tf in required_tfs}
+                # The shared feeder (strategies/bar_feed.py) — the same bar sequence the live
+                # scan loop hands its engines, so a backtest and live see identical calls.
+                from backend.strategies.bar_feed import BarFeed
+                _feed = BarFeed(strategy_engine, sym, required_tfs)
+                _feed.bind(indexed_by_tf)
 
                 # Generate signals for this symbol
                 sym_signals = []
@@ -1759,35 +1730,7 @@ async def run_portfolio_backtest_endpoint(
                             "close": float(_rep_c[i]),
                         })
 
-                    sig = None
-
-                    for tf in required_tfs:
-                        meta = TF_META.get(tf, TF_META["M5"])
-                        sorted_tf = indexed_by_tf[tf]
-                        tf_times = _tf_times_by_tf[tf]
-
-                        if tf == primary_tf:
-                            tf_end = i
-                            last_tf_time = primary_times[i]
-                        else:
-                            np_td, np_unit = meta["np_td"]
-                            cutoff = current_time - np.timedelta64(np_td, np_unit)
-                            tf_end = int(np.searchsorted(tf_times, cutoff, side='right'))
-                            last_tf_time = tf_times[tf_end - 1] if tf_end > 0 else None
-
-                        # Slice only once the timeframe has advanced — see the
-                        # single-symbol route for the measurement (2.1x).
-                        if last_tf_time is None or last_tf_time == prev_time_by_tf[tf]:
-                            continue
-
-                        slice_tf = sorted_tf.iloc[max(0, tf_end - _window_bars(tf, strategy_engine)):tf_end]
-                        if len(slice_tf) < 20:
-                            continue
-
-                        s = await strategy_engine.on_bar(sym, tf, slice_tf)
-                        if s:
-                            sig = s
-                        prev_time_by_tf[tf] = last_tf_time
+                    sig = await _feed.step(i)
 
                     if sig and not is_warmup:
                         sig_time = int(current_time.astype('datetime64[s]').astype(int)) if hasattr(current_time, 'astype') else int(current_time)
@@ -1837,7 +1780,7 @@ async def run_portfolio_backtest_endpoint(
                 # Use the primary timeframe candles as the simulation dataframe for this symbol
                 primary_df = primary_sorted.copy()
                 if 'time' not in primary_df.columns:
-                    primary_df['time'] = primary_df.index.astype('int64') // 10**9
+                    primary_df['time'] = pd.DatetimeIndex(primary_df.index).as_unit('s').asi8
 
                 # [12.8] Keyed by slot_key, not bare `sym` — lets two rows
                 # share `sym` under different strategies without colliding.

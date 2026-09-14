@@ -156,42 +156,40 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
         ),
     },
 
-    # ── Classic families (strategy_classic, data/edge_lab/classic_book.json) ──
-    # Settings chosen on 2024-01..2025-12 per market, then held unchanged over
-    # 2022-23 (never seen) and 2026-01..09. Families the research ran with no
-    # target carry tp1_rr 10 so the strategy's own exit closes them.
-    "Donchian_v1": {
-        "tp_count": 1, "tp1_rr": 10.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
-        "evidence": (
-            "classic_book: N55 long, channel exit — XAUUSD 2022-23 -0.00R / 2024-25 +0.63R / 2026 +0.47R; "
-            "BTCUSD +0.63R / +0.25R / +0.08R. US Tech 100 N55 trail +0.22R / +0.07R."
-        ),
+    # ── Restored 2026-09-14 (removed 2026-09-11) ─────────────────────────────
+    # Exit settings are the pre-removal measured ones; the 2026-09-14 confluence
+    # study re-measures every one of them — see the evidence strings once updated.
+    "HTFFVGFlip_v1": {
+        "tp1_rr": 4.0,
+        "session_filter_enabled": False,
+        "trail_method_tp1": "NONE",
+        "trail_mode": "NONE",
+        "be_mode": "EITHER",
+        "evidence": "research/16: 1:4 the only profitable fixed R:R; session gate ablation -0.170.",
     },
-    "EMAPullback_v1": {
-        "tp_count": 1, "tp1_rr": 3.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
-        "evidence": (
-            "classic_book: EMA 50/200 long 1:10 — XAUUSD 2022-23 +0.32R / 2024-25 +1.03R / 2026 +0.38R; "
-            "BTCUSD +0.08R / +0.49R / +0.20R. Shared 20/50 1:3 failed in 2026 on 3 of 4 markets."
-        ),
+    "BiasIFVG_v1": {
+        "tp1_rr": 3.0,
+        "trail_method_tp1": "NONE",
+        "trail_mode": "NONE",
+        "be_mode": "EITHER",
+        "be_trigger_rr": 1.5,
+        "evidence": "research/16: 1:3 best fixed R:R; session gate ablation +0.126.",
     },
-    "RSI2_v1": {
-        "tp_count": 1, "tp1_rr": 10.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
-        "evidence": "classic_book: RSI(2)<10 long, 24h hold — between -0.05R and +0.03R on all four markets in all windows. No edge.",
+    "SpikeFade_v1": {
+        "tp_count": 1, "tp1_rr": 5.0, "be_mode": "NONE", "trail_method_tp1": "NONE",
+        "evidence": "research/26 — best on Range Break 100 (+77.7%, PF 1.25, DD 22.2%).",
     },
-    "BollingerFade_v1": {
-        "tp_count": 1, "tp1_rr": 10.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
-        "evidence": "classic_book: every per-market pick lost in 2026 (-0.16R to -0.00R); no shared setting passed selection.",
+    "RangeRevert_v1": {
+        "tp_count": 1, "tp1_rr": 5.0, "be_mode": "NONE", "trail_method_tp1": "NONE",
+        "evidence": "research/26 — best on Vol 100 (+168.6%, PF 1.36) and Boom 500.",
     },
-    "VolBreakout_v1": {
-        "tp_count": 1, "tp1_rr": 10.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
-        "evidence": (
-            "classic_book: BTCUSD N20 x2.0 volume 2022-23 +0.46R / 2024-25 +0.28R / 2026 +3.7R on only 10 trades; "
-            "XAUUSD N55 x1.5 long -0.05R / +0.31R / +0.18R."
-        ),
+    "RangeBreakout_v1": {
+        "tp_count": 1, "tp1_rr": 3.0, "be_mode": "NONE", "trail_method_tp1": "NONE",
+        "evidence": "research/26 — best on Volatility 25 (+64.3%, PF 1.07, DD 27.9%).",
     },
-    "TSMOM_v1": {
-        "tp_count": 1, "tp1_rr": 10.0, "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
-        "evidence": "classic_book: 4-15 trades per market per window — too few to measure anything.",
+    "TrendDrift_v1": {
+        "tp_count": 1, "tp1_rr": 8.0, "be_mode": "NONE", "trail_method_tp1": "NONE",
+        "evidence": "research/26 — best on Crash 1000 (+120.5%, PF 1.30, DD 20.0%).",
     },
 }
 
@@ -226,9 +224,9 @@ SLOT_TP1_RR: dict[str, float] = {
     "US TECH 100|VWAP_v1": 10.0, # SESSION_TREND day_dir+rel_vol_open+early: 2024-25 +0.59 / 2026 +0.39
     "BTCUSD|VWAP_v1": 5.0,       # SESSION_PULLBACK gap_dir+early: +0.30 / +0.37 / +0.13
 
-    # Classic families — per-market picks that held in every window (classic_book)
-    "XAUUSD|EMAPullback_v1": 10.0,    # 50/200 long: +0.32 / +1.03 / +0.38
-    "BTCUSD|EMAPullback_v1": 10.0,    # 50/200 long: +0.08 / +0.49 / +0.20
+    # BiasIFVG (research/16)
+    "USOUSD|BiasIFVG_v1": 5.0,
+    "UKOUSD|BiasIFVG_v1": 5.0,
 }
 
 
@@ -241,7 +239,7 @@ SLOT_TP1_RR: dict[str, float] = {
 # explicit request value always wins over it.
 #
 # The name is historical: it first held the research/26 synthetic template
-# strategies, which were removed on 2026-09-11.
+# strategies (removed 2026-09-11, restored 2026-09-14).
 #
 # Format: "SYMBOL|Strategy_id": {param: value}
 SYNTH_SLOT_PARAMS: dict[str, dict[str, Any]] = {
@@ -262,14 +260,18 @@ SYNTH_SLOT_PARAMS: dict[str, dict[str, Any]] = {
     "BTCUSD|VWAP_v1": {"entry_mode": "SESSION_PULLBACK", "session_mode_session": "native",
                        "session_mode_gates": ["gap_dir", "early"]},
 
-    # Classic families (data/edge_lab/classic_book.json)
-    "XAUUSD|Donchian_v1": {"channel_bars": 55, "stop_atr": 2.0, "exit_mode": "channel", "side": "long"},
-    "BTCUSD|Donchian_v1": {"channel_bars": 55, "stop_atr": 2.0, "exit_mode": "channel", "side": "long"},
-    "US TECH 100|Donchian_v1": {"channel_bars": 55, "stop_atr": 2.0, "exit_mode": "trail", "side": "long"},
-    "XAUUSD|EMAPullback_v1": {"fast_ema": 50, "slow_ema": 200, "side": "long"},
-    "BTCUSD|EMAPullback_v1": {"fast_ema": 50, "slow_ema": 200, "side": "long"},
-    "XAUUSD|VolBreakout_v1": {"channel_bars": 55, "volume_mult": 1.5, "side": "long"},
-    "BTCUSD|VolBreakout_v1": {"channel_bars": 20, "volume_mult": 2.0, "side": "both"},
+    # Synthetic-index strategies (research/26) — superseded by the 2026-09-14 study
+    "BOOM 1000 INDEX|RangeRevert_v1":   {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "revert_k_atr": 2.0},
+    "BOOM 500 INDEX|RangeRevert_v1":    {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "revert_k_atr": 2.0},
+    "CRASH 1000 INDEX|TrendDrift_v1":   {"stop_atr_multiple": 5.0, "tp1_rr": 8.0},
+    "CRASH 500 INDEX|RangeRevert_v1":   {"stop_atr_multiple": 1.0, "tp1_rr": 5.0, "revert_k_atr": 2.0},
+    "VOLATILITY 75 INDEX|TrendDrift_v1": {"stop_atr_multiple": 2.5, "tp1_rr": 5.0},
+    "VOLATILITY 25 INDEX|RangeBreakout_v1": {"stop_atr_multiple": 2.5, "tp1_rr": 3.0, "breakout_lookback": 20},
+    "VOLATILITY 100 INDEX|RangeRevert_v1": {"stop_atr_multiple": 2.5, "tp1_rr": 8.0, "revert_k_atr": 2.0},
+    "JUMP 25 INDEX|RangeRevert_v1":     {"stop_atr_multiple": 2.5, "tp1_rr": 8.0, "revert_k_atr": 2.0},
+    "JUMP 100 INDEX|TrendDrift_v1":     {"stop_atr_multiple": 5.0, "tp1_rr": 5.0},
+    "RANGE BREAK 100 INDEX|SpikeFade_v1": {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "spike_k_atr": 3.0},
+    "RANGE BREAK 200 INDEX|SpikeFade_v1": {"stop_atr_multiple": 5.0, "tp1_rr": 5.0, "spike_k_atr": 3.0},
 }
 
 

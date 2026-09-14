@@ -46,6 +46,10 @@ def window_bars(timeframe: str, strategy: object | None = None) -> int:
 
 _TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
 
+# The backtest routes' TF_META warm-up days — also the span a freshly started
+# live engine is primed over (strategies/bar_feed.LiveBarFeed).
+WARMUP_BASE_DAYS: dict[str, float] = {"M1": 1, "M5": 5, "M15": 10, "M30": 15, "H1": 30, "H4": 150, "D1": 365}
+
 
 def warmup_days(timeframe: str, strategy: object | None, base_days: float) -> float:
     """Calendar days of history to fetch before a backtest starts so the first

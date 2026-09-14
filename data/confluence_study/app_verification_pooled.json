@@ -1,0 +1,1219 @@
+[
+ {
+  "market": "AUDUSD",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 170,
+    "avg_r": 0.0,
+    "total_r": 0.01,
+    "win_rate": 0.3706,
+    "pf": 1.0,
+    "t": 0.0
+   },
+   "unseen_2026": {
+    "n": 121,
+    "avg_r": -0.0145,
+    "total_r": -1.76,
+    "win_rate": 0.3471,
+    "pf": 0.979,
+    "t": -0.09
+   },
+   "quarters_positive": "6/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "adx_filter": "RANGE",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 488,
+   "trades": 121,
+   "net_pnl": -209.76,
+   "win_rate": 0.3471,
+   "profit_factor": 0.964,
+   "expectancy_r": null,
+   "max_dd_pct": 13.7,
+   "rejections": {},
+   "exit_reasons": {
+    "SL": 74,
+    "MAX_HOLD": 46,
+    "TP1": 1
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "BTCUSD",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 202,
+    "avg_r": 0.0306,
+    "total_r": 6.19,
+    "win_rate": 0.3317,
+    "pf": 1.048,
+    "t": 0.26
+   },
+   "unseen_2026": {
+    "n": 122,
+    "avg_r": 0.2469,
+    "total_r": 30.12,
+    "win_rate": 0.3852,
+    "pf": 1.41,
+    "t": 1.35
+   },
+   "quarters_positive": "10/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "adx_filter": "RANGE",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 439,
+   "trades": 123,
+   "net_pnl": 1557.78,
+   "win_rate": 0.3821,
+   "profit_factor": 1.29,
+   "expectancy_r": null,
+   "max_dd_pct": 12.26,
+   "rejections": {},
+   "exit_reasons": {
+    "TP1": 3,
+    "MAX_HOLD": 47,
+    "SL": 72,
+    "END_OF_DATA": 1
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "ETHUSD",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 190,
+    "avg_r": -0.119,
+    "total_r": -22.61,
+    "win_rate": 0.3158,
+    "pf": 0.822,
+    "t": -1.03
+   },
+   "unseen_2026": {
+    "n": 135,
+    "avg_r": 0.1144,
+    "total_r": 15.45,
+    "win_rate": 0.3037,
+    "pf": 1.163,
+    "t": 0.61
+   },
+   "quarters_positive": "8/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "adx_filter": "RANGE",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 485,
+   "trades": 135,
+   "net_pnl": 708.43,
+   "win_rate": 0.3037,
+   "profit_factor": 1.106,
+   "expectancy_r": null,
+   "max_dd_pct": 11.48,
+   "rejections": {},
+   "exit_reasons": {
+    "TP1": 5,
+    "SL": 88,
+    "MAX_HOLD": 42
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "EURUSD",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 162,
+    "avg_r": 0.0211,
+    "total_r": 3.41,
+    "win_rate": 0.3457,
+    "pf": 1.031,
+    "t": 0.16
+   },
+   "unseen_2026": {
+    "n": 108,
+    "avg_r": 0.0514,
+    "total_r": 5.56,
+    "win_rate": 0.3333,
+    "pf": 1.079,
+    "t": 0.29
+   },
+   "quarters_positive": "9/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "adx_filter": "RANGE",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 440,
+   "trades": 108,
+   "net_pnl": 85.55,
+   "win_rate": 0.3241,
+   "profit_factor": 1.017,
+   "expectancy_r": null,
+   "max_dd_pct": 9.4,
+   "rejections": {},
+   "exit_reasons": {
+    "SL": 62,
+    "MAX_HOLD": 43,
+    "TP1": 2,
+    "END_OF_DATA": 1
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "GBPJPY",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 171,
+    "avg_r": -0.0704,
+    "total_r": -12.04,
+    "win_rate": 0.3684,
+    "pf": 0.888,
+    "t": -0.65
+   },
+   "unseen_2026": {
+    "n": 108,
+    "avg_r": 0.175,
+    "total_r": 18.9,
+    "win_rate": 0.463,
+    "pf": 1.316,
+    "t": 1.11
+   },
+   "quarters_positive": "9/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "adx_filter": "RANGE",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 432,
+   "trades": 108,
+   "net_pnl": 1323.09,
+   "win_rate": 0.463,
+   "profit_factor": 1.313,
+   "expectancy_r": null,
+   "max_dd_pct": 10.76,
+   "rejections": {},
+   "exit_reasons": {
+    "SL": 56,
+    "MAX_HOLD": 51,
+    "TP1": 1
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "GBPUSD",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 181,
+    "avg_r": 0.0323,
+    "total_r": 5.85,
+    "win_rate": 0.3425,
+    "pf": 1.051,
+    "t": 0.26
+   },
+   "unseen_2026": {
+    "n": 113,
+    "avg_r": -0.0795,
+    "total_r": -8.98,
+    "win_rate": 0.3274,
+    "pf": 0.876,
+    "t": -0.54
+   },
+   "quarters_positive": "6/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "adx_filter": "RANGE",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 459,
+   "trades": 113,
+   "net_pnl": -697.76,
+   "win_rate": 0.3274,
+   "profit_factor": 0.864,
+   "expectancy_r": null,
+   "max_dd_pct": 15.72,
+   "rejections": {},
+   "exit_reasons": {
+    "MAX_HOLD": 45,
+    "SL": 67,
+    "END_OF_DATA": 1
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "US SP 500",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 158,
+    "avg_r": 0.0656,
+    "total_r": 10.36,
+    "win_rate": 0.3734,
+    "pf": 1.105,
+    "t": 0.48
+   },
+   "unseen_2026": {
+    "n": 109,
+    "avg_r": 0.2047,
+    "total_r": 22.31,
+    "win_rate": 0.3578,
+    "pf": 1.327,
+    "t": 1.09
+   },
+   "quarters_positive": "10/11"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "adx_filter": "RANGE",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 411,
+   "trades": 110,
+   "net_pnl": 990.27,
+   "win_rate": 0.3455,
+   "profit_factor": 1.189,
+   "expectancy_r": null,
+   "max_dd_pct": 9.56,
+   "rejections": {},
+   "exit_reasons": {
+    "MAX_HOLD": 40,
+    "SL": 67,
+    "TP1": 2,
+    "END_OF_DATA": 1
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "US Tech 100",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 159,
+    "avg_r": 0.1233,
+    "total_r": 19.6,
+    "win_rate": 0.4088,
+    "pf": 1.205,
+    "t": 0.95
+   },
+   "unseen_2026": {
+    "n": 111,
+    "avg_r": 0.1601,
+    "total_r": 17.77,
+    "win_rate": 0.3784,
+    "pf": 1.249,
+    "t": 0.9
+   },
+   "quarters_positive": "5/11"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "adx_filter": "RANGE",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 444,
+   "trades": 111,
+   "net_pnl": 862.76,
+   "win_rate": 0.3784,
+   "profit_factor": 1.179,
+   "expectancy_r": null,
+   "max_dd_pct": 9.82,
+   "rejections": {},
+   "exit_reasons": {
+    "SL": 68,
+    "MAX_HOLD": 42,
+    "END_OF_DATA": 1
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "USDJPY",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 168,
+    "avg_r": 0.0947,
+    "total_r": 15.9,
+    "win_rate": 0.3869,
+    "pf": 1.162,
+    "t": 0.77
+   },
+   "unseen_2026": {
+    "n": 114,
+    "avg_r": 0.2238,
+    "total_r": 25.51,
+    "win_rate": 0.4386,
+    "pf": 1.406,
+    "t": 1.51
+   },
+   "quarters_positive": "11/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "adx_filter": "RANGE",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 474,
+   "trades": 114,
+   "net_pnl": 1820.24,
+   "win_rate": 0.4386,
+   "profit_factor": 1.417,
+   "expectancy_r": null,
+   "max_dd_pct": 7.56,
+   "rejections": {},
+   "exit_reasons": {
+    "SL": 60,
+    "MAX_HOLD": 54
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "XAGUSD",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 168,
+    "avg_r": 0.1231,
+    "total_r": 20.68,
+    "win_rate": 0.3571,
+    "pf": 1.19,
+    "t": 0.86
+   },
+   "unseen_2026": {
+    "n": 94,
+    "avg_r": 0.1482,
+    "total_r": 13.93,
+    "win_rate": 0.3191,
+    "pf": 1.225,
+    "t": 0.72
+   },
+   "quarters_positive": "8/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "adx_filter": "RANGE",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 324,
+   "trades": 73,
+   "net_pnl": 626.01,
+   "win_rate": 0.3151,
+   "profit_factor": 1.224,
+   "expectancy_r": null,
+   "max_dd_pct": 8.86,
+   "rejections": {
+    "Calculated lot size is below this broker's minimum tradeable volume": 82
+   },
+   "exit_reasons": {
+    "MAX_HOLD": 26,
+    "SL": 45,
+    "TP1": 2
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "XAUUSD",
+  "strategy": "TrendDrift_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 150,
+    "avg_r": 0.2407,
+    "total_r": 36.11,
+    "win_rate": 0.38,
+    "pf": 1.385,
+    "t": 1.54
+   },
+   "unseen_2026": {
+    "n": 95,
+    "avg_r": -0.1056,
+    "total_r": -10.03,
+    "win_rate": 0.3263,
+    "pf": 0.843,
+    "t": -0.68
+   },
+   "quarters_positive": "11/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "require_adx": false,
+   "stop_atr_multiple": 5.0,
+   "tp1_rr": 8.0,
+   "max_trades_per_day": 4,
+   "max_daily_risk_pct": 4.0,
+   "side": "long",
+   "adx_filter": "RANGE",
+   "require_vol_high": true
+  },
+  "app": {
+   "signals": 360,
+   "trades": 92,
+   "net_pnl": -531.99,
+   "win_rate": 0.3261,
+   "profit_factor": 0.854,
+   "expectancy_r": null,
+   "max_dd_pct": 11.34,
+   "rejections": {
+    "Calculated lot size is below this broker's minimum tradeable volume": 13
+   },
+   "exit_reasons": {
+    "MAX_HOLD": 33,
+    "SL": 59
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "AUDUSD",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 38,
+    "avg_r": 0.3723,
+    "total_r": 14.15,
+    "win_rate": 0.3421,
+    "pf": 1.572,
+    "t": 1.06
+   },
+   "unseen_2026": {
+    "n": 16,
+    "avg_r": 0.0989,
+    "total_r": 1.58,
+    "win_rate": 0.375,
+    "pf": 1.145,
+    "t": 0.23
+   },
+   "quarters_positive": "9/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": true,
+   "target_rr": 5.0,
+   "side": "long",
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 17,
+   "trades": 16,
+   "net_pnl": 107.4,
+   "win_rate": 0.4375,
+   "profit_factor": 1.14,
+   "expectancy_r": null,
+   "max_dd_pct": 5.57,
+   "rejections": {},
+   "exit_reasons": {
+    "MAX_HOLD": 5,
+    "SL": 9,
+    "BE_SL": 2
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "BTCUSD",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 33,
+    "avg_r": 0.1767,
+    "total_r": 5.83,
+    "win_rate": 0.3333,
+    "pf": 1.282,
+    "t": 0.53
+   },
+   "unseen_2026": {
+    "n": 27,
+    "avg_r": 0.0326,
+    "total_r": 0.88,
+    "win_rate": 0.2963,
+    "pf": 1.047,
+    "t": 0.09
+   },
+   "quarters_positive": "7/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": true,
+   "target_rr": 5.0,
+   "side": "long",
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 26,
+   "trades": 26,
+   "net_pnl": -733.62,
+   "win_rate": 0.1538,
+   "profit_factor": 0.417,
+   "expectancy_r": null,
+   "max_dd_pct": 8.49,
+   "rejections": {},
+   "exit_reasons": {
+    "BE_SL": 8,
+    "MAX_HOLD": 5,
+    "SL": 13
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "ETHUSD",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 40,
+    "avg_r": 0.0506,
+    "total_r": 2.02,
+    "win_rate": 0.3,
+    "pf": 1.069,
+    "t": 0.16
+   },
+   "unseen_2026": {
+    "n": 24,
+    "avg_r": 0.9326,
+    "total_r": 22.38,
+    "win_rate": 0.4583,
+    "pf": 2.629,
+    "t": 1.81
+   },
+   "quarters_positive": "10/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": true,
+   "target_rr": 5.0,
+   "side": "long",
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 28,
+   "trades": 24,
+   "net_pnl": 702.4,
+   "win_rate": 0.25,
+   "profit_factor": 1.73,
+   "expectancy_r": null,
+   "max_dd_pct": 2.9,
+   "rejections": {
+    "Stop distance is inside the minimum viable stop (spread/stops-level would consume it)": 1
+   },
+   "exit_reasons": {
+    "SL": 10,
+    "TP1": 2,
+    "BE_SL": 8,
+    "MAX_HOLD": 4
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "EURUSD",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 30,
+    "avg_r": -0.2136,
+    "total_r": -6.41,
+    "win_rate": 0.2333,
+    "pf": 0.735,
+    "t": -0.64
+   },
+   "unseen_2026": {
+    "n": 18,
+    "avg_r": 0.0108,
+    "total_r": 0.19,
+    "win_rate": 0.2222,
+    "pf": 1.015,
+    "t": 0.02
+   },
+   "quarters_positive": "4/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": true,
+   "target_rr": 5.0,
+   "side": "long",
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 18,
+   "trades": 16,
+   "net_pnl": -49.97,
+   "win_rate": 0.25,
+   "profit_factor": 0.93,
+   "expectancy_r": null,
+   "max_dd_pct": 6.32,
+   "rejections": {},
+   "exit_reasons": {
+    "SL": 10,
+    "BE_SL": 2,
+    "MAX_HOLD": 3,
+    "TP1": 1
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "GBPJPY",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 33,
+    "avg_r": -0.1484,
+    "total_r": -4.9,
+    "win_rate": 0.2121,
+    "pf": 0.82,
+    "t": -0.44
+   },
+   "unseen_2026": {
+    "n": 15,
+    "avg_r": 0.0201,
+    "total_r": 0.3,
+    "win_rate": 0.3333,
+    "pf": 1.021,
+    "t": 0.03
+   },
+   "quarters_positive": "9/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": true,
+   "target_rr": 5.0,
+   "side": "long",
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 17,
+   "trades": 16,
+   "net_pnl": -170.25,
+   "win_rate": 0.5,
+   "profit_factor": 0.818,
+   "expectancy_r": null,
+   "max_dd_pct": 5.11,
+   "rejections": {},
+   "exit_reasons": {
+    "BE_SL": 5,
+    "SL": 8,
+    "MAX_HOLD": 2,
+    "TP1": 1
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "GBPUSD",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 33,
+    "avg_r": 0.3629,
+    "total_r": 11.98,
+    "win_rate": 0.3636,
+    "pf": 1.569,
+    "t": 0.98
+   },
+   "unseen_2026": {
+    "n": 16,
+    "avg_r": 0.0727,
+    "total_r": 1.16,
+    "win_rate": 0.4375,
+    "pf": 1.1,
+    "t": 0.15
+   },
+   "quarters_positive": "6/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": true,
+   "target_rr": 5.0,
+   "side": "long",
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 15,
+   "trades": 15,
+   "net_pnl": 180.81,
+   "win_rate": 0.6,
+   "profit_factor": 1.327,
+   "expectancy_r": null,
+   "max_dd_pct": 2.56,
+   "rejections": {},
+   "exit_reasons": {
+    "BE_SL": 4,
+    "MAX_HOLD": 4,
+    "SL": 6,
+    "TP1": 1
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "US SP 500",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 33,
+    "avg_r": 0.44,
+    "total_r": 14.52,
+    "win_rate": 0.3636,
+    "pf": 1.651,
+    "t": 1.09
+   },
+   "unseen_2026": {
+    "n": 28,
+    "avg_r": 0.1298,
+    "total_r": 3.63,
+    "win_rate": 0.3214,
+    "pf": 1.183,
+    "t": 0.35
+   },
+   "quarters_positive": "5/11"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": true,
+   "target_rr": 5.0,
+   "side": "long",
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 27,
+   "trades": 26,
+   "net_pnl": 49.42,
+   "win_rate": 0.2308,
+   "profit_factor": 1.035,
+   "expectancy_r": null,
+   "max_dd_pct": 4.49,
+   "rejections": {},
+   "exit_reasons": {
+    "TP1": 2,
+    "SL": 14,
+    "BE_SL": 6,
+    "MAX_HOLD": 4
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "US Tech 100",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 27,
+    "avg_r": 0.3012,
+    "total_r": 8.13,
+    "win_rate": 0.3333,
+    "pf": 1.42,
+    "t": 0.69
+   },
+   "unseen_2026": {
+    "n": 24,
+    "avg_r": -0.0968,
+    "total_r": -2.32,
+    "win_rate": 0.3333,
+    "pf": 0.862,
+    "t": -0.3
+   },
+   "quarters_positive": "5/11"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": true,
+   "target_rr": 5.0,
+   "side": "long",
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 23,
+   "trades": 23,
+   "net_pnl": 376.13,
+   "win_rate": 0.3043,
+   "profit_factor": 1.539,
+   "expectancy_r": null,
+   "max_dd_pct": 4.43,
+   "rejections": {},
+   "exit_reasons": {
+    "BE_SL": 8,
+    "MAX_HOLD": 6,
+    "SL": 8,
+    "TP1": 1
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "USDJPY",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 38,
+    "avg_r": -0.7333,
+    "total_r": -27.87,
+    "win_rate": 0.1053,
+    "pf": 0.224,
+    "t": -4.06
+   },
+   "unseen_2026": {
+    "n": 19,
+    "avg_r": 0.2642,
+    "total_r": 5.02,
+    "win_rate": 0.3684,
+    "pf": 1.439,
+    "t": 0.57
+   },
+   "quarters_positive": "10/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": true,
+   "target_rr": 5.0,
+   "side": "long",
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 20,
+   "trades": 20,
+   "net_pnl": -130.17,
+   "win_rate": 0.55,
+   "profit_factor": 0.825,
+   "expectancy_r": null,
+   "max_dd_pct": 4.7,
+   "rejections": {},
+   "exit_reasons": {
+    "TP1": 1,
+    "BE_SL": 9,
+    "SL": 8,
+    "MAX_HOLD": 2
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "XAGUSD",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 24,
+    "avg_r": 0.6132,
+    "total_r": 14.72,
+    "win_rate": 0.4167,
+    "pf": 2.124,
+    "t": 1.39
+   },
+   "unseen_2026": {
+    "n": 22,
+    "avg_r": 0.1391,
+    "total_r": 3.06,
+    "win_rate": 0.2273,
+    "pf": 1.194,
+    "t": 0.3
+   },
+   "quarters_positive": "10/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": true,
+   "target_rr": 5.0,
+   "side": "long",
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 22,
+   "trades": 21,
+   "net_pnl": 200.68,
+   "win_rate": 0.1905,
+   "profit_factor": 1.245,
+   "expectancy_r": null,
+   "max_dd_pct": 4.36,
+   "rejections": {
+    "Calculated lot size is below this broker's minimum tradeable volume": 1
+   },
+   "exit_reasons": {
+    "BE_SL": 5,
+    "SL": 11,
+    "MAX_HOLD": 3,
+    "TP1": 2
+   }
+  },
+  "pooled_group": "real"
+ },
+ {
+  "market": "XAUUSD",
+  "strategy": "HTFFVGFlip_v1",
+  "window": [
+   "2026-01-01",
+   "2026-09-12"
+  ],
+  "research": {
+   "validate_2025": {
+    "n": 29,
+    "avg_r": 0.1083,
+    "total_r": 3.14,
+    "win_rate": 0.3448,
+    "pf": 1.175,
+    "t": 0.34
+   },
+   "unseen_2026": {
+    "n": 13,
+    "avg_r": 0.0234,
+    "total_r": 0.3,
+    "win_rate": 0.3077,
+    "pf": 1.033,
+    "t": 0.04
+   },
+   "quarters_positive": "5/15"
+  },
+  "params": {
+   "max_hold_bars": 288,
+   "fvg_displacement_atr_mult": 0.0,
+   "fvg_displacement_body_pct": 0.0,
+   "htf_trend_filter": "COUNTER",
+   "require_retest": true,
+   "require_unfilled_htf_fvg": false,
+   "session_filter_enabled": true,
+   "target_rr": 5.0,
+   "side": "long",
+   "time_filter": "NEWYORK"
+  },
+  "app": {
+   "signals": 14,
+   "trades": 13,
+   "net_pnl": 144.55,
+   "win_rate": 0.2308,
+   "profit_factor": 1.215,
+   "expectancy_r": null,
+   "max_dd_pct": 3.19,
+   "rejections": {},
+   "exit_reasons": {
+    "MAX_HOLD": 2,
+    "SL": 8,
+    "BE_SL": 2,
+    "TP1": 1
+   }
+  },
+  "pooled_group": "real"
+ }
+]

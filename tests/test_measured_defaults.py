@@ -20,7 +20,7 @@ from backend.strategies.strategy_defaults import (
 )
 
 STRATEGIES = ["APA_v1", "DriftJumpAlpha_v1", "ORB_v1", "VWAP_v1",
-              "Donchian_v1", "EMAPullback_v1", "RSI2_v1", "BollingerFade_v1", "VolBreakout_v1", "TSMOM_v1"]
+              "HTFFVGFlip_v1", "BiasIFVG_v1", "SpikeFade_v1", "RangeRevert_v1", "RangeBreakout_v1", "TrendDrift_v1"]
 
 
 @pytest.mark.parametrize("sid", STRATEGIES)

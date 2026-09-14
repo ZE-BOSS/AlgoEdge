@@ -181,6 +181,37 @@ _GENERIC_PROFILE = OvershootProfile(
     0.02, _GENERIC, "class default — no tick study", "assumed")
 
 
+# ── Spike-aware stop fills, calibrated on MT5 ticks (2026-09-14) ──────────────
+#
+# A jump index does not overshoot a stop by a fixed amount. Replaying random
+# entries on 40 days of real ticks against the M5 bars showed two regimes:
+#
+#   * a stop on the GRIND side (a Crash short, a Boom long) is taken out by the
+#     slow drift and fills at the stop: ticks -1.002R on every stop exit;
+#   * a stop on the SPIKE side (a Crash long, a Boom short; either side on Jump
+#     and Range Break) is taken out by a jump and fills part-way to the bar's
+#     extreme. The fraction `lam` below was fitted per market over 1x/3x/5x ATR
+#     stops and 1:2 / 1:5 targets; mean |error| vs ticks 0.004-0.010R (Range
+#     Break 200: 0.05R).
+#
+# The previous profiles (a fixed 3.82-point or 0.353R overshoot) were far too
+# kind on tight spike-side stops — random Boom shorts at 1xATR/1:8 booked
+# +0.76R/trade in the backtester against -0.03R on ticks.
+#
+# spike_side: -1 down jumps (long stops), +1 up jumps (short stops), 2 both.
+SPIKE_FILLS: dict[str, tuple[int, float]] = {
+    "CRASH 1000 INDEX": (-1, 0.80), "CRASH 500 INDEX": (-1, 0.65), "CRASH 300 INDEX": (-1, 0.60),
+    "BOOM 1000 INDEX": (1, 0.80), "BOOM 500 INDEX": (1, 0.70), "BOOM 300 INDEX": (1, 0.65),
+    "JUMP 10 INDEX": (2, 0.30), "JUMP 25 INDEX": (2, 0.30), "JUMP 50 INDEX": (2, 0.30),
+    "JUMP 75 INDEX": (2, 0.30), "JUMP 100 INDEX": (2, 0.30),
+    "RANGE BREAK 100 INDEX": (2, 0.85), "RANGE BREAK 200 INDEX": (2, 0.85),
+}
+
+
+def get_spike_fill(symbol: str) -> tuple[int, float] | None:
+    return SPIKE_FILLS.get((symbol or "").upper().strip())
+
+
 def get_overshoot_profile(symbol: str) -> OvershootProfile:
     key = (symbol or "").upper().strip()
     if key in _PROFILES:
@@ -264,6 +295,23 @@ class StopFillModel:
             self._record(symbol, False, 0.0)
             return fill, False, 0.0
 
+        spike = get_spike_fill(symbol)
+        if spike is not None:
+            side, lam = spike
+            spike_side = side == 2 or (side == -1 and is_buy) or (side == 1 and not is_buy)
+            if spike_side:
+                fill = stop_level - lam * (stop_level - low) if is_buy else stop_level + lam * (high - stop_level)
+            else:
+                fill = stop_level
+            if slip > 0:
+                fill = fill - slip if is_buy else fill + slip
+            fill = max(fill, low) if is_buy else min(fill, high)
+            fill = min(fill, stop_level) if is_buy else max(fill, stop_level)
+            ov = self._overshoot_r(is_buy, fill, stop_level, stop_distance)
+            gapped = ov > 1e-9
+            self._record(symbol, gapped, ov)
+            return fill, gapped, ov
+
         # 2. The stop was breached INSIDE the bar. How far past it did the first
         #    tick through the level land?
         profile = get_overshoot_profile(symbol)
@@ -330,14 +378,17 @@ class StopFillModel:
         for sym, b in s["by_symbol"].items():
             bn = b["n"] or 1
             prof = get_overshoot_profile(sym)
+            spike = get_spike_fill(sym)
             out["by_symbol"][sym] = {
                 "stop_exits": b["n"],
                 "gapped_pct": round(100.0 * b["gapped"] / bn, 2),
                 "mean_overshoot_r": round(b["sum_r"] / bn, 4),
                 "max_overshoot_r": round(b["max_r"], 4),
-                "profile_mean": prof.mean,
-                "profile_source": prof.source,
-                "profile_calibration": prof.calibration,
+                "profile_mean": prof.mean if spike is None else None,
+                "profile_source": prof.source if spike is None else (
+                    f"MT5 tick replay 2026-09-14: spike-side stops fill {spike[1]:.2f} of the way to the bar extreme, "
+                    f"grind-side stops at the stop"),
+                "profile_calibration": prof.calibration if spike is None else "measured",
             }
         return out
 

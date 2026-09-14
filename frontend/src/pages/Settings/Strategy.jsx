@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import ConfluenceFields from '../../components/ConfluenceFields';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Sliders, Save, Loader2, Check } from 'lucide-react';
 import { getConfig, updateConfig } from '../../services/api';
@@ -108,6 +109,44 @@ export default function StrategySettings() {
       side: 'both',
       min_stop_atr: 0.25,
       close_at_session_end: true,
+    },
+    // Shared by SpikeFade / RangeRevert / RangeBreakout / TrendDrift — all four
+    // read the same backend dataclass (SynthParams), so one section serves them.
+    synth: {
+      stop_atr_multiple: 5.0,
+      tp1_rr: 5.0,
+      spike_k_atr: 3.0,
+      revert_k_atr: 2.0,
+      breakout_lookback: 20,
+      ema_fast: 20,
+      ema_slow: 50,
+      require_adx: true,
+      min_adx_to_trade: 20,
+      max_trades_per_day: 6,
+      max_daily_risk_pct: 4.0,
+    },
+    htf_fvg_flip: {
+      session_filter_enabled: true,
+      session_start: '09:30',
+      session_cutoff: '16:00',
+      htf_timeframe: 'H1',
+      entry_confirmation_tf: 'M5',
+      target_rr: 2.0,
+      require_unfilled_htf_fvg: true,
+      sl_buffer_atr_mult: 0.5,
+      min_sl_pips: 12.0,
+      min_sl_atr_mult: 1.0,
+    },
+    bias_ifvg: {
+      session_start: '09:30',
+      session_cutoff: '11:00',
+      max_trades_per_day: 2,
+      target_rr: 2.0,
+      sl_buffer_atr_mult: 0.5,
+      min_sl_pips: 12.0,
+      min_sl_atr_mult: 1.0,
+      a_plus_confluence_threshold: 90,
+      rejection_min_body_atr_mult: 0.15,
     },
   });
 
@@ -365,12 +404,12 @@ export default function StrategySettings() {
                       <option value="ORB_v1">Opening Range Breakout</option>
                       <option value="DriftJumpAlpha_v1">Drift &amp; Jump Alpha</option>
                       <option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option>
-                      <option value="Donchian_v1">Donchian Breakout</option>
-                      <option value="EMAPullback_v1">EMA Trend Pullback</option>
-                      <option value="RSI2_v1">RSI(2) Reversion</option>
-                      <option value="BollingerFade_v1">Bollinger Fade</option>
-                      <option value="VolBreakout_v1">Tick-Volume Breakout</option>
-                      <option value="TSMOM_v1">Daily Momentum (TSMOM)</option>
+                      <option value="HTFFVGFlip_v1">HTF FVG Flip</option>
+                      <option value="BiasIFVG_v1">Bias KeyLevel IFVG</option>
+                      <option value="SpikeFade_v1">Spike Fade</option>
+                      <option value="RangeRevert_v1">Range Revert</option>
+                      <option value="RangeBreakout_v1">Range Breakout</option>
+                      <option value="TrendDrift_v1">Trend Drift</option>
                 </select>
                 <label
                   style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', whiteSpace: 'nowrap', cursor: 'pointer' }}
@@ -550,22 +589,81 @@ export default function StrategySettings() {
       </div>
 
       <div className="card">
-        <div className="card-header"><span className="card-title">Classic Strategy Families</span></div>
+        <div className="card-header"><span className="card-title">HTF FVG Flip Parameters</span></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div>
+            <label>HTF Timeframe</label>
+            <select value={config.htf_fvg_flip?.htf_timeframe || 'H1'} onChange={e => updateNested('htf_fvg_flip', 'htf_timeframe', e.target.value)}>
+              {['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Entry Confirm TF</label>
+            <select value={config.htf_fvg_flip?.entry_confirmation_tf || 'M5'} onChange={e => updateNested('htf_fvg_flip', 'entry_confirmation_tf', e.target.value)}>
+              {['M1', 'M5', 'M15'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div><label>Target RR</label><input type="number" step="0.1" value={config.htf_fvg_flip?.target_rr ?? 2.0} onChange={e => updateNested('htf_fvg_flip', 'target_rr', +e.target.value)} /></div>
+          <div><label>Session Start</label><input type="text" value={config.htf_fvg_flip?.session_start || '09:30'} onChange={e => updateNested('htf_fvg_flip', 'session_start', e.target.value)} /></div>
+          <div><label>Session Cutoff</label><input type="text" value={config.htf_fvg_flip?.session_cutoff || '16:00'} onChange={e => updateNested('htf_fvg_flip', 'session_cutoff', e.target.value)} /></div>
+          <div><label>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={config.htf_fvg_flip?.sl_buffer_atr_mult ?? 0.5} onChange={e => updateNested('htf_fvg_flip', 'sl_buffer_atr_mult', +e.target.value)} /></div>
+          <div><label>Min SL (pips)</label><input type="number" step="0.5" min="0" value={config.htf_fvg_flip?.min_sl_pips ?? 12.0} onChange={e => updateNested('htf_fvg_flip', 'min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor. 0 disables.</div></div>
+          <div><label>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={config.htf_fvg_flip?.min_sl_atr_mult ?? 1.0} onChange={e => updateNested('htf_fvg_flip', 'min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative floor. Larger floor wins. 0 disables.</div></div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+              <input type="checkbox" checked={config.htf_fvg_flip?.session_filter_enabled ?? true} onChange={e => updateNested('htf_fvg_flip', 'session_filter_enabled', e.target.checked)} />
+              Enable Session Filter
+            </label>
+          </div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
+              <input type="checkbox" checked={config.htf_fvg_flip?.require_unfilled_htf_fvg ?? true} onChange={e => updateNested('htf_fvg_flip', 'require_unfilled_htf_fvg', e.target.checked)} />
+              Require Unfilled HTF FVG
+            </label>
+          </div>
+          <ConfluenceFields block="htf_fvg_flip" values={config.htf_fvg_flip} onChange={(k, v) => updateNested('htf_fvg_flip', k, v)} />
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Bias KeyLevel IFVG Parameters</span></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div><label>Target RR</label><input type="number" step="0.1" value={config.bias_ifvg?.target_rr ?? 2.0} onChange={e => updateNested('bias_ifvg', 'target_rr', +e.target.value)} /></div>
+          <div><label>Max Trades / Day</label><input type="number" value={config.bias_ifvg?.max_trades_per_day || 2} onChange={e => updateNested('bias_ifvg', 'max_trades_per_day', +e.target.value)} /></div>
+          <div><label>A+ Confluence Threshold</label><input type="number" min="0" max="100" value={config.bias_ifvg?.a_plus_confluence_threshold ?? 90} onChange={e => updateNested('bias_ifvg', 'a_plus_confluence_threshold', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Score a setup must reach to be taken (0–100).</div></div>
+          <div><label>Session Start</label><input type="text" value={config.bias_ifvg?.session_start || '09:30'} onChange={e => updateNested('bias_ifvg', 'session_start', e.target.value)} /></div>
+          <div><label>Session Cutoff</label><input type="text" value={config.bias_ifvg?.session_cutoff || '11:00'} onChange={e => updateNested('bias_ifvg', 'session_cutoff', e.target.value)} /></div>
+          <div><label>Rejection Min Body (× ATR)</label><input type="number" step="0.05" min="0" value={config.bias_ifvg?.rejection_min_body_atr_mult ?? 0.15} onChange={e => updateNested('bias_ifvg', 'rejection_min_body_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Minimum rejection-candle body, so a doji cannot count as displacement.</div></div>
+          <div><label>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={config.bias_ifvg?.sl_buffer_atr_mult ?? 0.5} onChange={e => updateNested('bias_ifvg', 'sl_buffer_atr_mult', +e.target.value)} /></div>
+          <div><label>Min SL (pips)</label><input type="number" step="0.5" min="0" value={config.bias_ifvg?.min_sl_pips ?? 12.0} onChange={e => updateNested('bias_ifvg', 'min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor. 0 disables.</div></div>
+          <div><label>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={config.bias_ifvg?.min_sl_atr_mult ?? 1.0} onChange={e => updateNested('bias_ifvg', 'min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative floor. Larger floor wins. 0 disables.</div></div>
+          <ConfluenceFields block="bias_ifvg" values={config.bias_ifvg} onChange={(k, v) => updateNested('bias_ifvg', k, v)} />
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Synthetic Template Strategies</span></div>
         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 12 }}>
-          Donchian, EMA pullback, RSI(2), Bollinger fade, tick-volume breakout and daily momentum. Each engine runs the research code itself; exits (ATR trail, channel, mean, flip, time limit) are the strategy's own and run live as well as in backtests. Slots with "Measured settings" on use the per-symbol values instead of these.
+          Shared by Spike Fade, Range Revert, Range Breakout and Trend Drift — all four read one backend params block, so a change here applies to all of them. Per-symbol measured values live in strategy_defaults.py (SYNTH_SLOT_PARAMS) and override these.
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Donchian Channel (H1 bars)</label><input type="number" min="5" value={config.donchian?.channel_bars ?? 20} onChange={e => updateNested('donchian', 'channel_bars', parseInt(e.target.value, 10))} /></div>
-          <div><label>Donchian Stop (× ATR)</label><input type="number" step="0.5" min="0.5" value={config.donchian?.stop_atr ?? 2.0} onChange={e => updateNested('donchian', 'stop_atr', +e.target.value)} /></div>
-          <div><label>Donchian Exit / Side</label><div style={{ display: 'flex', gap: 6 }}><select value={config.donchian?.exit_mode || 'trail'} onChange={e => updateNested('donchian', 'exit_mode', e.target.value)}><option value="trail">3×ATR trail</option><option value="channel">Channel</option></select><select value={config.donchian?.side || 'both'} onChange={e => updateNested('donchian', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div></div>
-          <div><label>EMA Pullback Fast / Slow</label><div style={{ display: 'flex', gap: 6 }}><input type="number" min="2" value={config.ema_pullback?.fast_ema ?? 20} onChange={e => updateNested('ema_pullback', 'fast_ema', parseInt(e.target.value, 10))} /><input type="number" min="3" value={config.ema_pullback?.slow_ema ?? 50} onChange={e => updateNested('ema_pullback', 'slow_ema', parseInt(e.target.value, 10))} /></div></div>
-          <div><label>EMA Pullback Side</label><select value={config.ema_pullback?.side || 'both'} onChange={e => updateNested('ema_pullback', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div>
-          <div><label>RSI(2) Threshold / Max Hold (H1)</label><div style={{ display: 'flex', gap: 6 }}><input type="number" step="1" min="1" value={config.rsi2?.threshold ?? 10} onChange={e => updateNested('rsi2', 'threshold', +e.target.value)} /><input type="number" min="1" value={config.rsi2?.max_hold_bars ?? 24} onChange={e => updateNested('rsi2', 'max_hold_bars', parseInt(e.target.value, 10))} /></div></div>
-          <div><label>RSI(2) Side</label><select value={config.rsi2?.side || 'both'} onChange={e => updateNested('rsi2', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div>
-          <div><label>Bollinger Band (σ) / Side</label><div style={{ display: 'flex', gap: 6 }}><input type="number" step="0.1" min="0.5" value={config.bollinger_fade?.band_sigma ?? 2.0} onChange={e => updateNested('bollinger_fade', 'band_sigma', +e.target.value)} /><select value={config.bollinger_fade?.side || 'both'} onChange={e => updateNested('bollinger_fade', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div></div>
-          <div><label>Vol Breakout Channel / Volume ×</label><div style={{ display: 'flex', gap: 6 }}><input type="number" min="5" value={config.vol_breakout?.channel_bars ?? 20} onChange={e => updateNested('vol_breakout', 'channel_bars', parseInt(e.target.value, 10))} /><input type="number" step="0.1" min="1" value={config.vol_breakout?.volume_mult ?? 1.5} onChange={e => updateNested('vol_breakout', 'volume_mult', +e.target.value)} /></div></div>
-          <div><label>Vol Breakout Side</label><select value={config.vol_breakout?.side || 'both'} onChange={e => updateNested('vol_breakout', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div>
-          <div><label>TSMOM Lookback (days) / Side</label><div style={{ display: 'flex', gap: 6 }}><input type="number" min="5" value={config.tsmom?.lookback_days ?? 60} onChange={e => updateNested('tsmom', 'lookback_days', parseInt(e.target.value, 10))} /><select value={config.tsmom?.side || 'both'} onChange={e => updateNested('tsmom', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option></select></div></div>
+          <div><label>Stop (x ATR)</label><input type="number" step="0.5" min="0.1" value={config.synth?.stop_atr_multiple ?? 5.0} onChange={e => updateNested('synth', 'stop_atr_multiple', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Keep wide. At 0.5x ATR the unmodelled spike gap is ~1 R/trade.</div></div>
+          <div><label>Target R:R</label><input type="number" step="0.5" min="0.1" value={config.synth?.tp1_rr ?? 5.0} onChange={e => updateNested('synth', 'tp1_rr', +e.target.value)} /></div>
+          <div><label>Spike Size (x ATR)</label><input type="number" step="0.5" min="0.5" value={config.synth?.spike_k_atr ?? 3.0} onChange={e => updateNested('synth', 'spike_k_atr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Spike Fade only.</div></div>
+          <div><label>Stretch (x ATR)</label><input type="number" step="0.5" min="0.5" value={config.synth?.revert_k_atr ?? 2.0} onChange={e => updateNested('synth', 'revert_k_atr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Range Revert only.</div></div>
+          <div><label>Breakout Lookback (bars)</label><input type="number" min="2" value={config.synth?.breakout_lookback ?? 20} onChange={e => updateNested('synth', 'breakout_lookback', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Range Breakout only.</div></div>
+          <div><label>Min ADX to Trade</label><input type="number" min="0" value={config.synth?.min_adx_to_trade ?? 20} onChange={e => updateNested('synth', 'min_adx_to_trade', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Trend Drift only.</div></div>
+          <div><label>EMA Fast</label><input type="number" min="2" value={config.synth?.ema_fast ?? 20} onChange={e => updateNested('synth', 'ema_fast', +e.target.value)} /></div>
+          <div><label>EMA Slow</label><input type="number" min="3" value={config.synth?.ema_slow ?? 50} onChange={e => updateNested('synth', 'ema_slow', +e.target.value)} /></div>
+          <div><label>Max Trades / Day</label><input type="number" min="0" value={config.synth?.max_trades_per_day ?? 6} onChange={e => updateNested('synth', 'max_trades_per_day', +e.target.value)} /></div>
+          <div><label>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={config.synth?.max_daily_risk_pct ?? 4.0} onChange={e => updateNested('synth', 'max_daily_risk_pct', +e.target.value)} /></div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.8rem' }}>
+              <input type="checkbox" checked={config.synth?.require_adx ?? true} onChange={e => updateNested('synth', 'require_adx', e.target.checked)} />
+              Require ADX trend filter (Trend Drift)
+            </label>
+          </div>
+          <ConfluenceFields block="synth" values={config.synth} onChange={(k, v) => updateNested('synth', k, v)} />
         </div>
       </div>
 

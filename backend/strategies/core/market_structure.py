@@ -68,7 +68,7 @@ class MarketStructureDetector:
         if 'time' in candles.columns:
             time_vals = candles['time'].values
         elif pd.api.types.is_datetime64_any_dtype(candles.index):
-            time_vals = candles.index.astype('int64') // 10**9
+            time_vals = pd.DatetimeIndex(candles.index).as_unit('s').asi8
         else:
             time_vals = [0] * len(candles)
             

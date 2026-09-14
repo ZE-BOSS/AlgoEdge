@@ -18,7 +18,7 @@ def _bars(days=70, seed=5):
     high = np.maximum(open_, close) + np.abs(rng.normal(0.03, 0.02, n))
     low = np.minimum(open_, close) - np.abs(rng.normal(0.03, 0.02, n))
     vol = rng.integers(50, 500, n).astype(float)
-    return Bars("GBPJPY", "M15", (idx.asi8 // 10**9).astype(np.int64), open_, high, low, close,
+    return Bars("GBPJPY", "M15", idx.as_unit("s").asi8.astype(np.int64), open_, high, low, close,
                 np.full(n, 0.01), vol)
 
 

@@ -35,12 +35,12 @@ const STRATEGIES = [
   { id: 'VWAP_v1', group: 'vwap', label: 'VWAP reversion' },
   { id: 'ORB_v1', group: 'orb', label: 'Opening range breakout' },
   { id: 'DriftJumpAlpha_v1', group: 'drift_jump_alpha', label: 'Drift / jump alpha' },
-  { id: 'Donchian_v1', group: 'donchian', label: 'Donchian breakout' },
-  { id: 'EMAPullback_v1', group: 'ema_pullback', label: 'EMA trend pullback' },
-  { id: 'RSI2_v1', group: 'rsi2', label: 'RSI(2) reversion' },
-  { id: 'BollingerFade_v1', group: 'bollinger_fade', label: 'Bollinger fade' },
-  { id: 'VolBreakout_v1', group: 'vol_breakout', label: 'Tick-volume breakout' },
-  { id: 'TSMOM_v1', group: 'tsmom', label: 'Daily momentum (TSMOM)' },
+  { id: 'HTFFVGFlip_v1', group: 'htf_fvg_flip', label: 'HTF FVG flip' },
+  { id: 'BiasIFVG_v1', group: 'bias_ifvg', label: 'Bias + key level IFVG' },
+  { id: 'SpikeFade_v1', group: 'synth', label: 'Spike fade' },
+  { id: 'RangeRevert_v1', group: 'synth', label: 'Range revert' },
+  { id: 'RangeBreakout_v1', group: 'synth', label: 'Range breakout' },
+  { id: 'TrendDrift_v1', group: 'synth', label: 'Trend drift' },
 ];
 
 const SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'GBPJPY', 'XAUUSD', 'XAGUSD',

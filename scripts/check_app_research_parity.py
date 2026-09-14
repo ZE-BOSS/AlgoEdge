@@ -37,9 +37,6 @@ BOOKS = {
 
 # classic families: the research builder + simulator on the SAME MT5 H1 bars the app fetched
 CLASSIC = {
-    "donchian": ("_donchian", "Donchian_v1"),
-    "ema_pullback": ("_ema_pullback", "EMAPullback_v1"),
-    "vol_breakout": ("_vol_breakout", "VolBreakout_v1"),
 }
 
 

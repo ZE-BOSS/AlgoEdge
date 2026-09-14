@@ -909,32 +909,17 @@ class BacktestEngine(CostModelMixin):
         closes_arr = candles["close"].values.astype(float)
         atr_period = 14
 
-        prev_closes = np.roll(closes_arr, 1)
-        prev_closes[0] = closes_arr[0]
-        tr_all = np.maximum(
-            highs_arr - lows_arr,
-            np.maximum(np.abs(highs_arr - prev_closes), np.abs(lows_arr - prev_closes))
-        )
-        # Rolling mean ATR
-        atr_array = np.zeros(len(candles))
-        for i in range(atr_period, len(candles)):
-            atr_array[i] = np.mean(tr_all[i - atr_period:i])
+        # ATR and swing points for break-even / trailing come from
+        # risk/exit_replay.py — the same functions the portfolio engine and the
+        # live position manager use, so a leg trails identically in all three.
+        from backend.risk.exit_replay import atr_series, swing_length, swing_points_at
+        atr_array = atr_series(highs_arr, lows_arr, closes_arr, atr_period)
 
         # ── Pre-compute swing point cache ──
-        sw_len = self.risk_config.get("trail_structure_bars", self.risk_config.get("swing_length", 5))
-        swing_lookback = 20
+        sw_len = swing_length(self.risk_config)
         swing_cache = {}
-        for i in range(swing_lookback, len(candles)):
-            points = []
-            for j in range(max(sw_len, i - swing_lookback), i - sw_len):
-                if j - sw_len < 0:
-                    continue
-                window_h = highs_arr[j - sw_len:j + sw_len + 1]
-                window_l = lows_arr[j - sw_len:j + sw_len + 1]
-                if highs_arr[j] == window_h.max():
-                    points.append({"type": "HIGH", "price": float(highs_arr[j])})
-                if lows_arr[j] == window_l.min():
-                    points.append({"type": "LOW", "price": float(lows_arr[j])})
+        for i in range(len(candles)):
+            points = swing_points_at(highs_arr, lows_arr, i, sw_len)
             if points:
                 swing_cache[i] = points
 

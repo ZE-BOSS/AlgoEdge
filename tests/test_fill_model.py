@@ -17,6 +17,7 @@ from backend.backtester.fill_model import (
     MODE_CONSERVATIVE,
     MODE_EMPIRICAL,
     MODE_OFF,
+    SPIKE_FILLS,
     StopFillModel,
     get_overshoot_profile,
 )
@@ -45,7 +46,10 @@ def test_intrabar_spike_is_not_a_perfect_fill():
     )
     assert gapped is True
     assert fill > 14_740.0, "SELL stop must fill ABOVE the stop when price jumps through it"
-    assert ov == pytest.approx(get_overshoot_profile("Boom 1000 Index").mean, rel=1e-6)
+    # tick-calibrated: a spike-side stop fills lam of the way to the bar's extreme
+    lam = SPIKE_FILLS["BOOM 1000 INDEX"][1]
+    assert fill == pytest.approx(14_740.0 + lam * (14_800.0 - 14_740.0))
+    assert ov == pytest.approx(lam * 60.0 / 40.0, rel=1e-6)
 
 
 def test_buy_side_mirror():
@@ -61,16 +65,41 @@ def test_buy_side_mirror():
     )
     assert gapped is True
     assert fill < 5_960.0
-    # Crash overshoot is ABSOLUTE (index points, measured on live fills), so a
-    # 40-point stop pays mean/40 R — not a fixed fraction of the stop.
-    prof = get_overshoot_profile("Crash 1000 Index")
-    assert prof.absolute
-    assert fill == pytest.approx(5_960.0 - prof.mean)
-    assert ov == pytest.approx(prof.mean / 40.0, rel=1e-6)
+    lam = SPIKE_FILLS["CRASH 1000 INDEX"][1]
+    assert fill == pytest.approx(5_960.0 - lam * (5_960.0 - 5_900.0))
+    assert ov == pytest.approx(lam * 60.0 / 40.0, rel=1e-6)
+
+
+def test_grind_side_stops_fill_at_the_stop():
+    """Ticks: a Crash short / Boom long is stopped by the slow drift, -1.002R on
+    every stop exit — no overshoot to charge."""
+    m = _model()
+    fill, gapped, ov = m.resolve_stop_fill(
+        direction="SELL", open_p=6_000.0, high=6_050.0, low=5_995.0,
+        stop_level=6_040.0, stop_distance=40.0, symbol="Crash 1000 Index",
+        slippage_pips=0.0, position_key="g1")
+    assert fill == pytest.approx(6_040.0) and gapped is False and ov == 0.0
+    fill, gapped, ov = m.resolve_stop_fill(
+        direction="BUY", open_p=14_700.0, high=14_705.0, low=14_600.0,
+        stop_level=14_660.0, stop_distance=40.0, symbol="Boom 1000 Index",
+        slippage_pips=0.0, position_key="g2")
+    assert fill == pytest.approx(14_660.0) and gapped is False
+
+
+def test_jump_indices_charge_both_sides():
+    m = _model()
+    lam = SPIKE_FILLS["JUMP 25 INDEX"][1]
+    for direction, hi, lo, stop in (("BUY", 1_005.0, 900.0, 960.0), ("SELL", 1_100.0, 995.0, 1_040.0)):
+        fill, gapped, _ = m.resolve_stop_fill(
+            direction=direction, open_p=1_000.0, high=hi, low=lo, stop_level=stop,
+            stop_distance=40.0, symbol="Jump 25 Index", slippage_pips=0.0, position_key=direction)
+        want = stop - lam * (stop - lo) if direction == "BUY" else stop + lam * (hi - stop)
+        assert gapped is True and fill == pytest.approx(want)
 
 
 def test_crash_overshoot_does_not_scale_with_the_stop():
-    """146 live Crash 1000 stop fills: corr(overshoot, stop distance) = -0.06."""
+    """The spike's landing price depends on the bar, not on how wide the stop was
+    (146 live fills: corr(overshoot, stop distance) = -0.06)."""
     m = _model()
     fills = []
     for dist in (10.0, 60.0):
@@ -99,8 +128,9 @@ def test_fill_never_beyond_the_bar_extreme():
         slippage_pips=0.0,
         position_key="p3",
     )
-    assert fill == pytest.approx(5_959.99)
-    assert ov == pytest.approx(0.01 / 40.0, rel=1e-6)
+    lam = SPIKE_FILLS["CRASH 1000 INDEX"][1]
+    assert fill == pytest.approx(5_960.0 - lam * 0.01)
+    assert fill >= 5_959.99
     assert gapped is True
 
 
@@ -184,9 +214,9 @@ def test_empirical_quantiles_are_monotonic_and_hit_the_measured_anchors():
 
 # ── the economic claim ───────────────────────────────────────────────────────
 
-def test_conservative_mode_charges_the_measured_mean_across_many_stops():
-    """Aggregate check: the run-level mean overshoot must land on the measured
-    per-symbol mean, because that is the number §0.3's correction is built on."""
+def test_conservative_mode_charges_the_tick_calibrated_spike_fill_across_many_stops():
+    """Aggregate check: every spike-side Boom stop through a 160-point bar pays
+    lam x 160 points (40-point stop -> lam x 4 R)."""
     m = _model()
     for n in range(200):
         m.resolve_stop_fill(
@@ -197,7 +227,7 @@ def test_conservative_mode_charges_the_measured_mean_across_many_stops():
     s = m.summary()
     assert s["stop_exits"] == 200
     assert s["gapped_pct"] == pytest.approx(100.0)
-    assert s["mean_overshoot_r"] == pytest.approx(0.353, abs=1e-3)
+    assert s["mean_overshoot_r"] == pytest.approx(SPIKE_FILLS["BOOM 1000 INDEX"][1] * 4.0, abs=1e-3)
 
 
 def test_zero_stop_distance_degrades_safely():
@@ -228,8 +258,13 @@ def test_summary_reports_calibration_provenance():
         symbol="Boom 1000 Index", slippage_pips=0.0, position_key="p7",
     )
     entry = m.summary()["by_symbol"]["Boom 1000 Index"]
-    assert entry["profile_calibration"] in {"interpolated", "assumed", "measured"}
-    assert "research/27" in entry["profile_source"]
+    assert entry["profile_calibration"] == "measured"
+    assert "tick replay" in entry["profile_source"]
+    m.resolve_stop_fill(
+        direction="BUY", open_p=1.1, high=1.11, low=1.08, stop_level=1.09, stop_distance=0.01,
+        symbol="EURUSD", slippage_pips=0.0, position_key="fx")
+    fx = m.summary()["by_symbol"]["EURUSD"]
+    assert fx["profile_calibration"] in {"interpolated", "assumed", "measured"}
 
 
 # ── [P1.2] the flags must survive grouping ───────────────────────────────────

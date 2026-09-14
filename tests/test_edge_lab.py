@@ -22,7 +22,7 @@ def _m5(days=45, seed=1, drift=0.0):
     open_ = np.r_[close[0], close[:-1]]
     high = np.maximum(open_, close) + np.abs(rng.normal(0.02, 0.01, n))
     low = np.minimum(open_, close) - np.abs(rng.normal(0.02, 0.01, n))
-    t = (idx.asi8 // 10**9).astype(np.int64)
+    t = idx.as_unit("s").asi8.astype(np.int64)
     return Bars("XAUUSD", "M5", t, open_, high, low, close, np.full(n, 0.001), rng.integers(50, 150, n).astype(float))
 
 
