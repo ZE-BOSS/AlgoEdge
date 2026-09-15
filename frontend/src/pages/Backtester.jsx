@@ -500,21 +500,27 @@ function SaveModal({ result, form, isPortfolio, portfolioSymbols, onClose, onSuc
     setIsSaving(true);
     setError(null);
     try {
-      await saveBacktest(result.backtest_id, {
-        backtest_data: {
-          ...result,
-          strategy_id: result.params_snapshot?.strategy_id || form.strategy_id,
-          // For portfolio saves, `symbol` on the run row is still populated
-          // (e.g. as a comma-joined list) so older UI that reads .symbol as
-          // a fallback still shows something reasonable — but `title` is
-          // what the saved-backtests list should actually display.
-          symbol: isPortfolio ? (portfolioSymbols || []).map(s => s.symbol).join(', ') : (result.params_snapshot?.symbol || form.symbol),
-          title: trimmedTitle,
-          risk_config: result.params_snapshot || form,
-          notes: notesInput
-        },
-        save_mode: 'FULL'
-      });
+      const meta = {
+        strategy_id: result.params_snapshot?.strategy_id || form.strategy_id,
+        // For portfolio saves, `symbol` on the run row is still populated
+        // (e.g. as a comma-joined list) so older UI that reads .symbol as
+        // a fallback still shows something reasonable — but `title` is
+        // what the saved-backtests list should actually display.
+        symbol: isPortfolio ? (portfolioSymbols || []).map(s => s.symbol).join(', ') : (result.params_snapshot?.symbol || form.symbol),
+        title: trimmedTitle,
+        risk_config: result.params_snapshot || form,
+        notes: notesInput,
+      };
+      try {
+        // The server saves from its own complete copy of the run, so only the
+        // details typed here are sent — the page holds a lean copy, and
+        // uploading a 3,000-trade run back was megabytes for nothing.
+        await saveBacktest(result.backtest_id, { backtest_data: meta, save_mode: 'SERVER' });
+      } catch (err) {
+        // 409: the server no longer holds this run (e.g. it restarted) — upload it.
+        if (err?.response?.status !== 409) throw err;
+        await saveBacktest(result.backtest_id, { backtest_data: { ...result, ...meta }, save_mode: 'FULL' });
+      }
       onSuccess();
     } catch (e) {
       console.error("Save failed", e);

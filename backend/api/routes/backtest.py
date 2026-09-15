@@ -112,23 +112,107 @@ def _redis_safe_state(state):
     full 3600s TTL, which is one of the three causes of the "stuck at 95%" bug.
 
     Memory remains the source of truth; Redis only has to answer "is it done,
-    and what were the headline numbers" after a process restart.
+    and what were the headline numbers" after a process restart — so it always
+    takes the leanest form (`_lean_result_view(for_mirror=True)`).
     """
     if not isinstance(state, dict):
         return state
     out = dict(state)
     res = out.get("result")
     if isinstance(res, dict):
-        res = {k: v for k, v in res.items() if k != "replay"}
-        # The Redis mirror only has to answer "is it done, and what were the
-        # headline numbers", so it always takes the leanest form regardless of
-        # size — hence drop_panel_only=True rather than the count threshold.
-        for key in ("grouped_trades", "trades"):
-            if key in res:
-                res[key] = _slim_groups(res[key], drop_panel_only=True)
-        res["run_logs"] = []
-        out["result"] = res
+        out["result"] = _lean_result_view(res, for_mirror=True)
     return out
+
+
+async def _redis_state_payload(state) -> str:
+    """The Redis mirror's JSON, built off the event loop."""
+    import asyncio
+    return await asyncio.to_thread(json.dumps, _redis_safe_state(state), default=str)
+
+
+# ── Delivering a finished run to the page ────────────────────────────────────
+# Measured 2026-09-15 on a portfolio-sized result (6 synthetic legs Jan–Sep 2026,
+# 3,001 trades): /latest_result froze the event loop 7 s (FastAPI's
+# jsonable_encoder 4.7 s + dumps 2.1 s) for a 13.7 MB body, 438,000 of whose
+# numbers were the per-bar equity curve the page decimates to 500 points. The
+# portfolio route also sanitised the run on the event loop and pushed it — every
+# leg's chart slices included — through one WebSocket frame. The page sat on
+# "Loading backtest details..." indefinitely.
+_EQUITY_POINTS_MAX = 4000
+
+
+def _downsample_curve(curve, max_points: int = _EQUITY_POINTS_MAX):
+    """At most ~max_points points: each bucket's minimum and maximum in time
+    order, plus the first and last point, so peaks and troughs survive."""
+    if not isinstance(curve, list) or len(curve) <= max_points:
+        return curve
+    n = len(curve)
+    buckets = max(1, max_points // 2)
+    try:
+        idx: list[int] = []
+        for k in range(buckets):
+            lo, hi = (k * n) // buckets, ((k + 1) * n) // buckets
+            if hi <= lo:
+                continue
+            seg = curve[lo:hi]
+            i_min = lo + min(range(hi - lo), key=seg.__getitem__)
+            i_max = lo + max(range(hi - lo), key=seg.__getitem__)
+            idx.extend(sorted({i_min, i_max}))
+        if idx[0] != 0:
+            idx.insert(0, 0)
+        if idx[-1] != n - 1:
+            idx.append(n - 1)
+        return [curve[i] for i in idx]
+    except TypeError:  # non-numeric points: plain stride
+        step = -(-n // max_points)
+        return curve[::step] + ([curve[-1]] if (n - 1) % step else [])
+
+
+def _lean_result_view(src: dict, *, for_mirror: bool = False) -> dict:
+    """What the page (or the Redis mirror) receives for a finished run. The full
+    result stays in USER_BACKTEST_STATE for the per-trade chart, replay and save
+    endpoints. Never mutates `src`."""
+    if not isinstance(src, dict):
+        return src
+    skip = ("replay", "trades", "equity_curve", "grouped_trades", "run_logs")
+    out = {k: v for k, v in src.items() if k not in skip}
+    groups = src.get("grouped_trades")
+    out["grouped_trades"] = (
+        _slim_groups(groups, drop_panel_only=True if for_mirror else None) if groups is not None else []
+    )
+    # Per-leg `trades` repeat grouped_trades[*].sub_trades and the results page
+    # does not read them; only small runs keep them.
+    legs = src.get("trades")
+    if isinstance(legs, list) and not for_mirror and len(groups or []) <= _LEAN_GROUP_THRESHOLD:
+        out["trades"] = _slim_groups(legs)
+    else:
+        out["trades"] = []
+        out["trades_omitted"] = len(legs) if isinstance(legs, list) else 0
+    curve = src.get("equity_curve")
+    out["equity_curve"] = _downsample_curve(curve)
+    if isinstance(curve, list) and len(curve) > _EQUITY_POINTS_MAX:
+        out["equity_curve_points"] = len(curve)
+    out["run_logs"] = [] if for_mirror else (src.get("run_logs") or [])
+    return out
+
+
+def _latest_result_json(result: dict) -> bytes:
+    return json.dumps(_lean_result_view(result), default=str).encode("utf-8")
+
+
+# user id -> ((backtest_id, id(result dict)), serialised lean view)
+_LATEST_RESULT_JSON: dict = {}
+
+
+def _completion_envelope(result: dict) -> dict:
+    """The "complete" WebSocket message: headline only. The page fetches the run
+    from /latest_result when it hears this."""
+    result = result or {}
+    return {"type": "backtest_progress", "stage": "complete", "pct": 100,
+            "backtest_id": result.get("backtest_id"), "total_trades": result.get("total_trades"),
+            "final_balance": result.get("final_balance")}
+
+
 # strategy_id -> the UserConfigV2 attribute holding that strategy's params.
 # A map rather than an if/elif chain: the chain was duplicated in the
 # single-symbol and portfolio paths, and adding a strategy to one but not the
@@ -594,7 +678,7 @@ async def reconcile_orphaned_runs() -> int:
                         "it did not finish. Run it again."
                     ),
                 }
-                await redis_client.redis.set(key, json.dumps(_redis_safe_state(state), default=str), ex=3600)
+                await redis_client.redis.set(key, await _redis_state_payload(state), ex=3600)
                 cleared += 1
             except Exception:
                 continue
@@ -647,20 +731,21 @@ async def get_backtest_latest_result(current_user: User = Depends(get_current_us
             logger.warning(f"[API] Redis get latest_result failed: {e}")
             
     if state and state.get("status") == "complete":
-        # This used to `copy.deepcopy` the whole result — duplicating tens of MB
-        # synchronously on the event loop purely to pop a few keys off it — and
-        # then strip chart_data/_m15/_m5 while leaving `chart_data_h1` (the one
-        # that is actually populated) and every `sub_trades` payload intact. It
-        # is the endpoint the page calls on reload, so that cost landed on every
-        # refresh. Build the trimmed view directly instead; `_slim_groups`
-        # returns new dicts, so the shared in-memory state is never mutated.
+        # Lean view (see _lean_result_view), serialised in a worker thread and
+        # returned as bytes, so FastAPI's jsonable_encoder never walks it on the
+        # event loop; cached so a reload or reconnect costs nothing.
+        import asyncio
+
+        from fastapi.responses import Response
         src = state.get("result") or {}
-        result_data = {k: v for k, v in src.items() if k not in ("run_logs", "replay")}
-        result_data["run_logs"] = []
-        for key in ("grouped_trades", "trades"):
-            if key in result_data:
-                result_data[key] = _slim_groups(result_data[key])
-        return result_data
+        key = (src.get("backtest_id"), id(src))
+        cached = _LATEST_RESULT_JSON.get(current_user.id)
+        if cached is not None and cached[0] == key:
+            body = cached[1]
+        else:
+            body = await asyncio.to_thread(_latest_result_json, src)
+            _LATEST_RESULT_JSON[current_user.id] = (key, body)
+        return Response(content=body, media_type="application/json")
     return {}
 
 @router.post("/stop")
@@ -686,7 +771,7 @@ async def stop_backtest_endpoint(current_user: User = Depends(get_current_user))
                 import asyncio
 
                 import redis.exceptions
-                await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(_redis_safe_state(state), default=str), ex=3600)
+                await redis_client.redis.set(f"backtest_state:{current_user.id}", await _redis_state_payload(state), ex=3600)
             except (Exception, asyncio.CancelledError, redis.exceptions.TimeoutError) as e:
                 logger.warning(f"[API] Redis set cancel failed: {e}")
         return {"message": "Backtest cancelled"}
@@ -1293,38 +1378,16 @@ async def run_backtest_endpoint(
             current_state["progress"] = {"stage": "complete", "pct": 100}
             current_state["result"] = sanitized
             
-            # Create a stripped payload for the frontend to prevent UI freezing.
-            #
-            # [T2.1] This used to deepcopy the whole sanitized result and then
-            # delete the heavy keys from the copy — i.e. duplicate hundreds of
-            # MB purely to throw most of it away, synchronously, on the event
-            # loop. Build the trimmed view directly instead: shallow-copy each
-            # trade dict without the chart keys and share everything else.
-            # Same rules as /latest_result and the Redis mirror — see
-            # _slim_groups. Keeping them in one place is what stops the three
-            # delivery paths drifting apart again.
-            ws_payload = {k: v for k, v in sanitized.items() if k != "replay"}
-            _groups = ws_payload.get("grouped_trades")
-            if isinstance(_groups, list):
-                if len(_groups) > _LEAN_GROUP_THRESHOLD:
-                    logger.info(
-                        f"[BT-WS] {len(_groups)} groups > {_LEAN_GROUP_THRESHOLD}: "
-                        f"sending lean payload (overlay detail refetched on demand)"
-                    )
-                ws_payload["grouped_trades"] = _slim_groups(_groups)
-            # (replay is already excluded above — it is megabytes and the
-            # client already has it from the live stream; it stays in saved
-            # state and is fetched via /replay when needed.)
-            
-            # Send the run logs immediately as part of the WS payload
-            _t1 = _time.perf_counter()
-            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
-            logger.info(f"[BT-TIMING] ws broadcast took {_time.perf_counter() - _t1:.1f}s")
-
-            # Now save to state (which writes to Redis and might block)
+            # Save first, then announce. The page fetches the run from
+            # /latest_result when it hears "complete"; announcing before the save
+            # let that fetch race the state write and come back empty. The
+            # announcement carries only the headline — the finished run pushed
+            # through one WebSocket frame froze the tab or dropped the socket on
+            # large runs (see _lean_result_view).
             _t2 = _time.perf_counter()
             await _save_state(current_state)
             logger.info(f"[BT-TIMING] _save_state took {_time.perf_counter() - _t2:.1f}s")
+            await ws_manager.broadcast_to_user(current_user.id, _completion_envelope(sanitized))
             
         except Exception as e:
             current_state = await _get_state()
@@ -1386,7 +1449,7 @@ async def run_portfolio_backtest_endpoint(
             if HAS_REDIS and redis_client and redis_client.redis:
                 try:
                     import redis.exceptions
-                    await redis_client.redis.set(f"backtest_state:{current_user.id}", json.dumps(_redis_safe_state(state), default=str), ex=3600)
+                    await redis_client.redis.set(f"backtest_state:{current_user.id}", await _redis_state_payload(state), ex=3600)
                 except Exception as e:
                     logger.warning(f"[PORTFOLIO_BT] Redis save failed: {e}")
 
@@ -1977,7 +2040,9 @@ async def run_portfolio_backtest_endpoint(
             except Exception as e:
                 logger.warning(f"[replay] series attach failed (chart only, run unaffected): {e}")
 
-            sanitized = _sanitize(response)
+            # Off the event loop, as the single-symbol route does: every leg's
+            # chart slices plus the replay series is millions of objects.
+            sanitized = await asyncio.to_thread(_sanitize, response)
             current_state = await _get_state()
             current_state["status"] = "complete"
             current_state["progress"] = {"stage": "complete", "pct": 100}
@@ -1985,34 +2050,11 @@ async def run_portfolio_backtest_endpoint(
             # what /backtest_result/trade/{group_id}/chart reads from on demand.
             current_state["result"] = sanitized
 
-            # Stripped copy for the WS broadcast itself. Previously this
-            # endpoint broadcast `sanitized` directly, with every trade's
-            # chart_data / chart_data_m15 / chart_data_m5 embedded — for a
-            # multi-symbol portfolio run with hundreds of grouped trades,
-            # each carrying up to ~500 candles per timeframe, this is exactly
-            # the "tremendous load" the on-demand chart endpoint exists to
-            # avoid. Mirror the /backtest endpoint's pattern: strip the heavy
-            # fields from what actually goes over the wire.
-            # Was a copy.deepcopy of the whole result followed by a strip list
-            # that missed `chart_data_h1` (the populated one) and never touched
-            # `sub_trades` — the same three defects /latest_result had. Routed
-            # through _slim_groups so all four delivery paths share one rule.
-            ws_payload = {k: v for k, v in sanitized.items() if k != "replay"}
-            _groups = ws_payload.get("grouped_trades")
-            if isinstance(_groups, list):
-                if len(_groups) > _LEAN_GROUP_THRESHOLD:
-                    logger.info(
-                        f"[PORTFOLIO_BT-WS] {len(_groups)} groups > "
-                        f"{_LEAN_GROUP_THRESHOLD}: sending lean payload"
-                    )
-                ws_payload["grouped_trades"] = _slim_groups(_groups)
-            # Same reasoning as the per-trade chart_data above — the client
-            # already received this series live; it is refetched from saved
-            # state via /replay rather than pushed again at completion.
-            ws_payload.pop("replay", None)
-
-            await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", "stage": "complete", "result": ws_payload})
+            # Save first, then announce with the headline only — see the
+            # single-symbol route. This route used to push the whole run, every
+            # leg's chart slices included, through one WebSocket frame.
             await _save_state(current_state)
+            await ws_manager.broadcast_to_user(current_user.id, _completion_envelope(sanitized))
 
         except Exception as e:
             import traceback
@@ -2584,6 +2626,21 @@ async def save_backtest_from_client(
     if res.scalars().first():
         return {"status": "ok", "message": "Already saved"}
 
+    # Save from the server's own copy of the run while it still holds it: that
+    # copy is complete (every trade's chart slices, the full equity curve, the
+    # replay), and the page no longer uploads megabytes it only received in lean
+    # form. The page's own fields (title, notes, symbol, strategy, risk_config)
+    # still win. `save_mode: "SERVER"` asks for exactly this and gets 409 when the
+    # run is gone (e.g. after a restart), so the page can resend the full body.
+    _srv = USER_BACKTEST_STATE.get(current_user.id)
+    _srv_result = _srv.get("result") if isinstance(_srv, dict) else None
+    if isinstance(_srv_result, dict) and _srv_result.get("backtest_id") == backtest_id:
+        _client_meta = {k: v for k, v in data.items()
+                        if k in ("title", "notes", "symbol", "strategy_id", "risk_config")}
+        data = {**_srv_result, **_client_meta}
+    elif raw_data.get("save_mode") == "SERVER":
+        raise HTTPException(status_code=409, detail="This run is no longer held on the server; send the full result.")
+
     report = data.get("report", {})
     
     # [B8] Default the stored range to what the run actually REQUESTED, not to
@@ -2638,6 +2695,12 @@ async def save_backtest_from_client(
         except Exception as e:
             logger.warning(f"Failed to parse dates for backtest {backtest_id}: {e}")
 
+    import asyncio as _asyncio
+    _replay_json, _run_logs_json = await _asyncio.to_thread(lambda: (
+        json.dumps(data.get("replay"), default=str) if data.get("replay") else None,
+        json.dumps(data.get("run_logs", []), default=str),
+    ))
+
     run = BacktestRun(
         id=backtest_id,
         user_id=current_user.id,
@@ -2680,9 +2743,9 @@ async def save_backtest_from_client(
         sl_hit_rate=report.get("sl_hit_rate", 0),
         be_hit_rate=report.get("be_hit_rate", 0),
         trail_hit_rate=report.get("trail_hit_rate", 0),
-        run_logs=json.dumps(data.get("run_logs", []), default=str),
+        run_logs=_run_logs_json,
         # [Phase 13 section C.7] See runner.py — same field, client-save path.
-        replay_data=json.dumps(data.get("replay"), default=str) if data.get("replay") else None,
+        replay_data=_replay_json,
     )
     
     db.add(run)
@@ -2716,71 +2779,83 @@ async def save_backtest_from_client(
         import logging
         logging.error(f"Failed to load state for chart injection: {e}")
     
-    for t in trades:
-        group_id = t.get("group_id")
-        state_t = next((st for st in state_trades if st.get("group_id") == group_id), {})
-        
-        t["chart_data"] = state_t.get("chart_data", t.get("chart_data", []))
-        t["chart_data_m15"] = state_t.get("chart_data_m15", t.get("chart_data_m15", []))
-        t["chart_data_m5"] = state_t.get("chart_data_m5", t.get("chart_data_m5", []))
+    # Thousands of trades, each serialising its chart slices: built in a
+    # worker thread (ORM objects need no session until db.add), with the
+    # state lookup indexed instead of a scan per trade.
+    state_by_gid = {st.get("group_id"): st for st in state_trades if isinstance(st, dict)}
 
-        try:
-            etime = t.get("entry_time_iso") or t.get("entry_time")
-            if isinstance(etime, (int, float)):
-                entry_time = datetime.fromtimestamp(etime)
-            else:
-                entry_time = datetime.fromisoformat(etime).replace(tzinfo=None) if etime else None
+    def _build_trade_rows():
+        rows = []
+        for t in trades:
+            group_id = t.get("group_id")
+            state_t = state_by_gid.get(group_id, {})
+        
+            t["chart_data"] = state_t.get("chart_data", t.get("chart_data", []))
+            t["chart_data_m15"] = state_t.get("chart_data_m15", t.get("chart_data_m15", []))
+            t["chart_data_m5"] = state_t.get("chart_data_m5", t.get("chart_data_m5", []))
+            t["chart_data_h1"] = state_t.get("chart_data_h1", t.get("chart_data_h1", []))
+
+            try:
+                etime = t.get("entry_time_iso") or t.get("entry_time")
+                if isinstance(etime, (int, float)):
+                    entry_time = datetime.fromtimestamp(etime)
+                else:
+                    entry_time = datetime.fromisoformat(etime).replace(tzinfo=None) if etime else None
                 
-            xtime = t.get("exit_time_iso") or t.get("exit_time")
-            if isinstance(xtime, (int, float)):
-                exit_time = datetime.fromtimestamp(xtime)
-            else:
-                exit_time = datetime.fromisoformat(xtime).replace(tzinfo=None) if xtime else None
-        except Exception as e:
-            import logging
-            logging.error(f"Failed to parse time for trade: {e}")
-            entry_time, exit_time = None, None
+                xtime = t.get("exit_time_iso") or t.get("exit_time")
+                if isinstance(xtime, (int, float)):
+                    exit_time = datetime.fromtimestamp(xtime)
+                else:
+                    exit_time = datetime.fromisoformat(xtime).replace(tzinfo=None) if xtime else None
+            except Exception as e:
+                import logging
+                logging.error(f"Failed to parse time for trade: {e}")
+                entry_time, exit_time = None, None
             
-        bt_trade = BacktestTrade(
-            id=uuid.uuid4().int & ((1 << 63) - 1),  # Bypass SQLite BIGINT autoincrement issue & ensure signed 64-bit fit
-            backtest_id=backtest_id,
-            symbol=t.get("symbol", run.symbol),
-            direction=t.get("direction"),
-            entry_price=t.get("entry_price"),
-            exit_price=t.get("exit_price"),
-            stop_loss=t.get("stop_loss"),
-            pnl=t.get("combined_pnl", t.get("pnl", 0)),
-            balance_before=t.get("balance_before"),
-            balance_after=t.get("balance_after"),
-            session=t.get("entry_session", "UNKNOWN"),
-            exit_reason=t.get("exit_reason"),
-            tp_level_hit=t.get("tp_level_hit") or t.get("tp_level"),
-            entry_time=entry_time,
-            exit_time=exit_time,
-            be_applied=t.get("be_applied", False),
-            trail_method=t.get("trail_method"),
-            mae_pips=t.get("mae_pips"),
-            mfe_pips=t.get("mfe_pips"),
-            mae_r=t.get("mae_r"),
-            mfe_r=t.get("mfe_r"),
-            risk_pips=t.get("risk_pips"),
-            confluence_score=t.get("confluence_score"),
-            strategy_id=t.get("strategy_id", t.get("strategy", run.strategy_id)),
-            chart_data=json.dumps(t.get("chart_data", [])),
-            chart_data_h1=json.dumps(t.get("chart_data_h1", [])),
-            chart_data_m15=json.dumps(t.get("chart_data_m15", [])),
-            chart_data_m5=json.dumps(t.get("chart_data_m5", [])),
-            tp1_price=t.get("tp1_price"),
-            tp2_price=t.get("tp2_price"),
-            tp3_price=t.get("tp3_price"),
-            tp4_price=t.get("tp4_price"),
-            tp5_price=t.get("tp5_price"),
-            pnl_r=t.get("pnl_r"),
-            planned_rr=t.get("planned_rr"),
-            realized_rr=t.get("realized_rr"),
-            smc_data=json.dumps(t.get("smc_data", {})),
-            sub_trades=json.dumps(_slim_sub_trades(t.get("sub_trades", [])))
-        )
+            bt_trade = BacktestTrade(
+                id=uuid.uuid4().int & ((1 << 63) - 1),  # Bypass SQLite BIGINT autoincrement issue & ensure signed 64-bit fit
+                backtest_id=backtest_id,
+                symbol=t.get("symbol", run.symbol),
+                direction=t.get("direction"),
+                entry_price=t.get("entry_price"),
+                exit_price=t.get("exit_price"),
+                stop_loss=t.get("stop_loss"),
+                pnl=t.get("combined_pnl", t.get("pnl", 0)),
+                balance_before=t.get("balance_before"),
+                balance_after=t.get("balance_after"),
+                session=t.get("entry_session", "UNKNOWN"),
+                exit_reason=t.get("exit_reason"),
+                tp_level_hit=t.get("tp_level_hit") or t.get("tp_level"),
+                entry_time=entry_time,
+                exit_time=exit_time,
+                be_applied=t.get("be_applied", False),
+                trail_method=t.get("trail_method"),
+                mae_pips=t.get("mae_pips"),
+                mfe_pips=t.get("mfe_pips"),
+                mae_r=t.get("mae_r"),
+                mfe_r=t.get("mfe_r"),
+                risk_pips=t.get("risk_pips"),
+                confluence_score=t.get("confluence_score"),
+                strategy_id=t.get("strategy_id", t.get("strategy", run.strategy_id)),
+                chart_data=json.dumps(t.get("chart_data", [])),
+                chart_data_h1=json.dumps(t.get("chart_data_h1", [])),
+                chart_data_m15=json.dumps(t.get("chart_data_m15", [])),
+                chart_data_m5=json.dumps(t.get("chart_data_m5", [])),
+                tp1_price=t.get("tp1_price"),
+                tp2_price=t.get("tp2_price"),
+                tp3_price=t.get("tp3_price"),
+                tp4_price=t.get("tp4_price"),
+                tp5_price=t.get("tp5_price"),
+                pnl_r=t.get("pnl_r"),
+                planned_rr=t.get("planned_rr"),
+                realized_rr=t.get("realized_rr"),
+                smc_data=json.dumps(t.get("smc_data", {})),
+                sub_trades=json.dumps(_slim_sub_trades(t.get("sub_trades", [])))
+            )
+            rows.append(bt_trade)
+        return rows
+
+    for bt_trade in await _asyncio.to_thread(_build_trade_rows):
         db.add(bt_trade)
         
     await db.commit()
