@@ -48,6 +48,13 @@ MAX_BATCH = 200
 LEVELS = ("TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL")
 LEVEL_ORDER = {name: i for i, name in enumerate(LEVELS)}
 
+# Pushed to every open tab, whatever page it is on, and parsed on the browser's
+# main thread. A busy backtest or bot scan logs hundreds of DEBUG lines a
+# second; streaming those made every tab stutter. They stay in the ring (and
+# the Logs page's REST query) — only INFO and above are pushed live.
+BROADCAST_MIN_LEVEL = "INFO"
+_BROADCAST_MIN = LEVEL_ORDER[BROADCAST_MIN_LEVEL]
+
 # `[SIZER]`, `[ENGINE]`, `[RISK]`, `[VWAP]` ... the codebase already tags its
 # high-value lines this way, so category is recovered rather than invented.
 _CATEGORY_RE = re.compile(r"\[([A-Z][A-Z0-9_]{1,24})\]")
@@ -188,7 +195,9 @@ class LogHub:
                 continue
             batch = []
             while self._pending and len(batch) < MAX_BATCH:
-                batch.append(self._pending.popleft())
+                rec = self._pending.popleft()
+                if LEVEL_ORDER.get(rec.get("level"), 0) >= _BROADCAST_MIN:
+                    batch.append(rec)
             if not batch:
                 continue
             try:

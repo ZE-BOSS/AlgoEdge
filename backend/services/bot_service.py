@@ -331,6 +331,26 @@ class BotService:
             out["slot_overrides"] = dict(slot.strategy_params_override)
         return out
 
+    @staticmethod
+    def active_slot_symbols(config) -> list[str]:
+        """Symbols with at least one ENABLED strategy slot, in slot order — the
+        list Settings → Strategy shows as active and the only list the bot trades."""
+        seen: dict[str, None] = {}
+        for slot in (getattr(config, "instrument_slots", None) or []):
+            if getattr(slot, "enabled", True) and getattr(slot, "symbol", None):
+                seen.setdefault(slot.symbol, None)
+        return list(seen)
+
+    def _live_feed(self, slot, engine, symbol: str, timeframes: list[str]):
+        """The slot's LiveBarFeed (strategies/bar_feed.py), rebuilt with its engine."""
+        from backend.strategies.bar_feed import LiveBarFeed
+
+        feeds = self.__dict__.setdefault("_bar_feeds", {})
+        feed = feeds.get(slot.slot_id)
+        if feed is None or feed.engine is not engine:
+            feed = feeds[slot.slot_id] = LiveBarFeed(engine, symbol, timeframes)
+        return feed
+
     def _primary_tf_seconds(self) -> int | None:
         """Seconds in the fastest timeframe any live engine is scanning.
 
@@ -633,6 +653,7 @@ class BotService:
             return {"running": False, "message": "Bot is already stopped"}
 
         self.running = False
+        self.symbols = []  # a stopped bot scans nothing; the Dashboard then shows the configured slots
         if self._task and not self._task.done():
             self._task.cancel()
             try:
@@ -839,12 +860,20 @@ class BotService:
                     if _slot.enabled:
                         _slots_by_symbol.setdefault(_slot.symbol, []).append(_slot)
 
+                # Settings is the source of truth, re-read every cycle: every
+                # ENABLED slot is scanned — one enabled while the bot runs is
+                # picked up next cycle, one disabled is dropped. A default APA_v1
+                # slot is synthesised only when the config has no slots at all.
+                # It used to be created for ANY started symbol without a slot, so
+                # a stale symbol list from the Dashboard traded APA on markets the
+                # user never selected while their real slots went unscanned.
                 effective_slots = []
-                for _sym in self.symbols:
-                    _matching = _slots_by_symbol.get(_sym)
-                    if _matching:
+                if getattr(config, 'instrument_slots', None):
+                    for _matching in _slots_by_symbol.values():
                         effective_slots.extend(_matching)
-                    else:
+                    self.symbols = list(_slots_by_symbol)
+                else:
+                    for _sym in self.symbols:
                         effective_slots.append(_InstrumentSlot(
                             slot_id=_uuid_mod.uuid5(_uuid_mod.NAMESPACE_OID, f"{_sym}:APA_v1").hex[:12],
                             symbol=_sym, strategy_id="APA_v1",
@@ -987,7 +1016,8 @@ class BotService:
                         fetched_data = {}
                         has_missing_data = False
                         for tf in req_tfs:
-                            tf_data = await DataFetcher.get_historical_data(symbol, tf, count=5000)
+                            tf_data = await DataFetcher.get_historical_data(
+                                symbol, tf, count=self._live_feed(slot, current_engine, symbol, req_tfs).fetch_count(tf))
                             await asyncio.sleep(0.2)  # Throttle between timeframe fetches
                             if tf_data is None or tf_data.empty:
                                 has_missing_data = True

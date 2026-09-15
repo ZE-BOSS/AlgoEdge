@@ -418,25 +418,44 @@ function ProgressBar({ progress }) {
   </div>);
 }
 
-function LiveLogPanel({ events, setEvents }) {
-  const ref = useRef(null);
+function LiveLogPanel({ events }) {
   const { status } = useConnectionStore();
   const isAuth = useAuthStore(s => s.isAuthenticated);
   const { data: logs } = useQuery({ queryKey: ['btLogs'], queryFn: () => getBotLogs(50).then(r => r.data), refetchInterval: 2000, enabled: status === 'ONLINE' && isAuth });
 
+  // Live WebSocket events are kept HERE, batched to at most four renders a
+  // second. They used to live in the Backtester page's own state, so every bot
+  // scan line and backtest log line re-rendered the entire page — form, results
+  // and replay — which is what made it hang while the bot or a run was busy.
+  // `events` (the finished run's logs) still comes from the page.
+  const [live, setLive] = useState([]);
+  useEffect(() => { if (!events.length) setLive([]); }, [events]);
   useEffect(() => {
-    const h = e => { try { const m = e.detail; if (m.type === 'activity_log' && m.event) setEvents(p => [m.event, ...p].slice(0, 2000)); } catch { } };
+    let pending = [];
+    let timer = null;
+    const h = e => {
+      const m = e.detail;
+      if (m?.type !== 'activity_log' || !m.event) return;
+      pending.push(m.event);
+      if (timer) return;
+      timer = setTimeout(() => {
+        const batch = pending.reverse();
+        pending = [];
+        timer = null;
+        setLive(p => [...batch, ...p].slice(0, 2000));
+      }, 250);
+    };
     window.addEventListener('ws-message', h);
-    return () => window.removeEventListener('ws-message', h);
+    return () => { window.removeEventListener('ws-message', h); if (timer) clearTimeout(timer); };
   }, []);
 
   const merged = useMemo(() => {
-    const all = [...events, ...(logs?.events || [])]; const seen = new Set(); const out = [];
+    const all = [...live, ...events, ...(logs?.events || [])]; const seen = new Set(); const out = [];
     for (const e of all) { const k = `${e.time}|${e.message}`; if (!seen.has(k)) { seen.add(k); out.push(e); } }
     out.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
     const allowed = ['BACKTEST', 'BACKTEST_LOG', 'SIGNAL', 'TRADE', 'SMC'];
     return out.filter(e => allowed.some(a => (e.category || '').includes(a)) || e.level === 'ERROR');
-  }, [logs, events]);
+  }, [logs, events, live]);
 
   return (<div style={{ maxHeight: 340, overflow: 'auto', background: '#0d1117', borderRadius: 'var(--radius-xs)', padding: '8px 12px', fontFamily: "'JetBrains Mono',monospace", fontSize: '0.72rem', lineHeight: 1.7, border: '1px solid var(--border)' }}>
     {merged.length ? merged.map((e, i) => (
@@ -1934,11 +1953,10 @@ export default function Backtester() {
     return [...new Set([...SYMBOLS, ...configured])];
   }, [remoteConfig]);
 
-  const [form, setForm] = useState(() => {
-    // Restore last saved config from localStorage. Anything the saved blob does
-    // not carry falls back to DEFAULT_FORM, so parameters added after a user
-    // last ran a backtest arrive with the correct backend default rather than
-    // as `undefined`.
+  // The form this browser last saved, read once at mount. Its presence decides
+  // whether the live config may seed the form (first visit only) and whether the
+  // measured exits are prefilled on load — see the effects below.
+  const [savedFormAtLoad] = useState(() => {
     try {
       // Drop the pre-retune cache. v1 blobs pin the OLD defaults (1% risk,
       // 3% hard cap, 2-pip BE buffer, zeroed simulation costs, …) and the
@@ -1946,15 +1964,21 @@ export default function Backtester() {
       // silently keep overriding the whole cost-realism retune.
       LEGACY_STORAGE_KEYS.forEach(k => localStorage.removeItem(k));
       const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) || {};
-        const merged = { ...DEFAULT_FORM, ...parsed };
-        NESTED_FORM_KEYS.forEach(k => {
-          merged[k] = { ...DEFAULT_FORM[k], ...(parsed[k] || {}) };
-        });
-        return merged;
-      }
-    } catch { }
+      return saved ? (JSON.parse(saved) || null) : null;
+    } catch { return null; }
+  });
+
+  const [form, setForm] = useState(() => {
+    // Anything the saved blob does not carry falls back to DEFAULT_FORM, so
+    // parameters added after a user last ran a backtest arrive with the correct
+    // backend default rather than as `undefined`.
+    if (savedFormAtLoad) {
+      const merged = { ...DEFAULT_FORM, ...savedFormAtLoad };
+      NESTED_FORM_KEYS.forEach(k => {
+        merged[k] = { ...DEFAULT_FORM[k], ...(savedFormAtLoad[k] || {}) };
+      });
+      return merged;
+    }
     return JSON.parse(JSON.stringify(DEFAULT_FORM));
   });
 
@@ -2007,13 +2031,33 @@ export default function Backtester() {
   const [configLoaded, setConfigLoaded] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
 
-  // Auto-save config to localStorage on every change (debounced)
+  // Persist every change: debounced while typing, and flushed when the page is
+  // reloaded, closed or navigated away from — a reload inside the debounce
+  // window used to lose the last edit. Reset sets skipPersistRef so the flush
+  // does not write the old form straight back.
+  const formRef = useRef(form);
+  useEffect(() => { formRef.current = form; }, [form]);
+  const skipPersistRef = useRef(false);
   useEffect(() => {
     const timer = setTimeout(() => {
+      if (skipPersistRef.current) return;
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(form)); } catch { }
-    }, 500);
+    }, 300);
     return () => clearTimeout(timer);
   }, [form]);
+  useEffect(() => {
+    const flush = () => {
+      if (skipPersistRef.current) return;
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(formRef.current)); } catch { }
+    };
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    return () => {
+      flush();
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('beforeunload', flush);
+    };
+  }, []);
 
   // Auto-save result to localStorage (debounced)
   //
@@ -2092,15 +2136,10 @@ export default function Backtester() {
   // is still the shipped default. The server says which fields that is
   // (`live_applies`); for the others the saved value is what live trades, so
   // that is what the form gets. Re-runs once the saved config arrives.
-  const lastStratRef = useRef(null);
-  useEffect(() => {
-    const sid = form.strategy_id;
+  const measuredExitPatch = useCallback((sid) => {
     const entry = allStrategyDefaults[sid];
-    const key = `${sid}|${entry ? 1 : 0}|${userCfg?.config ? 1 : 0}`;
-    if (!sid || lastStratRef.current === key) return;
-    lastStratRef.current = key;
     const measured = entry?.defaults;
-    if (!measured) return;
+    if (!measured) return {};
     const liveApplies = entry?.live_applies;
     const savedRisk = userCfg?.config?.risk || {};
     const patch = {};
@@ -2109,63 +2148,91 @@ export default function Backtester() {
       if (!liveApplies || liveApplies.includes(k)) patch[k] = measured[k];
       else if (savedRisk[k] !== undefined && savedRisk[k] !== null) patch[k] = savedRisk[k];
     });
-    if (Object.keys(patch).length) setForm(prev => ({ ...prev, ...patch }));
-  }, [form.strategy_id, allStrategyDefaults, userCfg]);
+    return patch;
+  }, [allStrategyDefaults, userCfg]);
+
+  // Prefill when the user CHANGES strategy — not on every page load. Keyed on
+  // load as well, it re-applied the measured exits on each reload and wiped the
+  // exits the user had set and saved. A restored form counts as already
+  // prefilled for its own strategy.
+  const prefilledStratRef = useRef(savedFormAtLoad ? form.strategy_id : null);
   useEffect(() => {
-      if (userCfg?.config && !configLoaded) {
-        const c = userCfg.config;
-        // [P1.12] The saved config is spread LAST, so it wins.
-        //
-        // This was `{ ...(c.<block> || {}), ...(prev.<block> || {}) }` — saved
-        // config first, form state second — with the intent "a value the user
-        // typed beats the saved config". It could never do that. This effect
-        // runs exactly once, gated on `!configLoaded`, so `prev` is always the
-        // component's own hardcoded initial state and it is FULLY populated:
-        // every key present, so every key of the saved config was overwritten.
-        //
-        // The visible symptom: Settings had the synthetic block at
-        // max_trades_per_day 20 / max_daily_risk_pct 20, the live bot ran those,
-        // and the Backtester silently ran 6 / 4.0 — a daily risk cap that stops
-        // the engine after 2 trades a day and then blinds it to the rest of the
-        // session. Backtests and live could not agree, and nothing said why.
-        // The same bug applied to apa, vwap, crt, drift_jump_alpha and every
-        // other block on this list.
-        //
-        // "The user's edit wins" is still true, because an edit made AFTER this
-        // has run is never revisited — configLoaded latches it off.
-        setForm(prev => {
-          const merged = { ...prev };
-          merged.max_risk_hard_cap_pct = c.risk?.max_risk_hard_cap_pct ?? prev.max_risk_hard_cap_pct ?? 3.0;
-          // Every flat risk field the form shows starts at the account's SAVED
-          // value (what the live bot is running), not at this page's own
-          // defaults — risk %, sizing basis, drawdown caps, TP ladder, break-even
-          // and trailing. The measured exit fields are resolved separately
-          // (live_applies, above), exactly as live resolves them.
-          Object.keys(DEFAULT_FORM).forEach(k => {
-            if (MEASURED_EXIT_FIELDS.includes(k)) return;
-            const v = c.risk?.[k];
-            if (v !== undefined && v !== null && typeof v !== 'object') merged[k] = v;
-          });
-          merged.prop_firm = { ...(prev.prop_firm || {}), ...(c.prop_firm || {}) };
-          merged.apa = { ...(prev.apa || {}), ...(c.apa || {}) };
-          merged.drift_jump_alpha = { ...(prev.drift_jump_alpha || {}), ...(c.drift_jump_alpha || {}) };
-          merged.vwap = { ...(prev.vwap || {}), ...(c.vwap || {}) };
-          merged.orb = { ...(prev.orb || {}), ...(c.orb || {}) };
-          merged.boom_drift_jump = { ...(prev.boom_drift_jump || {}), ...(c.boom_drift_jump || {}) };
-          merged.htf_fvg_flip = { ...(prev.htf_fvg_flip || {}), ...(c.htf_fvg_flip || {}) };
-          merged.bias_ifvg = { ...(prev.bias_ifvg || {}), ...(c.bias_ifvg || {}) };
-          merged.synth = { ...(prev.synth || {}), ...(c.synth || {}) };
-          return merged;
-        });
-      }
-      if (userCfg) setConfigLoaded(true);
-  }, [userCfg, configLoaded]);
+    const sid = form.strategy_id;
+    if (!sid || prefilledStratRef.current === sid) return;
+    if (!strategyDefaultsResp) return;                      // wait for the measured table
+    if (status === 'ONLINE' && isAuth && !userCfg) return;  // and for live_applies' saved config
+    prefilledStratRef.current = sid;
+    const patch = measuredExitPatch(sid);
+    if (Object.keys(patch).length) setForm(prev => ({ ...prev, ...patch }));
+  }, [form.strategy_id, strategyDefaultsResp, userCfg, status, isAuth, measuredExitPatch]);
+
+  // [P1.12] The account's saved LIVE settings, laid over the form — saved config
+  // spread LAST, so it wins. Before that fix the form's own fully-populated
+  // defaults overwrote every saved key (Settings ran synth 20/20, the Backtester
+  // silently ran 6/4.0).
+  const withLiveConfig = useCallback((prev, c) => {
+    const merged = { ...prev };
+    merged.max_risk_hard_cap_pct = c.risk?.max_risk_hard_cap_pct ?? prev.max_risk_hard_cap_pct ?? 3.0;
+    // Every flat risk field the form shows takes the account's SAVED value (what
+    // the live bot runs). The measured exit fields are resolved separately
+    // (live_applies, above), exactly as live resolves them.
+    Object.keys(DEFAULT_FORM).forEach(k => {
+      if (MEASURED_EXIT_FIELDS.includes(k)) return;
+      const v = c.risk?.[k];
+      if (v !== undefined && v !== null && typeof v !== 'object') merged[k] = v;
+    });
+    merged.prop_firm = { ...(prev.prop_firm || {}), ...(c.prop_firm || {}) };
+    merged.apa = { ...(prev.apa || {}), ...(c.apa || {}) };
+    merged.drift_jump_alpha = { ...(prev.drift_jump_alpha || {}), ...(c.drift_jump_alpha || {}) };
+    merged.vwap = { ...(prev.vwap || {}), ...(c.vwap || {}) };
+    merged.orb = { ...(prev.orb || {}), ...(c.orb || {}) };
+    merged.boom_drift_jump = { ...(prev.boom_drift_jump || {}), ...(c.boom_drift_jump || {}) };
+    merged.htf_fvg_flip = { ...(prev.htf_fvg_flip || {}), ...(c.htf_fvg_flip || {}) };
+    merged.bias_ifvg = { ...(prev.bias_ifvg || {}), ...(c.bias_ifvg || {}) };
+    merged.synth = { ...(prev.synth || {}), ...(c.synth || {}) };
+    return merged;
+  }, []);
+
+  // Seed from the live settings on a FIRST visit only, so a first backtest runs
+  // what the bot runs. Afterwards the Backtester keeps its own saved settings:
+  // this used to run on every mount and replaced whatever the user had set with
+  // the live config, which is why edits "reset on reload". The "Load live
+  // settings" button re-applies the live settings on demand.
+  useEffect(() => {
+    if (userCfg?.config && !configLoaded && !savedFormAtLoad) {
+      const c = userCfg.config;
+      setForm(prev => withLiveConfig(prev, c));
+    }
+    if (userCfg) setConfigLoaded(true);
+  }, [userCfg, configLoaded, savedFormAtLoad, withLiveConfig]);
+
+  // Progress frames re-render the whole page, so apply at most five a second;
+  // 'complete' and errors are applied at once and cancel anything pending.
+  const progressTimerRef = useRef(null);
+  const pendingProgressRef = useRef(null);
+  const cancelThrottledProgress = useCallback(() => {
+    if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
+    progressTimerRef.current = null;
+    pendingProgressRef.current = null;
+  }, []);
+  const throttledProgress = useCallback((m) => {
+    pendingProgressRef.current = m;
+    if (progressTimerRef.current) return;
+    progressTimerRef.current = setTimeout(() => {
+      progressTimerRef.current = null;
+      if (pendingProgressRef.current) setProgress(pendingProgressRef.current);
+      pendingProgressRef.current = null;
+    }, 200);
+  }, []);
+  useEffect(() => cancelThrottledProgress, [cancelThrottledProgress]);
 
   useEffect(() => {
     const h = e => {
       try {
         const m = e.detail; // 'ws-message' event from useBackendConnection.js passes parsed data in detail
         if (m.type === 'backtest_progress') {
+          if (m.stage !== 'complete') { throttledProgress(m); return; }
+          cancelThrottledProgress();
           setProgress(m);
           if (m.stage === 'complete') {
             if (m.result) {
@@ -2202,6 +2269,7 @@ export default function Backtester() {
           // the request itself already returned "started" successfully,
           // so mutation.isError never fires for this. Clear progress so
           // isRunning drops back to false and show the failure message.
+          cancelThrottledProgress();
           setProgress(null);
           setBtError(m.message || 'Backtest failed. Check the activity log for details.');
         }
@@ -2209,7 +2277,7 @@ export default function Backtester() {
     };
     window.addEventListener('ws-message', h);
     return () => window.removeEventListener('ws-message', h);
-  }, []);
+  }, [applyFreshResult, throttledProgress, cancelThrottledProgress]);
 
   // Fetch backend status on mount or reconnect
   useEffect(() => {
@@ -2765,7 +2833,12 @@ export default function Backtester() {
                 <X size={16} /> Stop Backtest
               </button>
             )}
-            <button className="btn btn-secondary btn-sm" onClick={() => { localStorage.removeItem(STORAGE_KEY); location.reload(); }} title="Reset to defaults" style={{ whiteSpace: 'nowrap' }}>
+            <button className="btn btn-secondary btn-sm" disabled={!userCfg?.config}
+              onClick={() => { const c = userCfg?.config; if (c) setForm(prev => ({ ...withLiveConfig(prev, c), ...measuredExitPatch(prev.strategy_id) })); }}
+              title="Replace these backtest settings with the live bot's saved settings" style={{ whiteSpace: 'nowrap' }}>
+              Load live settings
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => { skipPersistRef.current = true; localStorage.removeItem(STORAGE_KEY); location.reload(); }} title="Reset to defaults" style={{ whiteSpace: 'nowrap' }}>
               <X size={14} /> Reset
             </button>
           </div>
@@ -2801,7 +2874,7 @@ export default function Backtester() {
 
       <div className="card">
         <div className="card-header"><span className="card-title"><Terminal size={14} style={{ display: 'inline', marginRight: 6 }} />Live Logs</span></div>
-        <LiveLogPanel events={events} setEvents={setEvents} />
+        <LiveLogPanel events={events} />
       </div>
     </div>
 

@@ -220,6 +220,16 @@ function PositionCard({ position }) {
   );
 }
 
+// The symbols the bot trades: every symbol with an ENABLED strategy slot, which
+// is what Settings → Strategy shows as active. This used to read the legacy
+// watched_symbols/symbols lists with a hardcoded fallback, so Bot Control showed
+// — and Start Bot sent — markets that had no slot at all.
+function activeSymbolsFrom(cfg) {
+  const rows = cfg?.instrument_slots?.length ? cfg.instrument_slots : (cfg?.instrument_settings || []);
+  if (rows.length) return [...new Set(rows.filter(s => s.enabled !== false && s.symbol).map(s => s.symbol))];
+  return cfg?.symbols || [];
+}
+
 function BotControl() {
   const { status: connStatus } = useConnectionStore();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -238,10 +248,11 @@ function BotControl() {
   const brokerStatus = dashboardData?.broker;
 
   // Get symbols from config, or defaults
-  const configSymbols = userConfig?.config?.watched_symbols || userConfig?.config?.symbols || ['XAUUSD', 'XAGUSD', 'XPTUSD', 'EURUSD', 'GBPUSD', 'USOIL', 'ETHUSD', 'GBPJPY'];
+  const configSymbols = activeSymbolsFrom(userConfig?.config);
 
   const startMutation = useMutation({
-    mutationFn: () => startBot({ symbols: configSymbols, scan_interval: 60 }),
+    // No symbol list: the backend starts on the enabled slots, the same list shown here.
+    mutationFn: () => startBot({ scan_interval: 60 }),
     onSuccess: () => {
       setStartError(null);
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
@@ -323,7 +334,8 @@ function BotControl() {
 
       {botStatus && (
         <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-          <div><strong>Symbols:</strong> {botStatus.symbols?.length ? botStatus.symbols.join(', ') : configSymbols.join(', ')}</div>
+          <div><strong>Symbols:</strong> {(isRunning && botStatus.symbols?.length ? botStatus.symbols : configSymbols).join(', ')
+            || 'None — enable a strategy slot in Settings → Strategy'}</div>
           {botStatus.last_scan && <div><strong>Last Scan:</strong> {new Date(botStatus.last_scan).toLocaleString()}</div>}
           {botStatus.total_signals_today != null && <div><strong>Signals Today:</strong> {botStatus.total_signals_today}</div>}
         </div>
@@ -513,7 +525,7 @@ export default function Dashboard() {
   const propFirmStatus = dashboardData?.prop_firm_status;
   const mt5Sync = dashboardData?.mt5_sync;
 
-  const configSymbols = userConfig?.config?.watched_symbols || userConfig?.config?.symbols || ['XAUUSD', 'XAGUSD', 'XPTUSD', 'EURUSD', 'GBPUSD', 'USOIL', 'ETHUSD', 'GBPJPY'];
+  const configSymbols = activeSymbolsFrom(userConfig?.config);
 
   useEffect(() => {
     if (statsData) setStats(statsData);

@@ -150,6 +150,33 @@ class DataFetchError(Exception):
         super().__init__(f"Data fetch failed for {symbol} {timeframe}: {reason}")
 
 
+def _fetch_rates_frame(symbol: str, tf_code: int, timeframe: str, count: int):
+    """The blocking half of DataFetcher.get_historical_data, run on the MT5 thread.
+    Returns (normalised frame, None) or (None, error message)."""
+    terminal_info = mt5.terminal_info()
+    if terminal_info is None or not terminal_info.connected:
+        logger.warning("MT5 connection lost in DataFetcher. Attempting to re-initialize IPC...")
+        mt5.initialize()
+    symbol_info = mt5.symbol_info(symbol)
+    if symbol_info is None:
+        # The symbol might just not be in Market Watch yet, try selecting it
+        if mt5.symbol_select(symbol, True):
+            symbol_info = mt5.symbol_info(symbol)
+        if symbol_info is None:
+            return None, f"Symbol '{symbol}' not found in MT5. Check broker symbol list."
+    if not symbol_info.visible:
+        mt5.symbol_select(symbol, True)
+    rates = mt5.copy_rates_from_pos(symbol, tf_code, 0, count)
+    if rates is None or len(rates) == 0:
+        return None, (
+            f"MT5 returned no data for {symbol} {timeframe}. "
+            f"MT5 error: {mt5.last_error()}. "
+            f"Possible causes: market closed, symbol not subscribed, "
+            f"or insufficient history for {count} candles."
+        )
+    return _normalize_df(pd.DataFrame(rates)), None
+
+
 class DataFetcher:
     """Handles retrieval of historical candles from MT5."""
 
@@ -181,64 +208,24 @@ class DataFetcher:
             logger.error(error_msg)
             raise DataFetchError(symbol, timeframe, error_msg)
 
-        # ── IPC Auto-Recovery ──
-        terminal_info = mt5.terminal_info()
-        if terminal_info is None or not terminal_info.connected:
-            logger.warning("MT5 connection lost in DataFetcher. Attempting to re-initialize IPC...")
-            mt5.initialize()
-            
+        # Everything that touches MT5 or builds the frame runs on the MT5 thread.
+        # This used to run on the event loop — terminal_info(), a blocking
+        # re-initialise when IPC dropped, and a 5,000-row DataFrame build and
+        # normalise per timeframe per slot per scan — and stalled every API call
+        # and WebSocket ~0.4 s at a time while the bot scanned (measured 2026-09-15).
         tf_code = _get_timeframe_code(timeframe)
-        
-        # Check if symbol exists
         loop = asyncio.get_running_loop()
-        symbol_info = await loop.run_in_executor(
-            _executor, lambda: mt5.symbol_info(symbol)
+        df, error_msg = await loop.run_in_executor(
+            _executor, lambda: _fetch_rates_frame(symbol, tf_code, timeframe, count)
         )
-        if symbol_info is None:
-            # The symbol might just not be in Market Watch yet, try selecting it
-            selected = await loop.run_in_executor(
-                _executor, lambda: mt5.symbol_select(symbol, True)
-            )
-            if selected:
-                symbol_info = await loop.run_in_executor(
-                    _executor, lambda: mt5.symbol_info(symbol)
-                )
-
-            if symbol_info is None:
-                error_msg = f"Symbol '{symbol}' not found in MT5. Check broker symbol list."
-                logger.error(error_msg)
-                raise DataFetchError(symbol, timeframe, error_msg)
-        
-        # Ensure symbol is selected in Market Watch
-        if not symbol_info.visible:
-            await loop.run_in_executor(
-                _executor, lambda: mt5.symbol_select(symbol, True)
-            )
-        
-        rates = await loop.run_in_executor(
-            _executor, 
-            lambda: mt5.copy_rates_from_pos(symbol, tf_code, 0, count)
-        )
-        
-        if rates is None or len(rates) == 0:
-            mt5_error = mt5.last_error()
-            error_msg = (
-                f"MT5 returned no data for {symbol} {timeframe}. "
-                f"MT5 error: {mt5_error}. "
-                f"Possible causes: market closed, symbol not subscribed, "
-                f"or insufficient history for {count} candles."
-            )
+        if error_msg:
             logger.error(error_msg)
             raise DataFetchError(symbol, timeframe, error_msg)
-            
-        df = pd.DataFrame(rates)
-        df = _normalize_df(df)
         logger.info(f"Fetched {len(df)} candles for {symbol} {timeframe}")
-        
-        cls._cache[cache_key] = df.copy()
+
+        cls._cache[cache_key] = df
         cls._cache_time[cache_key] = time.time()
-        
-        return df
+        return df.copy()
 
     @classmethod
     async def get_data_range(

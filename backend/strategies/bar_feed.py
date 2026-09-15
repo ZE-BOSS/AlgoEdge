@@ -32,6 +32,7 @@ is reported as missed, never traded late.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -104,6 +105,10 @@ class FeedResult:
     history_gap: bool = False          # fetched history no longer reaches the last stepped bar
 
 
+FETCH_MARGIN_BARS = 20
+MAX_FETCH_BARS = 10_000
+
+
 class LiveBarFeed(BarFeed):
     """The live half: called once per scan with freshly fetched frames whose
     last primary row is the bar still forming."""
@@ -112,8 +117,30 @@ class LiveBarFeed(BarFeed):
         super().__init__(engine, symbol, timeframes)
         self.last_time = None  # primary bar-open time of the newest step
 
+    def fetch_count(self, tf: str, now_s: float | None = None) -> int:
+        """Bars of `tf` the next `advance` needs — not a fixed 5,000. Building
+        5,000-bar frames for every timeframe of every slot on every scan stalled
+        the server's event loop ~0.4 s at a time (measured 2026-09-15).
+
+        A fresh feed needs the warm-up span plus a full window before its first
+        bar; a running one needs a full window before the oldest bar it has not
+        stepped, the bars since then, and the one still forming."""
+        tf = str(tf).upper()
+        tf_s = TF_MINUTES.get(tf, 5) * 60
+        win = window_bars(tf, self.engine)
+        if self.last_time is None:
+            days = warmup_days(self.primary, self.engine, WARMUP_BASE_DAYS.get(self.primary, 5))
+            need = int(days * 86400 // tf_s) + win
+        else:
+            now_s = time.time() if now_s is None else now_s
+            last_s = int(pd.Timestamp(self.last_time).timestamp())
+            need = win + max(0, int((now_s - last_s) // tf_s)) + 2
+        need += FETCH_MARGIN_BARS
+        need = -(-need // 250) * 250  # round up so the fetch cache keys stay stable
+        return int(min(need, MAX_FETCH_BARS))
+
     async def advance(self, frames_by_tf: dict[str, pd.DataFrame], *, prime_days: float | None = None,
-                      yield_every: int = 200) -> FeedResult:
+                      yield_after_s: float = 0.02) -> FeedResult:
         self.bind(frames_by_tf)
         times = self.times[self.primary]
         n = len(times)
@@ -144,6 +171,10 @@ class LiveBarFeed(BarFeed):
         was_bt = getattr(self.engine, "is_backtesting", False)
         if out.primed:
             self.engine.is_backtesting = True
+        # Warm-up replays hundreds of bars inside the server's event loop, which
+        # also serves the API and WebSockets. Hand control back every
+        # `yield_after_s` of CPU so a slow strategy cannot freeze the UI.
+        last_yield = time.monotonic()
         try:
             for j in range(start, last + 1):
                 if out.primed and j == last:
@@ -154,8 +185,9 @@ class LiveBarFeed(BarFeed):
                     out.signal = s
                 elif s is not None and not out.primed:
                     out.missed.append((times[j], s))
-                if yield_every and out.stepped % yield_every == 0:
+                if yield_after_s and time.monotonic() - last_yield > yield_after_s:
                     await asyncio.sleep(0)
+                    last_yield = time.monotonic()
         finally:
             self.engine.is_backtesting = was_bt
         self.last_time = times[last]

@@ -43,23 +43,24 @@ async def start_bot(
     2. Validates that required brokers are connected for selected symbols
     3. Starts the bot scanning loop
     """
-    # 1. Load symbols from user config if not provided in request
-    symbols = req.symbols
-    if not symbols:
-        result = await db.execute(
-            select(UserConfigModel).where(UserConfigModel.user_id == current_user.id)
-        )
-        user_config = result.scalar_one_or_none()
-        if user_config:
-            config_data = json.loads(user_config.config_json) if user_config.config_json else {}
-            # Strategy.jsx saves instrument_settings (primary) or legacy symbols/watched_symbols
-            instrument_settings = config_data.get("instrument_settings", [])
-            if instrument_settings:
-                # Only include symbols that have enabled=True
-                symbols = [s["symbol"] for s in instrument_settings if s.get("enabled", True)]
-            else:
-                # Legacy fallbacks
-                symbols = config_data.get("symbols", config_data.get("watched_symbols", []))
+    # 1. The bot trades every symbol that has an ENABLED strategy slot — exactly
+    #    what Settings → Strategy shows as active. A client-sent list is used only
+    #    when no slots are configured at all: the Dashboard used to send a stale
+    #    legacy/hardcoded list, and the scan loop then traded each symbol without
+    #    a slot with a default APA strategy.
+    result = await db.execute(
+        select(UserConfigModel).where(UserConfigModel.user_id == current_user.id)
+    )
+    user_config = result.scalar_one_or_none()
+    config_data = json.loads(user_config.config_json) if user_config and user_config.config_json else {}
+    slot_symbols = []
+    if config_data:
+        from backend.core.config_schema import UserConfigV2
+        slot_symbols = bot_service.active_slot_symbols(UserConfigV2.from_dict(config_data))
+    if slot_symbols:
+        symbols = slot_symbols
+    else:
+        symbols = req.symbols or config_data.get("symbols", config_data.get("watched_symbols", []))
 
     # Block start if no symbols configured — never fall back to a hardcoded list
     if not symbols:

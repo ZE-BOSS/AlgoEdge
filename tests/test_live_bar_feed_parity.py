@@ -176,6 +176,35 @@ def test_history_gap_is_flagged():
     assert asyncio.run(feed.advance({"M5": later})).history_gap
 
 
+def test_live_fetches_only_what_the_next_advance_needs():
+    from backend.strategies.bar_feed import FETCH_MARGIN_BARS
+    from backend.strategies.windows import warmup_days, window_bars
+
+    class M5Only:
+        def get_required_timeframes(self):
+            return ["M5"]
+
+        async def on_bar(self, symbol, tf, candles):
+            return None
+
+    eng = M5Only()
+    feed = LiveBarFeed(eng, "X")
+    fresh = feed.fetch_count("M5")
+    span = int(warmup_days("M5", eng, WARMUP_BASE_DAYS["M5"]) * 86400 // 300)
+    assert fresh >= span + window_bars("M5", eng) + FETCH_MARGIN_BARS
+    assert fresh < 5000
+
+    frames = _bars()
+    idx = frames["M5"].index
+    asyncio.run(feed.advance({"M5": frames["M5"].loc[:idx[900]]}))
+    now = idx[900].timestamp() + 3 * 300 + 30  # three bars later
+    steady = feed.fetch_count("M5", now_s=now)
+    assert window_bars("M5", eng) + 3 <= steady <= window_bars("M5", eng) + 3 + FETCH_MARGIN_BARS + 250
+    # enough history for the next advance to connect to the last stepped bar
+    later = frames["M5"].loc[:idx[903]].iloc[-steady:]
+    assert not asyncio.run(feed.advance({"M5": later})).history_gap
+
+
 def test_every_path_uses_the_shared_feeder():
     """Four hand-copied loops drifted once; they must not come back."""
     import inspect
