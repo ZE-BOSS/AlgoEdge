@@ -13,6 +13,7 @@ Source: TradingBot_MasterPlan-2.md Section 6 — REST API
 # result was discarded. Imported once, here, where every scope can see it.
 import asyncio
 import json
+import time as _time_mod
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -67,9 +68,17 @@ _TRADE_PANEL_ONLY = ("smc_data", "original_signal", "entry_confirmations")
 # Above this many groups, shed the panel-only fields too. Ordinary runs keep
 # full fidelity; only runs that would otherwise stall the tab go lean.
 _LEAN_GROUP_THRESHOLD = 300
+# Never read by the page, and the bulk of an in-memory trade: `best_exit` and
+# `worst_exit` are whole copies of a leg, and every leg carries the strategy's
+# full signal twice (`metadata`, and `original_signal` which holds it again). A
+# 1-TP group therefore held the signal payload six times; on a 1,025-trade
+# portfolio run the first page of trades could not arrive inside 60 s.
+# `entry_snapshot_b64` is served per trade with the chart instead.
+_DELIVERY_DROP = ("best_exit", "worst_exit", "metadata", "original_signal", "entry_snapshot_b64",
+                  "_cache_key", "_last_known_close")
 
 
-def _slim_groups(groups, drop_panel_only=None):
+def _slim_groups(groups, drop_panel_only=None, extra=()):
     """
     Return `groups` with the heavy fields removed from each group AND each of
     its `sub_trades`. Builds new shallow dicts — never deepcopy, and never
@@ -81,7 +90,7 @@ def _slim_groups(groups, drop_panel_only=None):
         return groups
     if drop_panel_only is None:
         drop_panel_only = len(groups) > _LEAN_GROUP_THRESHOLD
-    drop = _TRADE_HEAVY + _TRADE_UNUSED
+    drop = _TRADE_HEAVY + _TRADE_UNUSED + tuple(extra)
     if drop_panel_only:
         drop = drop + _TRADE_PANEL_ONLY
 
@@ -178,13 +187,14 @@ def _lean_result_view(src: dict, *, for_mirror: bool = False) -> dict:
     out = {k: v for k, v in src.items() if k not in skip}
     groups = src.get("grouped_trades")
     out["grouped_trades"] = (
-        _slim_groups(groups, drop_panel_only=True if for_mirror else None) if groups is not None else []
+        _slim_groups(groups, drop_panel_only=True if for_mirror else None, extra=_DELIVERY_DROP)
+        if groups is not None else []
     )
     # Per-leg `trades` repeat grouped_trades[*].sub_trades and the results page
     # does not read them; only small runs keep them.
     legs = src.get("trades")
     if isinstance(legs, list) and not for_mirror and len(groups or []) <= _LEAN_GROUP_THRESHOLD:
-        out["trades"] = _slim_groups(legs)
+        out["trades"] = _slim_groups(legs, extra=_DELIVERY_DROP)
     else:
         out["trades"] = []
         out["trades_omitted"] = len(legs) if isinstance(legs, list) else 0
@@ -218,9 +228,11 @@ def _completion_envelope(result: dict) -> dict:
 # One response carrying every trade group was the "Loading backtest details..."
 # that never finished on a remote link; each page is a small request instead.
 _TRADE_PAGE_MAX = 500
-_PAGE_DROP = _TRADE_HEAVY + _TRADE_UNUSED + ("smc_data", "original_signal")
+_PAGE_DROP = _TRADE_HEAVY + _TRADE_UNUSED + ("smc_data",) + _DELIVERY_DROP
+# A page stops growing past this (always at least one group) and tells the page
+# where to continue, so no page is megabytes whatever a strategy stores on its trades.
+_PAGE_BYTES_MAX = 1_500_000
 _SUMMARY_JSON: dict = {}   # user id -> (result key, bytes)
-_PAGE_GROUPS: dict = {}    # user id -> (result key, groups for pages)
 _GROUP_INDEX: dict = {}    # user id -> (result key, {group_id: full group})
 
 
@@ -240,19 +252,21 @@ def _cached(store: dict, user_id, src: dict, build):
     return value
 
 
+def _page_slim_one(t):
+    """A group for a trade page: no chart slices, zones, raw signal or snapshot
+    (fetched per trade from /trade/{id}/chart); entry/exit confirmations stay."""
+    if not isinstance(t, dict):
+        return t
+    out = {k: v for k, v in t.items() if k not in _PAGE_DROP}
+    subs = out.get("sub_trades")
+    if isinstance(subs, list):
+        out["sub_trades"] = [{k: v for k, v in x.items() if k not in _PAGE_DROP} if isinstance(x, dict) else x
+                             for x in subs]
+    return out
+
+
 def _page_slim(groups):
-    """Groups for a trade page: no chart slices, zones or raw signal (fetched per
-    trade from /trade/{id}/chart), but entry/exit confirmations stay."""
-    def one(t):
-        if not isinstance(t, dict):
-            return t
-        out = {k: v for k, v in t.items() if k not in _PAGE_DROP}
-        subs = out.get("sub_trades")
-        if isinstance(subs, list):
-            out["sub_trades"] = [{k: v for k, v in x.items() if k not in _PAGE_DROP} if isinstance(x, dict) else x
-                                 for x in subs]
-        return out
-    return [one(t) for t in (groups or [])]
+    return [_page_slim_one(t) for t in (groups or [])]
 
 
 def _summary_view(src: dict) -> dict:
@@ -274,11 +288,26 @@ def _summary_view(src: dict) -> dict:
     return out
 
 
-def _page_payload(groups: list, offset: int, limit: int, backtest_id) -> bytes:
+def _page_bytes(items, offset: int, limit: int, total: int, backtest_id) -> bytes:
+    """`items` (the groups from `offset` on) as one page of JSON bytes, cut at
+    _PAGE_BYTES_MAX. `next_offset` is where the next page starts."""
+    parts, size = [], 0
+    for g in items:
+        b = json.dumps(g, default=str).encode("utf-8")
+        if parts and size + len(b) > _PAGE_BYTES_MAX:
+            break
+        parts.append(b)
+        size += len(b) + 1
+    head = json.dumps({"backtest_id": backtest_id, "offset": offset, "limit": limit, "total": total,
+                       "count": len(parts), "next_offset": offset + len(parts)}, default=str).encode("utf-8")
+    return head[:-1] + b', "groups": [' + b",".join(parts) + b"]}"
+
+
+def _page_payload(groups: list, offset: int, limit: int, backtest_id, slim=None) -> bytes:
     offset = max(0, int(offset))
     limit = max(1, min(_TRADE_PAGE_MAX, int(limit)))
-    return json.dumps({"backtest_id": backtest_id, "offset": offset, "limit": limit, "total": len(groups),
-                       "groups": groups[offset:offset + limit]}, default=str).encode("utf-8")
+    window = groups[offset:offset + limit]
+    return _page_bytes([slim(g) for g in window] if slim else window, offset, limit, len(groups), backtest_id)
 
 
 # ── One trade's chart, on demand ─────────────────────────────────────────────
@@ -348,6 +377,11 @@ def _trade_chart_payload(trade: dict, tf: str | None = None) -> dict:
             for x in (trade.get("sub_trades") or []) if isinstance(x, dict)
         ],
     }
+    snapshot = trade.get("entry_snapshot_b64") or next(
+        (x.get("entry_snapshot_b64") for x in (trade.get("sub_trades") or [])
+         if isinstance(x, dict) and x.get("entry_snapshot_b64")), None)
+    if snapshot:
+        out["panel"]["entry_snapshot_b64"] = snapshot
     if tf:
         name = str(tf).upper()
         out["tf"] = name
@@ -920,9 +954,11 @@ async def get_latest_result_summary(current_user: User = Depends(get_current_use
     src = await _completed_result(current_user.id)
     if src is None:
         return {}
+    t0 = _time_mod.perf_counter()
     body = await asyncio.to_thread(
         _cached, _SUMMARY_JSON, current_user.id, src,
         lambda: json.dumps(_summary_view(src), default=str).encode("utf-8"))
+    logger.info(f"[BT-DELIVERY] summary {len(body) // 1024} KB in {(_time_mod.perf_counter() - t0) * 1000:.0f} ms")
     return Response(content=body, media_type="application/json")
 
 
@@ -932,18 +968,17 @@ async def get_latest_result_trades(
     limit: int = 250,
     current_user: User = Depends(get_current_user),
 ):
-    """One page of the finished run's trade groups, in run order."""
-    import asyncio
-
+    """One page of the finished run's trade groups, in run order. Built inline:
+    a page is a bounded slice of slimmed groups (milliseconds), and must not
+    queue behind whatever else holds the shared worker threads."""
     from fastapi.responses import Response
     src = await _completed_result(current_user.id)
     if src is None:
         raise HTTPException(status_code=404, detail="No completed backtest")
-
-    def build():
-        groups = _cached(_PAGE_GROUPS, current_user.id, src, lambda: _page_slim(src.get("grouped_trades")))
-        return _page_payload(groups, offset, limit, src.get("backtest_id"))
-    body = await asyncio.to_thread(build)
+    t0 = _time_mod.perf_counter()
+    body = _page_payload(src.get("grouped_trades") or [], offset, limit, src.get("backtest_id"), slim=_page_slim_one)
+    logger.info(f"[BT-DELIVERY] trades offset={offset} {len(body) // 1024} KB "
+                f"in {(_time_mod.perf_counter() - t0) * 1000:.0f} ms")
     return Response(content=body, media_type="application/json")
 
 
@@ -2353,7 +2388,7 @@ _SAVED_CHART_DEFER = tuple(
 )
 
 
-def _saved_group_out(t, run, include_smc: bool = True) -> dict:
+def _saved_group_out(t, run, include_smc: bool = True, for_page: bool = False) -> dict:
     """One saved trade row as a trade group, shared by /backtests/{id} and its
     trade pages. Never touches the deferred chart columns."""
     sub_trades = safe_json_loads(t.sub_trades, [])
@@ -2364,7 +2399,7 @@ def _saved_group_out(t, run, include_smc: bool = True) -> dict:
     if t.entry_time and t.exit_time:
         duration = int((t.exit_time - t.entry_time).total_seconds() / 60)
 
-    return {
+    out = {
         "group_id": str(t.id),
         "symbol": t.symbol,
         "direction": t.direction,
@@ -2409,6 +2444,8 @@ def _saved_group_out(t, run, include_smc: bool = True) -> dict:
         # hardcoding "" and silently losing the saved snapshot image.
         "entry_snapshot_b64": (sub_trades[0].get("entry_snapshot_b64", "") if sub_trades else "")
     }
+    # A trade page leaves the snapshot to the per-trade chart endpoint.
+    return _page_slim_one(out) if for_page else out
 
 
 @router.get("/backtests/{backtest_id}")
@@ -2579,11 +2616,10 @@ async def get_backtest_trades_page(
     run = result.scalar_one_or_none()
     if not run:
         raise HTTPException(status_code=404, detail="Backtest not found")
+    from fastapi.responses import Response
     rows = list(run.trades)
-    return {
-        "backtest_id": backtest_id, "offset": offset, "limit": limit, "total": len(rows),
-        "groups": [_saved_group_out(t, run, include_smc=False) for t in rows[offset:offset + limit]],
-    }
+    items = [_saved_group_out(t, run, include_smc=False, for_page=True) for t in rows[offset:offset + limit]]
+    return Response(content=_page_bytes(items, offset, limit, len(rows), backtest_id), media_type="application/json")
 
 
 @router.get("/backtests/{backtest_id}/trade/{group_id}/chart")

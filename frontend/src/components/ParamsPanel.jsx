@@ -26,6 +26,21 @@ const isUnset = (v) =>
 const isGroup = (v) =>
   v !== null && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length > 0;
 
+// A list of objects — a portfolio's `symbols` legs — reads as one sub-group per
+// item, named by its symbol and strategy, instead of "[object Object], ...".
+const isObjectList = (v) =>
+  Array.isArray(v) && v.length > 0 && v.every(x => x !== null && typeof x === 'object' && !Array.isArray(x));
+
+function listAsGroup(list) {
+  const out = {};
+  list.forEach((item, i) => {
+    let name = [item.symbol, item.strategy_id].filter(Boolean).join(' · ') || `#${i + 1}`;
+    if (name in out) name = `${name} (${i + 1})`;
+    out[name] = item;
+  });
+  return out;
+}
+
 function formatValue(v) {
   if (typeof v === 'boolean') return v ? 'on' : 'off';
   if (typeof v === 'number') {
@@ -33,7 +48,7 @@ function formatValue(v) {
     // Trim float noise like 5.8999999999999995 without lying about precision.
     return String(Number(v.toPrecision(10)));
   }
-  if (Array.isArray(v)) return v.join(', ');
+  if (Array.isArray(v)) return v.map(x => (x !== null && typeof x === 'object' ? JSON.stringify(x) : x)).join(', ');
   return String(v);
 }
 
@@ -89,7 +104,9 @@ function Group({ name, obj, defaultOpen = false }) {
           {entries.map(([k, v]) => (
             isGroup(v)
               ? <Group key={k} name={k} obj={v} />
-              : <Row key={k} label={k} value={formatValue(v)} />
+              : isObjectList(v)
+                ? <Group key={k} name={k} obj={listAsGroup(v)} />
+                : <Row key={k} label={k} value={formatValue(v)} />
           ))}
         </div>
       )}
@@ -105,6 +122,7 @@ export default function ParamsPanel({ params, title = 'Configuration parameters'
     for (const [k, v] of Object.entries(params || {})) {
       if (isUnset(v)) u.push(k);
       else if (isGroup(v)) g.push([k, v]);
+      else if (isObjectList(v)) g.push([k, listAsGroup(v)]);
       else s.push([k, v]);
     }
     return { scalars: s, groups: g, unsetKeys: u };

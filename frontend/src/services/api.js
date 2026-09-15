@@ -199,12 +199,12 @@ export const getBacktestStatus = () => api.get('/backtest_status');
 export const getLatestBacktestResult = () => api.get('/latest_result');
 // Paged delivery of a finished run — see utils/progressiveResult.js.
 export const getLatestResultSummary = () => api.get('/latest_result/summary');
-export const getLatestResultTrades = (offset, limit) => api.get('/latest_result/trades', { params: { offset, limit } });
+export const getLatestResultTrades = (offset, limit) => api.get('/latest_result/trades', { params: { offset, limit }, timeout: 30000 });
 // `tf` asks for one timeframe, trimmed around the trade; omitted = legacy all-timeframes shape.
 export const getUnsavedTradeChart = (groupId, tf) => api.get(`/backtest_result/trade/${groupId}/chart`, { params: tf ? { tf } : {} });
 export const getSavedTradeChart = (backtestId, groupId, tf) => api.get(`/backtests/${backtestId}/trade/${groupId}/chart`, { params: tf ? { tf } : {} });
 export const getBacktestSummary = (id) => api.get(`/backtests/${id}`, { params: { include_trades: false } });
-export const getBacktestTrades = (id, offset, limit) => api.get(`/backtests/${id}/trades`, { params: { offset, limit } });
+export const getBacktestTrades = (id, offset, limit) => api.get(`/backtests/${id}/trades`, { params: { offset, limit }, timeout: 30000 });
 export const stopBacktest = () => api.post('/stop');
 export const saveBacktest = (id, data) => api.post(`/backtests/${id}/save`, data);
 export const getBacktests = () => api.get('/backtests');

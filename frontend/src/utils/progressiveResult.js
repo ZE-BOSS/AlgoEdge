@@ -10,15 +10,37 @@
  * summary lands, and fills the trade list in behind it.
  *
  * `onUpdate` receives a complete result object every time (a new object, so
- * React sees the change) with three extra fields:
+ * React sees the change) with extra fields:
  *   _trades_loading  still fetching pages
  *   _trades_loaded   groups received so far
  *   _trades_total    groups in the run
- * Updates are coalesced to at most one per `minUpdateMs`, so a 3,000-group run
- * re-renders the results a handful of times, not once per page.
+ *   _trades_error    set when pages stopped (after retries); the groups
+ *                    received so far stay, and `resume` continues from them
+ * Updates are coalesced to at most one per `minUpdateMs`.
+ *
+ * Only a failed SUMMARY rejects. A failed page resolves with `_trades_error`,
+ * because the run itself loaded and its headline numbers are worth showing.
  */
 
-export const TRADE_PAGE_SIZE = 250;
+export const TRADE_PAGE_SIZE = 100;
+const RETRY_DELAYS_MS = [1000, 3000, 6000];
+
+const retriable = (e) => {
+  const status = e?.response?.status;
+  return !status || status >= 500 || status === 408 || status === 429;
+};
+
+async function withRetry(fn, isCancelled) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt >= RETRY_DELAYS_MS.length || !retriable(e) || isCancelled()) throw e;
+      await new Promise(r => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+      if (isCancelled()) throw e;
+    }
+  }
+}
 
 export async function loadResultProgressively({
   fetchSummary,
@@ -27,44 +49,64 @@ export async function loadResultProgressively({
   isCancelled = () => false,
   pageSize = TRADE_PAGE_SIZE,
   minUpdateMs = 300,
+  describeError = (e) => e?.message || 'request failed',
+  resume = null,
 }) {
-  const summary = await fetchSummary();
-  if (isCancelled() || !summary || !Object.keys(summary).length) return null;
-
-  // An older backend returns the whole run in one payload.
-  if (!summary.trades_paged) {
-    const whole = { ...summary, _trades_loading: false };
-    onUpdate(whole);
-    return whole;
+  let summary;
+  let groups;
+  if (resume) {
+    ({ summary } = resume);
+    groups = resume.groups || [];
+  } else {
+    summary = await fetchSummary();
+    if (isCancelled() || !summary || !Object.keys(summary).length) return null;
+    // An older backend returns the whole run in one payload.
+    if (!summary.trades_paged) {
+      const whole = { ...summary, _trades_loading: false };
+      onUpdate(whole);
+      return whole;
+    }
+    groups = [];
   }
 
   const total = summary.trade_groups_total || 0;
-  const snapshot = (groups, loading) => ({
+  const snapshot = (loading, error = null) => ({
     ...summary,
     grouped_trades: groups,
     _trades_loading: loading,
     _trades_loaded: groups.length,
     _trades_total: total,
+    _trades_error: error,
   });
 
-  let groups = [];
-  onUpdate(snapshot(groups, total > 0));
-  if (total === 0) return snapshot(groups, false);
+  onUpdate(snapshot(groups.length < total));
+  if (groups.length >= total) return snapshot(false);
 
   let lastEmit = Date.now();
-  for (let offset = 0; offset < total; offset += pageSize) {
-    const page = await fetchPage(offset, pageSize);
+  let offset = groups.length;
+  while (offset < total) {
+    let page;
+    try {
+      page = await withRetry(() => fetchPage(offset, pageSize), isCancelled);
+    } catch (e) {
+      if (isCancelled()) return null;
+      const stopped = snapshot(false, describeError(e));
+      onUpdate(stopped);
+      return stopped;
+    }
     if (isCancelled()) return null;
     const rows = page?.groups || [];
+    if (!rows.length) break;
     groups = groups.concat(rows);
-    const done = rows.length === 0 || groups.length >= total;
-    if (done) break;
+    // The server may cut a page short to keep it small; continue where it stopped.
+    offset = Number.isFinite(page?.next_offset) ? page.next_offset : offset + rows.length;
+    if (groups.length >= total) break;
     if (Date.now() - lastEmit >= minUpdateMs) {
       lastEmit = Date.now();
-      onUpdate(snapshot(groups, true));
+      onUpdate(snapshot(true));
     }
   }
-  const final = snapshot(groups, false);
+  const final = snapshot(false);
   onUpdate(final);
   return final;
 }

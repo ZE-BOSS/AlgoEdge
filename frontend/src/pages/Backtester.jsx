@@ -521,7 +521,7 @@ function SaveModal({ result, form, isPortfolio, portfolioSymbols, onClose, onSuc
         // 409: the server no longer holds this run (e.g. it restarted) — upload it.
         if (err?.response?.status !== 409) throw err;
         // Uploading needs every trade group; a half-loaded run would save short.
-        if (result._trades_loading) throw new Error('The server no longer holds this run and its trades are still loading — try again once they finish.', { cause: err });
+        if (result._trades_loading || result._trades_error) throw new Error('The server no longer holds this run and not all of its trades have loaded — load them first, then save.', { cause: err });
         await saveBacktest(result.backtest_id, { backtest_data: { ...result, ...meta }, save_mode: 'FULL' });
       }
       onSuccess();
@@ -954,7 +954,7 @@ function EmptyResultDiagnostic({ funnel, blocked }) {
   );
 }
 
-const BacktestResults = memo(function BacktestResults({ result, onSave, onDismiss, onClose, isSaving }) {
+const BacktestResults = memo(function BacktestResults({ result, onRetryTrades, onSave, onDismiss, onClose, isSaving }) {
   const report = result.report || {};
   // [I1]/[H1]: the engine returns rejection_funnel at the TOP LEVEL of the
   // result (matching the portfolio route), not nested under `report` — the
@@ -1232,6 +1232,12 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
             <Loader2 size={11} className="spinner" /> loading trades {result._trades_loaded || 0}/{result._trades_total}
           </span>
         )}
+        {result._trades_error && (
+          <span className="pill-loading pill-error" title={`Stopped loading trades: ${result._trades_error}`}>
+            trades {result._trades_loaded || 0}/{result._trades_total} · paused
+            {onRetryTrades && <button type="button" className="pill-action" onClick={onRetryTrades}>Retry</button>}
+          </span>
+        )}
       </span>
       <div style={{ display: 'flex', gap: 8 }}>
         {!result.is_saved ? (
@@ -1240,7 +1246,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
             {/* Writes the COMPLETE in-memory result to a .json file. No quota,
                 no stripping — this is the way to hand a whole run to someone
                 else, which the cache was being misused for. */}
-            <button className="btn btn-secondary btn-sm" onClick={() => downloadResult(result)} disabled={!!result._trades_loading} title="Download the full result as JSON"><Download size={14} /> Export</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => downloadResult(result)} disabled={!!(result._trades_loading || result._trades_error)} title="Download the full result as JSON"><Download size={14} /> Export</button>
             <button className="btn btn-danger btn-sm" onClick={onDismiss}><X size={14} /> Dismiss</button>
           </>
         ) : (
@@ -1262,7 +1268,7 @@ const BacktestResults = memo(function BacktestResults({ result, onSave, onDismis
         explanation, which is what "the backtest just produces nothing" was.
         The rejection funnel has the answer; this surfaces it and names the
         single most likely cause. */}
-    {grouped.length === 0 && !result._trades_loading && (
+    {grouped.length === 0 && !result._trades_loading && !result._trades_error && (
       <EmptyResultDiagnostic funnel={rejectionFunnel} blocked={blockedSignals} result={result} />
     )}
     {filteredStats.tradeCount > 0 && filteredStats.tradeCount < LOW_SAMPLE_TRADE_THRESHOLD && (
@@ -2112,7 +2118,7 @@ export default function Backtester() {
         clearCachedResult();
         return;
       }
-      if (result._trades_loading) return; // cache the run once every page is in
+      if (result._trades_loading || result._trades_error) return; // cache the run once every page is in
       saveCachedResult(result).then(ok => {
         if (!ok) {
           console.warn(
@@ -2244,16 +2250,21 @@ export default function Backtester() {
   // A token per load: starting a run, dismissing, or opening another result
   // abandons the load in flight, so its late pages cannot land on the wrong run.
   const loadTokenRef = useRef(0);
+  // How the result on screen fetches its trade pages, so Retry can resume it.
+  const pagerRef = useRef(null);
   const cancelResultLoad = useCallback(() => { loadTokenRef.current += 1; }, []);
-  const loadResultInPages = useCallback(async ({ fetchSummary, fetchPage, isSaved = false }) => {
+  const loadResultInPages = useCallback(async ({ fetchSummary, fetchPage, isSaved = false, resume = null }) => {
     const token = ++loadTokenRef.current;
-    let first = true;
-    setIsLoadingDetail(true);
+    pagerRef.current = { fetchSummary, fetchPage, isSaved };
+    let first = !resume;
+    if (!resume) setIsLoadingDetail(true);
     try {
       return await loadResultProgressively({
         fetchSummary,
         fetchPage,
+        resume,
         pageSize: TRADE_PAGE_SIZE,
+        describeError: httpErrorMessage,
         isCancelled: () => token !== loadTokenRef.current,
         onUpdate: (r) => {
           if (first) {
@@ -2265,9 +2276,19 @@ export default function Backtester() {
         },
       });
     } finally {
-      if (token === loadTokenRef.current) setIsLoadingDetail(false);
+      if (!resume && token === loadTokenRef.current) setIsLoadingDetail(false);
     }
   }, [applyFreshResult]);
+
+  // Continue a trade list that stopped part-way, from the groups already shown.
+  const retryTrades = useCallback((r) => {
+    const pager = pagerRef.current;
+    if (!pager || !r) return;
+    const summary = { ...r, trades_paged: true, trade_groups_total: r._trades_total };
+    for (const k of ['grouped_trades', '_trades_loading', '_trades_loaded', '_trades_total', '_trades_error']) delete summary[k];
+    loadResultInPages({ ...pager, resume: { summary, groups: r.grouped_trades || [] } })
+      .catch(e => setBtError(`Trades could not be loaded (${httpErrorMessage(e)}).`));
+  }, [loadResultInPages]);
 
   const loadLatestInPages = useCallback(() => loadResultInPages({
     // A backend without the summary route answers 404: use the one-payload result.
@@ -2966,7 +2987,7 @@ export default function Backtester() {
       {(isRunning || result) && (
         <BacktestReplay progress={progress} result={result} isRunning={isRunning} live={!!form.live_chart} />
       )}
-      {result && !isLoadingDetail && !isRunning && <BacktestResults result={result} onSave={handleSave} onDismiss={handleDismiss} onClose={() => { cancelResultLoad(); setResult(null); }} isSaving={isSaving} />}
+      {result && !isLoadingDetail && !isRunning && <BacktestResults result={result} onSave={handleSave} onDismiss={handleDismiss} onClose={() => { cancelResultLoad(); setResult(null); }} onRetryTrades={() => retryTrades(result)} isSaving={isSaving} />}
     </div>
 
     <div id="saved-backtests" className="card" style={{ marginTop: 20 }}>
