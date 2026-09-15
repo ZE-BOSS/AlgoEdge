@@ -63,27 +63,27 @@ export default function ReplayChart({
       height,
       layout: {
         background: { color: 'transparent' },
-        textColor: '#8b949e',
+        textColor: '#8a94a6',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: 'rgba(255,255,255,0.04)' },
-        horzLines: { color: 'rgba(255,255,255,0.04)' },
+        vertLines: { color: 'rgba(148,163,184,0.06)' },
+        horzLines: { color: 'rgba(148,163,184,0.06)' },
       },
-      rightPriceScale: { borderColor: '#30363d' },
-      timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: '#1e2a3a' },
+      timeScale: { borderColor: '#1e2a3a', timeVisible: true, secondsVisible: false },
       crosshair: { mode: 1 },
       handleScroll: true,
       handleScale: true,
     });
 
     const series = chart.addSeries(CandlestickSeries, {
-      upColor: '#3fb68b',
-      downColor: '#f85149',
+      upColor: '#26a69a',
+      downColor: '#ef5350',
       borderVisible: false,
-      wickUpColor: '#3fb68b',
-      wickDownColor: '#f85149',
+      wickUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
       priceLineVisible: false,
     });
 

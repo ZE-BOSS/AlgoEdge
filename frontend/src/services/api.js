@@ -36,7 +36,10 @@ export const clearAuth = () => {
 
 // ── Request Interceptor: Attach JWT ─────────────────────────────────────────
 
-const isSilentUrl = (url) => url && (url.includes('/latest_result') || url.includes('/status') || url.includes('/logs'));
+// Background fetches that must not flash the global loading indicator — result
+// pages and trade charts arrive in many small requests by design.
+const isSilentUrl = (url) => url && (url.includes('/latest_result') || url.includes('/status') || url.includes('/logs')
+  || url.includes('/chart') || (url.includes('/backtests/') && url.includes('/trades')));
 
 api.interceptors.request.use((config) => {
   const token = getToken();
@@ -194,8 +197,14 @@ export const runBacktest = (data) => api.post('/backtest', data, { timeout: 3000
 export const runPortfolioBacktest = (data) => api.post('/portfolio_backtest', data, { timeout: 300000 });
 export const getBacktestStatus = () => api.get('/backtest_status');
 export const getLatestBacktestResult = () => api.get('/latest_result');
-export const getUnsavedTradeChart = (groupId) => api.get(`/backtest_result/trade/${groupId}/chart`);
-export const getSavedTradeChart = (backtestId, groupId) => api.get(`/backtests/${backtestId}/trade/${groupId}/chart`);
+// Paged delivery of a finished run — see utils/progressiveResult.js.
+export const getLatestResultSummary = () => api.get('/latest_result/summary');
+export const getLatestResultTrades = (offset, limit) => api.get('/latest_result/trades', { params: { offset, limit } });
+// `tf` asks for one timeframe, trimmed around the trade; omitted = legacy all-timeframes shape.
+export const getUnsavedTradeChart = (groupId, tf) => api.get(`/backtest_result/trade/${groupId}/chart`, { params: tf ? { tf } : {} });
+export const getSavedTradeChart = (backtestId, groupId, tf) => api.get(`/backtests/${backtestId}/trade/${groupId}/chart`, { params: tf ? { tf } : {} });
+export const getBacktestSummary = (id) => api.get(`/backtests/${id}`, { params: { include_trades: false } });
+export const getBacktestTrades = (id, offset, limit) => api.get(`/backtests/${id}/trades`, { params: { offset, limit } });
 export const stopBacktest = () => api.post('/stop');
 export const saveBacktest = (id, data) => api.post(`/backtests/${id}/save`, data);
 export const getBacktests = () => api.get('/backtests');

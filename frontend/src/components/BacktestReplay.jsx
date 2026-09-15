@@ -51,7 +51,61 @@ const EMPTY_LEG = { bars: [], signals: [], total: 0, done: false };
 const LIVE_BARS_PER_FRAME = 24;
 const LIVE_CATCHUP_RATIO = 0.12;  // drain at least this fraction of a big backlog
 
-export default function BacktestReplay({ progress, result, isRunning }) {
+// Live bars kept per leg. The window shows ~180 at a time; keeping every bar of
+// a long run in state made each append and redraw grow without bound. Trimmed
+// with hysteresis so the chart only redraws in full now and then.
+const LIVE_MAX_BARS = 4000;
+const LIVE_TRIM_TO = 2000;
+
+/**
+ * The replay panel. While a run is in flight the live chart shows only when it
+ * was asked for (the backend does not stream otherwise); once the run is over
+ * the chart stays folded until opened, so finishing a big run does not also
+ * fetch and draw its whole series.
+ */
+export default function BacktestReplay({ progress, result, isRunning, live = true }) {
+  const [open, setOpen] = useState(false);
+  const runKey = isRunning ? 'running' : (result?.backtest_id || (result ? 'result' : 'none'));
+  const [prevRunKey, setPrevRunKey] = useState(runKey);
+  if (runKey !== prevRunKey) {
+    setPrevRunKey(runKey);
+    setOpen(false);
+  }
+
+  if (isRunning) {
+    if (live) return <ReplayView progress={progress} result={result} isRunning />;
+    return (
+      <div className="card replay-folded">
+        <div className="replay-folded-row">
+          <span className="replay-folded-title"><Radio size={12} /> Live chart off</span>
+          <span className="replay-folded-meta">
+            {progress?.stage || 'Running…'}{progress?.pct != null ? ` · ${progress.pct}%` : ''}
+          </span>
+        </div>
+        <div className="replay-folded-hint">
+          Results load as soon as the run finishes. Tick “Live chart while running” to watch bars stream.
+        </div>
+      </div>
+    );
+  }
+  if (!result) return null;
+  if (!open) {
+    return (
+      <div className="card replay-folded">
+        <div className="replay-folded-row">
+          <span className="replay-folded-title"><Layers size={12} /> Replay</span>
+          <span className="replay-folded-meta">Scrub the run bar by bar, with every signal.</span>
+          <button className="btn btn-secondary btn-sm" onClick={() => setOpen(true)} style={{ marginLeft: 'auto' }}>
+            <Play size={12} /> Open replay
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return <ReplayView progress={progress} result={result} isRunning={false} onClose={() => setOpen(false)} />;
+}
+
+function ReplayView({ progress, result, isRunning, onClose }) {
   const [legs, setLegs] = useState([]);
   const [legData, setLegData] = useState({});   // slot_id -> { bars, signals, total, done }
   const [activeSlot, setActiveSlot] = useState(null);
@@ -120,10 +174,13 @@ export default function BacktestReplay({ progress, result, isRunning }) {
         const next = { ...prev };
         for (const [slot, buf] of Object.entries(take)) {
           const cur = next[slot] || EMPTY_LEG;
+          let bars = buf.bars.length ? cur.bars.concat(buf.bars) : cur.bars;
+          if (bars.length > LIVE_MAX_BARS) bars = bars.slice(-LIVE_TRIM_TO);
           next[slot] = {
             // concat rather than push: a new identity is what makes the chart
             // notice there is anything new to draw.
-            bars: buf.bars.length ? cur.bars.concat(buf.bars) : cur.bars,
+            bars,
+            received: (cur.received ?? cur.bars.length) + buf.bars.length,
             signals: buf.signals.length ? cur.signals.concat(buf.signals) : cur.signals,
             total: buf.total ?? cur.total,
             done: buf.done ?? cur.done,
@@ -400,6 +457,9 @@ export default function BacktestReplay({ progress, result, isRunning }) {
           }}>
             {visibleBars.length.toLocaleString()} bars · {visibleSignals.length} signals
           </span>
+          {onClose && (
+            <button className="btn btn-sm btn-secondary" onClick={onClose} title="Fold the replay away">Fold</button>
+          )}
         </div>
       </div>
 
@@ -440,7 +500,7 @@ export default function BacktestReplay({ progress, result, isRunning }) {
 
 // ── One portfolio leg ────────────────────────────────────────────────────
 function LegTab({ leg, data, isActive, onSelect }) {
-  const pct = data.total ? Math.min(100, Math.round((data.bars.length / data.total) * 100)) : 0;
+  const pct = data.total ? Math.min(100, Math.round(((data.received ?? data.bars.length) / data.total) * 100)) : 0;
   return (
     <button
       onClick={() => onSelect(leg.slot_id)}

@@ -213,6 +213,153 @@ def _completion_envelope(result: dict) -> dict:
             "final_balance": result.get("final_balance")}
 
 
+# ── Paged delivery: summary first, trade groups in pages ─────────────────────
+# /latest_result/summary + /latest_result/trades, and the saved-run equivalents.
+# One response carrying every trade group was the "Loading backtest details..."
+# that never finished on a remote link; each page is a small request instead.
+_TRADE_PAGE_MAX = 500
+_PAGE_DROP = _TRADE_HEAVY + _TRADE_UNUSED + ("smc_data", "original_signal")
+_SUMMARY_JSON: dict = {}   # user id -> (result key, bytes)
+_PAGE_GROUPS: dict = {}    # user id -> (result key, groups for pages)
+_GROUP_INDEX: dict = {}    # user id -> (result key, {group_id: full group})
+
+
+def _result_key(src: dict):
+    return (src.get("backtest_id"), id(src))
+
+
+def _cached(store: dict, user_id, src: dict, build):
+    """`build()` once per run per user; a new run (or a state reloaded from
+    Redis) replaces the entry."""
+    key = _result_key(src)
+    hit = store.get(user_id)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    value = build()
+    store[user_id] = (key, value)
+    return value
+
+
+def _page_slim(groups):
+    """Groups for a trade page: no chart slices, zones or raw signal (fetched per
+    trade from /trade/{id}/chart), but entry/exit confirmations stay."""
+    def one(t):
+        if not isinstance(t, dict):
+            return t
+        out = {k: v for k, v in t.items() if k not in _PAGE_DROP}
+        subs = out.get("sub_trades")
+        if isinstance(subs, list):
+            out["sub_trades"] = [{k: v for k, v in x.items() if k not in _PAGE_DROP} if isinstance(x, dict) else x
+                                 for x in subs]
+        return out
+    return [one(t) for t in (groups or [])]
+
+
+def _summary_view(src: dict) -> dict:
+    """The finished run without its trade groups (see utils/progressiveResult.js)."""
+    skip = ("replay", "trades", "equity_curve", "grouped_trades", "run_logs")
+    out = {k: v for k, v in src.items() if k not in skip}
+    groups = src.get("grouped_trades") or []
+    legs = src.get("trades")
+    out["grouped_trades"] = []
+    out["trades"] = []
+    out["trades_omitted"] = len(legs) if isinstance(legs, list) else 0
+    out["trade_groups_total"] = len(groups)
+    out["trades_paged"] = True
+    curve = src.get("equity_curve")
+    out["equity_curve"] = _downsample_curve(curve)
+    if isinstance(curve, list) and len(curve) > _EQUITY_POINTS_MAX:
+        out["equity_curve_points"] = len(curve)
+    out["run_logs"] = src.get("run_logs") or []
+    return out
+
+
+def _page_payload(groups: list, offset: int, limit: int, backtest_id) -> bytes:
+    offset = max(0, int(offset))
+    limit = max(1, min(_TRADE_PAGE_MAX, int(limit)))
+    return json.dumps({"backtest_id": backtest_id, "offset": offset, "limit": limit, "total": len(groups),
+                       "groups": groups[offset:offset + limit]}, default=str).encode("utf-8")
+
+
+# ── One trade's chart, on demand ─────────────────────────────────────────────
+_CHART_TF_KEYS = {"M5": ("chart_data_m5", "chart_data"), "M15": ("chart_data_m15",), "H1": ("chart_data_h1",)}
+_CHART_BARS_MAX = 400
+
+
+def _epoch_of(v):
+    from datetime import datetime as _dt, timezone as _tz
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, _dt):
+        return (v if v.tzinfo else v.replace(tzinfo=_tz.utc)).timestamp()
+    try:
+        d = _dt.fromisoformat(str(v).replace("Z", "+00:00"))
+        return (d if d.tzinfo else d.replace(tzinfo=_tz.utc)).timestamp()
+    except Exception:
+        return None
+
+
+def _trim_candles(candles, entry, exit_, max_bars: int = _CHART_BARS_MAX):
+    """At most `max_bars` candles around the trade — about two-thirds of the
+    spare room before the entry."""
+    if not isinstance(candles, list):
+        return []
+    if len(candles) <= max_bars:
+        return candles
+    import bisect
+    try:
+        times = [float(c["time"]) for c in candles]
+    except Exception:
+        return candles[-max_bars:]
+    e = _epoch_of(entry)
+    if e is None:
+        return candles[-max_bars:]
+    x = _epoch_of(exit_) or e
+    i0 = bisect.bisect_left(times, e)
+    i1 = bisect.bisect_right(times, x)
+    spare = max(0, max_bars - (i1 - i0))
+    lo = max(0, i0 - (spare * 2) // 3)
+    hi = min(len(candles), max(i1, lo + max_bars))
+    return candles[lo:hi]
+
+
+def _trade_chart_payload(trade: dict, tf: str | None = None) -> dict:
+    """With `tf`: that timeframe's candles only, trimmed around the trade, plus
+    the panel fields a paged trade list leaves out. Without: the original
+    all-timeframes shape."""
+    entry = trade.get("entry_time_iso") or trade.get("entry_time")
+    exit_ = trade.get("exit_time_iso") or trade.get("exit_time")
+
+    def series(name):
+        for key in _CHART_TF_KEYS.get(name, ()):
+            if trade.get(key):
+                return _trim_candles(trade.get(key), entry, exit_)
+        return []
+
+    out = {
+        "available": [name for name, keys in _CHART_TF_KEYS.items() if any(trade.get(k) for k in keys)],
+        "panel": {k: trade.get(k) for k in ("smc_data", "entry_confirmations", "exit_confirmations")
+                  if trade.get(k) is not None},
+        "sub_trades_panel": [
+            {k: x.get(k) for k in ("entry_confirmations", "exit_confirmations", "confluence_score")
+             if x.get(k) is not None}
+            for x in (trade.get("sub_trades") or []) if isinstance(x, dict)
+        ],
+    }
+    if tf:
+        name = str(tf).upper()
+        out["tf"] = name
+        out["candles"] = series(name)
+    else:
+        out["chart_data"] = _trim_candles(trade.get("chart_data") or [], entry, exit_)
+        out["chart_data_m15"] = series("M15")
+        out["chart_data_m5"] = series("M5")
+        out["chart_data_h1"] = series("H1")
+    return out
+
+
 # strategy_id -> the UserConfigV2 attribute holding that strategy's params.
 # A map rather than an if/elif chain: the chain was duplicated in the
 # single-symbol and portfolio paths, and adding a strategy to one but not the
@@ -748,6 +895,58 @@ async def get_backtest_latest_result(current_user: User = Depends(get_current_us
         return Response(content=body, media_type="application/json")
     return {}
 
+async def _completed_result(user_id):
+    """The finished run for `user_id` (memory, then the Redis mirror), or None."""
+    state = USER_BACKTEST_STATE.get(user_id)
+    if state is None and HAS_REDIS and redis_client and redis_client.redis:
+        try:
+            data = await redis_client.redis.get(f"backtest_state:{user_id}")
+            if data:
+                state = json.loads(data)
+                USER_BACKTEST_STATE[user_id] = state
+        except Exception as e:
+            logger.warning(f"[API] Redis get result failed: {e}")
+    if state and state.get("status") == "complete":
+        return state.get("result") or {}
+    return None
+
+
+@router.get("/latest_result/summary")
+async def get_latest_result_summary(current_user: User = Depends(get_current_user)):
+    """The finished run without its trade groups; they come from /latest_result/trades."""
+    import asyncio
+
+    from fastapi.responses import Response
+    src = await _completed_result(current_user.id)
+    if src is None:
+        return {}
+    body = await asyncio.to_thread(
+        _cached, _SUMMARY_JSON, current_user.id, src,
+        lambda: json.dumps(_summary_view(src), default=str).encode("utf-8"))
+    return Response(content=body, media_type="application/json")
+
+
+@router.get("/latest_result/trades")
+async def get_latest_result_trades(
+    offset: int = 0,
+    limit: int = 250,
+    current_user: User = Depends(get_current_user),
+):
+    """One page of the finished run's trade groups, in run order."""
+    import asyncio
+
+    from fastapi.responses import Response
+    src = await _completed_result(current_user.id)
+    if src is None:
+        raise HTTPException(status_code=404, detail="No completed backtest")
+
+    def build():
+        groups = _cached(_PAGE_GROUPS, current_user.id, src, lambda: _page_slim(src.get("grouped_trades")))
+        return _page_payload(groups, offset, limit, src.get("backtest_id"))
+    body = await asyncio.to_thread(build)
+    return Response(content=body, media_type="application/json")
+
+
 @router.post("/stop")
 async def stop_backtest_endpoint(current_user: User = Depends(get_current_user)):
     state = USER_BACKTEST_STATE.get(current_user.id)
@@ -1016,7 +1215,7 @@ async def run_backtest_endpoint(
             # the single-symbol route) so the frontend can build its chart
             # before any bars arrive, then feeds it the Phase-1 bar walk.
             replay = ReplayStreamer(ws_manager, current_user.id, mode="single",
-                                   enabled=bool(getattr(req, "replay_enabled", True)))
+                                   enabled=True, stream=bool(getattr(req, "replay_enabled", True)))
             replay.init([{
                 "slot_id": req.symbol,
                 "symbol": req.symbol,
@@ -1372,6 +1571,10 @@ async def run_backtest_endpoint(
             _t0 = _time.perf_counter()
             sanitized = await asyncio.to_thread(_sanitize, response)
             logger.info(f"[BT-TIMING] _sanitize took {_time.perf_counter() - _t0:.1f}s")
+            # The engine output is copied into `sanitized`; drop the originals so a
+            # big run does not hold two copies of itself.
+            results = None
+            response = None
 
             current_state = await _get_state()
             current_state["status"] = "complete"
@@ -1638,7 +1841,7 @@ async def run_portfolio_backtest_endpoint(
             # forbids. Announced up front so every tab exists before the first
             # bar arrives, and the tab strip doesn't reflow mid-run.
             replay = ReplayStreamer(ws_manager, current_user.id, mode="portfolio",
-                                   enabled=bool(getattr(req, "replay_enabled", True)))
+                                   enabled=True, stream=bool(getattr(req, "replay_enabled", True)))
             replay.init([
                 {
                     "slot_id": c.slot_id or f"{c.symbol}::{c.strategy_id}",
@@ -1766,7 +1969,7 @@ async def run_portfolio_backtest_endpoint(
                         _last_yield = time.monotonic()
 
                     if i % 600 == 0:
-                        cur_state = await _get_state()
+                        cur_state = USER_BACKTEST_STATE.get(current_user.id) or await _get_state()
                         if cur_state.get("status") == "cancelled":
                             raise Exception("Portfolio Backtest Cancelled")
                         
@@ -2043,6 +2246,16 @@ async def run_portfolio_backtest_endpoint(
             # Off the event loop, as the single-symbol route does: every leg's
             # chart slices plus the replay series is millions of objects.
             sanitized = await asyncio.to_thread(_sanitize, response)
+            # Release the engine output and every leg's frames and signals before
+            # the result is kept: a portfolio run otherwise holds several copies of
+            # itself at the moment pm2's 2 GB restart threshold matters most.
+            results = None
+            response = None
+            for _held in (portfolio_data, portfolio_data_m15, portfolio_data_m5, portfolio_signals):
+                try:
+                    _held.clear()
+                except Exception:
+                    pass
             current_state = await _get_state()
             current_state["status"] = "complete"
             current_state["progress"] = {"stage": "complete", "pct": 100}
@@ -2133,16 +2346,87 @@ def _slim_sub_trades(sub_trades: list) -> list:
         slim.append(st)
     return slim
 
+# Chart slices of a saved trade: loaded only by the per-trade chart endpoint.
+_SAVED_CHART_DEFER = tuple(
+    defer(getattr(BacktestTrade, _c)) for _c in ("chart_data", "chart_data_h1", "chart_data_m15", "chart_data_m5")
+    if hasattr(BacktestTrade, _c)
+)
+
+
+def _saved_group_out(t, run, include_smc: bool = True) -> dict:
+    """One saved trade row as a trade group, shared by /backtests/{id} and its
+    trade pages. Never touches the deferred chart columns."""
+    sub_trades = safe_json_loads(t.sub_trades, [])
+    tp_count = len(sub_trades)
+    tp_wins = sum(1 for st in sub_trades if st.get("pnl", 0) > 0)
+    tp_losses = tp_count - tp_wins
+    duration = 0
+    if t.entry_time and t.exit_time:
+        duration = int((t.exit_time - t.entry_time).total_seconds() / 60)
+
+    return {
+        "group_id": str(t.id),
+        "symbol": t.symbol,
+        "direction": t.direction,
+        "entry_price": t.entry_price,
+        "exit_price": t.exit_price,
+        "stop_loss": t.stop_loss,
+        "pnl": t.pnl,
+        "combined_pnl": t.pnl,
+        "exit_reason": t.exit_reason,
+        "tp_level_hit": t.tp_level_hit,
+        "balance_before": t.balance_before,
+        "balance_after": t.balance_after,
+        "tp1_price": t.tp1_price,
+        "tp2_price": t.tp2_price,
+        "tp3_price": t.tp3_price,
+        "tp4_price": t.tp4_price,
+        "tp5_price": t.tp5_price,
+        "pnl_r": t.pnl_r,
+        "planned_rr": t.planned_rr,
+        "realized_rr": t.realized_rr,
+        "entry_time": t.entry_time.isoformat() if t.entry_time else None,
+        "entry_time_iso": t.entry_time.isoformat() if t.entry_time else None,
+        "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+        "exit_time_iso": t.exit_time.isoformat() if t.exit_time else None,
+        "duration_minutes": duration,
+        "entry_session": getattr(t, "session", None) or "UNKNOWN",
+        "tp_count": tp_count,
+        "tp_wins": tp_wins,
+        "tp_losses": tp_losses,
+        "be_applied": t.be_applied,
+        "trail_method": t.trail_method,
+        "mae_pips": t.mae_pips,
+        "mfe_pips": t.mfe_pips,
+        "confluence_score": t.confluence_score,
+        "strategy_id": getattr(t, "strategy_id", None) or run.strategy_id,
+        "smc_data": safe_json_loads(t.smc_data, {}) if include_smc else {},
+        "sub_trades": sub_trades,
+        # runner.py's _slim_sub_trades keeps entry_snapshot_b64 on
+        # sub_trades[0] specifically (it's identical across every leg of
+        # a group, so it's stripped from legs 1+ to save space, not
+        # dropped entirely). Read it back from there instead of
+        # hardcoding "" and silently losing the saved snapshot image.
+        "entry_snapshot_b64": (sub_trades[0].get("entry_snapshot_b64", "") if sub_trades else "")
+    }
+
+
 @router.get("/backtests/{backtest_id}")
 async def get_backtest(
     backtest_id: str,
+    include_trades: bool = True,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get full backtest detail with all trades, equity data, and session breakdown."""
+    """Get full backtest detail with all trades, equity data, and session breakdown.
+
+    `include_trades=false` returns everything but the trade groups (count in
+    `trade_groups_total`); the page then reads /backtests/{id}/trades. The chart
+    columns are never loaded here — each trade's chart has its own endpoint."""
     result = await db.execute(
         select(BacktestRun)
-        .options(selectinload(BacktestRun.trades))
+        .options(selectinload(BacktestRun.trades).options(
+            *_SAVED_CHART_DEFER, *(() if include_trades else (defer(BacktestTrade.smc_data),))))
         .where(BacktestRun.id == backtest_id, BacktestRun.user_id == current_user.id)
     )
     run = result.scalar_one_or_none()
@@ -2197,61 +2481,7 @@ async def get_backtest(
         key = "OVERLAP" if sess == "LONDON/NY" else sess
         session_win_rates[key] = data["wins"] / data["total"] if data["total"] > 0 else 0
 
-    grouped_trades_out = []
-    for t in run.trades:
-        sub_trades = safe_json_loads(t.sub_trades, [])
-        tp_count = len(sub_trades)
-        tp_wins = sum(1 for st in sub_trades if st.get("pnl", 0) > 0)
-        tp_losses = tp_count - tp_wins
-        duration = 0
-        if t.entry_time and t.exit_time:
-            duration = int((t.exit_time - t.entry_time).total_seconds() / 60)
-            
-        grouped_trades_out.append({
-            "group_id": str(t.id),
-            "symbol": t.symbol,
-            "direction": t.direction,
-            "entry_price": t.entry_price,
-            "exit_price": t.exit_price,
-            "stop_loss": t.stop_loss,
-            "pnl": t.pnl,
-            "combined_pnl": t.pnl,
-            "exit_reason": t.exit_reason,
-            "tp_level_hit": t.tp_level_hit,
-            "balance_before": t.balance_before,
-            "balance_after": t.balance_after,
-            "tp1_price": t.tp1_price,
-            "tp2_price": t.tp2_price,
-            "tp3_price": t.tp3_price,
-            "tp4_price": t.tp4_price,
-            "tp5_price": t.tp5_price,
-            "pnl_r": t.pnl_r,
-            "planned_rr": t.planned_rr,
-            "realized_rr": t.realized_rr,
-            "entry_time": t.entry_time.isoformat() if t.entry_time else None,
-            "entry_time_iso": t.entry_time.isoformat() if t.entry_time else None,
-            "exit_time": t.exit_time.isoformat() if t.exit_time else None,
-            "exit_time_iso": t.exit_time.isoformat() if t.exit_time else None,
-            "duration_minutes": duration,
-            "entry_session": getattr(t, "session", None) or "UNKNOWN",
-            "tp_count": tp_count,
-            "tp_wins": tp_wins,
-            "tp_losses": tp_losses,
-            "be_applied": t.be_applied,
-            "trail_method": t.trail_method,
-            "mae_pips": t.mae_pips,
-            "mfe_pips": t.mfe_pips,
-            "confluence_score": t.confluence_score,
-            "strategy_id": getattr(t, "strategy_id", None) or run.strategy_id,
-            "smc_data": safe_json_loads(t.smc_data, {}),
-            "sub_trades": sub_trades,
-            # runner.py's _slim_sub_trades keeps entry_snapshot_b64 on
-            # sub_trades[0] specifically (it's identical across every leg of
-            # a group, so it's stripped from legs 1+ to save space, not
-            # dropped entirely). Read it back from there instead of
-            # hardcoding "" and silently losing the saved snapshot image.
-            "entry_snapshot_b64": (sub_trades[0].get("entry_snapshot_b64", "") if sub_trades else "")
-        })
+    grouped_trades_out = [_saved_group_out(t, run, include_smc=include_trades) for t in run.trades]
 
     resp = {
         "run": {
@@ -2323,13 +2553,44 @@ async def get_backtest(
         import logging
         logging.error(f"Failed to generate full risk report on the fly: {e}")
 
+    if not include_trades:
+        resp["trade_groups_total"] = len(resp.get("grouped_trades") or [])
+        resp["grouped_trades"] = []
+        resp["trades_paged"] = True
     return resp
+
+
+@router.get("/backtests/{backtest_id}/trades")
+async def get_backtest_trades_page(
+    backtest_id: str,
+    offset: int = 0,
+    limit: int = 250,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """One page of a saved run's trade groups, in the order /backtests/{id} lists them."""
+    offset = max(0, int(offset))
+    limit = max(1, min(_TRADE_PAGE_MAX, int(limit)))
+    result = await db.execute(
+        select(BacktestRun)
+        .options(selectinload(BacktestRun.trades).options(*_SAVED_CHART_DEFER, defer(BacktestTrade.smc_data)))
+        .where(BacktestRun.id == backtest_id, BacktestRun.user_id == current_user.id)
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Backtest not found")
+    rows = list(run.trades)
+    return {
+        "backtest_id": backtest_id, "offset": offset, "limit": limit, "total": len(rows),
+        "groups": [_saved_group_out(t, run, include_smc=False) for t in rows[offset:offset + limit]],
+    }
 
 
 @router.get("/backtests/{backtest_id}/trade/{group_id}/chart")
 async def get_saved_trade_chart(
     backtest_id: str,
     group_id: str,
+    tf: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2359,11 +2620,16 @@ async def get_saved_trade_chart(
     if not t:
         raise HTTPException(status_code=404, detail="Trade not found")
         
-    return {
+    return _trade_chart_payload({
         "chart_data": safe_json_loads(t.chart_data, []),
         "chart_data_m15": safe_json_loads(t.chart_data_m15, []),
-        "chart_data_m5": safe_json_loads(t.chart_data_m5, [])
-    }
+        "chart_data_m5": safe_json_loads(t.chart_data_m5, []),
+        "chart_data_h1": safe_json_loads(getattr(t, "chart_data_h1", None), []),
+        "entry_time": t.entry_time,
+        "exit_time": t.exit_time,
+        "smc_data": safe_json_loads(t.smc_data, {}),
+        "sub_trades": safe_json_loads(t.sub_trades, []),
+    }, tf)
 
 
 @router.get("/backtest_result/replay")
@@ -2556,35 +2822,28 @@ async def get_saved_replay_series(
 @router.get("/backtest_result/trade/{group_id}/chart")
 async def get_unsaved_trade_chart(
     group_id: str,
+    tf: str | None = None,
     current_user: User = Depends(get_current_user),
 ):
-    """Fetch massive chart data for an unsaved trade from the current running/completed backtest state."""
+    """One trade of the current run: with `tf`, just that timeframe trimmed around
+    the trade, plus the panel fields the paged trade list leaves out."""
     state = USER_BACKTEST_STATE.get(current_user.id)
     if state is None and HAS_REDIS and redis_client and redis_client.redis:
         try:
-            import json
             data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
             if data:
                 state = json.loads(data)
         except Exception:
             pass
-            
     if not state or not state.get("result"):
         raise HTTPException(status_code=404, detail="No active or completed backtest found")
-        
     result = state["result"]
-    trades = result.get("grouped_trades", [])
-    
-    # Find the trade by group_id
-    trade = next((t for t in trades if t.get("group_id") == group_id), None)
+    index = _cached(_GROUP_INDEX, current_user.id, result, lambda: {
+        t.get("group_id"): t for t in (result.get("grouped_trades") or []) if isinstance(t, dict)})
+    trade = index.get(group_id)
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found in current backtest")
-        
-    return {
-        "chart_data": trade.get("chart_data", []),
-        "chart_data_m15": trade.get("chart_data_m15", []),
-        "chart_data_m5": trade.get("chart_data_m5", [])
-    }
+    return _trade_chart_payload(trade, tf)
 
 
 @router.delete("/backtests/{backtest_id}")
@@ -2753,7 +3012,10 @@ async def save_backtest_from_client(
     # Inject chart data back from state since frontend strips it to save bandwidth
     state_trades = []
     try:
-        from backend.api.routes.backtest import USER_BACKTEST_STATE
+        # USER_BACKTEST_STATE is this module's global. It was re-imported here,
+        # which made the name LOCAL to the whole function — so the server-copy
+        # lookup near the top raised UnboundLocalError and every save failed with
+        # a CORS-less 500 the browser reports as "Network Error".
         state = USER_BACKTEST_STATE.get(current_user.id)
         if state and state.get("result"):
             state_result = state["result"]

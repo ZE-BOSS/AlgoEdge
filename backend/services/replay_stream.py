@@ -40,14 +40,16 @@ from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Bars per flush. 400 x ~48 bytes of JSON is a ~19 KB message — large enough
+# Bars per flush. 600 x ~48 bytes of JSON is a ~29 KB message — large enough
 # that per-message overhead is negligible, small enough to stay well inside a
 # single TCP window.
-DEFAULT_BATCH_SIZE = 400
+DEFAULT_BATCH_SIZE = 600
 
-# Floor between flushes for one leg. 120 ms is ~8 updates/second: visibly
-# animated, far below the rate at which the browser would start dropping frames.
-DEFAULT_MIN_INTERVAL_S = 0.12
+# Floor between flushes for one leg. Was 120 ms (~8 messages a second per leg),
+# and every message woke every open tab's WebSocket handler and re-rendered the
+# chart: on a multi-leg run that is what made the page feel heavy. Two a second
+# still animates; the live chart is also opt-in now (BacktestRequest.replay_enabled).
+DEFAULT_MIN_INTERVAL_S = 0.5
 
 # Ceiling on the continuous per-leg series retained for replay-mode scrubbing.
 # Above this the series is decimated by a stride (see `downsample`), which
@@ -103,6 +105,7 @@ class ReplayStreamer:
         batch_size: int = DEFAULT_BATCH_SIZE,
         min_interval_s: float = DEFAULT_MIN_INTERVAL_S,
         enabled: bool = True,
+        stream: bool = True,
     ):
         self.manager = manager
         self.user_id = user_id
@@ -111,6 +114,16 @@ class ReplayStreamer:
         self.batch_size = max(1, batch_size)
         self.min_interval_s = max(0.0, min_interval_s)
         self.enabled = enabled
+        # `enabled` keeps the downsampled series for after-run replay; `stream`
+        # additionally pushes bars and signals live. A run with the live chart
+        # off sends nothing over the socket but can still be replayed.
+        self.stream = stream
+        # Per-leg OHLC bucket being filled, and the bucket width, so the retained
+        # series never exceeds ~MAX_SERIES_BARS. It used to keep EVERY bar dict of
+        # every leg until the run ended (73k bars x 6 legs on a synthetic
+        # portfolio) purely to downsample them at the end.
+        self._bucket: dict[str, dict] = {}
+        self._stride: dict[str, int] = {}
 
         self._legs: list[dict] = []
         self._buffer: dict[str, list[dict]] = {}
@@ -159,7 +172,7 @@ class ReplayStreamer:
         inside the bar loop would couple simulation speed to network speed, so a
         slow client would slow the backtest itself.
         """
-        if not self.enabled:
+        if not self.enabled or not self.stream:
             return
         try:
             task = asyncio.create_task(self._deliver(payload))
@@ -197,7 +210,9 @@ class ReplayStreamer:
         self._cursor[slot_id] = 0
         self._total[slot_id] = total_bars
         self._signal_count.setdefault(slot_id, 0)
-        self._series.setdefault(slot_id, [])
+        self._series[slot_id] = []
+        self._bucket.pop(slot_id, None)
+        self._stride[slot_id] = max(1, -(-int(total_bars or 0) // MAX_SERIES_BARS))
         self._last_flush[slot_id] = 0.0
         self._send({
             "type": "replay_leg_start",
@@ -210,16 +225,45 @@ class ReplayStreamer:
         """Feed one processed bar. Flushes when the batch fills and the throttle allows."""
         if not self.enabled:
             return
+        self._retain(slot_id, bar)
+        self._cursor[slot_id] = self._cursor.get(slot_id, 0) + 1
+        if not self.stream:
+            return
         buf = self._buffer.setdefault(slot_id, [])
         buf.append(bar)
-        self._series.setdefault(slot_id, []).append(bar)
-        self._cursor[slot_id] = self._cursor.get(slot_id, 0) + 1
         if len(buf) >= self.batch_size:
             self.flush(slot_id)
+
+    def _retain(self, slot_id: str, bar: dict) -> None:
+        """Fold a bar into the replay series: one OHLC bucket per `stride` bars,
+        so memory stays bounded however long the run is."""
+        stride = self._stride.get(slot_id, 1)
+        series = self._series.setdefault(slot_id, [])
+        if stride <= 1:
+            series.append(bar)
+            return
+        b = self._bucket.get(slot_id)
+        if b is None:
+            b = self._bucket[slot_id] = {"time": bar["time"], "open": bar["open"], "high": bar["high"],
+                                         "low": bar["low"], "close": bar["close"], "_n": 0}
+        else:
+            if bar["high"] > b["high"]:
+                b["high"] = bar["high"]
+            if bar["low"] < b["low"]:
+                b["low"] = bar["low"]
+            b["close"] = bar["close"]
+        b["_n"] += 1
+        if b["_n"] >= stride:
+            del self._bucket[slot_id]
+            b.pop("_n", None)
+            series.append(b)
 
     def flush(self, slot_id: str, force: bool = False) -> None:
         buf = self._buffer.get(slot_id)
         if not buf:
+            return
+        if not self.stream:
+            self._buffer[slot_id] = []
             return
         now = time.monotonic()
         if not force and (now - self._last_flush.get(slot_id, 0.0)) < self.min_interval_s:
@@ -303,15 +347,18 @@ class ReplayStreamer:
         way to scroll the whole run and see every trade in sequence. This is
         that missing series.
         """
+        series = {}
+        for slot_id, bars in self._series.items():
+            tail = self._bucket.get(slot_id)
+            if tail:  # the last, partly filled bucket
+                bars = bars + [{k: v for k, v in tail.items() if k != "_n"}]
+            if bars:
+                series[slot_id] = downsample(bars)
         return {
             "run_id": self.run_id,
             "mode": self.mode,
             "legs": self._legs,
-            "series": {
-                slot_id: downsample(bars)
-                for slot_id, bars in self._series.items()
-                if bars
-            },
+            "series": series,
         }
 
     @property
