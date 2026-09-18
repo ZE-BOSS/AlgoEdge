@@ -697,11 +697,21 @@ class PositionManager:
             if last_closed <= entry_bar or self._last_exit_bar.get(parent_id) == last_closed:
                 continue
 
-            risk_config, _ = build_live_risk_config(config, trade.strategy_id)
+            risk_config, applied = build_live_risk_config(config, trade.strategy_id)
             fp = hashlib.sha256(json.dumps(risk_config, sort_keys=True, default=str).encode()).hexdigest()
             engine = self._exit_risk_engines.get(fp)
             if engine is None:
                 engine = self._exit_risk_engines[fp] = RiskEngine(risk_config)
+                # Once per distinct exit config: say which Settings values this
+                # strategy's measured exits replaced, so "break-even never fires"
+                # is answerable from the Logs page instead of from the code.
+                exit_keys = {k: v for k, v in applied.items()
+                             if k.startswith(("be_", "trail_")) or k in ("tp_count", "tp1_rr")}
+                if exit_keys:
+                    logger.info(f"[EXITS] {trade.strategy_id} runs its measured exits "
+                                f"({', '.join(f'{k}={v}' for k, v in sorted(exit_keys.items()))}); your Settings "
+                                f"values for these are not used. Turn off 'Use each strategy's measured exits' "
+                                f"in Settings -> Risk to apply yours.")
 
             is_buy = str(trade.direction).upper() in ("BUY", "BULLISH", "LONG")
             base = mt5_tickets[min(alive, key=lambda lp: lp.tp_level or 1).mt5_ticket]

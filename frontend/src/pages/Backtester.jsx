@@ -2757,6 +2757,26 @@ export default function Backtester() {
                 </select>
               </div>
 
+              {/* Same switch as Settings -> Risk -> "Exit Rules for Live Trades".
+                  Portfolio rows otherwise always ran each strategy's measured
+                  exits (ORB/VWAP/DriftJumpAlpha: no break-even, no trailing),
+                  whatever the two selects above said. */}
+              <label style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', fontSize: '0.75rem', textTransform: 'none', letterSpacing: 'normal' }}
+                title="Match this to Settings → Risk → Exit Rules for Live Trades, or the backtest and the live bot run different exits.">
+                <input
+                  type="checkbox" checked={form.use_strategy_exit_defaults ?? true}
+                  onChange={e => u('use_strategy_exit_defaults', e.target.checked)}
+                  style={{ width: 14, height: 14, marginTop: 2 }}
+                />
+                <span>
+                  Portfolio: use each strategy&apos;s measured exits
+                  <span style={{ display: 'block', fontSize: '0.62rem', color: 'var(--text-muted)' }}>
+                    On: ORB, VWAP and DriftJumpAlpha rows run without break-even or trailing. Off: every row uses the
+                    break-even and trailing set here. Keep it the same as Settings → Risk → Exit Rules for Live Trades.
+                  </span>
+                </span>
+              </label>
+
               <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.75rem' }}>
                   <input

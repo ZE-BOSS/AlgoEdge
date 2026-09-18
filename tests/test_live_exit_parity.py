@@ -162,3 +162,59 @@ def test_live_management_runs_the_replay_under_the_strategy_exits():
     for k, v in get_strategy_defaults("SpikeFade_v1").items():
         if k != "session_filter_enabled" and hasattr(cfg.risk, k):
             assert rc[k] == v and applied[k] == v
+
+
+# 2026-09-18: a user set break-even and trailing to "Either at 1R" and saw an ORB
+# trade run past 1.5R with its stop untouched. "Either" is the shipped default, so
+# ORB's measured exits (no break-even, no trailing) replaced it, and live had no
+# switch to say "use mine". These pin both sides of the new switch.
+def _user_exit_config(use_strategy_exits):
+    from backend.core.config_schema import UserConfigV2
+    cfg = UserConfigV2()
+    for k, v in dict(be_mode="EITHER", be_trigger_rr=1.0, be_buffer_pips=0.0, be_buffer_atr_mult=0.1,
+                     trail_mode="EITHER", trail_trigger_rr=1.0, trail_activation_rr=1.0,
+                     trail_method_tp1="ATR_TRAIL", atr_trail_multiplier_tp1=1.0, tp_count=1, tp1_rr=5.0,
+                     use_strategy_exit_defaults=use_strategy_exits).items():
+        setattr(cfg.risk, k, v)
+    return cfg
+
+
+def _run_to_one_and_a_half_r(risk_config):
+    n = 80
+    t = T0 + 900 * np.arange(n)
+    close = np.full(n, 1.1000)
+    close[40:60] = np.linspace(1.1000, 1.1030, 20)   # 20-pip stop -> +1.5R
+    close[60:] = 1.1030
+    out = replay_stops(direction="BUY", entry_price=1.1000, initial_stop=1.0980,
+                       legs=[LegState(level=1, stop_loss=1.0980)], times=t, high=close + 0.0004,
+                       low=close - 0.0004, close=close, entry_bar_time=int(t[39]),
+                       risk_config=risk_config, symbol="EURUSD", spread_pips=0.8)
+    return out[1]
+
+
+def test_strategy_exits_replace_default_valued_user_exits_when_the_switch_is_on():
+    from backend.risk.live_risk_config import build_live_risk_config
+    rc, applied = build_live_risk_config(_user_exit_config(True), "ORB_v1")
+    assert rc["be_mode"] == "NONE" and rc["trail_mode"] == "NONE"
+    assert {"be_mode", "trail_mode"} <= set(applied)
+    leg = _run_to_one_and_a_half_r(rc)
+    assert not leg.be_applied and not leg.trail_applied and leg.stop_loss == pytest.approx(1.0980)
+
+
+def test_user_exits_apply_to_every_strategy_when_the_switch_is_off():
+    from backend.risk.live_risk_config import build_live_risk_config
+    for sid in ("ORB_v1", "VWAP_v1", "DriftJumpAlpha_v1", "TrendDrift_v1"):
+        rc, applied = build_live_risk_config(_user_exit_config(False), sid)
+        assert applied == {}, sid
+        assert rc["be_mode"] == "EITHER" and rc["trail_mode"] == "EITHER", sid
+        assert rc["be_trigger_rr"] == 1.0 and rc["trail_method_tp1"] == "ATR_TRAIL", sid
+        leg = _run_to_one_and_a_half_r(rc)
+        assert leg.be_applied, f"{sid}: break-even at 1R never fired"
+        assert leg.stop_loss > 1.1000, f"{sid}: stop still below entry after +1.5R"
+
+
+def test_the_switch_round_trips_through_saved_config():
+    from backend.core.config_schema import UserConfigV2
+    cfg = UserConfigV2.from_dict({"risk": {"use_strategy_exit_defaults": False}})
+    assert cfg.risk.use_strategy_exit_defaults is False
+    assert UserConfigV2.from_dict({"risk": {}}).risk.use_strategy_exit_defaults is True

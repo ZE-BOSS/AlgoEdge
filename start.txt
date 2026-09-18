@@ -1,0 +1,1 @@
+git pull; cd frontend; npm run build; cd ..; cls; pm2 restart all; pm2 logs

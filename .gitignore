@@ -11,6 +11,10 @@ desktop.ini
 .env
 .env.local
 .env.*.local
+.env.bak.*
+# Plaintext secrets never go in; only the encrypted mirror does (docs/SECRETS.md).
+secrets/*
+!secrets/*.enc
 
 # =========================
 # Logs

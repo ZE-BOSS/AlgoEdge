@@ -56,6 +56,9 @@ export default function RiskSettings() {
     // from the saved payload entirely and could never be set from the UI.
     trail_trigger_tp_level: 1,
     trail_require_be_first: false,
+    // Whose exits live trades use: each strategy's measured exits (true) or the
+    // break-even / trailing values on this page for every strategy (false).
+    use_strategy_exit_defaults: true,
     be_trigger_tp_level: 1,
     be_spread_multiple: 2.0,
     trail_method_tp2: 'ATR_TRAIL',
@@ -288,6 +291,38 @@ export default function RiskSettings() {
 
       <div className="card">
         <div className="card-header"><span className="card-title">Trailing Stops</span></div>
+
+        {/* Whose exits apply. Without this, a break-even or trailing setting left
+            at its default value ("Either") was silently replaced by a strategy's
+            measured exits — so ORB, VWAP and DriftJumpAlpha trades never moved
+            their stop, whatever this page said. */}
+        <div style={{
+          padding: 12, marginBottom: 16, borderRadius: 'var(--radius-sm)',
+          background: config.use_strategy_exit_defaults === false ? 'rgba(234,179,8,0.06)' : 'rgba(16,185,129,0.05)',
+          border: `1px solid ${config.use_strategy_exit_defaults === false ? 'rgba(234,179,8,0.35)' : 'rgba(16,185,129,0.25)'}`,
+        }}>
+          <label>Exit Rules for Live Trades</label>
+          <select
+            value={config.use_strategy_exit_defaults === false ? 'mine' : 'strategy'}
+            onChange={e => update('use_strategy_exit_defaults', e.target.value === 'strategy')}
+            style={{ maxWidth: 460 }}
+          >
+            <option value="strategy">Each strategy's measured exits (recommended)</option>
+            <option value="mine">My settings on this page, for every strategy</option>
+          </select>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
+            {config.use_strategy_exit_defaults === false ? (
+              <>Break-even and trailing below apply to <strong>every</strong> strategy exactly as set. The research
+                measured several strategies <em>worse</em> with them on — run the same book in the Backtester with
+                &ldquo;Use strategy exit defaults&rdquo; on and off before relying on this.</>
+            ) : (
+              <>Strategies with tested exits use those instead of the values below: <strong>ORB, VWAP and
+                DriftJumpAlpha run with no break-even and no trailing</strong>; the synthetic strategies (TrendDrift,
+                RangeRevert, SpikeFade…) with no break-even. So a trade on them can pass 1R without its stop moving —
+                that is the tested behaviour, not a fault. Choose &ldquo;My settings&rdquo; to apply yours.</>
+            )}
+          </div>
+        </div>
 
         {/* [T2.3] Trail activation. Without these, RR-mode trailing had no
             trigger and TP1 had no method, so a single-TP position that ran to

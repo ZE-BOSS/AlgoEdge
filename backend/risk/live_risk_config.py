@@ -111,8 +111,13 @@ def build_live_risk_config(config: Any, strategy_id: str) -> tuple[dict[str, Any
     }
 
     # Measured per-strategy exits, where the saved setting is still the shipped
-    # RiskParams default — an explicit user setting always wins.
+    # RiskParams default. A value equal to its default cannot be told apart from
+    # "not set", so an explicit "Either" loses to a strategy's measured NONE —
+    # `use_strategy_exit_defaults = False` is how a user makes their own exits
+    # apply to every strategy (the Backtester's switch of the same name).
     applied: dict[str, Any] = {}
+    if not getattr(risk, "use_strategy_exit_defaults", True):
+        return risk_config, applied
     try:
         from backend.core.config_schema import RiskParams
         from backend.strategies.strategy_defaults import get_strategy_defaults

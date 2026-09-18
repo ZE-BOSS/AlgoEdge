@@ -346,6 +346,23 @@ class RiskParams:
     Set to `1.0` to restore backtest's old, narrower spread term.
     """
 
+    use_strategy_exit_defaults: bool = True
+    """
+    Whose exits a LIVE trade runs under. True: each strategy's measured exits
+    (strategies/strategy_defaults.py) replace any exit setting here that is still
+    at its shipped default — which, for ORB, VWAP and DriftJumpAlpha, means
+    break-even and trailing OFF, and for the synthetic strategies break-even OFF.
+    False: the break-even, trailing and target values on Settings -> Risk apply
+    to every strategy exactly as entered.
+
+    The Backtester has had this switch (`use_strategy_exit_defaults` on its
+    request) for a while; live had none. So a user who set break-even and
+    trailing "Either at 1R" saw neither happen on those strategies, because
+    "Either" is the default value and was therefore indistinguishable from
+    "not set" (2026-09-18). Default stays True: the measured exits are what the
+    research found better, and changing live behaviour is the user's call.
+    """
+
     trail_require_be_first: bool = False
     """
     [4.6/D7/F3] Whether trailing may only begin after break-even has been
