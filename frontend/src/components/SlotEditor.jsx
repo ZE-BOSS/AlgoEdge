@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Copy, Trash2 } from 'lucide-react';
 import SchemaForm from './SchemaForm';
-import { SLOT_RISK_KEYS, SLOT_RISK_SECTIONS, STRATEGY_GROUP, STRATEGY_LABEL, STRATEGY_OPTIONS, slotSummary } from './slotSpec';
+import { ACCOUNT_ONLY_KEYS, SLOT_RISK_KEYS, SLOT_RISK_SECTIONS, STRATEGY_GROUP, STRATEGY_LABEL, STRATEGY_OPTIONS, TP_LEVEL_OF, slotSummary } from './slotSpec';
 import SymbolPicker from './SymbolPicker';
 
 /**
@@ -25,6 +25,10 @@ export default function SlotEditor({
   schema,
   accountRisk = {},
   strategyDefaults = {},
+  // The strategy's MEASURED exits, and whether the account is using them.
+  // resolve_slot_risk_config lays these over the account default for any field
+  // this slot has not set itself, so they are what the run will use.
+  measuredExits = {},
   symbols = [],
   onChange,
   onRemove,
@@ -54,23 +58,58 @@ export default function SlotEditor({
     [schema, group, strategyDefaults],
   );
 
-  // Risk rows, re-based on the account's value so a field shows what this slot
-  // will actually use and "changed" means "this slot overrides the default".
+  // Risk rows, re-based on what this slot would actually run with, so
+  // "changed" means "this slot overrides it". The order matches the backend
+  // resolver: account default, then the strategy's measured exits, then the
+  // slot's own value (which SchemaForm shows on top of these).
   const riskRowsBySection = useMemo(() => {
+    const tpCount = Number(
+      slot.risk?.tp_count ?? measuredExits?.tp_count ?? accountRisk?.tp_count ?? 3,
+    ) || 3;
     const byName = Object.fromEntries(
       (schema || [])
         .filter(r => r.group === 'risk')
         .map(r => [r.key.split('.').slice(1).join('.'), r]),
     );
-    return SLOT_RISK_SECTIONS.map(([title, keys]) => [
+    const sections = SLOT_RISK_SECTIONS.map(([title, keys]) => [
       title,
-      keys.map(k => byName[k]).filter(Boolean).map(r => {
+      keys.map(k => byName[k]).filter(Boolean).filter(r => {
+        // a slot taking N targets is not asked about TP N+1
+        const level = TP_LEVEL_OF(r.key.split('.').slice(1).join('.'));
+        return level === null || level <= tpCount;
+      }).map(r => {
         const name = r.key.split('.').slice(1).join('.');
         const acct = accountRisk?.[name];
-        return { ...r, group: 'slot_risk', default: acct === undefined || acct === null ? r.default : acct };
+        const base = acct === undefined || acct === null ? r.default : acct;
+        const measured = measuredExits?.[name];
+        return measured === undefined || measured === null
+          ? { ...r, group: 'slot_risk', default: base }
+          : { ...r, group: 'slot_risk', default: measured, measuredBy: slot.strategy_id };
       }),
-    ]).filter(([, rows]) => rows.length);
-  }, [schema, accountRisk]);
+    ]);
+
+    // Everything else the engine reads off a slot's risk config. Rendered last,
+    // so a field added to RiskParams is reachable the day it ships instead of
+    // waiting for someone to remember this file.
+    const named = new Set(SLOT_RISK_KEYS);
+    const rest = Object.entries(byName)
+      .filter(([name]) => !named.has(name) && !ACCOUNT_ONLY_KEYS.includes(name))
+      .map(([name, r]) => {
+        const acct = accountRisk?.[name];
+        const base = acct === undefined || acct === null ? r.default : acct;
+        return { ...r, group: 'slot_risk', default: base };
+      });
+    sections.push(['Advanced', rest]);
+    return sections.filter(([, rows]) => rows.length);
+  }, [schema, accountRisk, measuredExits, slot.strategy_id, slot.risk]);
+
+  // Named so the risk tab can say which fields the strategy decided.
+  const measuredNames = useMemo(
+    () => riskRowsBySection.flatMap(([, rows]) => rows)
+      .filter(r => r.measuredBy)
+      .map(r => r.label),
+    [riskRowsBySection],
+  );
 
   // What this slot would actually run with: its own value, else the account's
   // (risk) or the strategy's (parameters), else the schema default.
@@ -197,6 +236,15 @@ export default function SlotEditor({
               This slot trades on its own risk engine: these limits count its trades and nothing
               else&apos;s. A field left at the default follows the account default shown under it.
             </p>
+            {measuredNames.length > 0 && (
+              <p className="slot-editor__note slot-editor__note--measured">
+                {STRATEGY_LABEL[slot.strategy_id] || slot.strategy_id} has measured exits, and the
+                account is set to use them, so they replace the account default for:{' '}
+                <strong>{measuredNames.join(', ')}</strong>. The values shown are what this slot
+                will run. Type your own into any of them to override it, or turn the measured
+                exits off in <em>Settings &gt; Defaults</em>.
+              </p>
+            )}
             {riskRowsBySection.map(([title, rows]) => (
               <div key={title} className="slot-editor__section">
                 <SchemaForm

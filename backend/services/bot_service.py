@@ -1354,7 +1354,12 @@ class BotService:
                                     # match the real account.
                                     from backend.risk.position_sizer import resolve_sizing_base_balance
                                     _account_mode = getattr(getattr(config, "prop_firm", None), "account_mode", "personal")
-                                    if _account_mode == "prop_firm":
+                                    _stated = getattr(config.risk, "sizing_static_balance", None)
+                                    if _stated:
+                                        # The user stated the capital to size against, so neither
+                                        # the firm's figure nor a restart-dependent anchor applies.
+                                        _static_balance = float(_stated)
+                                    elif _account_mode == "prop_firm":
                                         _static_balance = getattr(config.prop_firm, "initial_balance", account_balance)
                                     else:
                                         if self._static_personal_balance_anchor is None:

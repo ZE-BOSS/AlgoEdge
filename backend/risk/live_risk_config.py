@@ -92,6 +92,7 @@ def build_live_risk_config(config: Any, strategy_id: str) -> tuple[dict[str, Any
         "vol_target_min_scale": getattr(risk, "vol_target_min_scale", 0.5),
         "vol_target_max_scale": getattr(risk, "vol_target_max_scale", 2.0),
         "sizing_basis": getattr(risk, "sizing_basis", "STATIC"),
+        "sizing_static_balance": getattr(risk, "sizing_static_balance", None),
         "be_spread_multiple": getattr(risk, "be_spread_multiple", 2.0),
         "trail_require_be_first": getattr(risk, "trail_require_be_first", False),
         "be_mode": getattr(risk, "be_mode", "EITHER"),

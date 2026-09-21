@@ -7,6 +7,7 @@ import { useConnectionStore, useAuthStore } from '../../store';
 import SlotEditor from '../../components/SlotEditor';
 import SymbolPicker from '../../components/SymbolPicker';
 import { useSymbolOptions } from '../../hooks/useSymbolOptions';
+import { getStrategyDefaults } from '../../services/api';
 import { STRATEGY_GROUP, STRATEGY_OPTIONS } from '../../components/slotSpec';
 
 /**
@@ -274,6 +275,20 @@ export default function StrategySettings() {
     }]);
   };
 
+  // The measured exits the backend lays over an account default for any field
+  // a slot has not set itself, so the editor shows what will actually run.
+  const { data: strategyDefaultsResp } = useQuery({
+    queryKey: ['strategy-defaults'],
+    queryFn: () => getStrategyDefaults().then(r => r.data),
+    enabled: status === 'ONLINE' && isAuthenticated,
+    staleTime: Infinity,
+  });
+  const measuredExitsFor = (strategyId) => (
+    config.risk?.use_strategy_exit_defaults === false
+      ? {}
+      : (strategyDefaultsResp?.strategy_defaults?.[strategyId]?.defaults || {})
+  );
+
   // Broker names first (Deriv lists the Nasdaq as "US Tech 100"), then the
   // symbols this book already trades. Typing anything else is still allowed.
   const symbolOptions = useSymbolOptions(
@@ -370,6 +385,7 @@ export default function StrategySettings() {
               schema={schema}
               accountRisk={config.risk}
               strategyDefaults={config[STRATEGY_GROUP[slot.strategy_id]] || {}}
+              measuredExits={measuredExitsFor(slot.strategy_id)}
               symbols={symbolOptions}
               collapsible
               defaultOpen={false}

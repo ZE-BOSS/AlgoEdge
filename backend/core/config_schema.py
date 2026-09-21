@@ -309,6 +309,13 @@ class RiskParams:
 
     # ── Backtest <-> live parity (Phase 4) ─────────────────────────────────
     sizing_basis: Literal["STATIC", "BALANCE", "EQUITY"] = "STATIC"
+    # [2026-09-21] The capital STATIC sizes against, when you want to state it
+    # rather than inherit it. A backtest otherwise anchors to the balance typed
+    # on the run; live anchors to prop_firm.initial_balance (prop) or to the
+    # first balance the process observes (personal) — which moved on every
+    # restart. Set it and both paths use this figure; leave it None for the
+    # old behaviour.
+    sizing_static_balance: float | None = None
     """
     [4.2/D1] What position sizing is computed against. `STATIC` (default) sizes
     every trade against `PropFirmParams.initial_balance`, never the live/running

@@ -1392,7 +1392,10 @@ class BacktestEngine(CostModelMixin):
                     from backend.risk.position_sizer import resolve_sizing_base_balance
                     _sizing_base_balance = resolve_sizing_base_balance(
                         self.risk_config.get("sizing_basis", "STATIC"),
-                        static_balance=initial_balance,
+                        # A stated capital wins over the run's opening balance, so
+                        # STATIC means the same number here and live.
+                        static_balance=(self.risk_config.get("sizing_static_balance")
+                                        or initial_balance),
                         live_balance=balance,
                         live_equity=balance,  # no floating-PnL equity tracked mid-loop; balance is the closest available figure
                     )

@@ -72,6 +72,28 @@ function Field({ row, value, onChange }) {
     );
   }
 
+  // A list of PAIRS — confluence_risk_tiers is [[80, 100], [65, 75], ...].
+  // The comma editor below would flatten it into six numbers, so this one is
+  // edited as JSON and only committed when it parses.
+  if (Array.isArray(row.default) && row.default.some(Array.isArray)) {
+    return (
+      <div style={{ gridColumn: '1 / -1' }}>
+        {label}
+        <input
+          className="input input-sm"
+          style={{ width: '100%', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.72rem' }}
+          defaultValue={JSON.stringify(v ?? row.default)}
+          onChange={e => {
+            try {
+              const parsed = JSON.parse(e.target.value);
+              if (Array.isArray(parsed)) onChange(name, parsed);
+            } catch { /* keep typing — commit only valid JSON */ }
+          }}
+        />
+      </div>
+    );
+  }
+
   // List of numbers — e.g. tp_splits, vwap_band_sigmas. Editable as a comma list
   // rather than raw JSON, and validated back into an array.
   if (Array.isArray(row.default)) {

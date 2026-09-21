@@ -607,3 +607,187 @@ def test_both_run_endpoints_use_the_liveness_check():
     # and kill the task between "queued" and "started".
     assert src.count('state["heartbeat"] = _time_mod.time()') == 2, "both tasks must stamp their state, or liveness cannot be judged"
     assert 'state["heartbeat"] = _time.time()' not in src
+
+
+# ── The editor must show the exits that will actually run ───────────────────
+#
+# Found 2026-09-21 comparing two deployments with "the same settings": one ran
+# 55% trailing exits, the other none. resolve_slot_risk_config lays a strategy's
+# MEASURED exits over the account default for every field the slot has not set
+# itself, and DriftJumpAlpha's are trail_mode=NONE, trail_method_tp1=NONE,
+# be_mode=TP_HIT, tp1_rr=5. The slot editor was showing the account's
+# "trail EITHER / ATR_TRAIL", so the run silently did something else.
+
+def test_a_strategys_measured_exits_beat_the_account_default():
+    from backend.risk.slot_book import resolve_slot_risk_config
+
+    account = {"tp1_rr": 2.0, "trail_mode": "EITHER", "trail_method_tp1": "ATR_TRAIL",
+               "be_mode": "EITHER"}
+
+    inherited = resolve_slot_risk_config(account, "DriftJumpAlpha_v1", overrides={},
+                                         use_strategy_exit_defaults=True)
+    assert inherited["trail_mode"] == "NONE"
+    assert inherited["trail_method_tp1"] == "NONE"
+    assert inherited["be_mode"] == "TP_HIT"
+    assert inherited["tp1_rr"] == 5.0
+
+    # a slot that sets the field itself still wins
+    explicit = resolve_slot_risk_config(account, "DriftJumpAlpha_v1",
+                                        overrides={"trail_mode": "EITHER"},
+                                        use_strategy_exit_defaults=True)
+    assert explicit["trail_mode"] == "EITHER"
+
+    # and so does turning the measured exits off
+    off = resolve_slot_risk_config(account, "DriftJumpAlpha_v1", overrides={},
+                                   use_strategy_exit_defaults=False)
+    assert off["trail_mode"] == "EITHER"
+
+
+def test_the_slot_editor_shows_the_measured_exit_that_will_run():
+    from pathlib import Path
+
+    js = Path("frontend/src/components/SlotEditor.jsx").read_text(encoding="utf-8")
+    # the risk rows are rebased on the measured value, not only the account's
+    assert "const measured = measuredExits?.[name];" in js
+    assert "default: measured, measuredBy: slot.strategy_id" in js
+    # and the panel says which fields the strategy decided
+    assert "slot-editor__note--measured" in js
+
+    for path in ("frontend/src/pages/Backtester.jsx",
+                 "frontend/src/pages/Settings/Strategy.jsx"):
+        page = Path(path).read_text(encoding="utf-8")
+        assert "measuredExitsFor(" in page, f"{path} must pass the measured exits to the editor"
+        assert "use_strategy_exit_defaults === false" in page, \
+            f"{path} must stop showing them when the account has turned them off"
+
+
+# ── Every setting the engine honours must be reachable ──────────────────────
+#
+# Audited 2026-09-21 against the pre-redesign screens (d7f3a08): 18 RiskParams
+# fields the old UI wrote were unreachable in the new one and ALL 18 were still
+# read by the engine — the exit ladder (tp4/tp5, tp_splits, trail methods 3-5,
+# the per-TP ATR multipliers, trail_pips/pct/structure_bars, the BE spread and
+# TP-level triggers) and `use_strategy_exit_defaults`, the switch that decides
+# whether a strategy's measured exits replace them at all. A further 25 fields
+# had never been exposed by either UI.
+#
+# So coverage is no longer a hand-kept list: the slot editor renders every risk
+# field that is not account-owned, and this test holds that to the dataclass.
+
+def _ui_risk_keys():
+    import re
+    from pathlib import Path
+
+    spec = Path("frontend/src/components/slotSpec.js").read_text(encoding="utf-8")
+    sections = spec.split("SLOT_RISK_SECTIONS")[1].split("];")[0]
+    named = set(re.findall(r"'([a-z0-9_]+)'", sections))
+    account = set(re.findall(r"'([a-z0-9_]+)'",
+                             spec.split("ACCOUNT_ONLY_KEYS = [")[1].split("];")[0]))
+    return named, account
+
+
+def test_the_frontends_account_only_list_matches_the_backends():
+    from backend.risk.slot_book import ACCOUNT_ONLY_KEYS
+
+    _, account = _ui_risk_keys()
+    assert account == set(ACCOUNT_ONLY_KEYS), (
+        "slotSpec.js mirrors risk/slot_book.py — a key in one and not the other "
+        "means a setting is editable where it has no effect, or vice versa"
+    )
+
+
+def test_every_risk_field_is_reachable_somewhere_in_the_ui():
+    from pathlib import Path
+
+    from backend.core.config_schema import RiskParams
+    from backend.risk.slot_book import ACCOUNT_ONLY_KEYS
+
+    named, _ = _ui_risk_keys()
+    editor = Path("frontend/src/components/SlotEditor.jsx").read_text(encoding="utf-8")
+    page = Path("frontend/src/pages/Settings/Risk.jsx").read_text(encoding="utf-8")
+
+    # the leftovers bucket: everything not named and not account-owned
+    assert "sections.push(['Advanced', rest]);" in editor
+    assert "!named.has(name) && !ACCOUNT_ONLY_KEYS.includes(name)" in editor
+    # and the account's own fields are derived from the same list
+    assert "const ACCOUNT_KEYS = ['use_strategy_exit_defaults', ...ACCOUNT_ONLY_KEYS];" in page
+
+    # nothing in the dataclass can therefore be unreachable
+    fields = set(vars(RiskParams()).keys())
+    unreachable = fields - named - set(ACCOUNT_ONLY_KEYS) - {"use_strategy_exit_defaults"}
+    # these land in the Advanced bucket; assert the mechanism covers them
+    assert unreachable, "sanity: there should be fields relying on the bucket"
+    for key in ("confluence_risk_tiers", "min_stop_spread_multiple", "multi_position_mode",
+                "vol_target_annual_pct", "max_cluster_risk_pct"):
+        assert key in unreachable and key in fields
+
+
+def test_the_exit_ladder_is_editable_again():
+    named, _ = _ui_risk_keys()
+    for key in ("tp4_rr", "tp5_rr", "tp_splits", "trail_method_tp3", "trail_method_tp4",
+                "trail_method_tp5", "atr_trail_multiplier", "atr_trail_multiplier_tp2",
+                "atr_trail_multiplier_tp5", "trail_pips", "trail_pct",
+                "trail_structure_bars", "trail_trigger_tp_level", "be_spread_multiple",
+                "be_trigger_tp_level"):
+        assert key in named, f"{key} is read by the engine and must be on the slot"
+
+
+def test_a_slot_is_not_asked_about_targets_it_does_not_take():
+    from pathlib import Path
+
+    editor = Path("frontend/src/components/SlotEditor.jsx").read_text(encoding="utf-8")
+    assert "const level = TP_LEVEL_OF(" in editor
+    assert "return level === null || level <= tpCount;" in editor
+
+
+# ── STATIC must mean a number you chose ─────────────────────────────────────
+#
+# `sizing_basis=STATIC` sizes every position against `static_balance`. A
+# backtest passed the balance typed on the run; live passed
+# prop_firm.initial_balance for a prop account and, for a PERSONAL account, the
+# first balance the process happened to observe — so the anchor moved on every
+# restart and could not be set at all. Same setting, two different numbers.
+
+def test_a_stated_capital_is_what_static_sizes_against():
+    from backend.core.config_schema import RiskParams
+    from backend.risk.position_sizer import resolve_sizing_base_balance
+
+    assert RiskParams().sizing_static_balance is None, "opt-in: unset changes nothing"
+
+    # STATIC uses whatever the caller passes as the anchor...
+    assert resolve_sizing_base_balance("STATIC", static_balance=5000.0,
+                                       live_balance=12345.0, live_equity=9999.0) == 5000.0
+    # ...and the other two are untouched by it
+    assert resolve_sizing_base_balance("BALANCE", static_balance=5000.0,
+                                       live_balance=12345.0, live_equity=9999.0) == 12345.0
+    assert resolve_sizing_base_balance("EQUITY", static_balance=5000.0,
+                                       live_balance=12345.0, live_equity=9999.0) == 9999.0
+
+
+def test_every_path_anchors_static_on_the_stated_capital():
+    import inspect
+
+    from backend.backtester import engine as single
+    from backend.backtester import portfolio_engine as portfolio
+    from backend.risk import live_risk_config
+    from backend.services import bot_service
+
+    assert 'self.risk_config.get("sizing_static_balance")' in inspect.getsource(single)
+    assert '_slot_cfg.get("sizing_static_balance")' in inspect.getsource(portfolio)
+    live = inspect.getsource(bot_service)
+    assert '_stated = getattr(config.risk, "sizing_static_balance", None)' in live
+    assert "_static_balance = float(_stated)" in live, \
+        "a stated capital must beat both the firm's figure and the restart anchor"
+    assert "sizing_static_balance" in inspect.getsource(live_risk_config), \
+        "it must reach the live risk config like every other risk field"
+
+
+def test_the_stated_capital_is_editable_and_resolves_per_slot():
+    from backend.risk.slot_book import resolve_slot_risk_config
+
+    named, _ = _ui_risk_keys()
+    assert "sizing_static_balance" in named, "it belongs beside the sizing basis it modifies"
+
+    resolved = resolve_slot_risk_config({}, "ORB_v1", overrides={
+        "sizing_basis": "STATIC", "sizing_static_balance": 5000.0})
+    assert resolved["sizing_static_balance"] == 5000.0

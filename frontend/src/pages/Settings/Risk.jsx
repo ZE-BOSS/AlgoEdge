@@ -5,7 +5,7 @@ import { getConfig, getParameterSchema, updateConfig } from '../../services/api'
 import { invalidateConfigDependents } from '../../utils/invalidate';
 import { useConnectionStore, useAuthStore } from '../../store';
 import SchemaForm from '../../components/SchemaForm';
-import { SLOT_RISK_SECTIONS } from '../../components/slotSpec';
+import { ACCOUNT_ONLY_KEYS, SLOT_RISK_SECTIONS } from '../../components/slotSpec';
 
 /**
  * Settings > Defaults
@@ -26,7 +26,11 @@ import { SLOT_RISK_SECTIONS } from '../../components/slotSpec';
 
 // Account facts: a slot may not override these (risk/slot_book.py
 // ACCOUNT_ONLY_KEYS), so they are edited here and nowhere else.
-const ACCOUNT_KEYS = ['max_account_leverage', 'max_margin_utilisation_pct'];
+// The account's own fields: ACCOUNT_ONLY_KEYS (a slot may not override those)
+// plus `use_strategy_exit_defaults`, which bot_service and position_manager read
+// off the account and which decides whether a strategy's measured exits replace
+// the defaults above. Derived, so a key added to the backend list appears here.
+const ACCOUNT_KEYS = ['use_strategy_exit_defaults', ...ACCOUNT_ONLY_KEYS];
 
 export default function RiskSettings() {
   const { status } = useConnectionStore();

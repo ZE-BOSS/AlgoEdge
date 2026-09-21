@@ -1410,6 +1410,12 @@ html, body {
   overflow-wrap: anywhere;
 }
 
+.slot-editor__note--measured {
+  color: var(--text-secondary);
+  border-left: 2px solid var(--blue);
+  padding-left: 8px;
+}
+
 .slot-editor__blocked {
   display: inline-flex;
   align-items: center;

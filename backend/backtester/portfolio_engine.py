@@ -825,7 +825,9 @@ class PortfolioBacktestEngine(CostModelMixin):
                     from backend.risk.position_sizer import resolve_sizing_base_balance
                     _sizing_base_balance = resolve_sizing_base_balance(
                         _slot_cfg.get("sizing_basis", "STATIC"),
-                        static_balance=initial_balance,
+                        # As in the single-symbol engine: a stated capital wins.
+                        static_balance=(_slot_cfg.get("sizing_static_balance")
+                                        or initial_balance),
                         live_balance=balance,
                         live_equity=balance,
                     )

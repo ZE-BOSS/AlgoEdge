@@ -36,7 +36,7 @@ function savedRiskPassthrough(savedConfig, formKeys) {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SymbolPicker from '../components/SymbolPicker';
 import { useSymbolOptions } from '../hooks/useSymbolOptions';
-import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Shield, Terminal, Settings2, LayoutDashboard, PlusCircle, Download } from 'lucide-react';
+import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Shield, Terminal, LayoutDashboard, PlusCircle, Download } from 'lucide-react';
 import { getParameterSchema, runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, getLatestResultSummary, getLatestResultTrades, getBacktestSummary, getBacktestTrades, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts, getStrategyDefaults } from '../services/api';
 import TradeChart from '../components/TradeChart';
 import BacktestReplay from '../components/BacktestReplay';
@@ -1260,7 +1260,6 @@ function findLiveSlot(config, symbol, strategyId) {
     && sl.strategy_id === strategyId) || null;
 }
 
-const TRAIL_METHODS = [{ v: 'NONE', l: 'None' }, { v: 'ATR_TRAIL', l: 'ATR Trail' }, { v: 'FIXED_PIPS', l: 'Fixed Pips' }, { v: 'STRUCTURE_TRAIL', l: 'Structure Trail' }, { v: 'PCT_TRAIL', l: '% Trail' }];
 
 // One list, shared with Settings' trading book (components/slotSpec.js).
 const STRATEGY_OPTIONS = SLOT_STRATEGY_OPTIONS.map(([id, label]) => [id, label]);
@@ -1743,6 +1742,16 @@ export default function Backtester() {
     [strategyDefaultsResp],
   );
 
+  // What the backend's resolver will lay over the account default for a slot
+  // that has not set these fields itself (risk/slot_book.resolve_slot_risk_config).
+  // Empty when the account has turned measured exits off, because then nothing
+  // is laid over.
+  const measuredExitsFor = useCallback((strategyId) => (
+    userCfg?.config?.risk?.use_strategy_exit_defaults === false
+      ? {}
+      : (allStrategyDefaults?.[strategyId]?.defaults || {})
+  ), [allStrategyDefaults, userCfg]);
+
   // [18.3] Adopt the selected strategy's MEASURED exit settings (research/16,
   // 285 cells / 23,989 trades). Previously these were displayed in the defaults
   // panel but never applied, so every run used the generic values regardless of
@@ -2175,6 +2184,7 @@ export default function Backtester() {
                 schema={schema}
                 accountRisk={userCfg?.config?.risk}
                 strategyDefaults={userCfg?.config?.[STRATEGY_GROUP[form.strategy_id]] || {}}
+                measuredExits={measuredExitsFor(form.strategy_id)}
                 showEnabled={false}
                 showSymbol={false}
                 collapsible
@@ -2209,6 +2219,7 @@ export default function Backtester() {
                     schema={schema}
                     accountRisk={userCfg?.config?.risk}
                     strategyDefaults={userCfg?.config?.[STRATEGY_GROUP[item.strategy_id]] || {}}
+                    measuredExits={measuredExitsFor(item.strategy_id)}
                     symbols={backtestSymbols}
                     showEnabled={false}
                     collapsible

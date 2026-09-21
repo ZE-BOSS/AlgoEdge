@@ -463,3 +463,98 @@ The 58-second run in the report above is not a baseline: it was blocked at the
 first gate, before any indicator work. Now that the gate passes, the same window
 does the real simulation. Making DJA's per-bar work incremental is the open
 follow-up.
+
+## 15. Two deployments, "the same settings", different exits (2026-09-21)
+
+| | old (16.60.51.87) | new (18.135.178.117) |
+|---|---|---|
+| Starting balance | $10,000 | **$900** |
+| Final | $55,057.70 | $6,022.90 |
+| Return | +450.6% | **+569.2%** |
+| Trades | 389 | 342 approved |
+| Win rate | 56.3% | 28.4% |
+| Expectancy | 0.13R | **0.54R** |
+| Max DD | 71.5% | 88.7% |
+| Exits | SL 41% / **Trail 55%** | TP1 28% / SL 72%, **no trailing** |
+
+The dollar gap is the account size, not the edge: the new run returned more in
+percent and 4x more per trade. What actually differed is the exits.
+
+`resolve_slot_risk_config` lays a strategy's MEASURED exits over the account
+default for every field the slot has not set itself. DriftJumpAlpha's are
+`tp1_rr=5, trail_mode=NONE, trail_method_tp1=NONE, be_mode=TP_HIT`. The slot
+inherited "trail EITHER / ATR_TRAIL" from the account, never set them itself,
+and therefore ran with **no trailing** — while the editor displayed EITHER.
+
+That is a display bug, not a resolver bug: the layering is deliberate and
+matches live. The slot editor now rebases those fields on the measured value,
+so the number on screen is the number the run uses, and names the fields the
+strategy decided:
+
+> Drift & Jump Alpha has measured exits, and the account is set to use them, so
+> they replace the account default for: Tp1 rr, Be mode, Trail mode, Trail
+> method tp1. The values shown are what this slot will run.
+
+Verified in the app: the Risk & exits tab now reads `trail_mode NONE,
+trail_method_tp1 NONE, be_mode TP_HIT, tp1_rr 5` for a DJA slot, matching
+`resolve_slot_risk_config`.
+
+## 16. Settings audit: what the redesign dropped (2026-09-21)
+
+Diffed every config key the pre-redesign screens (`d7f3a08`) wrote against what
+the new ones expose, then checked each against the whole backend for a consumer.
+
+**18 fields the old UI wrote were unreachable in the new one, and every one of
+them is still read by the engine:**
+
+| | fields | read by |
+|---|---|---|
+| TP ladder | `tp4_rr`, `tp5_rr`, `tp_splits` | `risk/multi_tp.py`, `risk/engine.py` |
+| Trailing | `trail_method_tp3/4/5`, `atr_trail_multiplier`, `atr_trail_multiplier_tp2..5`, `trail_pips`, `trail_pct`, `trail_structure_bars`, `trail_trigger_tp_level` | `risk/trailing_manager.py`, `risk/exit_replay.py`, `risk/multi_tp.py` |
+| Break-even | `be_spread_multiple`, `be_trigger_tp_level` | `risk/breakeven_manager.py`, `backtester/engine.py` |
+| The switch | `use_strategy_exit_defaults` | `bot_service.py`, `position_manager.py` |
+
+Four of them (`atr_trail_multiplier_tp2..5`) are read through f-strings —
+`live_risk_config.py:71` builds all five, `trailing_manager.py:41` reads the one
+matching the TP level — so a literal grep says "dead" and the engine still uses
+them. That is exactly how they were lost.
+
+**A further 25 fields had never been exposed by either UI**, including
+`confluence_risk_tiers`, `min_stop_spread_multiple`, `multi_position_mode`,
+`sl_buffer_pips`, the `vol_target_*` block and the cluster/direction caps.
+
+### 16.1 Coverage is now a property of the code
+
+Listing fields by hand is what failed. The slot editor renders the named
+sections and then **every remaining risk field** that is not in
+`ACCOUNT_ONLY_KEYS`, and the Defaults page renders exactly the account-owned
+ones. `slotSpec.js` mirrors the backend list and a test asserts the two match,
+so a field added to `RiskParams` is reachable the day it ships.
+
+Per-TP rows (`tp4_rr`, `trail_method_tp5`, ...) are hidden above the slot's own
+`tp_count`, so the ladder is complete without the panel becoming a wall — raise
+TP count to 3 and TP2/TP3 and their trail methods appear.
+
+`confluence_risk_tiers` is a list of PAIRS; the comma editor would have
+flattened `[[80,100],[65,75]]` into six numbers, so nested lists now edit as
+JSON and commit only when they parse.
+
+### 16.2 `sizing_basis` was not removed — but STATIC meant two things
+
+It is on every slot (Risk & exits → Sizing) and on the Defaults page, and it
+reaches all three paths: `backtester/engine.py:1394` (single),
+`portfolio_engine.py:827` (per slot), `live_risk_config.py:94` (live).
+
+What was missing is the third option in the way the owner meant it. `STATIC`
+sizes against `static_balance`, and that number came from somewhere different in
+each path:
+
+* backtest → the balance typed on the run,
+* live, prop account → `prop_firm.initial_balance`,
+* live, personal account → **the first balance the process happened to see**,
+  re-anchored on every restart (`bot_service.py:1360`).
+
+New field `sizing_static_balance`: state the capital and all three paths size
+against it; leave it empty and nothing changes. Honoured in
+`backtester/engine.py`, `portfolio_engine.py` and `bot_service.py`, carried in
+`live_risk_config.py`, and it resolves per slot like any other risk field.
