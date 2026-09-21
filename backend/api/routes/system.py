@@ -40,7 +40,9 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api", tags=["system"])
 
-CB_STATE_FILE = "backend/data/cb_state.json"
+CB_STATE_FILE = "backend/data/cb_state.json"   # pre-per-slot; kept so a reset still clears it
+# [per-slot] One breaker state file per slot (risk/slot_book.py).
+CB_STATE_DIR = "backend/data/cb_state"
 SYNC_STATE_FILE = "backend/data/bot_sync_state.json"
 
 
@@ -221,12 +223,16 @@ async def account_live(
     except Exception as e:
         out["risk_error"] = f"{type(e).__name__}: {e}"
 
-    # Live circuit-breaker view, so the UI can say WHY trading is blocked.
+    # Live breaker view, so the UI can say WHY trading is blocked — per slot,
+    # since that is where the limits live now (risk/slot_book.py).
     try:
         from backend.services.bot_service import bot_service
-        cb = bot_service.circuit_breaker
-        if cb:
-            out["circuit_breaker"] = {
+        book = getattr(bot_service, "slot_book", None)
+        slots = {}
+        for key, engine in (book.built().items() if book else []):
+            cb = engine.circuit
+            slots[key] = {
+                "symbol": book.slot_symbols.get(key),
                 "account_id": cb.account_id,
                 "is_paused": cb.is_paused,
                 "pause_reason": cb.pause_reason,
@@ -234,7 +240,18 @@ async def account_live(
                 "weekly_pnl": cb.weekly_pnl,
                 "day_start_balance": cb._day_start_balance,
                 "daily_trades_count": cb.daily_trades_count,
+                "max_daily_trades": cb.max_daily_trades,
                 "max_daily_drawdown_pct": cb.max_daily_drawdown_pct,
+                "realised_r": round(float(cb.cum_r), 2),
+                "drawdown_r": round(float(cb.drawdown_r()), 2),
+            }
+        if slots:
+            out["slot_breakers"] = slots
+            out["circuit_breaker"] = {
+                "paused_slots": [k for k, v in slots.items() if v["is_paused"]],
+                "daily_pnl": sum(v["daily_pnl"] or 0.0 for v in slots.values()),
+                "weekly_pnl": sum(v["weekly_pnl"] or 0.0 for v in slots.values()),
+                "daily_trades_count": sum(v["daily_trades_count"] or 0 for v in slots.values()),
             }
     except Exception:
         pass
@@ -243,6 +260,39 @@ async def account_live(
 
 
 # ── Persisted state / reset ──────────────────────────────────────────────────
+
+def _slot_state_files() -> list[str]:
+    try:
+        return [os.path.join(CB_STATE_DIR, f) for f in sorted(os.listdir(CB_STATE_DIR))
+                if f.endswith(".json")]
+    except OSError:
+        return []
+
+
+def _read_slot_states() -> dict:
+    """The slots' persisted breaker state, summarised.
+
+    Each slot keeps its own file now, so "is there risk state, and whose account
+    is it?" is answered across all of them: any file tagged with a different MT5
+    login makes the state stale, and the P&L figures are the book's total.
+    """
+    states = [(os.path.basename(p), _read_json(p) or {}) for p in _slot_state_files()]
+    legacy = _read_json(CB_STATE_FILE)
+    if legacy:
+        states.append(("cb_state.json", legacy))
+    if not states:
+        return {}
+    accounts = {d.get("mt5_account") for _, d in states if d.get("mt5_account") is not None}
+    return {
+        "slots": len(states),
+        "mt5_account": next(iter(accounts)) if len(accounts) == 1 else None,
+        "accounts": sorted(a for a in accounts if a is not None),
+        "daily_pnl": sum(float(d.get("daily_pnl") or 0.0) for _, d in states),
+        "weekly_pnl": sum(float(d.get("weekly_pnl") or 0.0) for _, d in states),
+        "is_paused": any(bool(d.get("is_paused")) for _, d in states),
+        "pause_reason": "; ".join(f"{n}: {d.get('pause_reason')}" for n, d in states if d.get("is_paused")),
+    }
+
 
 def _read_json(path: str) -> dict | None:
     try:
@@ -260,7 +310,7 @@ async def account_state(
     db: AsyncSession = Depends(get_db),
 ):
     """What persisted state exists, which account it belongs to, and what is in the journal."""
-    cb = _read_json(CB_STATE_FILE) or {}
+    cb = _read_slot_states()
     sync = _read_json(SYNC_STATE_FILE) or {}
 
     live_login = None
@@ -290,8 +340,11 @@ async def account_state(
         "live_login": live_login,
         "circuit_breaker_state": {
             "exists": bool(cb),
+            "slots": cb.get("slots", 0),
             "mt5_account": cb.get("mt5_account"),
-            "stale": bool(cb) and live_login is not None and cb.get("mt5_account") != live_login,
+            # Stale when ANY slot's saved state belongs to a different login.
+            "stale": bool(cb) and live_login is not None
+                     and any(a != live_login for a in cb.get("accounts", [])),
             "daily_pnl": cb.get("daily_pnl"),
             "weekly_pnl": cb.get("weekly_pnl"),
             "is_paused": cb.get("is_paused"),
@@ -348,7 +401,8 @@ async def account_reset(
         pass
 
     if req.clear_risk_state:
-        for path in (CB_STATE_FILE, SYNC_STATE_FILE):
+        # [per-slot] Every slot's own state file, plus the pre-per-slot one.
+        for path in (*_slot_state_files(), CB_STATE_FILE, SYNC_STATE_FILE):
             try:
                 if os.path.exists(path):
                     os.remove(path)
@@ -356,9 +410,9 @@ async def account_reset(
             except Exception as e:
                 removed[os.path.basename(path)] = f"failed: {e}"
         try:
-            if bot_service.circuit_breaker:
-                bot_service.circuit_breaker.reset_for_new_account(live_login)
-                removed["circuit_breaker"] = f"reset for account {live_login}"
+            if getattr(bot_service, "slot_book", None):
+                bot_service.slot_book.reset_for_new_account(live_login)
+                removed["circuit_breaker"] = f"every slot's breaker reset for account {live_login}"
         except Exception as e:
             removed["circuit_breaker"] = f"failed: {e}"
         try:

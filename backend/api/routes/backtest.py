@@ -405,6 +405,7 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
     "DriftJumpAlpha_v1": "drift_jump_alpha",
     "BoomDriftJump_v1": "boom_drift_jump",
     "ORB_v1": "orb",
+    "IVW_v1": "ivw",
     "HTFFVGFlip_v1": "htf_fvg_flip",
     "BiasIFVG_v1": "bias_ifvg",
     "SpikeFade_v1": "synth",
@@ -415,7 +416,8 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
 
 
 def apply_strategy_params(
-    config, strategy_id: str, params: dict, symbol: str | None = None
+    config, strategy_id: str, params: dict, symbol: str | None = None,
+    use_measured_params: bool = True,
 ) -> list[str]:
     """Write `params` onto the config section owned by `strategy_id`.
 
@@ -438,7 +440,10 @@ def apply_strategy_params(
     if block is None:
         return list(params or {})
 
-    if symbol:
+    # `use_measured_params=False` is the slot saying "run exactly what I set":
+    # the measured per-symbol table is skipped, the same choice InstrumentSlot
+    # offers live.
+    if symbol and use_measured_params:
         from backend.strategies.strategy_defaults import get_synth_slot_params
         measured = get_synth_slot_params(symbol, strategy_id)
         if measured:
@@ -507,6 +512,16 @@ class BacktestRequest(BaseModel):
     initial_balance: float = 10000.0
     risk_config: dict[str, Any] = {}
     prop_firm: dict[str, Any] = {}
+    # [per-slot] THIS slot's own risk settings, the same shape a portfolio row
+    # sends (PortfolioSymbolConfig.risk). When present they are resolved through
+    # risk/slot_book.resolve_slot_risk_config, exactly as the portfolio and the
+    # live bot resolve the same slot — which is what makes a single run, a
+    # portfolio leg and live agree. Empty = the flat fields below, as before.
+    slot_risk: dict[str, Any] = {}
+    # As above, for the one slot this run tests.
+    use_measured_params: bool = True
+    # Whether this strategy's measured exits fill in what `slot_risk` leaves out.
+    use_strategy_exit_defaults: bool = True
     # ── Dynamic Strategy Params ──
     strategy_params: dict[str, Any] = {}
     # ── Risk Params ──
@@ -689,6 +704,16 @@ class PortfolioSymbolConfig(BaseModel):
     # single shared tp1_rr could not express it.
     tp1_rr: float | None = None
     tp_count: int | None = None
+    # Whether this row runs the measured per-symbol settings for its strategy,
+    # or exactly the parameters above. Same switch InstrumentSlot has live.
+    use_measured_params: bool = True
+    # [per-slot] This slot's own risk settings — any RiskParams trading field
+    # (risk_per_trade_pct, max_daily_trades, max_daily_drawdown_pct, break-even,
+    # trailing, slot_brake_r, ...). They override the portfolio-wide values
+    # below for THIS row only, and the row runs on its own RiskEngine and
+    # CircuitBreaker, so nothing here reaches any other row
+    # (implementation/PER-SLOT-RISK-DESIGN-2026-09-19.md).
+    risk: dict[str, Any] = {}
 
 
 class PortfolioBacktestRequest(BaseModel):
@@ -1126,7 +1151,8 @@ async def run_backtest_endpoint(
             config.risk.max_daily_trades = req.max_daily_trades
             
             # Inject dynamic strategy parameters (see STRATEGY_PARAM_SECTION)
-            _ignored = apply_strategy_params(config, req.strategy_id, req.strategy_params, req.symbol)
+            _ignored = apply_strategy_params(config, req.strategy_id, req.strategy_params, req.symbol,
+                                             use_measured_params=req.use_measured_params)
             if _ignored:
                 logger.warning(
                     f"[BACKTEST] {req.strategy_id}: strategy_params keys ignored "
@@ -1838,6 +1864,10 @@ async def run_portfolio_backtest_endpoint(
             # so ORB (measured: 1 TP, no break-even) ran with three TP legs and
             # break-even beside APA. Row-level tp1_rr / tp_count still win.
             portfolio_exit_overrides: dict[str, dict] = {}
+            from backend.risk.slot_book import resolve_slot_risk_config
+            from backend.strategies.strategy_defaults import measured_min_rr_by_strategy
+            merged_risk_config["min_rr_by_strategy"] = measured_min_rr_by_strategy(
+                {c.strategy_id for c in req.symbols})
             if req.use_strategy_exit_defaults:
                 from backend.strategies.strategy_defaults import OVERRIDABLE, get_strategy_defaults
                 for sym_cfg in req.symbols:
@@ -1866,6 +1896,8 @@ async def run_portfolio_backtest_endpoint(
             # by cache_key — this is what lets two rows share `symbol` under
             # different strategies without colliding.
             symbol_map: dict[str, str] = {}
+            # [per-slot] slot key -> that slot's resolved risk config.
+            portfolio_slot_configs: dict[str, dict] = {}
             portfolio_run_logs = []  # Aggregated across all per-symbol strategy engines
             total_symbols = len(req.symbols)
 
@@ -1895,6 +1927,18 @@ async def run_portfolio_backtest_endpoint(
                 # for the common "same symbol, different strategy" case.
                 slot_key = sym_cfg.slot_id or f"{sym}::{strat_id}"
                 symbol_map[slot_key] = sym
+                # [per-slot] The config THIS row trades under. Resolved by the
+                # same function live and the single-symbol path use, so one slot
+                # means one thing everywhere.
+                _row_over = dict(sym_cfg.risk or {})
+                if sym_cfg.tp1_rr is not None:
+                    _row_over["tp1_rr"] = sym_cfg.tp1_rr
+                if sym_cfg.tp_count is not None:
+                    _row_over["tp_count"] = sym_cfg.tp_count
+                portfolio_slot_configs[slot_key] = resolve_slot_risk_config(
+                    merged_risk_config, strat_id, overrides=_row_over,
+                    use_strategy_exit_defaults=req.use_strategy_exit_defaults,
+                )
 
                 pct_base = int((sym_idx / total_symbols) * 80)
                 current_state = await _get_state()
@@ -1910,7 +1954,8 @@ async def run_portfolio_backtest_endpoint(
                 config = UserConfigV2()
                 config.risk.min_rr = req.min_rr
                 config.risk.risk_per_trade_pct = req.risk_per_trade_pct
-                _ign = apply_strategy_params(config, strat_id, sym_cfg.strategy_params, sym_cfg.symbol)
+                _ign = apply_strategy_params(config, strat_id, sym_cfg.strategy_params, sym_cfg.symbol,
+                                             use_measured_params=sym_cfg.use_measured_params)
                 if _ign:
                     logger.warning(
                         f"[PORTFOLIO] {sym}/{strat_id}: strategy_params keys "
@@ -2124,7 +2169,7 @@ async def run_portfolio_backtest_endpoint(
             await _save_state(current_state)
             await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", **current_state["progress"]})
 
-            portfolio_engine = PortfolioBacktestEngine(merged_risk_config)
+            portfolio_engine = PortfolioBacktestEngine(merged_risk_config, portfolio_slot_configs)
 
             # [17.2] Progress during the global simulation. This is the same
             # thread-crossing problem as B4: `run` executes inside
@@ -3355,4 +3400,15 @@ def build_merged_risk_config(req: "BacktestRequest") -> dict[str, Any]:
             f"| {get_strategy_evidence(req.strategy_id)}"
         )
     merged_risk_config["_strategy_defaults_applied"] = _applied
+    from backend.strategies.strategy_defaults import measured_min_rr_by_strategy
+    merged_risk_config["min_rr_by_strategy"] = measured_min_rr_by_strategy([req.strategy_id])
+    # [per-slot] A slot profile wins over the flat request fields, through the
+    # resolver every path shares.
+    _slot_over = dict(getattr(req, "slot_risk", None) or {})
+    if _slot_over:
+        from backend.risk.slot_book import resolve_slot_risk_config
+        merged_risk_config = resolve_slot_risk_config(
+            merged_risk_config, req.strategy_id, overrides=_slot_over,
+            use_strategy_exit_defaults=getattr(req, "use_strategy_exit_defaults", True),
+        )
     return merged_risk_config

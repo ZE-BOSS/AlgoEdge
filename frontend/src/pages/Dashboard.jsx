@@ -49,6 +49,11 @@ function LiveAccountPanel() {
   const money = (v) => (v == null ? '—' : `${acct.currency || '$'}${Number(v).toFixed(2)}`);
   const risk = acct.risk || {};
   const cb = acct.circuit_breaker;
+  // [per-slot] One breaker per slot (backend risk/slot_book.py).
+  const slotRows = Object.entries(acct.slot_breakers || {});
+  const staleSlot = slotRows
+    .map(([, sb]) => sb.account_id)
+    .find(id => id != null && acct.login != null && id !== acct.login);
   const mismatch = acct.account_matches_config === false;
 
   return (
@@ -83,28 +88,64 @@ function LiveAccountPanel() {
           label="Risk / Trade"
           value={risk.risk_per_trade_amount != null ? money(risk.risk_per_trade_amount) : '—'}
           icon={Shield}
-          subtext={`${risk.risk_per_trade_pct ?? '—'}% of ${risk.sizing_base_label || 'balance'}`}
+          subtext={`${risk.risk_per_trade_pct ?? '—'}% of ${risk.sizing_base_label || 'balance'}${slotRows.length ? ' — slot default' : ''}`}
         />
         <MetricCard
           label="Daily Loss Limit"
           value={risk.max_daily_drawdown_amount != null ? money(risk.max_daily_drawdown_amount) : '—'}
           color="red"
           icon={TrendingDown}
-          subtext={`${risk.max_daily_drawdown_pct ?? '—'}% — used ${cb ? money(Math.min(0, cb.daily_pnl)) : '—'}`}
+          subtext={`${risk.max_daily_drawdown_pct ?? '—'}% per slot — today ${cb ? money(Math.min(0, cb.daily_pnl)) : '—'} across ${slotRows.length || 0} slot(s)`}
         />
       </div>
 
-      {cb?.is_paused && (
-        <div className="offline-banner" style={{ marginTop: 12 }}>
-          <AlertTriangle size={16} />
-          <span>Trading paused: {cb.pause_reason}</span>
+      {/* [per-slot] Limits live on the slot now, so this is per slot: what each
+          one has used of its own day, and whether it has stopped itself. */}
+      {slotRows.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.04em',
+                        color: 'var(--text-muted)', marginBottom: 6 }}>
+            Slots today
+          </div>
+          <div style={{ display: 'grid', gap: 4 }}>
+            {slotRows.map(([key, sb]) => (
+              <div key={key} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: '0.75rem',
+                                      padding: '4px 8px', background: 'var(--bg-tertiary)',
+                                      borderRadius: 'var(--radius-xs)' }}>
+                <span style={{ fontWeight: 600, minWidth: 120 }}>{sb.symbol || key}</span>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  {sb.daily_trades_count ?? 0}/{sb.max_daily_trades ?? '—'} trades
+                </span>
+                <span className={Number(sb.daily_pnl) < 0 ? 'red' : 'green'}>{money(sb.daily_pnl)}</span>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  stops itself at {sb.max_daily_drawdown_pct ?? '—'}%
+                </span>
+                {Number(sb.drawdown_r) > 0 && (
+                  <span style={{ color: 'var(--text-muted)' }} title="This slot's own drawdown, in R. The drawdown brake sizes it down as this grows.">
+                    {Number(sb.drawdown_r).toFixed(1)}R down
+                  </span>
+                )}
+                {sb.is_paused && (
+                  <span className="badge badge-red" title={sb.pause_reason}>paused</span>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
-      {cb && cb.account_id != null && acct.login != null && cb.account_id !== acct.login && (
+      {(cb?.paused_slots || []).length > 0 && (
         <div className="offline-banner" style={{ marginTop: 12 }}>
           <AlertTriangle size={16} />
           <span>
-            Risk state still belongs to account #{cb.account_id}. Reset it in
+            Paused for the rest of the day: {(cb.paused_slots || []).join(', ')}. Other slots keep trading.
+          </span>
+        </div>
+      )}
+      {staleSlot && acct.login != null && (
+        <div className="offline-banner" style={{ marginTop: 12 }}>
+          <AlertTriangle size={16} />
+          <span>
+            Risk state still belongs to account #{staleSlot}. Reset it in
             Settings → Broker so this account starts clean.
           </span>
         </div>

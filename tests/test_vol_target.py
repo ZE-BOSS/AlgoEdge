@@ -66,8 +66,23 @@ def test_extreme_volatility_cannot_shrink_below_the_floor():
 
 
 def test_binding_is_reported_accurately():
+    # Quiet, but a real series: target/realised blows past max_scale, so the
+    # clamp binds at the ceiling.
+    quiet = [100.0 * (1 + 1e-6) ** i for i in range(50)]
+    assert resolve_vol_scale(1.0, quiet, target_vol_annual_pct=15.0).binding == "ceiling"
+
+
+def test_a_dead_flat_series_is_insufficient_data_not_infinite_leverage():
+    """Zero variance is not "infinitely small volatility".
+
+    The old fixture here (100 + i * 1e-9) had log-returns whose variance
+    underflows to exactly 0, which realised_volatility reports as "no usable
+    history" — and the safe answer to that is scale 1.0, not the 2x ceiling.
+    """
     flat = [100.0 + i * 1e-9 for i in range(50)]
-    assert resolve_vol_scale(1.0, flat, target_vol_annual_pct=15.0).binding == "ceiling"
+    r = resolve_vol_scale(1.0, flat, target_vol_annual_pct=15.0)
+    assert r.binding == "insufficient_data"
+    assert r.scale == 1.0 and r.scaled_risk_pct == 1.0
 
 
 # ── the arithmetic ───────────────────────────────────────────────────────────

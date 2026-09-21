@@ -82,10 +82,13 @@ def test_both_backtest_engines_honour_allow_pyramiding():
     from backend.backtester import engine as single
     from backend.backtester import portfolio_engine as portfolio
 
+    # The single-symbol engine reads the run's config; the portfolio engine reads
+    # the SLOT's (risk/slot_book.py), since two slots in one basket may differ.
+    reads = {"engine.py": 'allow_pyramiding = bool(self.risk_config.get("allow_pyramiding", False))',
+             "portfolio_engine.py": 'allow_pyramiding = bool(_slot_cfg.get("allow_pyramiding", False))'}
     for mod, name in ((single, "engine.py"), (portfolio, "portfolio_engine.py")):
         src = inspect.getsource(mod)
-        assert 'allow_pyramiding = bool(self.risk_config.get("allow_pyramiding", False))' in src, \
-            f"{name} must read allow_pyramiding"
+        assert reads[name] in src, f"{name} must read allow_pyramiding"
         assert "if not allow_pyramiding:" in src, \
             f"{name} must skip the same-direction block when pyramiding is on"
         assert 'min_bars_between_entries' in src, \
@@ -170,25 +173,33 @@ def test_stop_fill_model_is_configurable_from_risk_config():
     assert eng._fill_model.mode == "CONSERVATIVE", "an unknown mode must fail safe, not fail open"
 
 
-# ── [P1.12] The Backtester ignored every saved strategy block ───────────────
+# ── [P1.12] A backtest must run the SAVED settings, not form defaults ───────
 #
-# The seeding effect spread the component's own hardcoded initial state LAST,
-# and that state is fully populated — so every key of the user's saved config
-# was overwritten by a form default. Settings had the synth block at 20/20 and
-# the live bot ran 20/20 while the Backtester silently ran 6/4.0, a daily risk
-# cap that stops the engine after 2 trades a day and blinds it to the rest of
-# the session. Observed in backtest_Boom_1000_Index_f8f2bb33: 0 trades.
+# Originally: the seeding effect spread the component's own hardcoded state
+# LAST, so every key of the user's saved config was overwritten by a form
+# default — Settings had the synth block at 20/20 and live ran 20/20 while the
+# Backtester silently ran 6/4.0 (observed: 0 trades on Boom 1000).
+#
+# Since 2026-09-20 there are no global strategy blocks at all: parameters belong
+# to the slot (symbol + strategy), so the same guarantee is now "the slot editor
+# starts from the SAVED SLOT, and the run sends that slot's own parameters".
 
-def test_backtester_seeds_strategy_blocks_from_the_saved_config():
+def test_backtester_runs_the_saved_slots_parameters_not_form_defaults():
     from pathlib import Path
 
     js = Path("frontend/src/pages/Backtester.jsx").read_text(encoding="utf-8")
-    for block in ("apa", "vwap", "orb", "drift_jump_alpha",
-                  "boom_drift_jump"):
-        good = f"merged.{block} = {{ ...(prev.{block} || {{}}), ...(c.{block} || {{}}) }};"
-        bad = f"merged.{block} = {{ ...(c.{block} || {{}}), ...(prev.{block} || {{}}) }};"
-        assert good in js, f"{block}: saved config must be spread last so it wins"
-        assert bad not in js, f"{block}: form defaults must not overwrite the saved config"
+    # the single run's slot is seeded from the saved slot for this pairing
+    assert "savedSlot?.strategy_params_override" in js,         "the slot editor must start from the saved slot's parameters"
+    assert "const savedSlot = findLiveSlot(userCfg?.config, form.symbol, form.strategy_id);" in js
+    # and the run sends that slot, not a global block
+    assert "const sp = singleSlot.strategy_params || {};" in js
+    assert "slot_risk: singleSlot.risk || {}," in js
+    # every portfolio row carries its own parameters and its own risk
+    assert "strategy_params: s.strategy_params ??" in js
+    assert "risk: s.risk ?? slotRiskFor(s.symbol, s.strategy_id)," in js
+    # the global blocks must not come back: they were shared by every symbol
+    for block in ("apa", "vwap", "orb", "drift_jump_alpha", "boom_drift_jump"):
+        assert f"merged.{block} = " not in js,             f"{block} is a per-slot parameter now — a global block would be shared by every symbol again"
 
 
 def test_backtester_hard_cap_prefers_the_saved_config():

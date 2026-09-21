@@ -14,13 +14,14 @@ from backend.analytics.strategy_search import Bars
 from backend.core.config_schema import UserConfigV2
 from backend.strategies.registry import get_strategy
 from backend.strategies.strategy_orb.params import ORBParams
-from backend.strategies.windows import window_bars
+from backend.strategies.windows import SESSION_CTX_BARS, window_bars
 
 
-def _m5(days=36, seed=3):
+def _m5(days=36, seed=3, weekends=False):
     rng = np.random.default_rng(seed)
     idx = pd.date_range("2025-02-03", periods=days * 288, freq="5min", tz="UTC")
-    idx = idx[idx.dayofweek < 5]
+    if not weekends:          # FX/metals/indices; weekends=True is a 24/7 market (BTCUSD)
+        idx = idx[idx.dayofweek < 5]
     n = len(idx)
     drift = np.repeat(rng.normal(0, 0.012, n // 400 + 1), 400)[:n]
     close = 2000 + np.cumsum(drift + rng.normal(0, 0.35, n))
@@ -64,24 +65,25 @@ def _assert_same(got, want):
         assert x == pytest.approx(y, rel=1e-6)
 
 
-@pytest.mark.parametrize("trend", [True, False])
-def test_orb_m5_reproduces_the_edge_lab_breaks(trend):
-    df, b = _m5(days=70, seed=5)     # one break a session at most: needs more sessions
+@pytest.mark.parametrize("trend,weekends", [(True, False), (False, False), (True, True)])
+def test_orb_m5_reproduces_the_edge_lab_breaks(trend, weekends):
+    df, b = _m5(days=70, seed=5, weekends=weekends)     # one break a session at most: needs more sessions
     want, start = _expected(b, "orb_break", "native|60", ("htf_trend",) if trend else ())
     cfg = UserConfigV2()
     cfg.orb = ORBParams(session="ny", range_minutes=60, breakout_timeframe="M5", require_trend=trend, min_stop_atr=0.5)
     eng = get_strategy("ORB_v1")(cfg)
-    assert eng.get_required_timeframes() == ["M5"] and window_bars("M5", eng) == 5000
+    assert eng.get_required_timeframes() == ["M5"] and window_bars("M5", eng) == SESSION_CTX_BARS
     _assert_same(_run(eng, df, start), want)
 
 
-@pytest.mark.parametrize("mode,family,gates", [
-    ("SESSION_TREND", "vwap_trend", ("day_dir", "gap_dir", "early")),
-    ("SESSION_TREND", "vwap_trend", ()),
-    ("SESSION_PULLBACK", "vwap_pullback", ("gap_dir", "early")),
+@pytest.mark.parametrize("mode,family,gates,weekends", [
+    ("SESSION_TREND", "vwap_trend", ("day_dir", "gap_dir", "early"), False),
+    ("SESSION_TREND", "vwap_trend", (), False),
+    ("SESSION_PULLBACK", "vwap_pullback", ("gap_dir", "early"), False),
+    ("SESSION_PULLBACK", "vwap_pullback", ("gap_dir", "early"), True),
 ])
-def test_vwap_session_modes_reproduce_the_edge_lab_candidates(mode, family, gates):
-    df, b = _m5(days=70, seed=11)
+def test_vwap_session_modes_reproduce_the_edge_lab_candidates(mode, family, gates, weekends):
+    df, b = _m5(days=70, seed=11, weekends=weekends)
     want, start = _expected(b, family, "native", gates)
     cfg = UserConfigV2()
     cfg.vwap.entry_mode = mode

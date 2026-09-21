@@ -103,6 +103,17 @@ class CircuitBreaker:
         self.last_pause_reason = ""
         self.last_trade_closed_time: dict[str, int] = {}
 
+        # [per-slot] Where this breaker persists. One file per slot live, so a
+        # slot's own counters survive a restart without being mixed with another
+        # slot's — see risk/slot_book.py.
+        self.state_file = str(config.get("cb_state_file") or CB_STATE_FILE)
+
+        # [per-slot] This slot's realised record in R, for the drawdown brake
+        # (RiskEngine.evaluate_signal). Measured on closed groups only: a group's
+        # R is its net P&L over the risk it was opened with.
+        self.cum_r = 0.0
+        self.peak_r = 0.0
+
         # Which MT5 login this state belongs to. Persisted state that was
         # written for a DIFFERENT account is discarded on load — see
         # load_state(). Without this, switching to a new account inherited the
@@ -354,6 +365,10 @@ class CircuitBreaker:
         """Sum the initial risk of all currently active groups."""
         return sum(group.get("initial_risk", 0.0) for group in self.active_groups.values())
 
+    def drawdown_r(self) -> float:
+        """How far this slot's realised record sits below its own peak, in R."""
+        return max(0.0, self.peak_r - self.cum_r)
+
     def position_closed(self, group_id: str, pnl: float, current_time: datetime | None = None):
         """Track a position closing."""
         if group_id in self.active_groups:
@@ -370,6 +385,7 @@ class CircuitBreaker:
                     group_pnl, group_pnl >= 0,
                     strategy_id=self.active_groups[group_id].get("strategy_id", ""),
                     slot_id=self.active_groups[group_id].get("slot_id", ""),
+                    initial_risk_dollars=float(self.active_groups[group_id].get("initial_risk", 0.0) or 0.0),
                 )
                 # Set per-symbol cooldown (live only)
                 sym = self.active_groups[group_id].get("symbol", "")
@@ -458,9 +474,10 @@ class CircuitBreaker:
 
     def record_backtest_close(self, group_id: str, group_pnl: float, current_time: datetime | None = None):
         """Used by backtester to finalize a group's total PnL at once, triggering drawdown checks."""
-        _strat = self.active_groups[group_id].get("strategy_id", "") if group_id in self.active_groups else ""
-        _slot = self.active_groups[group_id].get("slot_id", "") if group_id in self.active_groups else ""
-        self._record_trade_result(group_pnl, group_pnl >= 0, strategy_id=_strat, slot_id=_slot)
+        _grp = self.active_groups.get(group_id) or {}
+        self._record_trade_result(group_pnl, group_pnl >= 0, strategy_id=_grp.get("strategy_id", ""),
+                                  slot_id=_grp.get("slot_id", ""),
+                                  initial_risk_dollars=float(_grp.get("initial_risk", 0.0) or 0.0))
 
         sym = self.active_groups[group_id].get("symbol", "") if group_id in self.active_groups else ""
         
@@ -495,7 +512,7 @@ class CircuitBreaker:
             return
             
         try:
-            os.makedirs(os.path.dirname(CB_STATE_FILE), exist_ok=True)
+            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
             state = {
                 # Scopes this file to one MT5 login. load_state() throws the
                 # whole file away when it does not match the account now
@@ -515,8 +532,10 @@ class CircuitBreaker:
                 "pause_reason": self.pause_reason,
                 "last_reset_day": str(self.last_reset_day),
                 "last_reset_week": self.last_reset_week,
+                "cum_r": self.cum_r,
+                "peak_r": self.peak_r,
             }
-            with open(CB_STATE_FILE, "w") as f:
+            with open(self.state_file, "w") as f:
                 json.dump(state, f, indent=2)
         except Exception as e:
             logger.error(f"[CB] Failed to save state: {e}")
@@ -527,9 +546,9 @@ class CircuitBreaker:
         Auto-resets daily counters if it is a new calendar day.
         """
         try:
-            if not os.path.exists(CB_STATE_FILE):
+            if not os.path.exists(self.state_file):
                 return
-            with open(CB_STATE_FILE) as f:
+            with open(self.state_file) as f:
                 data = json.load(f)
 
             # Account scoping. State written against a different MT5 login says
@@ -563,6 +582,10 @@ class CircuitBreaker:
             self._cumulative_pnl_at_last_balance = (
                 data.get("cumulative_pnl_at_last_balance", self._cumulative_pnl) or 0.0
             )
+            # [per-slot] The drawdown brake's memory. It spans days and weeks —
+            # a slot's losing run does not end because a calendar day did.
+            self.cum_r = float(data.get("cum_r", 0.0) or 0.0)
+            self.peak_r = float(data.get("peak_r", self.cum_r) or 0.0)
 
             from datetime import date
             saved_day_str = data.get("last_reset_day", "")
@@ -618,6 +641,8 @@ class CircuitBreaker:
         self.losses_today_by_slot = {}
         self.last_trade_closed_time = {}
         self.active_groups = {}
+        self.cum_r = 0.0      # a different account's record says nothing about this one
+        self.peak_r = 0.0
         self.is_paused = False
         self.pause_reason = ""
         # Baselines are re-anchored to the new account's balance on the next
@@ -719,8 +744,12 @@ class CircuitBreaker:
         self._cumulative_pnl_at_last_balance = self._cumulative_pnl
         return False
 
-    def _record_trade_result(self, pnl: float, is_win: bool, strategy_id: str = "", slot_id: str = ""):
+    def _record_trade_result(self, pnl: float, is_win: bool, strategy_id: str = "", slot_id: str = "",
+                             initial_risk_dollars: float = 0.0):
         """Update state after a grouped trade fully closes."""
+        if initial_risk_dollars > 0:
+            self.cum_r += pnl / initial_risk_dollars
+            self.peak_r = max(self.peak_r, self.cum_r)
         self.daily_pnl += pnl
         self.weekly_pnl += pnl
         self._cumulative_pnl += pnl

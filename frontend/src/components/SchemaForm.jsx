@@ -152,7 +152,7 @@ function Field({ row, value, onChange }) {
   );
 }
 
-export default function SchemaForm({ schema, group, values, onChange, title }) {
+export default function SchemaForm({ schema, group, values, onChange, title, showFilter = true, minWidth = 210 }) {
   const [q, setQ] = useState('');
 
   const rows = useMemo(() => {
@@ -191,8 +191,8 @@ export default function SchemaForm({ schema, group, values, onChange, title }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-        {title && <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{title}</span>}
-        <div style={{ position: 'relative', flex: 1, maxWidth: 260 }}>
+        {title && <span style={{ fontWeight: 600, fontSize: '0.8rem' }}>{title}</span>}
+        <div style={{ position: 'relative', flex: 1, maxWidth: 260, display: showFilter ? 'block' : 'none' }}>
           <Search size={12} style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
             className="input input-sm" value={q} onChange={e => setQ(e.target.value)}
@@ -210,7 +210,7 @@ export default function SchemaForm({ schema, group, values, onChange, title }) {
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(210px,1fr))', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill,minmax(${minWidth}px,1fr))`, gap: 10 }}>
         {rows.map(r => {
           const name = r.key.split('.').slice(1).join('.');
           return (

@@ -30,6 +30,19 @@ STRATEGY_WINDOW_BARS: dict[str, int] = {
 
 DEFAULT_WINDOW_BARS = 500
 
+# M5 bars for engines that rebuild the edge-lab session context on their window
+# (ORB_v1's M5 form, VWAP_v1's session modes, APA_v1's session breakout). Every
+# per-session feature there — daily ATR, the noise band, opening volume — needs
+# 14 completed weekday sessions before the current one. 5,000 bars held ~17 such
+# sessions on FX and indices but only ~12 on 24/7 markets, whose weekends fill the
+# window with bars that are no session: ORB found no BTCUSD candidate at all
+# (measured 2026-09-19: 0 signals May-Sep 2026 against 23 in the research over the
+# same weeks), and a VWAP/APA confluence built on those features (rel_vol_open,
+# the noise band) could never pass there. VWAP's shipped BTCUSD gates (gap_dir,
+# early) do not read them and traded the same either way. 7,000 bars hold 16 or
+# more weekday sessions on any market. (`high_vol` needs 34 — not offered.)
+SESSION_CTX_BARS = 7000
+
 
 def window_bars(timeframe: str, strategy: object | None = None) -> int:
     """Bars of history for `timeframe`; the M5 value for anything unrecognised.

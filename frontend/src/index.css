@@ -841,6 +841,12 @@ label {
   }
 }
 
+/* The drawer opener: desktop keeps the collapse chevron on the panel itself. */
+.nav-open,
+.nav-scrim {
+  display: none;
+}
+
 @media (max-width: 768px) {
   .sidebar {
     transform: translateX(-100%);
@@ -848,9 +854,42 @@ label {
   .sidebar.open {
     transform: translateX(0);
   }
+  /* The chevron is pinned to the panel, so on a phone it is off-screen with it. */
+  .sidebar-toggle {
+    display: none;
+  }
+  .nav-open {
+    display: flex;
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 102;
+    width: 38px;
+    height: 38px;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+  /* the opener sits over the panel once it is open: keep the brand clear of it */
+  .sidebar-brand {
+    padding-left: 54px;
+  }
+  .nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+    background: rgba(0, 0, 0, 0.55);
+  }
   .main-content {
     margin-left: 0;
     padding: 16px;
+    /* clear the fixed opener */
+    padding-top: 58px;
   }
   .metrics-grid {
     grid-template-columns: 1fr 1fr;
@@ -1305,3 +1344,165 @@ html, body {
   color: var(--text-primary);
 }
 
+
+/* ── Slot editor ─────────────────────────────────────────────────
+   One symbol + one strategy, with its own parameters and its own risk
+   (components/SlotEditor.jsx). Every row wraps rather than overflowing: the
+   old slot row was a fixed-width flex line, so its buttons sat outside the
+   card as soon as the window narrowed. */
+.slot-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.slot-editor + .slot-editor {
+  margin-top: 10px;
+}
+
+.slot-editor__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.slot-editor__enable {
+  display: inline-flex;
+  align-items: center;
+}
+
+.slot-editor__enable input {
+  width: 14px;
+  height: 14px;
+}
+
+/* `input, select { width: 100% }` is global, so the header's controls would each
+   take a whole line. Inside the header they are flex items instead. */
+.slot-editor__head > .input,
+.slot-editor__head > .slot-editor__symbol {
+  width: auto;
+}
+
+.slot-editor__symbol {
+  flex: 1 1 140px;
+  min-width: 110px;
+  max-width: 200px;
+}
+
+.slot-editor__strategy {
+  flex: 2 1 180px;
+  min-width: 150px;
+  max-width: 320px;
+}
+
+/* Wide enough and the whole header is one line; in a narrow column the summary
+   and the buttons share the second line rather than taking one each. */
+.slot-editor__summary {
+  flex: 1 1 240px;
+  order: 3;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.slot-editor__actions {
+  display: flex;
+  order: 4;
+  margin-left: auto;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.slot-editor__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.slot-editor__tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.slot-editor__tab.is-active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent, var(--green));
+}
+
+.slot-editor__body {
+  padding: 12px;
+  min-width: 0;
+}
+
+.slot-editor__section + .slot-editor__section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.slot-editor__measured {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+.slot-editor__note {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+
+/* A slot list and its "add" row: both wrap instead of pushing controls out. */
+.slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.slot-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.slot-add .input,
+.slot-add__symbol {
+  flex: 1 1 160px;
+  min-width: 140px;
+  max-width: 240px;
+}
+
+/* the picker owns the width of its own field */
+.slot-add__symbol .input {
+  max-width: none;
+}
+
+@media (max-width: 768px) {
+  .slot-editor__symbol,
+  .slot-editor__strategy {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .slot-editor__actions {
+    margin-left: 0;
+  }
+}

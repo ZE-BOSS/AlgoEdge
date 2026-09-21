@@ -36,7 +36,7 @@ def _bars(seed: int = 7) -> dict[str, pd.DataFrame]:
                        "tick_volume": rng.integers(50, 500, N_BARS).astype(float),
                        "spread": np.full(N_BARS, 30.0)}, index=idx)
     out = {"M5": m5}
-    for tf, rule in (("M15", "15min"), ("H1", "1h"), ("H4", "4h")):
+    for tf, rule in (("M15", "15min"), ("H1", "1h"), ("H4", "4h"), ("D1", "1D")):
         r = m5.resample(rule, label="left", closed="left")
         out[tf] = pd.DataFrame({"open": r["open"].first(), "high": r["high"].max(), "low": r["low"].min(),
                                 "close": r["close"].last(), "tick_volume": r["tick_volume"].sum(),

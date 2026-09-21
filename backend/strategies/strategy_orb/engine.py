@@ -98,9 +98,10 @@ class ORBStrategy(BaseStrategy):
 
     @property
     def WINDOW_BARS(self) -> dict[str, int]:  # noqa: N802 — read by strategies.windows
-        # the trend EMA spans 600 M5 bars; 5,000 lets it forget its seed and
-        # gives the stop discard its 14 prior sessions
-        return {"M5": 5000} if self._m5 else {}
+        # the trend EMA spans 600 M5 bars; the session context needs 14 prior
+        # weekday sessions, which 24/7 markets spread over more bars
+        from backend.strategies.windows import SESSION_CTX_BARS
+        return {"M5": SESSION_CTX_BARS} if self._m5 else {}
 
     def _m5_signal(self, symbol: str, candles: pd.DataFrame) -> TradeSignal | None:
         from backend.analytics import edge_lab as lab

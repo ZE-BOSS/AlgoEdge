@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   LayoutDashboard, BookOpen, FlaskConical, BarChart3,
   Zap, Settings, Wifi, WifiOff, Loader2, LogOut, ChevronLeft, ChevronRight,
-  Sparkles, Activity, Terminal
+  Sparkles, Activity, Terminal, Menu, X
 } from 'lucide-react';
 import { useState } from 'react';
 import { useBackendConnection, useWebSocket } from './hooks/useBackendConnection';
@@ -49,7 +49,7 @@ function AuthGuard({ children }) {
   return children;
 }
 
-function Sidebar({ isCollapsed, setIsCollapsed }) {
+function Sidebar({ isCollapsed, setIsCollapsed, isNavOpen, closeNav }) {
   const { status } = useConnectionStore();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -68,7 +68,7 @@ function Sidebar({ isCollapsed, setIsCollapsed }) {
   ];
 
   return (
-    <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
+    <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''} ${isNavOpen ? 'open' : ''}`}>
       <button className="sidebar-toggle" onClick={() => setIsCollapsed(!isCollapsed)}>
         {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
       </button>
@@ -78,7 +78,8 @@ function Sidebar({ isCollapsed, setIsCollapsed }) {
       </div>
       <nav className="sidebar-nav">
         {links.map(({ to, icon: Icon, label }) => (
-          <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+          <NavLink key={to} to={to} end={to === '/'} onClick={closeNav}
+                   className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
             <Icon />
             <span>{label}</span>
           </NavLink>
@@ -114,13 +115,28 @@ function GlobalLoader() {
 
 function AppContent() {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  // Below 768px the sidebar is a drawer: it sits off-canvas until opened, so it
+  // needs an opener that does NOT ride along with it (the collapse chevron is
+  // pinned to the panel and goes off-screen with it).
+  // Open only for the route it was opened on: any navigation closes it,
+  // with no effect to run and no extra render pass.
+  const [navOpenAt, setNavOpenAt] = useState(null);
+  const { pathname } = useLocation();
+  const isNavOpen = navOpenAt === pathname;
+  const closeNav = () => setNavOpenAt(null);
   useBackendConnection();
   useWebSocket();
 
   return (
     <div className="app-layout">
       <GlobalLoader />
-      <Sidebar isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} />
+      <button className="nav-open" aria-label={isNavOpen ? 'Close navigation' : 'Open navigation'}
+              aria-expanded={isNavOpen} onClick={() => setNavOpenAt(v => (v === pathname ? null : pathname))}>
+        {isNavOpen ? <X size={18} /> : <Menu size={18} />}
+      </button>
+      {isNavOpen && <div className="nav-scrim" onClick={closeNav} />}
+      <Sidebar isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed}
+               isNavOpen={isNavOpen} closeNav={closeNav} />
       <NotificationContainer />
       <main className={`main-content ${isCollapsed ? 'collapsed' : ''}`}>
         <ErrorBoundary>

@@ -34,6 +34,7 @@ const STRATEGIES = [
   { id: 'APA_v1', group: 'apa', label: 'APA (H&S inversion)' },
   { id: 'VWAP_v1', group: 'vwap', label: 'VWAP reversion' },
   { id: 'ORB_v1', group: 'orb', label: 'Opening range breakout' },
+  { id: 'IVW_v1', group: 'ivw', label: 'IV walls breakout' },
   { id: 'DriftJumpAlpha_v1', group: 'drift_jump_alpha', label: 'Drift / jump alpha' },
   { id: 'HTFFVGFlip_v1', group: 'htf_fvg_flip', label: 'HTF FVG flip' },
   { id: 'BiasIFVG_v1', group: 'bias_ifvg', label: 'Bias + key level IFVG' },

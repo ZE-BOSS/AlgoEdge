@@ -359,7 +359,8 @@ class VWAPEngine(BaseStrategy):
 
     @property
     def WINDOW_BARS(self) -> dict[str, int]:  # noqa: N802 — read by strategies.windows
-        return {"M5": 5000} if self._session_mode else {}
+        from backend.strategies.windows import SESSION_CTX_BARS
+        return {"M5": SESSION_CTX_BARS} if self._session_mode else {}
 
     @property
     def LIVE_POSITION_EXITS(self) -> bool:  # noqa: N802 — read by position_manager

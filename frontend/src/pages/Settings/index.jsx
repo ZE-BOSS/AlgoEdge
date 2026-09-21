@@ -10,8 +10,10 @@ function SettingsNav() {
   const tabs = [
     { to: '/settings', label: 'Connection', icon: Wifi, end: true },
     { to: '/settings/broker', label: 'Broker', icon: Server },
-    { to: '/settings/strategy', label: 'Strategy', icon: Sliders },
-    { to: '/settings/risk', label: 'Risk', icon: Shield },
+    { to: '/settings/strategy', label: 'Trading Book', icon: Sliders },
+    // Not account-wide rules any more: the values a NEW slot starts from, plus
+    // the broker/prop-firm facts. Per-slot risk lives on the slot (Strategy tab).
+    { to: '/settings/risk', label: 'Defaults', icon: Shield },
     { to: '/settings/ai', label: 'AI', icon: Sparkles },
   ];
 

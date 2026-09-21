@@ -45,8 +45,10 @@ class BotService:
         self._suppression_funnel: dict[str, int] = {}
         self._suppression_day = None
         self.engine = None
-        self.risk_engine = None          # Cached RiskEngine — rebuilt only when config changes
-        self._risk_engine_fp = None      # Fingerprint tuple for cache invalidation
+        # [per-slot] One RiskEngine + CircuitBreaker per slot, built from each
+        # slot's own profile (risk/slot_book.py). There is no account-wide risk
+        # engine any more: a slot's limits gate that slot and nothing else.
+        self.slot_book = None
         # [4.2/D1] For personal accounts under sizing_basis="STATIC", the
         # static anchor is the balance first observed after this service
         # started — NOT prop_firm.initial_balance (that field's $10,000
@@ -56,6 +58,8 @@ class BotService:
         # that moment, matching what "static" should mean for an account
         # with no explicit starting-balance concept of its own.
         self._static_personal_balance_anchor: float | None = None
+        # Kept as the breaker of the slot most recently evaluated, for status
+        # endpoints that want "a" breaker; every decision uses the slot's own.
         self.circuit_breaker = None
         self.prop_firm_validator = None
         # UserConfig.magic_base — the base of the magic-number range that marks
@@ -166,8 +170,8 @@ class BotService:
             self.account_equity = float(info.equity)
             self.account_currency = getattr(info, "currency", "") or ""
             self.account_server = getattr(info, "server", "") or ""
-            if self.circuit_breaker:
-                if self.circuit_breaker.note_account_balance(self.account_balance, self.account_id):
+            if self.slot_book:
+                if self.slot_book.note_account_balance(self.account_balance, self.account_id):
                     self._log_event(
                         f"Account balance re-baselined to "
                         f"{self.account_balance:.2f} {self.account_currency} "
@@ -274,6 +278,81 @@ class BotService:
     # cause. `resolve_slot_gate_params` is deliberately the ONLY definition of
     # that list, and `backtest.py` reads the same function for its snapshot, so
     # the live block and the backtest block cannot drift apart.
+    # ── [per-slot] the slot book ──────────────────────────────────────────
+    # Every slot trades under its own RiskEngine and CircuitBreaker, built from
+    # its own profile. No limit is shared, so a slot behaves live exactly as it
+    # does in a backtest of that slot — see risk/slot_book.py and
+    # implementation/PER-SLOT-RISK-DESIGN-2026-09-19.md.
+
+    def _rebuild_slot_book(self, config, risk_dict: dict) -> None:
+        """Point the book at the current account config; slots resolve on use."""
+        from backend.risk.slot_book import SlotBook
+
+        if self.slot_book is None:
+            self.slot_book = SlotBook(risk_dict)
+        else:
+            self.slot_book.base_config = dict(risk_dict)
+
+    def _reconcile_slots_with_mt5(self) -> None:
+        """Point every slot's open-position count at what MT5 actually holds.
+
+        Runs once per bot start, and only after the slot book exists: a slot's
+        saved state can carry positions that were closed while the bot was off
+        (a manual close, a stop hit during downtime), and a stale count blocks
+        that slot's next entry against its own max_positions_per_symbol.
+        """
+        if getattr(self, "_slots_reconciled", False) or self.slot_book is None:
+            return
+        try:
+            import MetaTrader5 as mt5
+            if not mt5.terminal_info():
+                return
+            # Bot-owned positions only. Feeding every live position in here made
+            # the breaker count somebody else's open trade against
+            # max_positions_per_symbol, so a manual position sitting on Crash
+            # 1000 silently blocked the bot from ever entering Crash 1000
+            # itself. See backend/services/trade_ownership.py.
+            from backend.services.trade_ownership import is_bot_position
+            _all = list(mt5.positions_get() or [])
+            _mine = [p for p in _all if is_bot_position(p, magic_base=self._magic_base)]
+            if len(_all) != len(_mine):
+                self._log_event(
+                    f"Ignoring {len(_all) - len(_mine)} open MT5 position(s) not placed "
+                    f"by this bot — they do not count towards position limits.",
+                    "INFO", "SYNC",
+                )
+            open_symbols = [p.symbol for p in _mine]
+            self.slot_book.reconcile_from_mt5(open_symbols)
+            self._slots_reconciled = True
+            self._log_event(
+                f"Slot breakers reconciled with MT5: {len(open_symbols)} open position(s) — "
+                + (", ".join(sorted(set(open_symbols))) if open_symbols else "none"),
+                "INFO", "BOT",
+            )
+        except Exception as e:
+            logger.error(f"Slot/MT5 reconciliation error: {e}")
+
+    def _slot_engine(self, slot, config):
+        """This slot's engine, rebuilt in place whenever its settings change."""
+        from backend.risk.live_risk_config import build_live_risk_config
+        from backend.risk.slot_book import resolve_slot_risk_config, slot_overrides_from
+
+        if self.slot_book is None:
+            self._rebuild_slot_book(config, dict(getattr(self, "_live_risk_base", None) or {}))
+        base, _ = build_live_risk_config(config, slot.strategy_id)
+        base = dict(base)
+        base["mt5_account"] = self.account_id
+        resolved = resolve_slot_risk_config(
+            base, slot.strategy_id,
+            overrides=slot_overrides_from(slot),
+            use_strategy_exit_defaults=getattr(getattr(config, "risk", None), "use_strategy_exit_defaults", True),
+            # One state file per slot: a slot's counters survive a restart
+            # without being mixed into another slot's.
+            state_file=f"backend/data/cb_state/{slot.slot_id}.json",
+        )
+        self.slot_book.set_slot_config(slot.slot_id, resolved, symbol=slot.symbol)
+        return self.slot_book.engine(slot.slot_id)
+
     def _resolved_slot_params(self, slot, config, engine) -> dict:
         risk = getattr(config, "risk", None)
         sp = getattr(engine, "params", None)
@@ -612,37 +691,9 @@ class BotService:
         except Exception as e:
             logger.error(f"Recovery error: {e}")
 
-        # ── Reconcile CircuitBreaker open_positions_by_symbol with actual MT5 state ──
-        # After a restart, cb_state.json may have stale open-position counts for symbols that
-        # were closed while the bot was offline (manual close, SL hit during downtime, etc.).
-        # Query MT5 for truly-open positions and correct the CB before the scan loop starts.
-        try:
-            import MetaTrader5 as mt5
-            if mt5.terminal_info() and self.circuit_breaker:
-                live_positions = mt5.positions_get()
-                # Bot-owned positions only. Feeding every live position in here
-                # made the circuit breaker count somebody else's open trade
-                # against max_positions_per_symbol, so a manual position sitting
-                # on Crash 1000 silently blocked the bot from ever entering
-                # Crash 1000 itself. See backend/services/trade_ownership.py.
-                from backend.services.trade_ownership import is_bot_position
-                _all = list(live_positions) if live_positions else []
-                _mine = [p for p in _all if is_bot_position(p, magic_base=self._magic_base)]
-                if len(_all) != len(_mine):
-                    self._log_event(
-                        f"Ignoring {len(_all) - len(_mine)} open MT5 position(s) not placed "
-                        f"by this bot — they do not count towards position limits.",
-                        "INFO", "SYNC",
-                    )
-                open_symbols = [p.symbol for p in _mine]
-                self.circuit_breaker.reconcile_from_mt5(open_symbols)
-                self._log_event(
-                    f"CB reconciled with MT5: {len(open_symbols)} open position(s) — "
-                    + (", ".join(set(open_symbols)) if open_symbols else "none"),
-                    "INFO", "BOT"
-                )
-        except Exception as e:
-            logger.error(f"CB MT5 reconciliation error: {e}")
+        # The breakers are reconciled against MT5 once the slot book exists — see
+        # _reconcile_slots_with_mt5, called from the scan loop.
+        self._slots_reconciled = False
 
         return {"running": True, "message": "Bot started successfully", "symbols": self.symbols}
 
@@ -746,14 +797,13 @@ class BotService:
                     else:
                         config = UserConfigV2()
 
-                from backend.risk.circuit_breaker import CircuitBreaker
                 from backend.risk.prop_firm_validator import PropFirmValidator
                 from backend.strategies.registry import get_strategy
 
-                # Bug 11 fix: rebuild CircuitBreaker when key risk settings change.
-                # Previously initialized once (`if not self.circuit_breaker`) and
-                # never updated, so max_daily_trades / max_concurrent_positions
-                # changes made in the frontend had no effect on a running bot.
+                # Bug 11 fix: a settings change must reach a RUNNING bot. Each
+                # slot's engine is now rebuilt in place when that slot's resolved
+                # config changes (SlotBook.set_slot_config), keeping the live
+                # counters — so editing a limit takes effect on the next scan.
                 risk_dict = config.risk.to_dict() if hasattr(config.risk, 'to_dict') else vars(config.risk)
                 # The magic-number base that marks an order as ours — used by
                 # the ownership filter so the bot never books somebody else's
@@ -768,31 +818,12 @@ class BotService:
                 # persisted daily/weekly P&L cannot leak across accounts.
                 risk_dict = dict(risk_dict)
                 risk_dict["mt5_account"] = await self._current_mt5_account()
-                _cb_fp = (
-                    risk_dict.get("max_daily_trades"),
-                    risk_dict.get("max_concurrent_positions"),
-                    risk_dict.get("max_daily_drawdown_pct"),
-                    risk_dict.get("max_weekly_drawdown_pct"),
-                    risk_dict.get("max_positions_per_symbol"),
-                )
-                if self.circuit_breaker is None or getattr(self, "_cb_fp", None) != _cb_fp:
-                    # Preserve live state when only non-limit settings change
-                    old_cb = self.circuit_breaker
-                    self.circuit_breaker = CircuitBreaker(risk_dict)
-                    if old_cb is not None:
-                        # Carry over live state counters so open positions aren't lost
-                        self.circuit_breaker.daily_trades_count = old_cb.daily_trades_count
-                        self.circuit_breaker.daily_pnl = old_cb.daily_pnl
-                        self.circuit_breaker.weekly_pnl = old_cb.weekly_pnl
-                        self.circuit_breaker.open_positions_by_symbol = old_cb.open_positions_by_symbol
-                        self.circuit_breaker.active_groups = old_cb.active_groups
-                        self.circuit_breaker.is_paused = old_cb.is_paused
-                        self.circuit_breaker.pause_reason = old_cb.pause_reason
-                        self.circuit_breaker.last_reset_day = old_cb.last_reset_day
-                        self.circuit_breaker.last_reset_week = old_cb.last_reset_week
-                        self.circuit_breaker._day_start_balance = old_cb._day_start_balance
-                    self._cb_fp = _cb_fp
-                    logger.info("[BOT] CircuitBreaker rebuilt with updated risk config.")
+                # [per-slot] Every slot's own engine and breaker, rebuilt in
+                # place when that slot's settings change (live counters carried
+                # over by SlotBook.set_slot_config).
+                self._rebuild_slot_book(config, risk_dict)
+                # First scan after a start: correct each slot's open-position counts.
+                self._reconcile_slots_with_mt5()
                 if not getattr(self, "prop_firm_validator", None):
                     self.prop_firm_validator = PropFirmValidator(getattr(config, "prop_firm", None) or config)
                 else:
@@ -1140,7 +1171,10 @@ class BotService:
                                 # of divergence Rule-5 exists to catch, and CircuitBreaker's state is
                                 # kept accurate against MT5 via reconcile_from_mt5() on startup, so
                                 # it doesn't need a parallel direct-MT5-count fallback here.
-                                if self.circuit_breaker:
+                                _slot_engine = self._slot_engine(slot, config)
+                                _slot_circuit = _slot_engine.circuit
+                                self.circuit_breaker = _slot_circuit  # for status endpoints
+                                if _slot_circuit:
                                     # [12.5/Part14] Slot-aware — was a bare check_symbol(symbol),
                                     # which would incorrectly block a second slot's signal against
                                     # the GLOBAL symbol-wide position count even though
@@ -1152,7 +1186,7 @@ class BotService:
                                         if slot.max_positions_per_symbol is not None
                                         else getattr(config.risk, "max_positions_per_symbol", 1)
                                     )
-                                    cb_ok, cb_reason = self.circuit_breaker.check_symbol(
+                                    cb_ok, cb_reason = _slot_circuit.check_symbol(
                                         signal.symbol,
                                         slot_id=slot.slot_id,
                                         slot_max_positions=_slot_max_positions,
@@ -1216,6 +1250,9 @@ class BotService:
                                     # strategy's measured exits — see risk/live_risk_config.py.
                                     from backend.risk.live_risk_config import build_live_risk_config
                                     risk_config, _applied = build_live_risk_config(config, strategy_id)
+                                    # The engine was built from this slot's profile above; the
+                                    # measured-defaults log below is the only thing risk_config
+                                    # is still read for here.
                                     if _applied and strategy_id not in self.__dict__.setdefault("_logged_sdefaults", set()):
                                         from backend.strategies.strategy_defaults import get_strategy_evidence
                                         self._logged_sdefaults.add(strategy_id)
@@ -1233,17 +1270,9 @@ class BotService:
                                     # was silently invisible to the cache, so RiskEngine kept running with a
                                     # stale config until one of those 3 fields also happened to change. A hash
                                     # of the full serialised dict catches every field.
-                                    import hashlib as _hashlib
-                                    import json as _json
-                                    _rf = _hashlib.sha256(
-                                        _json.dumps(risk_config, sort_keys=True, default=str).encode()
-                                    ).hexdigest()
-                                    if self.risk_engine is None or self._risk_engine_fp != _rf:
-                                        self.risk_engine = RiskEngine(risk_config)
-                                        self._risk_engine_fp = _rf
-                                    # Always refresh injected singletons (they may update between scans)
-                                    self.risk_engine.circuit = self.circuit_breaker
-                                    self.risk_engine.prop_firm_validator = getattr(self, "prop_firm_validator", None)
+                                    # Prop-firm limits belong to the account, so one validator
+                                    # is shared by every slot's engine.
+                                    _slot_engine.prop_firm_validator = getattr(self, "prop_firm_validator", None)
 
                                     # Feed live equity to prop firm validator so drawdown checks use
                                     # floating equity (balance + unrealized P&L), not just closed balance.
@@ -1339,7 +1368,7 @@ class BotService:
                                         live_equity=_live_equity,
                                     )
 
-                                    approved, reason, tp_levels = self.risk_engine.evaluate_signal(
+                                    approved, reason, tp_levels = _slot_engine.evaluate_signal(
                                         signal_data,
                                         account_balance,
                                         current_time=datetime.now(timezone.utc),  # explicit time
@@ -1348,7 +1377,7 @@ class BotService:
 
                                     if approved:
                                         group_id = signal_data.get("group_id", "unknown")
-                                        if self.circuit_breaker:
+                                        if _slot_circuit:
                                             # §2.3 fix: live trading never reported open-position risk to the
                                             # circuit breaker (initial_risk_dollars defaulted to 0.0), so
                                             # get_open_risk() always returned 0.0 live — the "predictive
@@ -1363,7 +1392,7 @@ class BotService:
                                                 signal.stop_loss,
                                                 signal.symbol,
                                             )
-                                            self.circuit_breaker.position_opened(
+                                            _slot_circuit.position_opened(
                                                 group_id, len(tp_levels), symbol=signal.symbol,
                                                 initial_risk_dollars=initial_risk_dollars,
                                                 strategy_id=signal.strategy_id,
@@ -1497,8 +1526,8 @@ class BotService:
                                                         ))
 
                                         if not db_positions:
-                                            if self.circuit_breaker:
-                                                self.circuit_breaker.rollback_position(group_id)
+                                            if _slot_circuit:
+                                                _slot_circuit.rollback_position(group_id)
                                             # Detect if ALL failures were due to stale signal
                                             all_stale = tp_failure_details and all("Stale Signal" in d for d in tp_failure_details)
                                             if all_stale:
@@ -1513,7 +1542,7 @@ class BotService:
                                                 await self._save_signal_state(signal, "FAILED", fail_reason, tp_levels=tp_levels)
                                             had_execution_failure = True
                                         elif len(db_positions) < len(tp_levels):
-                                            self.circuit_breaker.active_groups[group_id]["sub_trades"] = len(db_positions)
+                                            _slot_circuit.active_groups[group_id]["sub_trades"] = len(db_positions)
                                     
                                         if db_positions and self.user_id:
                                             sig_id = await self._save_signal_state(signal, "EXECUTED", tp_levels=db_positions)
@@ -1860,15 +1889,15 @@ class BotService:
                         grp["commission"] += deal.get("commission", 0) or 0
                         grp["swap"] += deal.get("swap", 0) or 0
 
-                        # Update circuit breaker state
-                        if self.circuit_breaker:
+                        # Update the OWNING slot's breaker — see SlotBook.route_close.
+                        if self.slot_book:
                             cb_symbol = deal.get("symbol", "UNKNOWN")
                             close_time = datetime.fromtimestamp(deal["time"], timezone.utc) if deal.get("time") else None
                             # record_external_close() handles the post-restart case where
                             # active_groups is empty (position_closed() would be a no-op).
                             # [4.8/D10] group_id is a UUID now, not the symbol — record_external_close()
                             # looks the active group up by its stored "symbol" field internally.
-                            self.circuit_breaker.record_external_close(cb_symbol, net_profit, close_time)
+                            self.slot_book.route_close(cb_symbol, net_profit, close_time)
                         if getattr(self, "prop_firm_validator", None):
                             self.prop_firm_validator.record_trade_closed(deal.get("symbol", "UNKNOWN"), deal.get("volume", 0.0), net_profit)
 

@@ -1,9 +1,32 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Shield, Save, Loader2, Check } from 'lucide-react';
-import { getConfig, updateConfig } from '../../services/api';
+import { getConfig, getParameterSchema, updateConfig } from '../../services/api';
 import { invalidateConfigDependents } from '../../utils/invalidate';
 import { useConnectionStore, useAuthStore } from '../../store';
+import SchemaForm from '../../components/SchemaForm';
+import { SLOT_RISK_SECTIONS } from '../../components/slotSpec';
+
+/**
+ * Settings > Defaults
+ *
+ * What this page is, now that risk and strategy parameters belong to the slot
+ * (symbol x strategy):
+ *
+ *   1. the values a slot uses until it sets its own - rendered from the SAME
+ *      schema sections the slot editor shows, so the two cannot drift;
+ *   2. the few things a slot cannot own, because they describe the account or
+ *      the broker rather than a trading policy (leverage, margin, prop firm).
+ *
+ * It no longer carries strategy parameters. Those were per strategy but shared
+ * by every symbol running it, which is exactly what per-slot parameters
+ * replaced - and one block (CRT) configured a strategy the backend no longer
+ * has, so its fields wrote a key nothing read.
+ */
+
+// Account facts: a slot may not override these (risk/slot_book.py
+// ACCOUNT_ONLY_KEYS), so they are edited here and nowhere else.
+const ACCOUNT_KEYS = ['max_account_leverage', 'max_margin_utilisation_pct'];
 
 export default function RiskSettings() {
   const { status } = useConnectionStore();
@@ -11,76 +34,11 @@ export default function RiskSettings() {
   const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
 
-  // Every default below mirrors the authoritative backend RiskParams dataclass
-  // (backend/core/config_schema.py). This form posts each value explicitly, so
-  // a stale default here silently overrides the backend rather than deferring
-  // to it.
+  // Only the two blocks this page owns. Field defaults come from the schema
+  // (generated from RiskParams itself), so there is no hand-maintained mirror
+  // of the dataclass here any more.
   const [config, setConfig] = useState({
-    risk_per_trade_pct: 0.5,
-    max_risk_hard_cap_pct: 2.0,
-    max_daily_drawdown_pct: 3.0,
-    max_weekly_drawdown_pct: 6.0,
-    max_daily_trades: 5,
-    max_concurrent_positions: 3,
-    max_positions_per_symbol: 1,
-    target_profit_enabled: false,
-    max_daily_profit: 500.0,
-    max_weekly_profit: 2000.0,
-    min_rr: 3.0,
-    be_trigger_rr: 1.5,
-    be_buffer_pips: 0.0,
-    be_buffer_atr_mult: 0.10,
-    min_sl_pips: 10.0,
-    max_account_leverage: 30.0,
-    // [sizing] RiskParams.sizing_basis. Falls into `riskParams` on save, so it
-    // reaches the live sizer through the existing channel. STATIC matches the
-    // backend default; BALANCE/EQUITY are the compounding modes.
-    sizing_basis: 'STATIC',
-    tp_count: 3,
-    tp1_rr: 1.5,
-    tp2_rr: 3.0,
-    tp3_rr: 5.0,
-    tp4_rr: 10.0,
-    tp5_rr: 15.0,
-    tp_splits: '50,30,20',
-    // [T2.3] These three were missing from live Risk settings entirely, which
-    // is the live-trading half of the bug that left trail_method NULL on
-    // 3,528/3,528 backtest trades: with tp_count=1 the ONLY leg had no trail
-    // method, so RiskEngine's `if trail_method and ...` guard short-circuited
-    // on every tick and no position ever trailed.
-    trail_method_tp1: 'NONE',
-    trail_mode: 'EITHER',
-    trail_trigger_rr: 2.0,
-    trail_activation_rr: 2.0,   // legacy alias, kept in sync by `update`
-    // [17.6] Previously absent from this defaults block, so they were dropped
-    // from the saved payload entirely and could never be set from the UI.
-    trail_trigger_tp_level: 1,
-    trail_require_be_first: false,
-    // Whose exits live trades use: each strategy's measured exits (true) or the
-    // break-even / trailing values on this page for every strategy (false).
-    use_strategy_exit_defaults: true,
-    be_trigger_tp_level: 1,
-    be_spread_multiple: 2.0,
-    trail_method_tp2: 'ATR_TRAIL',
-    trail_method_tp3: 'STRUCTURE_TRAIL',
-    trail_method_tp4: 'ATR_TRAIL',
-    trail_method_tp5: 'STRUCTURE_TRAIL',
-    atr_trail_multiplier: 1.5,
-    atr_trail_multiplier_tp1: 1.5,
-    atr_trail_multiplier_tp2: 1.5,
-    atr_trail_multiplier_tp3: 1.5,
-    atr_trail_multiplier_tp4: 1.5,
-    atr_trail_multiplier_tp5: 1.5,
-    trail_pips: 15,
-    trail_pct: 0.5,
-    // [17.7] `trail_activation_rr: 1.5` was declared a SECOND time here.
-    // JS object literals are last-wins, so it silently overrode the 2.0 set
-    // above and shipped defaults where the UI showed 2.0R while the engine
-    // (which reads trail_activation_rr) armed at 1.5R. Removed; the single
-    // declaration beside trail_trigger_rr is now authoritative.
-    trail_step_pips: 5.0,
-    trail_structure_bars: 3,
-
+    risk: {},
     prop_firm: {
       account_mode: 'personal',
       firm_name: '',
@@ -100,407 +58,161 @@ export default function RiskSettings() {
       profit_target_pct: 0.0,
       min_trading_days: 0,
     },
-    // FEAT-1: Live strategy params
-    vwap: {
-      sl_method: 'auto',
-      sl_points: 80.0,
-      sl_atr_multiplier: 3.0,
-      min_sl_pips: 8.0,
-      min_sl_spread_mult: 4.0,
-      target_rr: 2.0,
-      max_trades_per_day: 4,
-    },
-    crt: {
-      min_sl_pips: 15.0,
-      sl_atr_mult: 1.0,
-      target_r_multiple: 1.5,
-    },
-    apa: {
-      sl_buffer_atr_mult: 0.5,
-      min_sl_pips: 12.0,
-      min_sl_atr_mult: 1.0,
-    },
   });
 
-  // Load current config from backend
   const { data: remoteConfig } = useQuery({
     queryKey: ['config'],
     queryFn: () => getConfig().then(r => r.data),
     enabled: status === 'ONLINE' && isAuthenticated,
   });
 
+  const { data: schemaResp } = useQuery({
+    queryKey: ['parameterSchema'],
+    queryFn: () => getParameterSchema().then(r => r.data),
+    enabled: status === 'ONLINE' && isAuthenticated,
+    staleTime: 300000,
+  });
+  const schema = schemaResp?.fields;
+
   useEffect(() => {
-    if (remoteConfig?.config) {
-      const cfg = remoteConfig.config;
-      // Merge remote config with defaults
-      setConfig(prev => ({
-        ...prev,
-        // Flat mapping for risk parameters
-        ...Object.fromEntries(
-          Object.entries(cfg.risk || {}).filter(([k]) => k in prev)
-        ),
-        // Additional top-level mapping
-        prop_firm: cfg.prop_firm || prev.prop_firm,
-        // Strategy sub-configs (FEAT-1)
-        vwap: { ...prev.vwap, ...(cfg.vwap || {}) },
-        crt: { ...prev.crt, ...(cfg.crt || {}) },
-        apa: { ...prev.apa, ...(cfg.apa || {}) },
-      }));
-    }
+    if (!remoteConfig?.config) return;
+    const cfg = remoteConfig.config;
+    setConfig(prev => ({
+      risk: { ...(cfg.risk || {}) },
+      prop_firm: cfg.prop_firm || prev.prop_firm,
+    }));
   }, [remoteConfig]);
 
   const mutation = useMutation({
     mutationFn: (newConfig) => updateConfig({ config: newConfig }),
     onSuccess: () => {
-      // Every cached response that embeds config, not just ['config'] itself —
-      // the dashboard, the live-account risk resolution and the stats all
-      // derive from these values and kept serving pre-save copies.
+      // Every cached response that embeds config, not just ['config'] itself.
       invalidateConfigDependents(queryClient);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     },
   });
 
+  // `trail_activation_rr` is the legacy name for `trail_trigger_rr`. The engine
+  // prefers the latter and config_schema warns when they disagree, so keep them
+  // in lockstep rather than emitting a warning on every save.
+  const setRisk = (next) => setConfig(prev => {
+    const risk = { ...next };
+    if (risk.trail_trigger_rr !== prev.risk.trail_trigger_rr) risk.trail_activation_rr = risk.trail_trigger_rr;
+    else if (risk.trail_activation_rr !== prev.risk.trail_activation_rr) risk.trail_trigger_rr = risk.trail_activation_rr;
+    return { ...prev, risk };
+  });
+
   const update = (key, val) => {
-    // `trail_activation_rr` is the legacy name for the same threshold. The
-    // engine prefers `trail_trigger_rr`, but config_schema warns when the two
-    // disagree ("the UI shows one number while the engine uses another"), so
-    // keep them in lockstep rather than emitting a warning on every save.
-    // [17.7] Sync BOTH ways. This previously only handled trail_trigger_rr,
-    // so editing the "Trail Activation (RR)" control left trail_trigger_rr
-    // stale and the two disagreed again.
-    if (key === 'trail_trigger_rr' || key === 'trail_activation_rr') {
-      setConfig({ ...config, trail_trigger_rr: val, trail_activation_rr: val });
-      return;
-    }
-    setConfig({ ...config, [key]: val });
+    if (key === 'prop_firm') { setConfig(prev => ({ ...prev, prop_firm: val })); return; }
+    setRisk({ ...config.risk, [key]: val });
   };
+
+  // One schema feeds both cards, so a field can only appear in one of them.
+  const riskByName = useMemo(() => Object.fromEntries(
+    (schema || []).filter(r => r.group === 'risk')
+      .map(r => [r.key.split('.').slice(1).join('.'), r]),
+  ), [schema]);
+
+  const defaultSections = useMemo(
+    () => SLOT_RISK_SECTIONS
+      .map(([title, keys]) => [title, keys.map(k => riskByName[k]).filter(Boolean)])
+      .filter(([, rows]) => rows.length),
+    [riskByName],
+  );
+  const accountRows = useMemo(
+    () => ACCOUNT_KEYS.map(k => riskByName[k]).filter(Boolean),
+    [riskByName],
+  );
+
+  const valueOf = (k) => (config.risk?.[k] ?? riskByName[k]?.default);
+  const pct = (k) => Number(valueOf(k) ?? 0);
 
   const riskWarnings = [];
-  if (config.risk_per_trade_pct > config.max_risk_hard_cap_pct) riskWarnings.push(`Risk Per Trade (${config.risk_per_trade_pct}%) > Max Risk Hard Cap (${config.max_risk_hard_cap_pct}%)`);
-  if (config.risk_per_trade_pct > config.max_daily_drawdown_pct) riskWarnings.push(`Risk Per Trade (${config.risk_per_trade_pct}%) > Max Daily Drawdown (${config.max_daily_drawdown_pct}%)`);
-  if (config.risk_per_trade_pct > config.max_weekly_drawdown_pct) riskWarnings.push(`Risk Per Trade (${config.risk_per_trade_pct}%) > Max Weekly Drawdown (${config.max_weekly_drawdown_pct}%)`);
-  if (config.max_daily_drawdown_pct > config.max_weekly_drawdown_pct) riskWarnings.push(`Max Daily Drawdown (${config.max_daily_drawdown_pct}%) > Max Weekly Drawdown (${config.max_weekly_drawdown_pct}%)`);
-  if (config.max_risk_hard_cap_pct > config.max_daily_drawdown_pct) riskWarnings.push(`Max Risk Hard Cap (${config.max_risk_hard_cap_pct}%) > Max Daily Drawdown (${config.max_daily_drawdown_pct}%)`);
-  if (config.max_risk_hard_cap_pct > config.max_weekly_drawdown_pct) riskWarnings.push(`Max Risk Hard Cap (${config.max_risk_hard_cap_pct}%) > Max Weekly Drawdown (${config.max_weekly_drawdown_pct}%)`);
+  if (pct('risk_per_trade_pct') > pct('max_risk_hard_cap_pct')) riskWarnings.push(`Risk per trade (${pct('risk_per_trade_pct')}%) is above the hard cap (${pct('max_risk_hard_cap_pct')}%)`);
+  if (pct('risk_per_trade_pct') > pct('max_daily_drawdown_pct')) riskWarnings.push(`Risk per trade (${pct('risk_per_trade_pct')}%) is above the daily drawdown limit (${pct('max_daily_drawdown_pct')}%), so one loss stops the slot for the day`);
+  if (pct('max_daily_drawdown_pct') > pct('max_weekly_drawdown_pct')) riskWarnings.push(`Daily drawdown (${pct('max_daily_drawdown_pct')}%) is above weekly (${pct('max_weekly_drawdown_pct')}%)`);
   if (config.prop_firm?.account_mode === 'prop_firm') {
-    if (config.risk_per_trade_pct > (config.prop_firm?.max_total_drawdown_pct ?? 10.0)) riskWarnings.push(`Risk Per Trade (${config.risk_per_trade_pct}%) > Prop Firm Max Total Drawdown (${config.prop_firm?.max_total_drawdown_pct ?? 10.0}%)`);
-    if (config.risk_per_trade_pct > (config.prop_firm?.max_daily_loss_pct ?? 5.0)) riskWarnings.push(`Risk Per Trade (${config.risk_per_trade_pct}%) > Prop Firm Max Daily Loss (${config.prop_firm?.max_daily_loss_pct ?? 5.0}%)`);
-    if (config.max_weekly_drawdown_pct > (config.prop_firm?.max_total_drawdown_pct ?? 10.0)) riskWarnings.push(`Max Weekly Drawdown (${config.max_weekly_drawdown_pct}%) > Prop Firm Max Total Drawdown (${config.prop_firm?.max_total_drawdown_pct ?? 10.0}%)`);
-    if (config.max_daily_drawdown_pct > (config.prop_firm?.max_daily_loss_pct ?? 5.0)) riskWarnings.push(`Max Daily Drawdown (${config.max_daily_drawdown_pct}%) > Prop Firm Max Daily Loss (${config.prop_firm?.max_daily_loss_pct ?? 5.0}%)`);
+    const dayCap = config.prop_firm?.max_daily_loss_pct ?? 5.0;
+    const totalCap = config.prop_firm?.max_total_drawdown_pct ?? 10.0;
+    if (pct('risk_per_trade_pct') > dayCap) riskWarnings.push(`Risk per trade (${pct('risk_per_trade_pct')}%) is above the firm daily loss limit (${dayCap}%)`);
+    if (pct('max_weekly_drawdown_pct') > totalCap) riskWarnings.push(`Weekly drawdown (${pct('max_weekly_drawdown_pct')}%) is above the firm total drawdown limit (${totalCap}%)`);
+    if (pct('max_daily_drawdown_pct') > dayCap) riskWarnings.push(`Daily drawdown (${pct('max_daily_drawdown_pct')}%) is above the firm daily loss limit (${dayCap}%)`);
   }
 
-  const handleSave = () => {
-    const { prop_firm, vwap, crt, apa, ...riskParams } = config;
-    mutation.mutate({
-      risk: riskParams,
-      prop_firm: prop_firm,
-      // Strategy sub-configs (FEAT-1)
-      vwap,
-      crt,
-      apa,
-    });
-  };
+  // Only the two blocks this page owns are posted. Strategy parameters and the
+  // slots themselves are saved by Settings > Trading Book, so a save here can
+  // no longer overwrite them with this page's idea of a default.
+  const handleSave = () => mutation.mutate({ risk: config.risk, prop_firm: config.prop_firm });
 
   return (
-    <div style={{ display: 'grid', gap: 20, maxWidth: 800 }}>
-      <div className="card">
-        <div className="card-header"><span className="card-title"><Shield size={14} /> Position Sizing</span></div>
-        {riskWarnings.length > 0 && (
-          <div style={{ marginBottom: 16, padding: 12, background: 'var(--bg-warning)', border: '1px solid var(--yellow)', borderRadius: 'var(--radius-xs)', color: 'var(--yellow)', fontSize: '0.85rem' }}>
-            <strong style={{ display: 'block', marginBottom: 6 }}>⚠️ Risk Parameter Mismatches Detected:</strong>
-            <ul style={{ margin: 0, paddingLeft: 20 }}>
-              {riskWarnings.map((w, i) => <li key={i}>{w}</li>)}
-            </ul>
-          </div>
-        )}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Risk Per Trade (%)</label><input type="number" step="0.1" value={config.risk_per_trade_pct} onChange={e => update('risk_per_trade_pct', +e.target.value)} /></div>
-          <div><label>Max Risk Hard Cap (%)</label><input type="number" step="0.1" value={config.max_risk_hard_cap_pct} onChange={e => update('max_risk_hard_cap_pct', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute position sizer safety net</div></div>
-          <div><label>Minimum R:R</label><input type="number" step="0.5" value={config.min_rr} onChange={e => update('min_rr', +e.target.value)} /></div>
-          <div><label>Min SL (pips)</label><input type="number" step="0.5" min="0" value={config.min_sl_pips} onChange={e => update('min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Global stop floor. Prevents a sub-spread stop sizing into an untradeable position. Set 0 to disable.</div></div>
-          <div><label>Max Account Leverage (×)</label><input type="number" step="1" min="0" value={config.max_account_leverage} onChange={e => update('max_account_leverage', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Caps total notional against equity. Blocks the 100×+ sizes MT5 rejects with retcode 10019. Set 0 to disable.</div></div>
-          <div>
-            <label>Size Against</label>
-            <select value={config.sizing_basis ?? 'STATIC'} onChange={e => update('sizing_basis', e.target.value)}>
-              <option value="STATIC">Starting balance — no compounding</option>
-              <option value="BALANCE">Closed balance — compounds with realised P&amp;L</option>
-              <option value="EQUITY">Floating equity — compounds incl. open P&amp;L</option>
-            </select>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>
-              This is the compounding switch. Set it the same here and in the Backtester, or live and backtest results will not be comparable.
-            </div>
-          </div>
-        </div>
+    <div style={{ display: 'grid', gap: 20, maxWidth: 860 }}>
+      <div style={{ padding: 12, background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+        <strong>These are starting values, not account-wide limits.</strong>{' '}
+        Every symbol + strategy slot runs on its own risk engine and its own circuit breaker, so a
+        limit here counts only that slot&apos;s trades: one slot can never use up another&apos;s daily
+        budget, positions or drawdown. A slot that sets its own value ignores the one here.
+        Give a slot its own numbers in <em>Settings &gt; Trading Book</em>, or on the row you are
+        testing in the <em>Backtester</em>.
       </div>
 
       <div className="card">
-        <div className="card-header"><span className="card-title">Circuit Breakers</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Max Daily Drawdown (%)</label><input type="number" step="0.1" min="0.1" value={config.max_daily_drawdown_pct} onChange={e => update('max_daily_drawdown_pct', +e.target.value)} /></div>
-          <div><label>Max Weekly Drawdown (%)</label><input type="number" step="0.1" min="0.1" value={config.max_weekly_drawdown_pct} onChange={e => update('max_weekly_drawdown_pct', +e.target.value)} /></div>
-          <div><label>Max Daily Trades</label><input type="number" step="1" min="1" value={config.max_daily_trades} onChange={e => update('max_daily_trades', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Prevents overtrading in chop</div></div>
-          <div><label>Max Open Positions</label><input type="number" value={config.max_concurrent_positions} onChange={e => update('max_concurrent_positions', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Global across all symbols</div></div>
-          <div><label>Max Positions / Symbol</label><input type="number" value={config.max_positions_per_symbol} onChange={e => update('max_positions_per_symbol', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Limit trades per symbol</div></div>
+        <div className="card-header">
+          <span className="card-title"><Shield size={14} /> Defaults every slot starts from</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, marginBottom: 12 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textTransform: 'none' }}>
-            <input type="checkbox" checked={config.target_profit_enabled} onChange={e => update('target_profit_enabled', e.target.checked)} style={{ width: 16, height: 16 }} />
-            Enable Target Profit Halts
-          </label>
-        </div>
-        {config.target_profit_enabled && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-xs)' }}>
-            <div><label>Max Daily Profit ($)</label><input type="number" step="10" value={config.max_daily_profit} onChange={e => update('max_daily_profit', +e.target.value)} /></div>
-            <div><label>Max Weekly Profit ($)</label><input type="number" step="10" value={config.max_weekly_profit} onChange={e => update('max_weekly_profit', +e.target.value)} /></div>
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <div className="card-header"><span className="card-title">Take Profit & Break-Even</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div>
-            <label>Active TP Count</label>
-            <select value={config.tp_count} onChange={e => update('tp_count', +e.target.value)}>
-              <option value={1}>1 TP</option>
-              <option value={2}>2 TPs</option>
-              <option value={3}>3 TPs (default)</option>
-              <option value={4}>4 TPs</option>
-              <option value={5}>5 TPs</option>
-            </select>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>
-              All TPs open at entry. TP1 hit → move remaining to break-even.
-            </div>
-          </div>
-          <div><label>TP1 R:R</label><input type="number" step="0.5" value={config.tp1_rr} onChange={e => update('tp1_rr', +e.target.value)} /></div>
-          <div><label>TP2 R:R</label><input type="number" step="0.5" value={config.tp2_rr} onChange={e => update('tp2_rr', +e.target.value)} /></div>
-          <div><label>TP3 R:R</label><input type="number" step="0.5" value={config.tp3_rr} onChange={e => update('tp3_rr', +e.target.value)} /></div>
-          {config.tp_count >= 4 && (
-            <div><label>TP4 R:R</label><input type="number" step="0.5" value={config.tp4_rr} onChange={e => update('tp4_rr', +e.target.value)} /></div>
-          )}
-          {config.tp_count >= 5 && (
-            <div><label>TP5 R:R</label><input type="number" step="0.5" value={config.tp5_rr} onChange={e => update('tp5_rr', +e.target.value)} /></div>
-          )}
-          <div><label>TP Volume Split</label><input type="text" value={config.tp_splits} onChange={e => update('tp_splits', e.target.value)} placeholder="50,30,20" /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Comma-separated % per TP level (must sum to 100)</div></div>
-          <div><label>BE Trigger (R)</label><input type="number" step="0.5" value={config.be_trigger_rr} onChange={e => update('be_trigger_rr', +e.target.value)} /></div>
-          <div><label>BE Buffer (pips)</label><input type="number" step="0.5" min="0" value={config.be_buffer_pips} onChange={e => update('be_buffer_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Keep at 0. A non-zero pip buffer can put the break-even stop beyond the market, where it fills as fabricated profit. Use the ATR buffer instead.</div></div>
-          <div><label>BE Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={config.be_buffer_atr_mult} onChange={e => update('be_buffer_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Scale-aware break-even cushion, as a multiple of ATR(14). This is the safe way to sit slightly above entry.</div></div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header"><span className="card-title">Trailing Stops</span></div>
-
-        {/* Whose exits apply. Without this, a break-even or trailing setting left
-            at its default value ("Either") was silently replaced by a strategy's
-            measured exits — so ORB, VWAP and DriftJumpAlpha trades never moved
-            their stop, whatever this page said. */}
-        <div style={{
-          padding: 12, marginBottom: 16, borderRadius: 'var(--radius-sm)',
-          background: config.use_strategy_exit_defaults === false ? 'rgba(234,179,8,0.06)' : 'rgba(16,185,129,0.05)',
-          border: `1px solid ${config.use_strategy_exit_defaults === false ? 'rgba(234,179,8,0.35)' : 'rgba(16,185,129,0.25)'}`,
-        }}>
-          <label>Exit Rules for Live Trades</label>
-          <select
-            value={config.use_strategy_exit_defaults === false ? 'mine' : 'strategy'}
-            onChange={e => update('use_strategy_exit_defaults', e.target.value === 'strategy')}
-            style={{ maxWidth: 460 }}
-          >
-            <option value="strategy">Each strategy's measured exits (recommended)</option>
-            <option value="mine">My settings on this page, for every strategy</option>
-          </select>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
-            {config.use_strategy_exit_defaults === false ? (
-              <>Break-even and trailing below apply to <strong>every</strong> strategy exactly as set. The research
-                measured several strategies <em>worse</em> with them on — run the same book in the Backtester with
-                &ldquo;Use strategy exit defaults&rdquo; on and off before relying on this.</>
-            ) : (
-              <>Strategies with tested exits use those instead of the values below: <strong>ORB, VWAP and
-                DriftJumpAlpha run with no break-even and no trailing</strong>; the synthetic strategies (TrendDrift,
-                RangeRevert, SpikeFade…) with no break-even. So a trade on them can pass 1R without its stop moving —
-                that is the tested behaviour, not a fault. Choose &ldquo;My settings&rdquo; to apply yours.</>
-            )}
-          </div>
-        </div>
-
-        {/* [T2.3] Trail activation. Without these, RR-mode trailing had no
-            trigger and TP1 had no method, so a single-TP position that ran to
-            3R and reversed went all the way back to its original stop. */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16,
-          padding: 12, marginBottom: 16, borderRadius: 'var(--radius-sm)',
-          background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.25)',
-        }}>
-          <div>
-            <label>Trail Trigger Mode</label>
-            <select value={config.trail_mode} onChange={e => update('trail_mode', e.target.value)}>
-              <option value="RR">RR — at an R-multiple</option>
-              <option value="TP_HIT">TP_HIT — when TP1 closes</option>
-              <option value="EITHER">Either, whichever first</option>
-              <option value="NONE">Never trail</option>
-            </select>
-          </div>
-          <div>
-            <label>Trail Start (R)</label>
-            <input
-              type="number" step="0.1" min="0"
-              value={config.trail_trigger_rr}
-              onChange={e => update('trail_trigger_rr', +e.target.value)}
-              disabled={config.trail_mode === 'TP_HIT' || config.trail_mode === 'NONE'}
+        <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
+          The same fields a slot shows under <em>Risk &amp; exits</em>. Change one here and every slot
+          that has not overridden it follows.
+        </p>
+        {!schema ? (
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Loading parameters...</div>
+        ) : defaultSections.map(([title, rows]) => (
+          <div key={title} style={{ marginBottom: 16 }}>
+            <SchemaForm
+              schema={rows.map(r => ({ ...r, group: 'defaults' }))}
+              group="defaults"
+              title={title}
+              values={config.risk}
+              onChange={(next) => setRisk(next)}
+              showFilter={false}
+              minWidth={175}
             />
           </div>
-          {/* [17.6] These four existed in the schema and were read by the
-              engine, but had no control anywhere in the UI — so they could only
-              ever hold their defaults, and a user had no way to see or change
-              behaviour that was actively affecting live positions. */}
-          <div>
-            <label>Trail Start (TP level)</label>
-            <select
-              value={config.trail_trigger_tp_level ?? 1}
-              onChange={e => update('trail_trigger_tp_level', +e.target.value)}
-              disabled={config.trail_mode === 'RR' || config.trail_mode === 'NONE'}
-            >
-              {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>TP{n} closes</option>)}
-            </select>
-            <small style={{ color: 'var(--text-dim)' }}>Which TP closing arms the trail (TP_HIT / Either modes).</small>
-          </div>
-          <div>
-            <label>Require Break-even First</label>
-            <select
-              value={config.trail_require_be_first ? 'yes' : 'no'}
-              onChange={e => update('trail_require_be_first', e.target.value === 'yes')}
-              disabled={config.trail_mode === 'NONE'}
-            >
-              <option value="no">No — trail as soon as it triggers</option>
-              <option value="yes">Yes — only after break-even is set</option>
-            </select>
-            <small style={{ color: 'var(--text-dim)' }}>Stops the trail arming while the position can still lose.</small>
-          </div>
-          <div>
-            <label>Break-even Trigger (TP level)</label>
-            <select
-              value={config.be_trigger_tp_level ?? 1}
-              onChange={e => update('be_trigger_tp_level', +e.target.value)}
-              disabled={config.be_mode === 'RR' || config.be_mode === 'NONE'}
-            >
-              {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>TP{n} closes</option>)}
-            </select>
-            <small style={{ color: 'var(--text-dim)' }}>Which TP closing moves the stop to break-even.</small>
-          </div>
-          <div>
-            <label>Break-even Spread Multiple</label>
-            <input
-              type="number" step="0.5" min="0"
-              value={config.be_spread_multiple ?? 2.0}
-              onChange={e => update('be_spread_multiple', +e.target.value)}
-              disabled={config.be_mode === 'NONE'}
-            />
-            <small style={{ color: 'var(--text-dim)' }}>Break-even sits this many spreads above entry, so it cannot close at a loss.</small>
-          </div>
-          <div>
-            <label>TP1 Trail Method</label>
-            <select value={config.trail_method_tp1} onChange={e => update('trail_method_tp1', e.target.value)}>
-              <option value="NONE">None</option>
-              <option value="ATR_TRAIL">ATR Trail</option>
-              <option value="FIXED_PIPS">Fixed Pips</option>
-              <option value="STRUCTURE_TRAIL">Structure Trail</option>
-              <option value="PCT_TRAIL">Percentage Trail</option>
-            </select>
-            {config.trail_method_tp1 === 'ATR_TRAIL' && (
-              <div style={{ marginTop: 8 }}>
-                <label>ATR Multiplier</label>
-                <input type="number" step="0.1" value={config.atr_trail_multiplier_tp1} onChange={e => update('atr_trail_multiplier_tp1', +e.target.value)} />
-              </div>
-            )}
-          </div>
-          <div style={{ gridColumn: '1 / -1', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            <strong>RR</strong> arms the trail once the position reaches this R-multiple, measured
-            from the ORIGINAL stop. <strong>TP_HIT</strong> arms it when TP1 closes — which never
-            fires on a single-TP setup, so leave it on RR or Either if <code>tp_count = 1</code>.
-            TP1 must have a trail method other than None or nothing trails at all.
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div>
-            <label>TP2 Trail Method</label>
-            <select value={config.trail_method_tp2} onChange={e => update('trail_method_tp2', e.target.value)}>
-              <option value="NONE">None</option>
-              <option value="ATR_TRAIL">ATR Trail</option>
-              <option value="FIXED_PIPS">Fixed Pips</option>
-              <option value="STRUCTURE_TRAIL">Structure Trail</option>
-              <option value="PCT_TRAIL">Percentage Trail</option>
-            </select>
-            {config.trail_method_tp2 === 'ATR_TRAIL' && (
-              <div style={{ marginTop: 8 }}>
-                <label>ATR Multiplier</label>
-                <input type="number" step="0.1" value={config.atr_trail_multiplier_tp2} onChange={e => update('atr_trail_multiplier_tp2', +e.target.value)} />
-              </div>
-            )}
-          </div>
-          <div>
-            <label>TP3 Trail Method</label>
-            <select value={config.trail_method_tp3} onChange={e => update('trail_method_tp3', e.target.value)}>
-              <option value="NONE">None</option>
-              <option value="STRUCTURE_TRAIL">Structure Trail</option>
-              <option value="ATR_TRAIL">ATR Trail</option>
-              <option value="FIXED_PIPS">Fixed Pips</option>
-              <option value="PCT_TRAIL">Percentage Trail</option>
-            </select>
-            {config.trail_method_tp3 === 'ATR_TRAIL' && (
-              <div style={{ marginTop: 8 }}>
-                <label>ATR Multiplier</label>
-                <input type="number" step="0.1" value={config.atr_trail_multiplier_tp3} onChange={e => update('atr_trail_multiplier_tp3', +e.target.value)} />
-              </div>
-            )}
-          </div>
-          {config.tp_count >= 4 && (
-            <div>
-              <label>TP4 Trail Method</label>
-              <select value={config.trail_method_tp4} onChange={e => update('trail_method_tp4', e.target.value)}>
-                <option value="NONE">None</option>
-                <option value="ATR_TRAIL">ATR Trail</option>
-                <option value="STRUCTURE_TRAIL">Structure Trail</option>
-                <option value="FIXED_PIPS">Fixed Pips</option>
-                <option value="PCT_TRAIL">Percentage Trail</option>
-              </select>
-              {config.trail_method_tp4 === 'ATR_TRAIL' && (
-                <div style={{ marginTop: 8 }}>
-                  <label>ATR Multiplier</label>
-                  <input type="number" step="0.1" value={config.atr_trail_multiplier_tp4} onChange={e => update('atr_trail_multiplier_tp4', +e.target.value)} />
-                </div>
-              )}
-            </div>
-          )}
-          {config.tp_count >= 5 && (
-            <div>
-              <label>TP5 Trail Method</label>
-              <select value={config.trail_method_tp5} onChange={e => update('trail_method_tp5', e.target.value)}>
-                <option value="NONE">None</option>
-                <option value="STRUCTURE_TRAIL">Structure Trail</option>
-                <option value="ATR_TRAIL">ATR Trail</option>
-                <option value="FIXED_PIPS">Fixed Pips</option>
-                <option value="PCT_TRAIL">Percentage Trail</option>
-              </select>
-              {config.trail_method_tp5 === 'ATR_TRAIL' && (
-                <div style={{ marginTop: 8 }}>
-                  <label>ATR Multiplier</label>
-                  <input type="number" step="0.1" value={config.atr_trail_multiplier_tp5} onChange={e => update('atr_trail_multiplier_tp5', +e.target.value)} />
-                </div>
-              )}
-            </div>
-          )}
-          <div><label>ATR Multiplier</label><input type="number" step="0.1" value={config.atr_trail_multiplier} onChange={e => update('atr_trail_multiplier', +e.target.value)} /></div>
-          <div><label>Fixed Trail Pips</label><input type="number" value={config.trail_pips} onChange={e => update('trail_pips', +e.target.value)} /></div>
-          <div><label>Trail % (for PCT_TRAIL)</label><input type="number" step="0.1" value={config.trail_pct} onChange={e => update('trail_pct', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>% of price as trail distance</div></div>
-          {/* [17.7] Removed: a second control for the same setting as
-              "Trail Start (R)" above. Two inputs writing one value let a user
-              set them to different numbers, and only one of them synced. */}
-          <div><label>Trail Step (Pips)</label><input type="number" step="0.5" value={config.trail_step_pips} onChange={e => update('trail_step_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Minimum SL hop distance</div></div>
-          <div><label>Structure Swing Bars</label><input type="number" value={config.trail_structure_bars} onChange={e => update('trail_structure_bars', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Left/Right bars for structure</div></div>
-        </div>
+        ))}
       </div>
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Account &amp; broker</span></div>
+        <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
+          Properties of the account itself. A slot cannot override these.
+        </p>
+        {accountRows.length ? (
+          <SchemaForm
+            schema={accountRows.map(r => ({ ...r, group: 'account' }))}
+            group="account"
+            values={config.risk}
+            onChange={(next) => setRisk(next)}
+            showFilter={false}
+            minWidth={200}
+          />
+        ) : (
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Loading parameters...</div>
+        )}
+      </div>
+
+      {riskWarnings.length > 0 && (
+        <div className="card" style={{ borderColor: 'var(--yellow)' }}>
+          <div className="card-header"><span className="card-title" style={{ color: 'var(--yellow)' }}>Check these</span></div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {riskWarnings.map((msg, i) => (
+              <div key={i} style={{ color: 'var(--yellow)', fontSize: '0.75rem', display: 'flex', gap: 6 }}>
+                <span>&bull;</span><span>{msg}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div className="card-header"><span className="card-title">Prop Firm / Broker Settings</span></div>
@@ -682,143 +394,6 @@ export default function RiskSettings() {
             </div>
           </div>
         )}
-      </div>
-
-      {/* FEAT-1: Strategy-Specific Parameters (live trading) */}
-      <div className="card">
-        <div className="card-header"><span className="card-title">⚙ Strategy Parameters</span></div>
-        <div style={{ display: 'grid', gap: 20 }}>
-
-          {/* VWAP */}
-          <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--blue)', marginBottom: 8 }}>VWAP Strategy</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-              <div>
-                <label>SL Method</label>
-                <select value={config.vwap?.sl_method ?? 'auto'}
-                  onChange={e => update('vwap', { ...config.vwap, sl_method: e.target.value })}>
-                  <option value="auto">Auto (by instrument class)</option>
-                  <option value="fixed_points">Fixed Points</option>
-                  <option value="atr_multiple">ATR Multiple</option>
-                </select>
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Auto routes index CFDs and index futures to the fixed-points stop and everything else (FX, metals, crypto, synthetics) to the ATR multiple. Default: auto.
-                </div>
-              </div>
-              <div>
-                <label>SL Points (index only)</label>
-                <input type="number" step="1" min="10" value={config.vwap?.sl_points ?? 80}
-                  onChange={e => update('vwap', { ...config.vwap, sl_points: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Stop distance in native INDEX points, used only when the resolved SL method is Fixed Points. Not a pipette figure — it does not apply to FX. Default: 80 points.
-                </div>
-              </div>
-              <div>
-                <label>SL ATR Multiplier</label>
-                <input type="number" step="0.1" min="0" value={config.vwap?.sl_atr_multiplier ?? 3.0}
-                  onChange={e => update('vwap', { ...config.vwap, sl_atr_multiplier: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Stop = this × ATR of the M5 entry bars, for every non-index instrument. 0 disables the ATR path. Default: 3.0.
-                </div>
-              </div>
-              <div>
-                <label>Min SL Pips (Floor)</label>
-                <input type="number" step="0.5" min="0" value={config.vwap?.min_sl_pips ?? 8.0}
-                  onChange={e => update('vwap', { ...config.vwap, min_sl_pips: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Absolute stop floor for the low-volatility tail, where 3×ATR alone is only ~2.5× spread. Lower than APA's 12 because VWAP is a scalper with a hard session close. Default: 8 pips.
-                </div>
-              </div>
-              <div>
-                <label>Min SL (× Spread)</label>
-                <input type="number" step="0.5" min="0" value={config.vwap?.min_sl_spread_mult ?? 4.0}
-                  onChange={e => update('vwap', { ...config.vwap, min_sl_spread_mult: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Instrument-neutral form of the floor above: SL must be at least this × the live spread, so it adapts to news-time spread blowouts. Default: 4.0×.
-                </div>
-              </div>
-              <div>
-                <label>Target R:R</label>
-                <input type="number" step="0.1" min="0" value={config.vwap?.target_rr ?? 2.0}
-                  onChange={e => update('vwap', { ...config.vwap, target_rr: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Reward-to-risk multiple applied to the realised stop distance. Default: 2.0R.
-                </div>
-              </div>
-              <div>
-                <label>Max Trades / Day</label>
-                <input type="number" step="1" min="1" value={config.vwap?.max_trades_per_day ?? 4}
-                  onChange={e => update('vwap', { ...config.vwap, max_trades_per_day: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Maximum signals the VWAP engine will generate per day (independent of, but also bounded by, the global Max Daily Trades circuit breaker above).
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* CRT */}
-          <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--yellow)', marginBottom: 8 }}>CRT Strategy — Stop-Loss Floors</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-              <div>
-                <label>Min SL Pips (Hard Floor)</label>
-                <input type="number" step="0.5" min="0" value={config.crt?.min_sl_pips ?? 15}
-                  onChange={e => update('crt', { ...config.crt, min_sl_pips: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Hard minimum SL distance in pips. Prevents tiny CRT candles from producing unrealistically tight stops. Set 0 to disable. Default: 15 pips.
-                </div>
-              </div>
-              <div>
-                <label>SL ATR Multiplier</label>
-                <input type="number" step="0.1" min="0" value={config.crt?.sl_atr_mult ?? 1.0}
-                  onChange={e => update('crt', { ...config.crt, sl_atr_mult: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  SL must be at least N × ATR(14). Whichever is larger (ATR floor or Pips floor) wins. Set 0 to disable ATR floor. Default: 1.0×.
-                </div>
-              </div>
-              <div>
-                <label>Target R-Multiple</label>
-                <input type="number" step="0.1" min="0.5" value={config.crt?.target_r_multiple ?? 1.5}
-                  onChange={e => update('crt', { ...config.crt, target_r_multiple: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Minimum reward-to-risk ratio for CRT setups. TP is extended to maintain this R-multiple when the SL floor is applied. Default: 1.5R.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* APA/SMC SL Buffer */}
-          <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--green)', marginBottom: 8 }}>APA / SMC Strategy — Stop-Loss Floors</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-              <div>
-                <label>SL Buffer (× ATR)</label>
-                <input type="number" step="0.05" min="0" max="2" value={config.apa?.sl_buffer_atr_mult ?? 0.5}
-                  onChange={e => update('apa', { ...config.apa, sl_buffer_atr_mult: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Extra cushion added beyond the structure extreme for the SL, as a multiple of ATR(14). At 0.5× a normal structural stop clears round-trip spread by roughly 1.5–2×. Default: 0.5.
-                </div>
-              </div>
-              <div>
-                <label>Min SL Pips (Hard Floor)</label>
-                <input type="number" step="0.5" min="0" value={config.apa?.min_sl_pips ?? 12.0}
-                  onChange={e => update('apa', { ...config.apa, min_sl_pips: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Absolute minimum stop distance. APA's retest entry can sit a fraction of a pip from the shoulder wick; 12 pips is ~4× round-trip friction. Set 0 to disable. Default: 12 pips.
-                </div>
-              </div>
-              <div>
-                <label>Min SL (× ATR)</label>
-                <input type="number" step="0.1" min="0" value={config.apa?.min_sl_atr_mult ?? 1.0}
-                  onChange={e => update('apa', { ...config.apa, min_sl_atr_mult: +e.target.value })} />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  Volatility-relative floor for regimes where 12 pips is itself noise. Whichever floor is larger wins. Set 0 to disable. Default: 1.0×.
-                </div>
-              </div>
-            </div>
-          </div>
-
-        </div>
       </div>
 
       <button className="btn btn-primary" style={{ justifySelf: 'start' }} onClick={handleSave} disabled={mutation.isPending}>

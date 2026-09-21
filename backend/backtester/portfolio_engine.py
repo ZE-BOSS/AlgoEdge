@@ -14,6 +14,7 @@ import pandas as pd
 
 from backend.analytics.reports import generate_risk_report
 from backend.risk.engine import RiskEngine
+from backend.risk.slot_book import SlotBook
 from backend.risk.multi_tp import TPLevel, _is_buy
 from backend.risk.position_sizer import get_pip_size, get_symbol_info
 from backend.risk.prop_firm_validator import PropFirmValidator
@@ -58,14 +59,18 @@ _PRE_RISK_GATES = frozenset({
 
 
 class PortfolioBacktestEngine(CostModelMixin):
-    def __init__(self, risk_config: dict[str, Any]):
+    def __init__(self, risk_config: dict[str, Any], slot_configs: dict[str, dict[str, Any]] | None = None):
+        """`slot_configs` maps a slot's cache key to the config that slot trades
+        under (risk/slot_book.resolve_slot_risk_config). A key without one falls
+        back to `risk_config` — but every slot still gets its OWN engine and
+        breaker, so no limit is ever shared between slots."""
         # Bug 5 fix: mark as backtest so CircuitBreaker skips cb_state.json
         # load/save on every position close (was causing file I/O on every bar,
         # a major performance bottleneck with many symbols).
         risk_config = risk_config.copy()
         risk_config["is_backtest"] = True
-        self.risk_engine = RiskEngine(risk_config)
         self.risk_config = risk_config
+        self.book = SlotBook(risk_config, slot_configs, is_backtest=True)
         prop_firm_config = risk_config.get("prop_firm", {})
         if isinstance(prop_firm_config, dict):
             prop_firm_config = prop_firm_config.copy()
@@ -78,7 +83,9 @@ class PortfolioBacktestEngine(CostModelMixin):
             setattr(prop_firm_config, "is_backtesting", True)
             
         self.prop_firm_validator = PropFirmValidator(prop_firm_config)
-        self.risk_engine.prop_firm_validator = self.prop_firm_validator
+        # One validator for the whole account: a prop firm's limits are the
+        # firm's, not a slot's (see slot_book's module docstring).
+        self.book.prop_firm_validator = self.prop_firm_validator
         
         self.trades = []
         self.open_positions = []
@@ -132,18 +139,23 @@ class PortfolioBacktestEngine(CostModelMixin):
         # a symbol must throttle independently.
         self._last_entry_bar_by_slot: dict[str, int] = {}
 
-    def _exit_engine(self, strategy_id: str | None) -> RiskEngine:
-        """The RiskEngine whose break-even / trailing settings apply to this
-        strategy's legs — the shared one unless the strategy has measured exits."""
-        ov = getattr(self, "_exit_overrides", {}).get(strategy_id or "")
-        if not ov:
-            return self.risk_engine
-        eng = self._exit_engines.get(strategy_id)
-        if eng is None:
-            eng = RiskEngine({**self.risk_config, **ov})
-            eng.prop_firm_validator = self.prop_firm_validator
-            self._exit_engines[strategy_id] = eng
-        return eng
+    def _slot_config(self, cache_key: str, strategy_id: str | None = None) -> dict[str, Any]:
+        """The config THIS slot trades under — its entries, its exits, its limits."""
+        cfg = self.book.slot_configs.get(cache_key)
+        if cfg is not None:
+            return cfg
+        # No profile supplied (an older caller): fall back to the account config
+        # plus this strategy's measured exits, which is what `_exit_overrides`
+        # used to do for exits alone.
+        ov = getattr(self, "_exit_overrides", {}).get(strategy_id or "") or {}
+        cfg = {**self.risk_config, **ov}
+        self.book.set_slot_config(cache_key, cfg)
+        return cfg
+
+    def _slot_engine(self, cache_key: str, strategy_id: str | None = None) -> RiskEngine:
+        """This slot's own RiskEngine and CircuitBreaker."""
+        self._slot_config(cache_key, strategy_id)
+        return self.book.engine(cache_key)
 
     def _calc_pnl(
         self,
@@ -267,8 +279,8 @@ class PortfolioBacktestEngine(CostModelMixin):
         """
         symbol_map = symbol_map or {}
         # strategy_id -> exit fields (be_mode, trail_*) for that strategy's legs.
+        # Only used for slots the caller gave no profile for — see _slot_config.
         self._exit_overrides = exit_overrides or {}
-        self._exit_engines: dict[str, Any] = {}
 
         def _real_symbol(cache_key: str) -> str:
             return symbol_map.get(cache_key, cache_key)
@@ -566,7 +578,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                 current_atr = symbol_cache[_ckey]["atr"].get(current_time, 0.0)  # [12.8]
                 swing_points = symbol_cache[_ckey]["swings"].get(current_time, [])
 
-                actions = self._exit_engine(pos.get("strategy_id")).manage_open_position(
+                actions = self._slot_engine(_ckey, pos.get("strategy_id")).manage_open_position(
                     pos, current_price,
                     atr_value=current_atr,
                     swing_points=swing_points,
@@ -611,10 +623,10 @@ class PortfolioBacktestEngine(CostModelMixin):
                         logger.debug(f"[PORTFOLIO] on_position_bar raised (non-fatal): {_e}")
 
             # [4.7/D8/F5] Was unconditional — now gated on be_mode, matching engine.py.
-            _be_mode_cascade = self.risk_config.get("be_mode", "EITHER")
             if tp1_hit_groups:
                 for pos in self.open_positions:
-                    _pos_be_mode = self._exit_overrides.get(pos.get("strategy_id"), {}).get("be_mode", _be_mode_cascade)
+                    _pos_cfg = self._slot_config(pos.get("_cache_key", pos.get("symbol")), pos.get("strategy_id"))
+                    _pos_be_mode = _pos_cfg.get("be_mode", "EITHER")
                     if _pos_be_mode not in ("TP_HIT", "EITHER"):
                         continue
                     if pos.get("group_id") in tp1_hit_groups and pos not in closed_this_bar:
@@ -635,7 +647,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                             current_price=_mkt,
                             pip_size=pip_size,
                             atr=_atr,
-                            risk_config=self.risk_config,
+                            risk_config=_pos_cfg,
                             spread_pips=self._costs_for(_sym)["spread_pips"],
                         )
                         if pos["direction"] == "BUY":
@@ -707,8 +719,10 @@ class PortfolioBacktestEngine(CostModelMixin):
                         p.get("volume", 0.0) for p in self.trades
                         if p.get("group_id") == group_id_closed
                     ) + pos.get("volume", 0.0)
-                    if hasattr(self.risk_engine, "on_backtest_position_closed"):
-                        self.risk_engine.on_backtest_position_closed(
+                    _close_engine = self._slot_engine(pos.get("_cache_key", pos.get("symbol")),
+                                                      pos.get("strategy_id"))
+                    if hasattr(_close_engine, "on_backtest_position_closed"):
+                        _close_engine.on_backtest_position_closed(
                             group_id_closed, group_pnl, current_time,
                             pos.get("symbol", ""), group_lots,
                         )
@@ -752,7 +766,9 @@ class PortfolioBacktestEngine(CostModelMixin):
                 # backtest, silently not in a portfolio one, and (via
                 # bot_service -> RiskEngine) yes again live. Three paths, three
                 # behaviours, on one setting. All three now agree.
-                allow_pyramiding = bool(self.risk_config.get("allow_pyramiding", False))
+                _sig_strategy_id = sig.get("strategy_name", sig.get("strategy_id", "UNKNOWN"))
+                _slot_cfg = self._slot_config(cache_key, _sig_strategy_id)
+                allow_pyramiding = bool(_slot_cfg.get("allow_pyramiding", False))
                 already_open = False
                 if not allow_pyramiding:
                     for p in self.open_positions:
@@ -769,7 +785,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                     # Companion throttle so pyramiding cannot fire every bar.
                     # Keyed by SLOT, not symbol — two slots on one symbol have
                     # independent entry cadences.
-                    min_bars = int(self.risk_config.get("min_bars_between_entries", 0) or 0)
+                    min_bars = int(_slot_cfg.get("min_bars_between_entries", 0) or 0)
                     if min_bars > 0:
                         # `_tl_i` indexes the GLOBAL timeline (the union of every
                         # leg's bar times). On a single shared timeframe that is
@@ -808,12 +824,12 @@ class PortfolioBacktestEngine(CostModelMixin):
                     # see backtester/engine.py's evaluate_signal call for the full rationale.
                     from backend.risk.position_sizer import resolve_sizing_base_balance
                     _sizing_base_balance = resolve_sizing_base_balance(
-                        self.risk_config.get("sizing_basis", "STATIC"),
+                        _slot_cfg.get("sizing_basis", "STATIC"),
                         static_balance=initial_balance,
                         live_balance=balance,
                         live_equity=balance,
                     )
-                    approved, reason, tp_levels = self.risk_engine.evaluate_signal(
+                    approved, reason, tp_levels = self._slot_engine(cache_key, _sig_strategy_id).evaluate_signal(
                         signal_data=sig,
                         account_balance=balance,
                         current_time=current_time_dt,
@@ -930,15 +946,16 @@ class PortfolioBacktestEngine(CostModelMixin):
                 # open_positions_by_symbol are properly accumulated.
                 # Previously this call was missing entirely from portfolio engine,
                 # making all CB trade-count limits ineffective in portfolio backtests.
-                strategy_id = sig.get("strategy_name", sig.get("strategy_id", "UNKNOWN"))
+                strategy_id = _sig_strategy_id
+                _slot_circuit = self._slot_engine(cache_key, strategy_id).circuit
 
-                if hasattr(self.risk_engine, "circuit") and hasattr(self.risk_engine.circuit, "position_opened"):
+                if hasattr(_slot_circuit, "position_opened"):
                     from backend.risk.position_sizer import calculate_risk_dollars
                     actual_risk = sum(
                         calculate_risk_dollars(lvl.volume, sig["entry_price"], sig["stop_loss"], symbol)
                         for lvl in tp_levels
                     )
-                    self.risk_engine.circuit.position_opened(
+                    _slot_circuit.position_opened(
                         group_id,
                         len(tp_levels),
                         symbol=symbol,
@@ -949,9 +966,10 @@ class PortfolioBacktestEngine(CostModelMixin):
                     )
 
                 # Detect entry session (used for session win-rate breakdown and
-                # displayed directly in the trade-expand panel)
+                # displayed directly in the trade-expand panel). Taken from the
+                # FILL bar, like engine.py and live — see `entry_time` below.
                 try:
-                    entry_session = detect_session(sig_time)
+                    entry_session = detect_session(_to_epoch_seconds(current_time))
                 except Exception:
                     entry_session = "UNKNOWN"
 
@@ -996,8 +1014,13 @@ class PortfolioBacktestEngine(CostModelMixin):
                         "strategy_id": strategy_id,
                         "strategy": strategy_id,  # kept as an alias for backward compatibility
                         "direction": sig["direction"],
-                        "entry_time": sig_time,
-                        "entry_time_iso": _epoch_to_iso(sig_time),
+                        # The bar the leg FILLS on, which is the bar after the
+                        # signal's. engine.py and live both stamp it this way;
+                        # stamping the signal's own bar here put a portfolio
+                        # leg's entry one bar before the same leg run alone.
+                        "entry_time": current_time,
+                        "entry_time_iso": _epoch_to_iso(current_time),
+                        "signal_time": sig_time,
                         "entry_session": entry_session,
                         "entry_price": bar_open_price,
                         "stop_loss": _leg_sl,
@@ -1096,7 +1119,9 @@ class PortfolioBacktestEngine(CostModelMixin):
                     pos["exit_price"] = pos["entry_price"]
                     pos["exit_time"] = global_timeline[-1]
 
-                pos["exit_reason"] = "END_OF_BACKTEST"
+                # Same name engine.py uses, so a leg's record reads the same
+                # whichever engine ran it.
+                pos["exit_reason"] = "END_OF_DATA"
                 pos["status"] = "CLOSED"  # Task 6
                 pos["pnl"] = self._calc_pnl(pos["direction"], pos["entry_price"], pos["exit_price"], pos["volume"], pos.get("symbol", ""), pos.get("entry_time"), pos.get("exit_time"))
                 pos["duration_minutes"] = _calc_duration_minutes(pos.get("entry_time"), pos.get("exit_time"))
@@ -1197,8 +1222,7 @@ class PortfolioBacktestEngine(CostModelMixin):
             "significance": _compute_significance_safe(grouped_trades),
             # [2.24] Distinguishes a drawdown-latched stretch from "no setups".
             "circuit_breaker_summary": {
-                "paused_checks": self.risk_engine.circuit.paused_bars,
-                "last_pause_reason": self.risk_engine.circuit.last_pause_reason,
+                **self.book.circuit_summary(),
             },
         }
 

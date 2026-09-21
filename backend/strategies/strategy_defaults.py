@@ -156,6 +156,25 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
         ),
     },
 
+    # ── IVW — implied-volatility-wall breakout (ivw study, 2026-09-19) ──────
+    # Measured with ONE target one wall-width away (stop half a width: 1:2), no
+    # break-even and no trailing, plus the day-end exit the engine applies itself.
+    "IVW_v1": {
+        "tp_count": 1,
+        "tp1_rr": 2.0,
+        # the RiskEngine's shipped min_rr of 3.0 would reject every 1:2 signal
+        "min_rr": 2.0,
+        "be_mode": "NONE",
+        "trail_method_tp1": "NONE",
+        "trail_mode": "NONE",
+        "evidence": (
+            "ivw study 2026-09-19, 16 markets M5 2013-2026: fading the walls lost almost everywhere; "
+            "breakout of the 90th-percentile wall from a low cumulative-vol regime on a liquidation-"
+            "bubble bar, chosen on 2013-19, was +0.152R (t 3.3, n 512) on 2020-26 and positive on "
+            "10/10 markets with enough trades."
+        ),
+    },
+
     # ── Restored 2026-09-14 (removed 2026-09-11) ─────────────────────────────
     # Exit settings are the pre-removal measured ones; the 2026-09-14 confluence
     # study re-measures every one of them — see the evidence strings once updated.
@@ -333,3 +352,19 @@ def merge_strategy_defaults(
         if value is not None:
             merged[key] = value
     return merged
+
+
+def measured_min_rr_by_strategy(strategy_ids) -> dict[str, float]:
+    """Each strategy's measured minimum R:R, for the strategies that declare one.
+
+    RiskEngine lowers the account's `min_rr` to this value for that strategy's
+    signals only (never raises it). A measured target below the account gate
+    otherwise rejects every signal the strategy produces — IVW_v1's 1:2 under the
+    shipped 3.0 — and does so on every path, since the Backtester page always
+    sends its own min_rr and the portfolio has one gate for all rows."""
+    out: dict[str, float] = {}
+    for sid in strategy_ids:
+        v = get_strategy_defaults(sid).get("min_rr") if sid else None
+        if v is not None:
+            out[str(sid)] = float(v)
+    return out

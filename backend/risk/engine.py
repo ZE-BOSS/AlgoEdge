@@ -45,6 +45,9 @@ class RiskEngine:
         # Risk params
         self.risk_pct = config.get("risk_per_trade_pct", 1.0)
         self.min_rr = config.get("min_rr", 3.0)
+        # A strategy's measured min R:R (strategy_defaults.measured_min_rr_by_strategy)
+        # lowers `min_rr` for that strategy's signals only.
+        self.min_rr_by_strategy: dict[str, float] = dict(config.get("min_rr_by_strategy") or {})
         # [15.4] `min_rr` gates on blended_rr (task 5.7) — the VOLUME-WEIGHTED RR
         # across the TP ladder, not the last TP's RR. Those two numbers differ a
         # lot, and the difference can make a config that looks reasonable reject
@@ -82,6 +85,19 @@ class RiskEngine:
         self.vol_target_max_scale = float(config.get("vol_target_max_scale", 2.0) or 2.0)
         self.post_split_risk_tolerance_pct = config.get("post_split_risk_tolerance_pct", 5.0)
         self.open_risk_weight = config.get("open_risk_weight", 0.5)
+        # [per-slot] Drawdown brake. This slot's size falls linearly with the
+        # slot's OWN realised drawdown (circuit.drawdown_r()), reaching
+        # `slot_brake_floor` of normal at `slot_brake_r` R below its peak.
+        # Measured 2026-09-19 (implementation/PER-SLOT-RISK-DESIGN-2026-09-19.md
+        # §6): on eight real slot streams, 30R cut a broken slot's damage by
+        # ~60% and roughly halved the book's drawdown, at about 30% of the
+        # return when every slot is healthy.
+        #
+        # OFF by default (0), because turning it on changes what every existing
+        # slot earns, and a per-slot risk redesign is not the place to quietly
+        # re-size anyone's trades. Set `slot_brake_r` on a slot to arm it.
+        self.slot_brake_r = float(config.get("slot_brake_r", 0.0) or 0.0)
+        self.slot_brake_floor = float(config.get("slot_brake_floor", 0.25) or 0.25)
         # [3.5/E3] RiskParams.min_sl_pips — defined (default 10.0 in
         # RiskParams) but never actually reached minimum_stop_distance(); now
         # wired so it works when a caller passes it. Engine-level fallback
@@ -135,12 +151,16 @@ class RiskEngine:
             total = sum(weights) or 1.0
             blended = sum((w / total) * rr for w, rr in zip(weights, rrs))
 
-            if blended < float(self.min_rr):
+            gate = float(self.min_rr)
+            floor = self.min_rr_by_strategy.get(cfg.get("strategy_id"))
+            if floor is not None:
+                gate = min(gate, float(floor))
+            if blended < gate:
                 # f-string, not %-args: this project logs through loguru, which
                 # does not do %-style interpolation — the placeholders would be
                 # printed literally and the numbers lost.
                 logger.error(
-                    f"[RISK] min_rr={float(self.min_rr):.2f} can NEVER be met by this TP "
+                    f"[RISK] min_rr={gate:.2f} can NEVER be met by this TP "
                     f"ladder: TPs {rrs} at volumes {weights} blend to {blended:.2f}. Every "
                     f"signal will be rejected with 'insufficient_rr' before sizing, and the "
                     f"rejection funnel will look identical to a market that produced no "
@@ -423,6 +443,23 @@ class RiskEngine:
                 requested_risk_dollars = remaining_weekly_risk
                 dd_binding = "weekly_dd"
 
+        # [per-slot] The slot's own drawdown brake, applied after the drawdown
+        # budgets and before sizing, so it scales the risk actually deployed.
+        brake_mult = 1.0
+        if self.slot_brake_r > 0:
+            dd_r = getattr(self.circuit, "drawdown_r", lambda: 0.0)()
+            if dd_r > 0:
+                brake_mult = max(self.slot_brake_floor,
+                                 1.0 - (1.0 - self.slot_brake_floor) * dd_r / self.slot_brake_r)
+                if brake_mult < 1.0:
+                    requested_risk_dollars *= brake_mult
+                    dd_binding = "slot_drawdown_brake"
+                    logger.info(json.dumps({
+                        "event": "slot_brake_applied", "symbol": symbol,
+                        "strategy_id": strategy_id_for_cb, "slot_drawdown_r": round(dd_r, 2),
+                        "size_multiplier": round(brake_mult, 3),
+                    }))
+
         # Calculate lot size based on (potentially scaled down) requested_risk_dollars
         max_risk_hard_cap_pct_val = self.config.get("max_risk_hard_cap_pct", 3.0)
         
@@ -614,18 +651,23 @@ class RiskEngine:
             if tp.rr_multiplier <= be_trigger_rr_for_blend
         )
 
-        if blended_rr < self.min_rr:
+        min_rr = self.min_rr
+        _rr_sid = (strategy_id_for_cb if strategy_id_for_cb != "UNKNOWN"
+                   else signal_data.get("strategy_name") or signal_data.get("strategy_id"))
+        if _rr_sid in self.min_rr_by_strategy:
+            min_rr = min(min_rr, self.min_rr_by_strategy[_rr_sid])
+        if blended_rr < min_rr:
             logger.warning(json.dumps({
                 "event": "risk_rejected",
                 "reason": "insufficient_rr",
-                "min_rr": self.min_rr,
+                "min_rr": min_rr,
                 "blended_rr": round(blended_rr, 3),
                 "last_tp_rr": round(last_tp_rr, 2),
                 "entry": entry,
                 "sl": sl,
                 "last_tp": last_tp_price
             }))
-            return False, f"Blended RR {blended_rr:.2f} below minimum {self.min_rr}", []
+            return False, f"Blended RR {blended_rr:.2f} below minimum {min_rr}", []
 
         group_id = signal_data.get("group_id", "unknown")
         # Removed state modification: self.circuit.position_opened(group_id, len(tp_levels), symbol=symbol)

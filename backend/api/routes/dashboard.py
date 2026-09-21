@@ -154,11 +154,13 @@ async def reset_circuit_breaker(
     """
     try:
         from backend.services.bot_service import bot_service
-        cb = getattr(bot_service, "circuit_breaker", None)
-        if cb:
-            cb.manual_resume()
-            return {"status": "ok", "message": "Circuit breaker reset. Trading resumed."}
-        return {"status": "ok", "message": "Circuit breaker not initialized (bot not running)."}
+        book = getattr(bot_service, "slot_book", None)
+        circuits = book.circuits() if book else []
+        if circuits:
+            for cb in circuits:
+                cb.manual_resume()
+            return {"status": "ok", "message": f"Resumed {len(circuits)} slot(s)."}
+        return {"status": "ok", "message": "No slot breakers initialized (bot not running)."}
     except Exception as e:
         logger.error(f"Failed to reset circuit breaker: {e}")
         return {"status": "error", "message": str(e)}

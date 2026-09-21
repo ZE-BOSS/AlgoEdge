@@ -15,6 +15,7 @@ from backend.strategies.strategy_apa.params import APAParams
 from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
 from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
 from backend.strategies.strategy_orb.params import ORBParams
+from backend.strategies.strategy_ivw.params import IVWParams
 from backend.strategies.strategy_vwap.params import VWAPParams
 # ─────────────────────────────────────────────────────────────────────────────
 # RISK MANAGEMENT PARAMETERS
@@ -345,6 +346,26 @@ class RiskParams:
     backtest's BE buffer is now very slightly wider by default than before.
     Set to `1.0` to restore backtest's old, narrower spread term.
     """
+
+    slot_brake_r: float = 0.0
+    """
+    A slot's drawdown brake, in R. 0 (shipped) = off.
+
+    When set, a slot's position size falls linearly with THAT SLOT's own realised
+    drawdown, down to `slot_brake_floor` of normal once it is `slot_brake_r` R
+    below its own peak. Nothing here reads any other slot: the brake lives on the
+    slot's own circuit breaker (risk/slot_book.py).
+
+    Measured 2026-09-19 on eight real slot streams
+    (implementation/PER-SLOT-RISK-DESIGN-2026-09-19.md §6): at 30R it cut a broken
+    slot's damage by about 60% and roughly halved the book's drawdown, and cost
+    about 30% of the return when every slot was healthy. It is off by default
+    because arming it changes what every existing slot earns; set it per slot in
+    Settings -> Strategy -> Risk, or here to give new slots a starting value.
+    """
+
+    slot_brake_floor: float = 0.25
+    """The smallest fraction of normal size the brake may scale a slot down to."""
 
     use_strategy_exit_defaults: bool = True
     """
@@ -870,6 +891,17 @@ class InstrumentSlot:
     strategy_id: str = "APA_v1"
     enabled: bool = True
 
+    # [per-slot] THIS slot's own risk settings, as RiskParams field names:
+    # risk_per_trade_pct, max_daily_trades, max_daily_drawdown_pct,
+    # max_weekly_drawdown_pct, min_rr, tp_count/tp*_rr, be_*, trail_*,
+    # slot_brake_r ... Anything absent falls back to the account defaults in
+    # RiskParams, which is what a NEW slot starts from rather than a rule it
+    # must obey: the slot runs on its own RiskEngine and CircuitBreaker, so its
+    # limits count only its own trades (risk/slot_book.py, and
+    # implementation/PER-SLOT-RISK-DESIGN-2026-09-19.md). The named fields below
+    # are the older, narrower form of the same thing and still win over this.
+    risk: dict = field(default_factory=dict)
+
     # ── Per-slot overrides — None means "inherit the global RiskParams /
     # strategy default", exactly like every other None-defaulted override
     # field elsewhere in this codebase (see e.g. RiskParams.min_sl_pips's own
@@ -1071,6 +1103,7 @@ class UserConfigV2(UserConfig):
     apa: APAParams = field(default_factory=APAParams)
     vwap: VWAPParams = field(default_factory=VWAPParams)
     orb: ORBParams = field(default_factory=ORBParams)
+    ivw: IVWParams = field(default_factory=IVWParams)
     synth: SynthParams = field(default_factory=SynthParams)
     htf_fvg_flip: HTFFVGFlipParams = field(default_factory=HTFFVGFlipParams)
     bias_ifvg: BiasIFVGParams = field(default_factory=BiasIFVGParams)
@@ -1086,6 +1119,7 @@ class UserConfigV2(UserConfig):
         apa_data = data.pop("apa", {})
         vwap_data = data.pop("vwap", {})
         orb_data = data.pop("orb", {})
+        ivw_data = data.pop("ivw", {})
         synth_data = data.pop("synth", {})
         htf_fvg_flip_data = data.pop("htf_fvg_flip", {})
         bias_ifvg_data = data.pop("bias_ifvg", {})
@@ -1107,6 +1141,7 @@ class UserConfigV2(UserConfig):
         config.apa = APAParams(**filter_kwargs(APAParams, apa_data))
         config.vwap = VWAPParams(**filter_kwargs(VWAPParams, vwap_data))
         config.orb = ORBParams(**filter_kwargs(ORBParams, orb_data))
+        config.ivw = IVWParams(**filter_kwargs(IVWParams, ivw_data))
         config.synth = SynthParams(**filter_kwargs(SynthParams, synth_data))
         config.htf_fvg_flip = HTFFVGFlipParams(**filter_kwargs(HTFFVGFlipParams, htf_fvg_flip_data))
         config.bias_ifvg = BiasIFVGParams(**filter_kwargs(BiasIFVGParams, bias_ifvg_data))
@@ -1171,6 +1206,8 @@ class UserConfigV2(UserConfig):
             self.vwap = VWAPParams()
         if self.orb is None:
             self.orb = ORBParams()
+        if self.ivw is None:
+            self.ivw = IVWParams()
         if self.synth is None:
             self.synth = SynthParams()
         if self.htf_fvg_flip is None:

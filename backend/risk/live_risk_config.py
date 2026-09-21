@@ -26,6 +26,9 @@ def build_live_risk_config(config: Any, strategy_id: str) -> tuple[dict[str, Any
     risk_config: dict[str, Any] = {
         "risk_per_trade_pct": risk.risk_per_trade_pct,
         "min_rr": risk.min_rr,
+        # [per-slot] The drawdown brake's account default; a slot may set its own.
+        "slot_brake_r": getattr(risk, "slot_brake_r", 0.0),
+        "slot_brake_floor": getattr(risk, "slot_brake_floor", 0.25),
         "tp1_rr": risk.tp1_rr,
         "tp2_rr": risk.tp2_rr,
         "tp3_rr": risk.tp3_rr,
@@ -116,6 +119,8 @@ def build_live_risk_config(config: Any, strategy_id: str) -> tuple[dict[str, Any
     # `use_strategy_exit_defaults = False` is how a user makes their own exits
     # apply to every strategy (the Backtester's switch of the same name).
     applied: dict[str, Any] = {}
+    from backend.strategies.strategy_defaults import measured_min_rr_by_strategy
+    risk_config["min_rr_by_strategy"] = measured_min_rr_by_strategy([strategy_id])
     if not getattr(risk, "use_strategy_exit_defaults", True):
         return risk_config, applied
     try:

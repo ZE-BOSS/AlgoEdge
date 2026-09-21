@@ -529,10 +529,11 @@ Continue?`)) return;
       {state && (
         <div style={{ marginBottom: 16 }}>
           <StateRow label="Connected MT5 login" value={state.live_login ?? 'not connected'} />
+          {/* [per-slot] One breaker state file per slot now, so this counts them. */}
           <StateRow
-            label="Risk state (cb_state.json)"
+            label="Risk state (one file per slot)"
             value={state.circuit_breaker_state.exists
-              ? `account #${state.circuit_breaker_state.mt5_account ?? 'untagged'} · daily P&L ${(state.circuit_breaker_state.daily_pnl ?? 0).toFixed(2)}${state.circuit_breaker_state.is_paused ? ' · PAUSED' : ''}`
+              ? `${state.circuit_breaker_state.slots ?? 1} slot(s) · account #${state.circuit_breaker_state.mt5_account ?? 'mixed'} · daily P&L ${(state.circuit_breaker_state.daily_pnl ?? 0).toFixed(2)}${state.circuit_breaker_state.is_paused ? ' · PAUSED' : ''}`
               : 'none'}
             warn={state.circuit_breaker_state.stale}
           />

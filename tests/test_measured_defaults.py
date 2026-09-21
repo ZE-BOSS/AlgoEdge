@@ -19,7 +19,7 @@ from backend.strategies.strategy_defaults import (
     OVERRIDABLE,
 )
 
-STRATEGIES = ["APA_v1", "DriftJumpAlpha_v1", "ORB_v1", "VWAP_v1",
+STRATEGIES = ["APA_v1", "DriftJumpAlpha_v1", "ORB_v1", "IVW_v1", "VWAP_v1",
               "HTFFVGFlip_v1", "BiasIFVG_v1", "SpikeFade_v1", "RangeRevert_v1", "RangeBreakout_v1", "TrendDrift_v1"]
 
 

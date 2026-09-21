@@ -1,18 +1,41 @@
-import { useState, useEffect } from 'react';
-import ConfluenceFields from '../../components/ConfluenceFields';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Sliders, Save, Loader2, Check } from 'lucide-react';
-import { getConfig, updateConfig } from '../../services/api';
+import { Sliders, Save, Loader2, Check, Plus } from 'lucide-react';
+import { getConfig, updateConfig, getParameterSchema } from '../../services/api';
 import { invalidateConfigDependents } from '../../utils/invalidate';
 import { useConnectionStore, useAuthStore } from '../../store';
+import SlotEditor from '../../components/SlotEditor';
+import SymbolPicker from '../../components/SymbolPicker';
+import { useSymbolOptions } from '../../hooks/useSymbolOptions';
+import { STRATEGY_GROUP, STRATEGY_OPTIONS } from '../../components/slotSpec';
+
+/**
+ * The trading book: one row per symbol + strategy, each with its OWN strategy
+ * parameters and its OWN risk. That pairing is the unit everywhere now — the
+ * live bot, a single backtest and a portfolio row all run a slot.
+ *
+ * This page used to be a wall of ~300 symbol chips followed by nine global
+ * strategy parameter cards. Those cards were shared by every slot running that
+ * strategy, so ORB on gold and ORB on GBPJPY could not have different ranges or
+ * timeframes, and the risk that applied to them lived on another page entirely.
+ * Both are gone: parameters are edited on the slot that uses them
+ * (components/SlotEditor.jsx), generated from the backend's own schema.
+ */
+
 
 export default function StrategySettings() {
   const { status } = useConnectionStore();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
+  const [newSymbol, setNewSymbol] = useState('XAUUSD');
+  const [newStrategy, setNewStrategy] = useState('APA_v1');
 
   const [config, setConfig] = useState({
+    // [per-slot] Read-only here: the account defaults a slot inherits when it
+    // sets nothing of its own. Shown under each field in the slot's Risk panel,
+    // and stripped from this page's save so it can never overwrite the Risk page.
+    risk: {},
     symbols: ['XAUUSD', 'XAGUSD', 'XPTUSD', 'EURUSD', 'GBPUSD'], // legacy support
     instrument_settings: [
       { symbol: 'XAUUSD', strategy_id: 'APA_v1', enabled: true },
@@ -110,6 +133,16 @@ export default function StrategySettings() {
       min_stop_atr: 0.25,
       close_at_session_end: true,
     },
+    ivw: {
+      wall_percentile: 90,
+      lookback_days: 60,
+      regime_filter: 'low',
+      require_bubble: true,
+      forecast_filter: 'any',
+      stop_width_frac: 0.5,
+      side: 'both',
+      close_at_day_end: true,
+    },
     // Shared by SpikeFade / RangeRevert / RangeBreakout / TrendDrift — all four
     // read the same backend dataclass (SynthParams), so one section serves them.
     synth: {
@@ -151,6 +184,15 @@ export default function StrategySettings() {
   });
 
   // Load current config from backend
+
+  const { data: schemaResp } = useQuery({
+    queryKey: ['parameter-schema'],
+    queryFn: () => getParameterSchema().then(r => r.data),
+    enabled: status === 'ONLINE' && isAuthenticated,
+    staleTime: 60 * 60 * 1000,
+  });
+  const schema = schemaResp?.fields;
+
   const { data: remoteConfig } = useQuery({
     queryKey: ['config'],
     queryFn: () => getConfig().then(r => r.data),
@@ -171,10 +213,9 @@ export default function StrategySettings() {
             })
           ),
         };
-        // [P2.1] A config saved before this page wrote slots carries only
+        // A config saved before this page wrote slots carries only
         // `instrument_settings`. Project it to one slot per symbol — the same
-        // migration config_schema.py performs server-side, so what the form
-        // shows is what the backend already resolved.
+        // migration config_schema.py performs server-side.
         if (!merged.instrument_slots?.length && merged.instrument_settings?.length) {
           merged.instrument_slots = merged.instrument_settings.map((i, n) => ({
             slot_id: `legacy${String(n).padStart(7, '0')}`,
@@ -191,509 +232,174 @@ export default function StrategySettings() {
   const mutation = useMutation({
     mutationFn: (newConfig) => updateConfig({ config: newConfig }),
     onSuccess: () => {
-      // Every cached response that embeds config, not just ['config'] itself —
-      // the dashboard, the live-account risk resolution and the stats all
-      // derive from these values and kept serving pre-save copies.
       invalidateConfigDependents(queryClient);
       setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setTimeout(() => setSaved(false), 2000);
     },
   });
 
-  const updateNested = (section, key, val) => {
-    setConfig({
-      ...config,
-      [section]: {
-        ...(config[section] || {}),
-        [key]: val
-      }
-    });
+  const handleSave = () => {
+    // `risk` belongs to the Risk page. This page only reads it (to show what a
+    // slot inherits), so sending it back could overwrite a change made there
+    // while this page was open.
+    const toSave = { ...config };
+    delete toSave.risk;
+    mutation.mutate(toSave);
   };
-  const handleSave = () => mutation.mutate(config);
 
-  const allSymbols = [
-    'XAUUSD', 'Gold', 'XAU', 'XAGUSD', 'Silver', 'XAG', 'XPTUSD', 'Platinum', 'XPT',
-    'EURUSD', 'GBPUSD', 'AUDUSD', 'Aussie', 'GBPJPY', 'Geppy', 'GJ',
-    'GBPNZD', 'GBPAUD', 'GBPCHF', 'EURJPY', 'EURAUD', 'USDJPY',
-    'USDCHF', 'USDCAD', 'NZDUSD', 'Kiwi', 'AUDJPY', 'CADJPY', 'GBPCAD', 'EURGBP',
-    'US30', 'Wall Street 30', 'WS30', 'DJI', 'DOW', 'YM',
-    'NAS100', 'US100', 'USTEC', 'NDX', 'NQ',
-    'SPX500', 'US500', 'SPX', 'SP500', 'S&P500', 'ES',
-    'GER40', 'DAX', 'DE40', 'GER30', 'HK50', 'Hang Seng', 'HSI',
-    'US2000', 'RUT', 'UK100', 'FTSE100', 'FRA40', 'CAC40',
-    'EU50', 'EUSTX50', 'NTH25', 'AEX25', 'SWI20', 'SMI20',
-    'AUS200', 'ASX200', 'JP225', 'Nikkei',
-    'USOIL', 'WTI', 'Crude Oil', 'OIL', 'XTIUSD', 'US Oil',
-    'UKOIL', 'Brent', 'UK Brent Oil', 'XCUUSD', 'Copper',
-    'NG', 'XNGUSD', 'Natural Gas',
-    'BTCUSD', 'Bitcoin', 'BTC', 'ETHUSD', 'ETH', 'Ethereum',
-    'DOGUSD', 'Dogecoin', 'DOGE', 'SOLUSD', 'Solana', 'SOL',
-    'XRPUSD', 'Ripple', 'XRP', 'LTCUSD', 'Litecoin', 'LTC',
-    'Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index',
-    'Volatility 75 Index', 'Volatility 100 Index', 'Volatility 150 Index', 'Volatility 250 Index',
-    'Volatility 10 (1s) Index', 'Volatility 25 (1s) Index', 'Volatility 50 (1s) Index',
-    'Volatility 75 (1s) Index', 'Volatility 100 (1s) Index', 'Volatility 150 (1s) Index', 'Volatility 250 (1s) Index',
-    'Boom 300 Index', 'Boom 500 Index', 'Boom 1000 Index',
-    'Crash 300 Index', 'Crash 500 Index', 'Crash 1000 Index',
-    'Jump 10 Index', 'Jump 25 Index', 'Jump 50 Index', 'Jump 75 Index', 'Jump 100 Index',
-    'Step Index', 'Range Break 100 Index', 'Range Break 200 Index',
-  ];
-
-  // ── [P2.1] Slot model ────────────────────────────────────────────────────
-  // A slot is one (symbol, strategy) pairing. The same symbol may appear in as
-  // many slots as you like; each gets its own engine instance, its own daily
-  // budget and its own position quota on the backend.
-  const slots = config.instrument_slots || [];
-  const activeSymbols = [...new Set(slots.filter(s => s.enabled).map(s => s.symbol))];
+  const slots = useMemo(() => config.instrument_slots || [], [config.instrument_slots]);
 
   // Everything that writes slots goes through here, so `symbols` (which
-  // /bot/start uses to decide what is live) and the legacy
-  // `instrument_settings` projection can never fall out of step with them.
+  // /bot/start reads) and the legacy `instrument_settings` projection can never
+  // fall out of step with them.
   const commitSlots = (nextSlots) => {
-    const enabled = nextSlots.filter(s => s.enabled);
+    const enabled = nextSlots.filter(s => s.enabled !== false);
     const symbols = [...new Set(enabled.map(s => s.symbol))];
-    // One legacy row per symbol — first enabled slot wins. Read-only as far as
-    // this page is concerned; the backend prefers instrument_slots when present.
     const legacy = symbols.map(sym => {
       const first = enabled.find(s => s.symbol === sym);
       return { symbol: sym, strategy_id: first.strategy_id, enabled: true };
     });
-    setConfig({
-      ...config,
-      instrument_slots: nextSlots,
-      instrument_settings: legacy,
-      symbols,
-    });
+    setConfig({ ...config, instrument_slots: nextSlots, instrument_settings: legacy, symbols });
   };
 
   const newSlotId = () =>
     (crypto?.randomUUID?.() || Math.random().toString(16).slice(2).padEnd(12, '0'))
       .replace(/-/g, '').slice(0, 12);
 
-  const addSlot = (symbol, strategyId = 'APA_v1') => {
-    if (!symbol) return;
-    commitSlots([...slots, { slot_id: newSlotId(), symbol, strategy_id: strategyId, enabled: true }]);
+  const addSlot = () => {
+    if (!newSymbol) return;
+    commitSlots([...slots, {
+      slot_id: newSlotId(), symbol: newSymbol, strategy_id: newStrategy,
+      enabled: true, strategy_params: {}, risk: {},
+    }]);
   };
 
-  const updateSlot = (slotId, key, val) =>
-    commitSlots(slots.map(s => (s.slot_id === slotId ? { ...s, [key]: val } : s)));
-
+  // Broker names first (Deriv lists the Nasdaq as "US Tech 100"), then the
+  // symbols this book already trades. Typing anything else is still allowed.
+  const symbolOptions = useSymbolOptions(
+    (config.instrument_slots || []).map(sl => sl.symbol).filter(Boolean),
+  );
+  const updateSlot = (slotId, next) =>
+    commitSlots(slots.map(s => (s.slot_id === slotId ? { ...next, slot_id: slotId } : s)));
   const removeSlot = (slotId) => commitSlots(slots.filter(s => s.slot_id !== slotId));
-
   const duplicateSlot = (slotId) => {
     const src = slots.find(s => s.slot_id === slotId);
-    if (!src) return;
-    commitSlots([...slots, { ...src, slot_id: newSlotId() }]);
+    if (src) commitSlots([...slots, { ...src, slot_id: newSlotId() }]);
   };
 
-  // Toggling a symbol chip adds a first slot for it, or disables every slot on
-  // it. Removing individual strategies is done on the slot row itself.
-  const toggleSymbol = (sym) => {
-    const existing = slots.filter(s => s.symbol === sym);
-    if (existing.length === 0) { addSlot(sym); return; }
-    const anyEnabled = existing.some(s => s.enabled);
-    commitSlots(slots.map(s => (s.symbol === sym ? { ...s, enabled: !anyEnabled } : s)));
-  };
+  const duplicatePairings = useMemo(() => {
+    const seen = new Set();
+    const dupes = new Set();
+    slots.forEach(s => {
+      const key = `${s.symbol}::${s.strategy_id}`;
+      if (seen.has(key)) dupes.add(key);
+      seen.add(key);
+    });
+    return dupes;
+  }, [slots]);
 
-  // A slot pairing is only meaningful once — two identical (symbol, strategy)
-  // rows would give one strategy two independent daily budgets on one symbol,
-  // which is double-counting, not diversification.
-  const duplicatePairings = new Set(
-    slots
-      .map(s => `${s.symbol}::${s.strategy_id}`)
-      .filter((k, i, arr) => arr.indexOf(k) !== i)
-  );
-
-
+  // What the book risks when everything goes wrong at once. Nothing caps it any
+  // more — each slot stops only itself — so it is shown rather than enforced.
+  const exposure = useMemo(() => {
+    const enabled = slots.filter(s => s.enabled !== false);
+    const acct = config.risk || {};
+    const num = (v, d) => (v === undefined || v === null || v === '' ? d : Number(v));
+    const worstDay = enabled.reduce((sum, s) =>
+      sum + num(s.risk?.max_daily_drawdown_pct, num(acct.max_daily_drawdown_pct, 0)), 0);
+    const openRisk = enabled.reduce((sum, s) =>
+      sum + num(s.risk?.risk_per_trade_pct, num(s.risk_per_trade_pct, num(acct.risk_per_trade_pct, 0)))
+        * num(s.risk?.max_positions_per_symbol, num(s.max_positions_per_symbol, num(acct.max_positions_per_symbol, 1))), 0);
+    return { count: enabled.length, worstDay, openRisk };
+  }, [slots, config.risk]);
 
   return (
-    <div style={{ display: 'grid', gap: 20, maxWidth: 800 }}>
-      <div className="card">
-        <div className="card-header"><span className="card-title"><Sliders size={14} /> Active Symbols</span></div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          {[...new Set([...allSymbols, ...activeSymbols])].map(sym => (
-            <button
-              key={sym}
-              className={`btn btn-sm ${activeSymbols.includes(sym) ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => toggleSymbol(sym)}
-            >
-              {sym}
-            </button>
-          ))}
-          <input
-            type="text"
-            placeholder="Add custom symbol... (Enter)"
-            className="input"
-            style={{ width: 220, height: 32, fontSize: '0.875rem' }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && e.target.value.trim()) {
-                const newSym = e.target.value.trim();
-                if (!activeSymbols.includes(newSym)) {
-                  toggleSymbol(newSym);
-                }
-                e.target.value = '';
-              }
-            }}
-          />
-        </div>
-      </div>
-
+    <div style={{ display: 'grid', gap: 20, maxWidth: 1100 }}>
       <div className="card">
         <div className="card-header">
-          <span className="card-title">Strategy Slots</span>
-        </div>
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12 }}>
-          One row = one symbol running one strategy. Add the same symbol more than once to
-          run several strategies on it at the same time — each slot gets its own engine,
-          its own daily budget and its own position quota, and they cannot block each
-          other's entries. This is the same pairing the portfolio backtester uses, so a
-          basket you tested there can be reproduced here row for row.
+          <span className="card-title"><Sliders size={14} /> Trading Book</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            {slots.length} slot{slots.length === 1 ? '' : 's'}
+          </span>
         </div>
 
+        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 0 }}>
+          One row is one symbol running one strategy, with its own parameters and its own risk.
+          Add the same symbol twice to run two strategies on it: each gets its own engine, its own
+          daily budget and its own position quota, and neither can block the other. This is the
+          same unit the Backtester runs, so the slot you test is the slot that trades.
+        </p>
+
+        {exposure.count > 0 && (
+          <div style={{
+            marginBottom: 12, padding: 10, background: 'var(--bg-tertiary)',
+            border: '1px solid var(--border)', borderRadius: 'var(--radius-xs)',
+            fontSize: '0.75rem', color: 'var(--text-secondary)',
+          }}>
+            <strong>{exposure.count} slot{exposure.count === 1 ? '' : 's'} enabled.</strong>{' '}
+            Each stops itself and nothing stops them together: if every one hit its own daily limit
+            on the same day, that day would cost <strong>{exposure.worstDay.toFixed(1)}%</strong> of
+            the account, and with one position open in each,{' '}
+            <strong>{exposure.openRisk.toFixed(1)}%</strong> is at risk.
+          </div>
+        )}
+
         {duplicatePairings.size > 0 && (
-          <div style={{ marginBottom: 12, padding: 10, background: 'var(--bg-warning)', border: '1px solid var(--yellow)', borderRadius: 'var(--radius-xs)', color: 'var(--yellow)', fontSize: '0.8rem' }}>
+          <div style={{
+            marginBottom: 12, padding: 10, background: 'var(--bg-warning)',
+            border: '1px solid var(--yellow)', borderRadius: 'var(--radius-xs)',
+            color: 'var(--yellow)', fontSize: '0.78rem',
+          }}>
             <strong>Duplicate slot{duplicatePairings.size > 1 ? 's' : ''}:</strong>{' '}
-            {[...duplicatePairings].join(', ')} — the same strategy is on the same symbol
-            twice. That gives one strategy two independent daily budgets and two position
-            quotas on one instrument, which doubles exposure without adding a signal.
+            {[...duplicatePairings].join(', ')} — the same strategy on the same symbol twice gives it
+            two budgets and two quotas on one instrument, doubling exposure without adding a signal.
             Remove one, or change its strategy.
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="slot-list">
           {slots.length === 0 && (
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '12px 0' }}>
-              No slots configured. Pick a symbol above, or add one below.
+              No slots yet. Add one below — it starts from the account defaults on the Risk page and
+              the measured settings for that symbol.
             </div>
           )}
-          {slots.map(slot => {
-            const dup = duplicatePairings.has(`${slot.symbol}::${slot.strategy_id}`);
-            return (
-              <div
-                key={slot.slot_id}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-                  background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)',
-                  border: `1px solid ${dup ? 'var(--yellow)' : 'var(--border)'}`,
-                  opacity: slot.enabled ? 1 : 0.5,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={slot.enabled !== false}
-                  onChange={e => updateSlot(slot.slot_id, 'enabled', e.target.checked)}
-                  title={slot.enabled ? 'Enabled — the bot scans this slot' : 'Disabled'}
-                  style={{ width: 14, height: 14 }}
-                />
-                <select
-                  value={slot.symbol}
-                  onChange={e => updateSlot(slot.slot_id, 'symbol', e.target.value)}
-                  style={{ fontSize: '0.8rem', padding: '4px 8px', width: 200 }}
-                >
-                  {[...new Set([...allSymbols, slot.symbol])].map(sym => (
-                    <option key={sym} value={sym}>{sym}</option>
-                  ))}
-                </select>
-                <select
-                  value={slot.strategy_id || 'APA_v1'}
-                  onChange={e => updateSlot(slot.slot_id, 'strategy_id', e.target.value)}
-                  style={{ fontSize: '0.8rem', padding: '4px 8px', flex: 1, minWidth: 200 }}
-                >
-                      <option value="APA_v1">APA (Adv. Price Action)</option>
-                      <option value="VWAP_v1">VWAP Institutional</option>
-                      <option value="ORB_v1">Opening Range Breakout</option>
-                      <option value="DriftJumpAlpha_v1">Drift &amp; Jump Alpha</option>
-                      <option value="BoomDriftJump_v1">Boom Drift &amp; Jump</option>
-                      <option value="HTFFVGFlip_v1">HTF FVG Flip</option>
-                      <option value="BiasIFVG_v1">Bias KeyLevel IFVG</option>
-                      <option value="SpikeFade_v1">Spike Fade</option>
-                      <option value="RangeRevert_v1">Range Revert</option>
-                      <option value="RangeBreakout_v1">Range Breakout</option>
-                      <option value="TrendDrift_v1">Trend Drift</option>
-                </select>
-                <label
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', whiteSpace: 'nowrap', cursor: 'pointer' }}
-                  title="On: this slot runs the settings measured for this symbol (the Backtester's 'Use the measured settings' box). Off: it runs the strategy parameters below, exactly as the Backtester does with that box unticked."
-                >
-                  <input
-                    type="checkbox"
-                    checked={slot.use_measured_params !== false}
-                    onChange={e => updateSlot(slot.slot_id, 'use_measured_params', e.target.checked)}
-                    style={{ width: 14, height: 14 }}
-                  />
-                  Measured settings
-                </label>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => duplicateSlot(slot.slot_id)}
-                  title="Add another strategy on this symbol"
-                >
-                  Duplicate
-                </button>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => removeSlot(slot.slot_id)}
-                  title="Remove this slot"
-                >
-                  Remove
-                </button>
-              </div>
-            );
-          })}
+          {slots.map(slot => (
+            <SlotEditor
+              key={slot.slot_id}
+              slot={slot}
+              schema={schema}
+              accountRisk={config.risk}
+              strategyDefaults={config[STRATEGY_GROUP[slot.strategy_id]] || {}}
+              symbols={symbolOptions}
+              collapsible
+              defaultOpen={false}
+              onChange={next => updateSlot(slot.slot_id, next)}
+              onRemove={() => removeSlot(slot.slot_id)}
+              onDuplicate={() => duplicateSlot(slot.slot_id)}
+            />
+          ))}
         </div>
 
-        <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select
-            id="new-slot-symbol"
-            defaultValue={allSymbols[0]}
-            style={{ fontSize: '0.8rem', padding: '4px 8px', width: 200 }}
-          >
-            {allSymbols.map(sym => <option key={sym} value={sym}>{sym}</option>)}
+        <div className="slot-add">
+          <SymbolPicker
+            className="slot-add__symbol"
+            value={newSymbol}
+            onChange={setNewSymbol}
+            options={symbolOptions}
+            placeholder="Symbol"
+          />
+          <select className="input input-sm" value={newStrategy} onChange={e => setNewStrategy(e.target.value)}>
+            {STRATEGY_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => addSlot(document.getElementById('new-slot-symbol')?.value)}
-          >
-            + Add slot
+          <button className="btn btn-primary btn-sm" onClick={addSlot}>
+            <Plus size={13} /> Add slot
           </button>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            {activeSymbols.length} symbol{activeSymbols.length === 1 ? '' : 's'} ·{' '}
-            {slots.filter(x => x.enabled).length} active slot
-            {slots.filter(x => x.enabled).length === 1 ? '' : 's'}
-          </span>
-        </div>
-      </div>
-
-
-
-      <div className="card">
-        <div className="card-header"><span className="card-title">APA (Advanced Price Action) Parameters</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Setup</label><select value={config.apa?.setup_mode || 'HEAD_AND_SHOULDERS'} onChange={e => updateNested('apa', 'setup_mode', e.target.value)}><option value="HEAD_AND_SHOULDERS">Head &amp; shoulders (original)</option><option value="SESSION_BREAKOUT_TREND">Session breakout with the trend (edge lab)</option></select><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Session breakout = the ORB-trend price-action setup under this APA slot. Don't also run ORB_v1 on the same symbol, or both take the same trade.</div></div>
-          <div><label>Breakout Session</label><select value={config.apa?.breakout_session || 'native'} onChange={e => updateNested('apa', 'breakout_session', e.target.value)}><option value="native">Native</option><option value="alt">The other one</option><option value="london">London</option><option value="ny">New York</option></select></div>
-          <div><label>Structure Timeframe</label><input type="text" value={config.apa?.structure_timeframe || 'M15'} onChange={e => updateNested('apa', 'structure_timeframe', e.target.value)} /></div>
-          <div><label>Entry Timeframe</label><input type="text" value={config.apa?.entry_timeframe || 'M5'} onChange={e => updateNested('apa', 'entry_timeframe', e.target.value)} /></div>
-          <div><label>Minor Fractal (M)</label><input type="number" value={config.apa?.minor_fractal_m ?? 3} onChange={e => updateNested('apa', 'minor_fractal_m', +e.target.value)} /></div>
-          <div><label>Major Fractal (M)</label><input type="number" value={config.apa?.major_fractal_m ?? 8} onChange={e => updateNested('apa', 'major_fractal_m', +e.target.value)} /></div>
-          <div><label>Shoulder Symmetry (× ATR)</label><input type="number" step="0.05" min="0" value={config.apa?.shoulder_symmetry_tolerance_atr ?? 0.3} onChange={e => updateNested('apa', 'shoulder_symmetry_tolerance_atr', +e.target.value)} /></div>
-          <div><label>Tight Level Threshold (× ATR)</label><input type="number" step="0.05" min="0" value={config.apa?.tight_level_threshold_atr ?? 0.35} onChange={e => updateNested('apa', 'tight_level_threshold_atr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Head and Shoulder closer than this × ATR → SL covers both wicks (the wider, survivable branch).</div></div>
-          <div><label>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={config.apa?.sl_buffer_atr_mult ?? 0.5} onChange={e => updateNested('apa', 'sl_buffer_atr_mult', +e.target.value)} /></div>
-          <div><label>Min SL (pips)</label><input type="number" step="0.5" min="0" value={config.apa?.min_sl_pips ?? 12.0} onChange={e => updateNested('apa', 'min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor. 0 disables.</div></div>
-          <div><label>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={config.apa?.min_sl_atr_mult ?? 1.0} onChange={e => updateNested('apa', 'min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative floor. Larger floor wins. 0 disables.</div></div>
-          <div>
-            <label>Invalidation Zone Source</label>
-            <select value={config.apa?.invalidation_zone_source || 'right_shoulder'} onChange={e => updateNested('apa', 'invalidation_zone_source', e.target.value)}>
-              <option value="right_shoulder">Right Shoulder (conservative)</option>
-              <option value="both">Left + Right Shoulder (wider)</option>
-            </select>
-          </div>
-          <div><label>Session Start (UTC)</label><input type="text" value={config.apa?.session_start || '07:00'} onChange={e => updateNested('apa', 'session_start', e.target.value)} /></div>
-          <div><label>Session Cutoff (UTC)</label><input type="text" value={config.apa?.session_cutoff || '16:00'} onChange={e => updateNested('apa', 'session_cutoff', e.target.value)} /></div>
-          <div><label>ATR Lookback</label><input type="number" value={config.apa?.atr_lookback ?? 14} onChange={e => updateNested('apa', 'atr_lookback', +e.target.value)} /></div>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
-              <input type="checkbox" checked={config.apa?.session_filter_enabled ?? true} onChange={e => updateNested('apa', 'session_filter_enabled', e.target.checked)} />
-              Enable Session Filter
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header"><span className="card-title">VWAP Institutional Parameters</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>VWAP Anchor (min)</label><input type="number" value={config.vwap?.vwap_anchor_minutes ?? 15} onChange={e => updateNested('vwap', 'vwap_anchor_minutes', +e.target.value)} /></div>
-          <div><label>Entry Timeframe</label><input type="text" value={config.vwap?.entry_timeframe || 'M5'} onChange={e => updateNested('vwap', 'entry_timeframe', e.target.value)} /></div>
-          <div><label>Momentum Lookback (bars)</label><input type="number" value={config.vwap?.momentum_lookback_bars ?? 4} onChange={e => updateNested('vwap', 'momentum_lookback_bars', +e.target.value)} /></div>
-          <div><label>Momentum Threshold (%)</label><input type="number" step="0.01" value={config.vwap?.momentum_threshold_pct ?? 0.1} onChange={e => updateNested('vwap', 'momentum_threshold_pct', +e.target.value)} /></div>
-          <div>
-            <label>SL Method</label>
-            <select value={config.vwap?.sl_method || 'auto'} onChange={e => updateNested('vwap', 'sl_method', e.target.value)}>
-              <option value="auto">Auto (by instrument class)</option>
-              <option value="fixed_points">Fixed Points</option>
-              <option value="atr_multiple">ATR Multiple</option>
-            </select>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Auto: index CFDs/futures use SL Points; FX, metals, crypto and synthetics use the ATR multiple.</div>
-          </div>
-          <div><label>SL Points (index only)</label><input type="number" step="1" min="0" value={config.vwap?.sl_points ?? 80.0} onChange={e => updateNested('vwap', 'sl_points', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Native index points, not pipettes. Ignored on FX.</div></div>
-          <div><label>SL ATR Multiplier</label><input type="number" step="0.1" min="0" value={config.vwap?.sl_atr_multiplier ?? 3.0} onChange={e => updateNested('vwap', 'sl_atr_multiplier', +e.target.value)} /></div>
-          <div><label>Min SL (pips)</label><input type="number" step="0.5" min="0" value={config.vwap?.min_sl_pips ?? 8.0} onChange={e => updateNested('vwap', 'min_sl_pips', +e.target.value)} /></div>
-          <div><label>Min SL (× Spread)</label><input type="number" step="0.5" min="0" value={config.vwap?.min_sl_spread_mult ?? 4.0} onChange={e => updateNested('vwap', 'min_sl_spread_mult', +e.target.value)} /></div>
-          <div><label>Target R:R</label><input type="number" step="0.1" min="0" value={config.vwap?.target_rr ?? 2.0} onChange={e => updateNested('vwap', 'target_rr', +e.target.value)} /></div>
-          <div><label>Session Open</label><input type="text" value={config.vwap?.session_open || '09:30'} onChange={e => updateNested('vwap', 'session_open', e.target.value)} /></div>
-          <div><label>Session Exclude End</label><input type="text" value={config.vwap?.session_exclude_end || '10:30'} onChange={e => updateNested('vwap', 'session_exclude_end', e.target.value)} /></div>
-          <div><label>Entry Cutoff</label><input type="text" value={config.vwap?.entry_cutoff || '15:30'} onChange={e => updateNested('vwap', 'entry_cutoff', e.target.value)} /></div>
-          <div><label>Hard Close</label><input type="text" value={config.vwap?.hard_close || '15:55'} onChange={e => updateNested('vwap', 'hard_close', e.target.value)} /></div>
-          <div><label>Max Trades / Day</label><input type="number" value={config.vwap?.max_trades_per_day ?? 4} onChange={e => updateNested('vwap', 'max_trades_per_day', +e.target.value)} /></div>
-          <div><label>Max Losses / Day</label><input type="number" value={config.vwap?.max_losses_per_day ?? 2} onChange={e => updateNested('vwap', 'max_losses_per_day', +e.target.value)} /></div>
-          <div><label>Drawdown Kill (%)</label><input type="number" step="0.5" value={config.vwap?.drawdown_kill_pct ?? 10.0} onChange={e => updateNested('vwap', 'drawdown_kill_pct', +e.target.value)} /></div>
-          <div><label>Entry Mode</label><select value={config.vwap?.entry_mode || 'PULLBACK_TO_VALUE'} onChange={e => updateNested('vwap', 'entry_mode', e.target.value)}><option value="PULLBACK_TO_VALUE">Pullback to value (original)</option><option value="BAND_REVERSION">Band reversion</option><option value="BOTH">Both</option><option value="SESSION_TREND">Session trend (Zarattini &amp; Aziz)</option><option value="SESSION_PULLBACK">Session pullback</option></select></div>
-          <div><label>Session-Mode Session</label><select value={config.vwap?.session_mode_session || 'native'} onChange={e => updateNested('vwap', 'session_mode_session', e.target.value)}><option value="native">Native</option><option value="alt">The other one</option><option value="london">London</option><option value="ny">New York</option></select></div>
-          <div><label>Session-Mode Confluences</label><input type="text" value={(config.vwap?.session_mode_gates || ['day_dir', 'early']).join(', ')} onChange={e => updateNested('vwap', 'session_mode_gates', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Session modes only: day_dir, gap_dir, prev_day_dir, early, htf_trend, vwap_slope, vwap_side, vol_surge, rel_vol_open, strong_body, noise_out, nr7, inside_day.</div></div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header"><span className="card-title">Drift & Jump Alpha Parameters</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Drift EMA Fast</label><input type="number" value={config.drift_jump_alpha?.drift_ema_fast || 20} onChange={e => updateNested('drift_jump_alpha', 'drift_ema_fast', +e.target.value)} /></div>
-          <div><label>Drift EMA Slow</label><input type="number" value={config.drift_jump_alpha?.drift_ema_slow || 50} onChange={e => updateNested('drift_jump_alpha', 'drift_ema_slow', +e.target.value)} /></div>
-          <div><label>Min ADX to Trade</label><input type="number" value={config.drift_jump_alpha?.min_adx_to_trade || 20} onChange={e => updateNested('drift_jump_alpha', 'min_adx_to_trade', +e.target.value)} /></div>
-          <div><label>Jump Entry Threshold (%)</label><input type="number" value={config.drift_jump_alpha?.jump_entry_percentile_threshold || 95.0} onChange={e => updateNested('drift_jump_alpha', 'jump_entry_percentile_threshold', +e.target.value)} /></div>
-          <div><label>Max Lots per Symbol</label><input type="number" step="0.1" value={config.drift_jump_alpha?.aggregate_max_lots_per_symbol || 6.0} onChange={e => updateNested('drift_jump_alpha', 'aggregate_max_lots_per_symbol', +e.target.value)} /></div>
-          <div><label>Spike Threshold (pips)</label><input type="number" step="0.5" min="0" value={config.drift_jump_alpha?.spike_threshold_pips ?? 0.0} onChange={e => updateNested('drift_jump_alpha', 'spike_threshold_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>0 = auto (derived from the spike percentile).</div></div>
-          <div><label>Recovery Target (pips)</label><input type="number" step="0.5" min="0" value={config.drift_jump_alpha?.recovery_target_pips ?? 0.0} onChange={e => updateNested('drift_jump_alpha', 'recovery_target_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>0 = auto.</div></div>
-          <div><label>Max Trades / Day</label><input type="number" min="0" value={config.drift_jump_alpha?.max_trades_per_day ?? 6} onChange={e => updateNested('drift_jump_alpha', 'max_trades_per_day', +e.target.value)} /></div>
-          <div><label>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={config.drift_jump_alpha?.max_daily_risk_pct ?? 4.0} onChange={e => updateNested('drift_jump_alpha', 'max_daily_risk_pct', +e.target.value)} /></div>
-          <div><label>Max Consecutive Losses</label><input type="number" min="0" value={config.drift_jump_alpha?.max_consecutive_losses ?? 4} onChange={e => updateNested('drift_jump_alpha', 'max_consecutive_losses', +e.target.value)} /></div>
-          <div><label>Cooldown After Max Losses (h)</label><input type="number" min="0" value={config.drift_jump_alpha?.cooldown_after_max_losses_hours ?? 12} onChange={e => updateNested('drift_jump_alpha', 'cooldown_after_max_losses_hours', +e.target.value)} /></div>
-          <div><label>Min RRR to Accept Trade</label><input type="number" step="0.1" min="0" value={config.drift_jump_alpha?.min_rrr_to_accept_trade ?? 1.5} onChange={e => updateNested('drift_jump_alpha', 'min_rrr_to_accept_trade', +e.target.value)} /></div>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
-              <input type="checkbox" checked={config.drift_jump_alpha?.trade_jumps_enabled ?? false} onChange={e => updateNested('drift_jump_alpha', 'trade_jumps_enabled', e.target.checked)} />
-              Enable Jump Trades (Setup B)
-            </label>
-          </div>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
-              <input type="checkbox" checked={config.drift_jump_alpha?.control_test_passed ?? false} onChange={e => updateNested('drift_jump_alpha', 'control_test_passed', e.target.checked)} />
-              Control Test Passed
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header"><span className="card-title">Opening Range Breakout Parameters</span></div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 12 }}>Trades the first close beyond the opening range, once per session, and flattens at the session close. Target = the slot TP1 R:R. On slots with "Measured settings" on, the measured per-symbol values apply instead of these: M5 break of the 60-minute range only with the H1 trend, 1:3 — GBPJPY London; US Tech 100, XAUUSD, BTCUSD New York.</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Session</label><select value={config.orb?.session || 'london'} onChange={e => updateNested('orb', 'session', e.target.value)}><option value="london">London (08:00 UK)</option><option value="ny">New York (09:30 ET)</option></select></div>
-          <div><label>Range (minutes)</label><select value={config.orb?.range_minutes ?? 60} onChange={e => updateNested('orb', 'range_minutes', +e.target.value)}>{[15, 30, 45, 60, 90, 120].map(m => <option key={m} value={m}>{m}</option>)}</select></div>
-          <div><label>Breakout Window (minutes)</label><input type="number" step="15" min="15" value={config.orb?.breakout_window_minutes ?? 180} onChange={e => updateNested('orb', 'breakout_window_minutes', +e.target.value)} /></div>
-          <div><label>Side</label><select value={config.orb?.side || 'both'} onChange={e => updateNested('orb', 'side', e.target.value)}><option value="both">Both</option><option value="long">Long only</option><option value="short">Short only</option></select></div>
-          <div><label>Min Stop (× ATR)</label><input type="number" step="0.05" min="0" value={config.orb?.min_stop_atr ?? 0.25} onChange={e => updateNested('orb', 'min_stop_atr', +e.target.value)} /></div>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.8rem' }}>
-              <input type="checkbox" checked={config.orb?.close_at_session_end ?? true} onChange={e => updateNested('orb', 'close_at_session_end', e.target.checked)} />
-              Close at session end (part of the tested rule)
-            </label>
-          </div>
-          <div><label>Breakout Timeframe</label><select value={config.orb?.breakout_timeframe || 'M15'} onChange={e => updateNested('orb', 'breakout_timeframe', e.target.value)}><option value="M15">M15 (original)</option><option value="M5">M5 (edge lab)</option></select></div>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 24, fontSize: '0.8rem' }}>
-              <input type="checkbox" checked={config.orb?.require_trend ?? false} onChange={e => updateNested('orb', 'require_trend', e.target.checked)} />
-              Only with the H1 trend (M5 form)
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header"><span className="card-title">HTF FVG Flip Parameters</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div>
-            <label>HTF Timeframe</label>
-            <select value={config.htf_fvg_flip?.htf_timeframe || 'H1'} onChange={e => updateNested('htf_fvg_flip', 'htf_timeframe', e.target.value)}>
-              {['M15', 'M30', 'H1', 'H4', 'D1'].map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Entry Confirm TF</label>
-            <select value={config.htf_fvg_flip?.entry_confirmation_tf || 'M5'} onChange={e => updateNested('htf_fvg_flip', 'entry_confirmation_tf', e.target.value)}>
-              {['M1', 'M5', 'M15'].map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div><label>Target RR</label><input type="number" step="0.1" value={config.htf_fvg_flip?.target_rr ?? 2.0} onChange={e => updateNested('htf_fvg_flip', 'target_rr', +e.target.value)} /></div>
-          <div><label>Session Start</label><input type="text" value={config.htf_fvg_flip?.session_start || '09:30'} onChange={e => updateNested('htf_fvg_flip', 'session_start', e.target.value)} /></div>
-          <div><label>Session Cutoff</label><input type="text" value={config.htf_fvg_flip?.session_cutoff || '16:00'} onChange={e => updateNested('htf_fvg_flip', 'session_cutoff', e.target.value)} /></div>
-          <div><label>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={config.htf_fvg_flip?.sl_buffer_atr_mult ?? 0.5} onChange={e => updateNested('htf_fvg_flip', 'sl_buffer_atr_mult', +e.target.value)} /></div>
-          <div><label>Min SL (pips)</label><input type="number" step="0.5" min="0" value={config.htf_fvg_flip?.min_sl_pips ?? 12.0} onChange={e => updateNested('htf_fvg_flip', 'min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor. 0 disables.</div></div>
-          <div><label>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={config.htf_fvg_flip?.min_sl_atr_mult ?? 1.0} onChange={e => updateNested('htf_fvg_flip', 'min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative floor. Larger floor wins. 0 disables.</div></div>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
-              <input type="checkbox" checked={config.htf_fvg_flip?.session_filter_enabled ?? true} onChange={e => updateNested('htf_fvg_flip', 'session_filter_enabled', e.target.checked)} />
-              Enable Session Filter
-            </label>
-          </div>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 12 }}>
-              <input type="checkbox" checked={config.htf_fvg_flip?.require_unfilled_htf_fvg ?? true} onChange={e => updateNested('htf_fvg_flip', 'require_unfilled_htf_fvg', e.target.checked)} />
-              Require Unfilled HTF FVG
-            </label>
-          </div>
-          <ConfluenceFields block="htf_fvg_flip" values={config.htf_fvg_flip} onChange={(k, v) => updateNested('htf_fvg_flip', k, v)} />
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header"><span className="card-title">Bias KeyLevel IFVG Parameters</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Target RR</label><input type="number" step="0.1" value={config.bias_ifvg?.target_rr ?? 2.0} onChange={e => updateNested('bias_ifvg', 'target_rr', +e.target.value)} /></div>
-          <div><label>Max Trades / Day</label><input type="number" value={config.bias_ifvg?.max_trades_per_day || 2} onChange={e => updateNested('bias_ifvg', 'max_trades_per_day', +e.target.value)} /></div>
-          <div><label>A+ Confluence Threshold</label><input type="number" min="0" max="100" value={config.bias_ifvg?.a_plus_confluence_threshold ?? 90} onChange={e => updateNested('bias_ifvg', 'a_plus_confluence_threshold', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Score a setup must reach to be taken (0–100).</div></div>
-          <div><label>Session Start</label><input type="text" value={config.bias_ifvg?.session_start || '09:30'} onChange={e => updateNested('bias_ifvg', 'session_start', e.target.value)} /></div>
-          <div><label>Session Cutoff</label><input type="text" value={config.bias_ifvg?.session_cutoff || '11:00'} onChange={e => updateNested('bias_ifvg', 'session_cutoff', e.target.value)} /></div>
-          <div><label>Rejection Min Body (× ATR)</label><input type="number" step="0.05" min="0" value={config.bias_ifvg?.rejection_min_body_atr_mult ?? 0.15} onChange={e => updateNested('bias_ifvg', 'rejection_min_body_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Minimum rejection-candle body, so a doji cannot count as displacement.</div></div>
-          <div><label>SL Buffer (× ATR)</label><input type="number" step="0.05" min="0" value={config.bias_ifvg?.sl_buffer_atr_mult ?? 0.5} onChange={e => updateNested('bias_ifvg', 'sl_buffer_atr_mult', +e.target.value)} /></div>
-          <div><label>Min SL (pips)</label><input type="number" step="0.5" min="0" value={config.bias_ifvg?.min_sl_pips ?? 12.0} onChange={e => updateNested('bias_ifvg', 'min_sl_pips', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Absolute stop floor. 0 disables.</div></div>
-          <div><label>Min SL (× ATR)</label><input type="number" step="0.1" min="0" value={config.bias_ifvg?.min_sl_atr_mult ?? 1.0} onChange={e => updateNested('bias_ifvg', 'min_sl_atr_mult', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Volatility-relative floor. Larger floor wins. 0 disables.</div></div>
-          <ConfluenceFields block="bias_ifvg" values={config.bias_ifvg} onChange={(k, v) => updateNested('bias_ifvg', k, v)} />
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header"><span className="card-title">Synthetic Template Strategies</span></div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 12 }}>
-          Shared by Spike Fade, Range Revert, Range Breakout and Trend Drift — all four read one backend params block, so a change here applies to all of them. Per-symbol measured values live in strategy_defaults.py (SYNTH_SLOT_PARAMS) and override these.
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Stop (x ATR)</label><input type="number" step="0.5" min="0.1" value={config.synth?.stop_atr_multiple ?? 5.0} onChange={e => updateNested('synth', 'stop_atr_multiple', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Keep wide. At 0.5x ATR the unmodelled spike gap is ~1 R/trade.</div></div>
-          <div><label>Target R:R</label><input type="number" step="0.5" min="0.1" value={config.synth?.tp1_rr ?? 5.0} onChange={e => updateNested('synth', 'tp1_rr', +e.target.value)} /></div>
-          <div><label>Spike Size (x ATR)</label><input type="number" step="0.5" min="0.5" value={config.synth?.spike_k_atr ?? 3.0} onChange={e => updateNested('synth', 'spike_k_atr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Spike Fade only.</div></div>
-          <div><label>Stretch (x ATR)</label><input type="number" step="0.5" min="0.5" value={config.synth?.revert_k_atr ?? 2.0} onChange={e => updateNested('synth', 'revert_k_atr', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Range Revert only.</div></div>
-          <div><label>Breakout Lookback (bars)</label><input type="number" min="2" value={config.synth?.breakout_lookback ?? 20} onChange={e => updateNested('synth', 'breakout_lookback', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Range Breakout only.</div></div>
-          <div><label>Min ADX to Trade</label><input type="number" min="0" value={config.synth?.min_adx_to_trade ?? 20} onChange={e => updateNested('synth', 'min_adx_to_trade', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Trend Drift only.</div></div>
-          <div><label>EMA Fast</label><input type="number" min="2" value={config.synth?.ema_fast ?? 20} onChange={e => updateNested('synth', 'ema_fast', +e.target.value)} /></div>
-          <div><label>EMA Slow</label><input type="number" min="3" value={config.synth?.ema_slow ?? 50} onChange={e => updateNested('synth', 'ema_slow', +e.target.value)} /></div>
-          <div><label>Max Trades / Day</label><input type="number" min="0" value={config.synth?.max_trades_per_day ?? 6} onChange={e => updateNested('synth', 'max_trades_per_day', +e.target.value)} /></div>
-          <div><label>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={config.synth?.max_daily_risk_pct ?? 4.0} onChange={e => updateNested('synth', 'max_daily_risk_pct', +e.target.value)} /></div>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.8rem' }}>
-              <input type="checkbox" checked={config.synth?.require_adx ?? true} onChange={e => updateNested('synth', 'require_adx', e.target.checked)} />
-              Require ADX trend filter (Trend Drift)
-            </label>
-          </div>
-          <ConfluenceFields block="synth" values={config.synth} onChange={(k, v) => updateNested('synth', k, v)} />
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header"><span className="card-title">Boom Drift &amp; Jump Parameters</span></div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 12 }}>
-          Boom mirror of Drift &amp; Jump Alpha: sells the downward grind, buys after an up-spike. Shipped defaults from research/25.
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div><label>Drift EMA Fast</label><input type="number" value={config.boom_drift_jump?.drift_ema_fast ?? 20} onChange={e => updateNested('boom_drift_jump', 'drift_ema_fast', +e.target.value)} /></div>
-          <div><label>Drift EMA Slow</label><input type="number" value={config.boom_drift_jump?.drift_ema_slow ?? 50} onChange={e => updateNested('boom_drift_jump', 'drift_ema_slow', +e.target.value)} /></div>
-          <div><label>Min ADX to Trade</label><input type="number" value={config.boom_drift_jump?.min_adx_to_trade ?? 20} onChange={e => updateNested('boom_drift_jump', 'min_adx_to_trade', +e.target.value)} /><div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>Measured cost of this gate: 0.069 R/trade on Boom.</div></div>
-          <div><label>Jump Entry Threshold (%)</label><input type="number" step="0.5" value={config.boom_drift_jump?.jump_entry_percentile_threshold ?? 95.0} onChange={e => updateNested('boom_drift_jump', 'jump_entry_percentile_threshold', +e.target.value)} /></div>
-          <div><label>Target R:R</label><input type="number" step="0.5" min="0" value={config.boom_drift_jump?.tp1_rr ?? 5.0} onChange={e => updateNested('boom_drift_jump', 'tp1_rr', +e.target.value)} /></div>
-          <div><label>Min RRR to Accept Trade</label><input type="number" step="0.1" min="0" value={config.boom_drift_jump?.min_rrr_to_accept_trade ?? 1.5} onChange={e => updateNested('boom_drift_jump', 'min_rrr_to_accept_trade', +e.target.value)} /></div>
-          <div><label>Max Trades / Day</label><input type="number" min="0" value={config.boom_drift_jump?.max_trades_per_day ?? 6} onChange={e => updateNested('boom_drift_jump', 'max_trades_per_day', +e.target.value)} /></div>
-          <div><label>Max Daily Risk (%)</label><input type="number" step="0.5" min="0" value={config.boom_drift_jump?.max_daily_risk_pct ?? 4.0} onChange={e => updateNested('boom_drift_jump', 'max_daily_risk_pct', +e.target.value)} /></div>
-          <div><label>ADX Gate Mode</label><select value={config.boom_drift_jump?.adx_gate_mode || 'REDUCED_SIZE'} onChange={e => updateNested('boom_drift_jump', 'adx_gate_mode', e.target.value)}><option value="REDUCED_SIZE">Reduced size</option><option value="BLOCK">Block</option></select></div>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.8rem' }}>
-              <input type="checkbox" checked={config.boom_drift_jump?.trade_jumps_enabled ?? false} onChange={e => updateNested('boom_drift_jump', 'trade_jumps_enabled', e.target.checked)} />
-              Trade jump entries (Setup B)
-            </label>
-          </div>
         </div>
       </div>
 
       <button className="btn btn-primary" style={{ justifySelf: 'start' }} onClick={handleSave} disabled={mutation.isPending}>
         {mutation.isPending ? <Loader2 size={14} className="spin" /> : saved ? <Check size={14} /> : <Save size={14} />}
-        {mutation.isPending ? 'Saving...' : saved ? 'Saved!' : 'Save Strategy Configuration'}
+        {mutation.isPending ? 'Saving...' : saved ? 'Saved!' : 'Save Trading Book'}
       </button>
       {mutation.isError && (
         <div style={{ color: 'var(--red)', fontSize: '0.8rem' }}>

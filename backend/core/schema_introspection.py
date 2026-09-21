@@ -132,6 +132,7 @@ def build_full_schema() -> list[dict]:
     from backend.strategies.strategy_apa.params import APAParams
     from backend.strategies.strategy_vwap.params import VWAPParams
     from backend.strategies.strategy_orb.params import ORBParams
+    from backend.strategies.strategy_ivw.params import IVWParams
     from backend.core.config_schema import DriftJumpAlphaParams
 
     groups: list[tuple[type, str]] = [
@@ -140,12 +141,18 @@ def build_full_schema() -> list[dict]:
         (APAParams, "apa"),
         (VWAPParams, "vwap"),
         (ORBParams, "orb"),
+        (IVWParams, "ivw"),
         (DriftJumpAlphaParams, "drift_jump_alpha"),
     ]
     from backend.core.config_schema import SynthParams
     from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
     from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
-    groups += [(SynthParams, "synth"), (HTFFVGFlipParams, "htf_fvg_flip"), (BiasIFVGParams, "bias_ifvg")]
+    from backend.core.config_schema import BoomDriftJumpParams
+    groups += [(SynthParams, "synth"), (HTFFVGFlipParams, "htf_fvg_flip"), (BiasIFVGParams, "bias_ifvg"),
+               # Every strategy a slot can run needs a group here: the slot editor
+               # builds its parameter form from this schema, so a missing group
+               # leaves that strategy with no editable parameters at all.
+               (BoomDriftJumpParams, "boom_drift_jump")]
 
     schema: list[dict] = []
     for cls, group in groups:

@@ -41,12 +41,34 @@ def test_boom_drift_jump_has_a_boom_buy_side():
 
 
 def test_setup_b_flags_are_reachable_from_the_backtester_payload():
-    """A side you cannot switch on from the Backtester cannot be measured."""
+    """A side you cannot switch on from the Backtester cannot be measured.
+
+    The Backtester no longer hardcodes strategy fields: since 2026-09-20 each slot
+    renders its strategy's whole schema group, so "reachable" now means the flags
+    are IN that group and the editor renders the group for these strategies.
+    """
     from pathlib import Path
 
+    from backend.core.schema_introspection import build_full_schema
+
+    schema = build_full_schema()
+    keys = {f["key"] for f in schema}
+    for key in ("drift_jump_alpha.trade_jumps_enabled",
+                "drift_jump_alpha.control_test_passed",
+                "boom_drift_jump.trade_jumps_enabled"):
+        assert key in keys, f"{key} is not in the parameter schema, so no form can render it"
+
+    spec = Path("frontend/src/components/slotSpec.js").read_text(encoding="utf-8")
+    for strategy, group in (("DriftJumpAlpha_v1", "drift_jump_alpha"),
+                            ("BoomDriftJump_v1", "boom_drift_jump")):
+        assert f"'{strategy}'" in spec and f"'{group}'" in spec,             f"{strategy} must map to its schema group or its slot shows the wrong fields"
+
+    editor = Path("frontend/src/components/SlotEditor.jsx").read_text(encoding="utf-8")
+    assert "const group = STRATEGY_GROUP[slot.strategy_id] || 'apa';" in editor
+    assert "group={group}" in editor, "the slot editor must render the strategy's own schema group"
+
     js = Path("frontend/src/pages/Backtester.jsx").read_text(encoding="utf-8")
-    assert "trade_jumps_enabled" in js
-    assert "control_test_passed" in js
+    assert "<SlotEditor" in js, "the Backtester must edit its run through the slot editor"
 
 
 def test_both_jump_strategies_are_wired_into_the_backtester_param_routing():

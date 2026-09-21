@@ -698,6 +698,19 @@ class PositionManager:
                 continue
 
             risk_config, applied = build_live_risk_config(config, trade.strategy_id)
+            # [per-slot] Break-even and trailing are the SLOT's settings, not the
+            # strategy's: two slots running one strategy on different symbols may
+            # exit differently, and the backtest of each slot uses its own.
+            _slot = next((sl for sl in (getattr(config, "instrument_slots", None) or [])
+                          if str(getattr(sl, "symbol", "")).upper() == str(trade.symbol).upper()
+                          and getattr(sl, "strategy_id", None) == trade.strategy_id), None)
+            if _slot is not None:
+                from backend.risk.slot_book import resolve_slot_risk_config, slot_overrides_from
+                risk_config = resolve_slot_risk_config(
+                    risk_config, trade.strategy_id, overrides=slot_overrides_from(_slot),
+                    use_strategy_exit_defaults=getattr(getattr(config, "risk", None),
+                                                       "use_strategy_exit_defaults", True),
+                )
             fp = hashlib.sha256(json.dumps(risk_config, sort_keys=True, default=str).encode()).hexdigest()
             engine = self._exit_risk_engines.get(fp)
             if engine is None:
