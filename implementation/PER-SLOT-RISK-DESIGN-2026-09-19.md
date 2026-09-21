@@ -558,3 +558,41 @@ New field `sizing_static_balance`: state the capital and all three paths size
 against it; leave it empty and nothing changes. Honoured in
 `backtester/engine.py`, `portfolio_engine.py` and `bot_service.py`, carried in
 `live_risk_config.py`, and it resolves per slot like any other risk field.
+
+## 17. "Costs 0.00" — charged all along, never attributed (2026-09-21)
+
+A Crash 1000 run reported **Gross 4103.91 / Costs 0.00 / Net 4103.91** over 344
+legs, under a cost model showing spread 30, slippage 1, swap −3.00867/lot/day.
+
+`_calc_pnl` had been charging all of it: slippage shifts the effective entry
+against the trade, spread and commission are deducted, swap is added on real
+closes. What was missing is the per-leg record — `commission`, `spread_cost`,
+`slippage_cost` — which `RunReport.jsx::CostImpact` sums. With the fields absent
+it summed zeros, so gross equalled net and the run read as cost-free.
+
+`CostModelMixin._attach_cost_breakdown()` now records them (plus signed `swap`)
+on every closed leg, in both engines. Measured on a real ORB EURUSD run through
+the API:
+
+```
+GROSS 110.16 | COSTS 33.36 | NET 76.80 | reconciles True   (cost drag 30.3% of gross)
+```
+
+Net P&L is unchanged by this — the money was always taken. What changes is that
+the drag is now visible.
+
+### 17.1 Why the number is so small on Crash 1000 specifically
+
+`tick_value / tick_size = $1.00` per price unit, and pip = 0.001, so the MT5
+spread of 30 points is 0.03 price units = **$0.03 per lot**, round trip:
+
+| | spread + slippage, 344 legs | swap |
+|---|---|---|
+| 0.05 lots | $0.53 | −$51.75 per night held |
+| 0.2 lots | $2.13 | −$207 per night |
+| 1.0 lot | $10.66 | −$1,035 per night |
+
+So on this instrument the execution costs are noise and the **financing** is the
+part that bites on multi-day holds. Neither explains a +$4,103 result on a $900
+account: that is 5% risk sized on floating EQUITY (compounding) with an 88.7%
+peak-to-trough drawdown.

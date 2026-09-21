@@ -727,6 +727,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                             pos.get("symbol", ""), group_lots,
                         )
 
+                self._attach_cost_breakdown(pos)
                 self.trades.append(pos)
                 positions_to_remove.append(pos)
 
@@ -1110,6 +1111,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                     pos["exit_time_iso"] = _epoch_to_iso(pos.get("exit_time"))
                     balance += pos.get("pnl", 0)
                     pos["balance_after"] = balance
+                    self._attach_cost_breakdown(pos)
                     self.trades.append(pos)
                     continue
                 if _ckey in symbol_cache:
@@ -1132,6 +1134,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                 
                 balance += pos.get("pnl", 0)
                 pos["balance_after"] = balance
+                self._attach_cost_breakdown(pos)
                 self.trades.append(pos)
                 
             self.open_positions.clear()

@@ -614,6 +614,44 @@ class CostModelMixin:
         )
         return resolved
 
+    def _attach_cost_breakdown(self, pos: dict) -> None:
+        """Record what this leg's costs were, in account currency.
+
+        `_calc_pnl` has already charged them; this is the attribution the Cost
+        Impact panel reads (commission / spread_cost / slippage_cost / swap).
+        Recorded per leg so `gross = pnl + costs` reconciles exactly.
+        """
+        try:
+            from backend.risk.position_sizer import get_pip_size, get_symbol_info
+
+            symbol = pos.get("symbol", "")
+            volume = float(pos.get("volume", 0) or 0)
+            if not symbol or volume <= 0:
+                return
+            costs = self._costs_for(symbol)
+            info = get_symbol_info(symbol)
+            tick_size = info.get("tick_size", 0.0) or 0.0
+            tick_value = info.get("tick_value", 0.0) or 0.0
+            pip_size = get_pip_size(symbol)
+            if tick_size == 0 or tick_value == 0 or pip_size == 0:
+                return
+            value_per_unit_move = tick_value / tick_size
+
+            spread_pips = self._spread_pips_for(symbol, pos.get("entry_time"), costs)
+            pos["spread_cost"] = spread_pips * pip_size * value_per_unit_move * volume
+            pos["commission"] = costs["commission_per_lot"] * volume
+            # Slippage is charged by moving the entry price, so its cost is the
+            # same distance expressed in money.
+            pos["slippage_cost"] = costs["slippage_pips"] * pip_size * value_per_unit_move * volume
+            if pos.get("entry_time") is not None and pos.get("exit_time") is not None:
+                # signed, MT5 convention: negative is a charge
+                pos["swap"] = self._swap_cost(
+                    pos.get("direction", "BUY"), volume, symbol,
+                    pos.get("entry_time"), pos.get("exit_time"),
+                )
+        except Exception as exc:  # attribution must never fail a run
+            logger.debug(f"[COSTS] breakdown not attached for {pos.get('symbol')}: {exc}")
+
     def _swap_cost(
         self,
         direction: str,
@@ -1295,6 +1333,7 @@ class BacktestEngine(CostModelMixin):
                             is_win=group_pnl > 0,
                             pnl=group_pnl,
                         )
+                self._attach_cost_breakdown(pos)
                 self.trades.append(pos)
                 positions_to_remove.append(pos)
 
@@ -1541,6 +1580,7 @@ class BacktestEngine(CostModelMixin):
             ]
             balance += pos.get("pnl", 0)
             pos["balance_after"] = balance
+            self._attach_cost_breakdown(pos)
             self.trades.append(pos)
         self.open_positions = []
         self.equity_curve.append(balance)

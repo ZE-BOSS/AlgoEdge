@@ -791,3 +791,57 @@ def test_the_stated_capital_is_editable_and_resolves_per_slot():
     resolved = resolve_slot_risk_config({}, "ORB_v1", overrides={
         "sizing_basis": "STATIC", "sizing_static_balance": 5000.0})
     assert resolved["sizing_static_balance"] == 5000.0
+
+
+# ── Costs are charged; they must also be SHOWN ──────────────────────────────
+#
+# Reported 2026-09-21: a Crash 1000 run showed "Gross 4103.91 / Costs 0.00 /
+# Net 4103.91". `_calc_pnl` had charged spread, commission, slippage and swap
+# all along — it shifts the entry by slippage and deducts the rest — but none of
+# the components were written onto the leg, so the Cost Impact panel summed
+# zeros and the run read as a simulation with no costs at all.
+
+def test_a_closed_leg_carries_the_costs_it_was_charged():
+    from backend.backtester.engine import BacktestEngine
+
+    eng = BacktestEngine({
+        "risk_per_trade_pct": 1.0, "spread_pips": 2.0,
+        "commission_per_lot": 7.0, "slippage_pips": 0.5,
+    })
+    pos = {"symbol": "EURUSD", "direction": "BUY", "volume": 0.5,
+           "entry_price": 1.10000, "exit_price": 1.10500,
+           "entry_time": None, "exit_time": None}
+    eng._attach_cost_breakdown(pos)
+
+    assert pos["commission"] == pytest.approx(3.5)        # 7.0/lot x 0.5
+    assert pos["spread_cost"] > 0
+    assert pos["slippage_cost"] > 0
+    # and the components are the same ones _calc_pnl charges
+    charged = eng._calc_pnl("BUY", 1.10000, 1.10500, 0.5, "EURUSD")
+    free = BacktestEngine({"risk_per_trade_pct": 1.0, "spread_pips": 0.0,
+                           "commission_per_lot": 0.0, "slippage_pips": 0.0})._calc_pnl(
+        "BUY", 1.10000, 1.10500, 0.5, "EURUSD")
+    total = pos["commission"] + pos["spread_cost"] + pos["slippage_cost"]
+    assert free - charged == pytest.approx(total, rel=1e-6), \
+        "gross - net must equal the attributed costs, or the panel lies"
+
+
+def test_both_engines_attach_the_breakdown_to_every_closed_leg():
+    import inspect
+
+    from backend.backtester import engine as single
+    from backend.backtester import portfolio_engine as portfolio
+
+    # defined once on the shared mixin
+    src = inspect.getsource(single)
+    assert "def _attach_cost_breakdown(self, pos: dict) -> None:" in src
+    assert src.index("class CostModelMixin:") < src.index("def _attach_cost_breakdown") \
+        < src.index("class BacktestEngine("), "it belongs to the mixin both engines use"
+
+    for mod, name in ((single, "engine.py"), (portfolio, "portfolio_engine.py")):
+        text = inspect.getsource(mod)
+        appends = text.count("self.trades.append(pos)")
+        attaches = text.count("self._attach_cost_breakdown(pos)")
+        assert attaches == appends, (
+            f"{name}: {appends} places record a closed leg but {attaches} attribute its costs"
+        )
