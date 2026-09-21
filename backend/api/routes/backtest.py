@@ -1118,7 +1118,12 @@ async def run_backtest_endpoint(
         async def _save_state(state):
             # Memory is the source of truth and is updated synchronously, so a
             # slow or failing Redis can never make a finished run look unfinished.
-            state["heartbeat"] = _time.time()
+            # `_time_mod` (module level), NOT `_time`: both task bodies import
+            # `time as _time` further down, which makes `_time` a LOCAL of the
+            # task for its whole body — so this closure read it before the
+            # import had run and every backtest died here, after "queued" and
+            # before "started".
+            state["heartbeat"] = _time_mod.time()
             USER_BACKTEST_STATE[current_user.id] = state
             if HAS_REDIS and redis_client and redis_client.redis:
                 try:
@@ -1786,7 +1791,12 @@ async def run_portfolio_backtest_endpoint(
         initial_state = {"status": "running", "progress": {"stage": "Fetching data...", "pct": 0}, "result": None}
 
         async def _save_state(state):
-            state["heartbeat"] = _time.time()
+            # `_time_mod` (module level), NOT `_time`: both task bodies import
+            # `time as _time` further down, which makes `_time` a LOCAL of the
+            # task for its whole body — so this closure read it before the
+            # import had run and every backtest died here, after "queued" and
+            # before "started".
+            state["heartbeat"] = _time_mod.time()
             USER_BACKTEST_STATE[current_user.id] = state
             if HAS_REDIS and redis_client and redis_client.redis:
                 try:

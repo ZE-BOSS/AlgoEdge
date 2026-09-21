@@ -602,5 +602,8 @@ def test_both_run_endpoints_use_the_liveness_check():
     src = inspect.getsource(bt)
     assert src.count("if _is_live_run(state):") == 2, \
         "the single and the portfolio endpoint must both allow a new run after a dead one"
-    assert src.count('state["heartbeat"] = _time.time()') == 2, \
-        "both tasks must stamp their state, or liveness cannot be judged"
+    # `_time_mod`, the MODULE-level clock: both task bodies import `time as
+    # _time` further down, which would make this closure read an unbound local
+    # and kill the task between "queued" and "started".
+    assert src.count('state["heartbeat"] = _time_mod.time()') == 2, "both tasks must stamp their state, or liveness cannot be judged"
+    assert 'state["heartbeat"] = _time.time()' not in src
