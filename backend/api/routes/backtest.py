@@ -50,6 +50,9 @@ MAX_SIGNALS_PER_RUN = 5000
 from backend.services.log_stream import log_hub  # noqa: E402
 
 USER_BACKTEST_STATE = {}  # Fallback in-memory persistence: user_id -> state
+# A run that has not written its state for this long is treated as dead, so a
+# crashed or abandoned run cannot lock the user out of starting another.
+STALE_RUN_SECONDS = 15 * 60
 
 
 # ── One definition of "what is heavy in a grouped trade" ──────────────────
@@ -413,6 +416,51 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
     "RangeBreakout_v1": "synth",
     "TrendDrift_v1": "synth",
 }
+
+
+async def load_saved_strategy_blocks(user_id: str) -> dict:
+    """The user's saved strategy blocks (`apa`, `orb`, `drift_jump_alpha`, ...).
+
+    A backtest builds a fresh UserConfigV2, whose strategy blocks are DATACLASS
+    defaults. Live builds its engines from the saved config instead, so without
+    this every parameter the user set in Settings but did not override on the
+    slot ran at its default in the backtest and at the saved value live.
+    """
+    import json as _json
+
+    from backend.data.database import async_session
+    from backend.data.models import UserConfigModel
+
+    try:
+        async with async_session() as session:
+            row = (await session.execute(
+                select(UserConfigModel).where(UserConfigModel.user_id == user_id)
+            )).scalar_one_or_none()
+        if not row:
+            return {}
+        saved = _json.loads(row.config_json) or {}
+    except Exception as exc:  # a backtest must still run without a saved config
+        logger.warning(f"[BACKTEST] saved strategy blocks not loaded: {exc}")
+        return {}
+
+    sections = set(STRATEGY_PARAM_SECTION.values())
+    return {name: saved[name] for name in sections
+            if isinstance(saved.get(name), dict)}
+
+
+def seed_strategy_blocks(config, saved_blocks: dict) -> None:
+    """Write those saved blocks onto a fresh config, before any override."""
+    for name, values in (saved_blocks or {}).items():
+        block = getattr(config, name, None)
+        if block is None:
+            continue
+        for key, value in (values or {}).items():
+            if value is None or not hasattr(block, key):
+                continue
+            try:
+                setattr(block, key, value)
+            except Exception:  # a field that rejects this value
+                continue
 
 
 def apply_strategy_params(
@@ -1047,7 +1095,7 @@ async def run_backtest_endpoint(
     Run a backtest in the background to prevent frontend timeouts.
     """
     state = await get_backtest_status(current_user)
-    if state and state.get("status") == "running":
+    if _is_live_run(state):
         raise HTTPException(status_code=400, detail="A backtest is already running for this user.")
         
     from backend.services.bot_service import bot_service
@@ -1070,6 +1118,7 @@ async def run_backtest_endpoint(
         async def _save_state(state):
             # Memory is the source of truth and is updated synchronously, so a
             # slow or failing Redis can never make a finished run look unfinished.
+            state["heartbeat"] = _time.time()
             USER_BACKTEST_STATE[current_user.id] = state
             if HAS_REDIS and redis_client and redis_client.redis:
                 try:
@@ -1132,6 +1181,25 @@ async def run_backtest_endpoint(
             except Exception as _e:
                 logger.warning(f"[BACKTEST] Could not update progress state: {_e}")
 
+            # A run that ends here must SAY so. These two paths used to
+            # broadcast over the websocket and return, leaving the persisted
+            # state at {"status": "running", "stage": "Fetching historical
+            # data..."} for ever: the page showed a run that never finished
+            # (indistinguishable from a slow one), and the next run was refused
+            # because the endpoint sees a run already in progress.
+            async def _fail(message: str):
+                state = await _get_state()
+                state["status"] = "error"
+                state["progress"] = {"stage": "error", "message": message, "pct": 0}
+                state["result"] = None
+                await _save_state(state)
+                try:
+                    await ws_manager.broadcast_to_user(
+                        current_user.id, {"type": "backtest_error", "message": message})
+                except Exception:
+                    pass
+
+
             # NOTE: Engine is built first so we can call get_required_timeframes()
             # before deciding which data to fetch. Data fetch happens below.
             import pandas as pd
@@ -1150,6 +1218,11 @@ async def run_backtest_endpoint(
             config.risk.max_positions_per_symbol = req.max_positions_per_symbol
             config.risk.max_daily_trades = req.max_daily_trades
             
+            # [parity] Start from what Settings has saved for this strategy, the
+            # way bot_service builds a live engine. The slot's own parameters are
+            # applied on top, below.
+            seed_strategy_blocks(config, await load_saved_strategy_blocks(current_user.id))
+
             # Inject dynamic strategy parameters (see STRATEGY_PARAM_SECTION)
             _ignored = apply_strategy_params(config, req.strategy_id, req.strategy_params, req.symbol,
                                              use_measured_params=req.use_measured_params)
@@ -1183,6 +1256,10 @@ async def run_backtest_endpoint(
             except Exception as _e:
                 logger.warning(f"[BACKTEST] strategy session default not applied: {_e}")
 
+            # [per-slot] The request fields above are the account baseline; this
+            # slot's own risk wins, and the strategy must be gated on the same
+            # numbers the sizer will use.
+            apply_resolved_risk_to_strategy_config(config, build_merged_risk_config(req))
             config.instrument_settings = [InstrumentSettings(symbol=req.symbol, strategy_id=req.strategy_id)]
             
             strategy_id = req.strategy_id
@@ -1250,13 +1327,13 @@ async def run_backtest_endpoint(
                         candles_by_tf[tf] = await DataFetcher.get_historical_data(req.symbol, tf, count=req.candle_count)
             except DataFetchError as e:
                 bot_service.log_system_event(f"Backtest data fetch failed: {e.reason}", category="BACKTEST", level="ERROR")
-                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
+                await _fail(str(e))
                 return
 
             missing = [tf for tf, df in candles_by_tf.items() if df is None or df.empty]
             if missing:
                 bot_service.log_system_event(f"Incomplete MTF data for backtest ({missing})", category="BACKTEST", level="ERROR")
-                await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": f"No data for {missing}"})
+                await _fail(f"No data for {missing} — the broker returned nothing for this symbol and date range.")
                 return
 
             def _index_candles(df):
@@ -1691,7 +1768,7 @@ async def run_portfolio_backtest_endpoint(
     All symbols share the same global risk parameters, tracked on a single timeline.
     """
     state = await get_backtest_status(current_user)
-    if state and state.get("status") == "running":
+    if _is_live_run(state):
         raise HTTPException(status_code=400, detail="A backtest is already running for this user.")
         
     from backend.services.bot_service import bot_service
@@ -1709,6 +1786,7 @@ async def run_portfolio_backtest_endpoint(
         initial_state = {"status": "running", "progress": {"stage": "Fetching data...", "pct": 0}, "result": None}
 
         async def _save_state(state):
+            state["heartbeat"] = _time.time()
             USER_BACKTEST_STATE[current_user.id] = state
             if HAS_REDIS and redis_client and redis_client.redis:
                 try:
@@ -1919,6 +1997,10 @@ async def run_portfolio_backtest_endpoint(
                 for c in req.symbols
             ])
 
+            # [parity] Read once: every row starts from what Settings has saved
+            # for its strategy, the way bot_service builds a live engine.
+            _saved_strategy_blocks = await load_saved_strategy_blocks(current_user.id)
+
             for sym_idx, sym_cfg in enumerate(req.symbols):
                 sym = sym_cfg.symbol
                 strat_id = sym_cfg.strategy_id
@@ -1954,6 +2036,11 @@ async def run_portfolio_backtest_endpoint(
                 config = UserConfigV2()
                 config.risk.min_rr = req.min_rr
                 config.risk.risk_per_trade_pct = req.risk_per_trade_pct
+                # [per-slot] ...then THIS row's resolved risk, so a row that
+                # overrides risk is not gated on the page's value.
+                apply_resolved_risk_to_strategy_config(config, portfolio_slot_configs[slot_key])
+                # [parity] as above: the saved block is the base for every row.
+                seed_strategy_blocks(config, _saved_strategy_blocks)
                 _ign = apply_strategy_params(config, strat_id, sym_cfg.strategy_params, sym_cfg.symbol,
                                              use_measured_params=sym_cfg.use_measured_params)
                 if _ign:
@@ -3266,6 +3353,46 @@ async def get_bulk_backtests(
         })
         
     return {"data": response}
+
+def apply_resolved_risk_to_strategy_config(config, resolved: dict) -> None:
+    """Mirror a slot's RESOLVED risk onto the config the STRATEGY reads.
+
+    Strategies carry their own guardrails that compare against `config.risk`:
+    DriftJumpAlpha blocks a bar when `risk_per_trade_pct` alone would breach its
+    `max_daily_risk_pct`, and BoomDriftJump does the same. Both routes used to
+    hand the strategy the REQUEST's risk fields while the sizer used the slot's
+    resolved config, so a slot that overrode risk was gated on a number it never
+    trades with.
+    """
+    risk = getattr(config, "risk", None)
+    if risk is None:
+        return
+    for key, value in (resolved or {}).items():
+        if value is None or not hasattr(risk, key):
+            continue
+        try:
+            setattr(risk, key, value)
+        except Exception:  # a dataclass field that rejects this value
+            continue
+
+
+def _is_live_run(state: dict | None) -> bool:
+    """True only for a run that is still reporting progress.
+
+    A backtest that dies without writing its state -- a restarted worker, a
+    killed process, an exception path that returns early -- leaves
+    `status: running` behind, and every later run was then refused with "A
+    backtest is already running" until the server restarted. A run that has not
+    updated its state in STALE_RUN_SECONDS is treated as gone.
+    """
+    if not state or state.get("status") != "running":
+        return False
+    beat = state.get("heartbeat")
+    if not beat:
+        return True  # pre-heartbeat state: assume it is real
+    import time as _t
+    return (_t.time() - float(beat)) < STALE_RUN_SECONDS
+
 
 def build_merged_risk_config(req: "BacktestRequest") -> dict[str, Any]:
     """The risk config a single-symbol Backtester run hands the engine.

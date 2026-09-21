@@ -390,3 +390,76 @@ collapse chevron — which is pinned to the panel and slides off-screen with it.
 Every page rendered at 375px and none of them could be left. Added a fixed
 opener, a scrim, and close-on-navigate derived from the route (no effect, so no
 cascading render). Guarded by two tests.
+
+## 14. Why a DriftJumpAlpha run found 0 signals (2026-09-21)
+
+A live run: DJA on Crash 1000, 2026-01-01 → 2026-09-21, $900, 5% risk.
+**0 trades from 77,107 bars**, funnel: `daily_risk_cap (77107 candidates)`.
+
+### 14.1 The strategy ran parameters the user never chose
+
+DJA's first guardrail is
+`daily_risk_used_pct + config.risk.risk_per_trade_pct <= params.max_daily_risk_pct`,
+checked before any signal is formed. Settings had `max_daily_risk_pct = 20`
+(and `max_trades_per_day = 20`, `trade_jumps_enabled = on`), which passes at 5%.
+The engine ran the **dataclass defaults** — 4.0 / 6 / off — so `0 + 5 <= 4` was
+false on every bar of the run.
+
+Cause: both backtest routes build a fresh `UserConfigV2()` and write only the
+slot's explicit overrides onto it. Anything set in Settings but not overridden
+on the slot reverted to a default. `bot_service` builds a live engine from
+`UserConfigV2.from_dict(saved)`, so **live and backtest ran different
+parameters for the same slot**. Measured on the audit copy:
+
+| | max_daily_risk_pct | max_trades_per_day | trade_jumps_enabled |
+|---|---|---|---|
+| Saved in Settings | 20 | 20 | on |
+| Engine, before | **4.0** | **6** | **off** |
+| Engine, after | 20 | 20 | on |
+
+Fixed with `load_saved_strategy_blocks()` + `seed_strategy_blocks()`, called by
+both routes before `apply_strategy_params`, so the order matches live exactly:
+saved block → measured per-symbol table → slot override.
+
+Until 2026-09-19 the frontend hid this by posting whole strategy blocks in the
+payload. Moving parameters onto the slot removed that accident, and the gap
+became visible — the P1.12 failure mode in a new form.
+
+### 14.2 The same gate read the wrong risk number
+
+`config.risk.risk_per_trade_pct` was the REQUEST's value, while the sizer used
+the slot's resolved config, so a portfolio row that overrode risk was gated on a
+number it never traded with. `apply_resolved_risk_to_strategy_config()` now
+mirrors the resolved slot risk onto the config the strategy reads, on both
+routes.
+
+### 14.3 A failed run claimed to still be running
+
+Reproducing it surfaced a worse bug. The data fetch failed in under a second
+("MT5 returned no data"), and the handler broadcast over the websocket and
+returned **without persisting anything** — so `/api/backtest_status` kept
+answering `{"status": "running", "stage": "Fetching historical data...",
+"pct": 5}` indefinitely. The page showed a run that never finished, and every
+later run was refused with *"A backtest is already running for this user."*
+
+Two fixes: failures persist an error state with the reason, and each task
+stamps a `heartbeat` so a run that stops reporting for `STALE_RUN_SECONDS`
+(15 min) no longer blocks a new one.
+
+### 14.4 What a real DJA run costs
+
+Measured, 500-bar window, this machine:
+
+| Strategy | per bar | 77,107 bars |
+|---|---|---|
+| ORB_v1 | 0.17 ms | ~12 s |
+| DriftJumpAlpha_v1 | 16.0 ms | **~21 min** |
+
+Profile of DJA's `on_bar`: `MarketStructureDetector.update` 38% (it rebuilds
+every swing over the whole window on each bar), four `DataFrame.__setitem__`
+column assignments 20%.
+
+The 58-second run in the report above is not a baseline: it was blocked at the
+first gate, before any indicator work. Now that the gate passes, the same window
+does the real simulation. Making DJA's per-bar work incremental is the open
+follow-up.

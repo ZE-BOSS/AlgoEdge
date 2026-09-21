@@ -415,3 +415,192 @@ def test_every_symbol_field_accepts_a_symbol_the_list_does_not_have():
     hook = Path("frontend/src/hooks/useSymbolOptions.js").read_text(encoding="utf-8")
     assert "getInstrumentResolution" in hook
     assert "US Tech 100" in hook, "the fallback list must carry broker names, not only canonical ones"
+
+
+# ── A strategy's own guardrails must read the SLOT's risk ───────────────────
+#
+# Found 2026-09-21 on a live run: DriftJumpAlpha on Crash 1000, 0 trades from
+# 77,107 bars, funnel says `daily_risk_cap`. The strategy blocks a bar when
+# risk_per_trade_pct alone would breach ITS max_daily_risk_pct (default 4%), and
+# the run risked 5% -- so it refused every bar before forming a single signal.
+#
+# Two separate problems: the gate is invisible until you read the breakdown
+# (now warned about in the slot editor), and it was reading the REQUEST's risk
+# rather than the slot's, so a row that overrode risk was gated on a number it
+# never traded with.
+
+def test_the_strategy_config_takes_the_slots_resolved_risk():
+    from backend.api.routes.backtest import apply_resolved_risk_to_strategy_config
+    from backend.core.config_schema import UserConfigV2
+
+    config = UserConfigV2()
+    config.risk.risk_per_trade_pct = 5.0      # the page's value
+    apply_resolved_risk_to_strategy_config(config, {
+        "risk_per_trade_pct": 0.25,            # what this slot actually risks
+        "max_daily_trades": 3,
+        "not_a_risk_field": "ignored",
+    })
+    assert config.risk.risk_per_trade_pct == 0.25
+    assert config.risk.max_daily_trades == 3
+    assert not hasattr(config.risk, "not_a_risk_field")
+
+
+def test_both_backtest_routes_hand_the_strategy_the_resolved_risk():
+    import inspect
+
+    from backend.api.routes import backtest as bt
+
+    src = inspect.getsource(bt)
+    calls = src.count("apply_resolved_risk_to_strategy_config(config,") - src.count(
+        "def apply_resolved_risk_to_strategy_config(config,")
+    assert calls == 2, "the single run and every portfolio row must both do it"
+    assert "apply_resolved_risk_to_strategy_config(config, build_merged_risk_config(req))" in src
+    assert "apply_resolved_risk_to_strategy_config(config, portfolio_slot_configs[slot_key])" in src
+
+
+def test_risk_above_the_strategys_daily_cap_blocks_every_bar():
+    """The interaction itself, so the cause stays documented in a test."""
+    import asyncio
+
+    import numpy as np
+    import pandas as pd
+
+    from backend.core.config_schema import UserConfigV2
+    from backend.strategies.registry import get_strategy
+
+    idx = pd.date_range("2026-01-01", periods=200, freq="5min", tz="UTC")
+    close = 1000 + np.cumsum(np.random.default_rng(7).normal(0, 1, 200))
+    bars = pd.DataFrame({"open": close, "high": close + 2, "low": close - 2,
+                         "close": close, "tick_volume": 100}, index=idx)
+
+    async def gate_stats(risk_pct: float) -> dict:
+        config = UserConfigV2()
+        config.risk.risk_per_trade_pct = risk_pct
+        engine = get_strategy("DriftJumpAlpha_v1")(config)
+        engine.is_backtesting = True
+        engine.gates.enabled = True
+        for i in range(80, 200):
+            await engine.on_bar("Crash 1000 Index", "M5", bars.iloc[:i])
+        summary = engine.gates.summary()
+        return (summary.get("gates") or summary)["daily_risk_cap"]
+
+    # default cap is 4%: 5% per trade cannot pass on any bar, ever
+    blocked = asyncio.run(gate_stats(5.0))
+    assert blocked["passed"] == 0 and blocked["failed"] == blocked["evaluated"] > 0
+
+    allowed = asyncio.run(gate_stats(3.0))
+    assert allowed["failed"] == 0, "3% is inside the 4% cap and must reach the entry logic"
+
+
+def test_the_slot_editor_warns_before_a_run_that_cannot_signal():
+    from pathlib import Path
+
+    js = Path("frontend/src/components/SlotEditor.jsx").read_text(encoding="utf-8")
+    assert "max_daily_risk_pct" in js and "max_trades_per_day" in js
+    assert "slot-editor__blocked" in js, "the collapsed row must show it too"
+    assert "slot-editor__warn" in js
+
+    bt = Path("frontend/src/pages/Backtester.jsx").read_text(encoding="utf-8")
+    assert "daily_risk_cap:" in bt, "the run report must explain this gate in words"
+
+
+# ── The backtest must run the SAVED strategy parameters ─────────────────────
+#
+# Found 2026-09-21 on the same run: Settings had DriftJumpAlpha at
+# max_daily_risk_pct = 20 and the slot risked 5%, which passes — but the engine
+# used the DATACLASS default of 4% and blocked all 77,107 bars. Both backtest
+# routes build a fresh UserConfigV2 and write only the slot's explicit
+# overrides onto it, so anything set in Settings and not overridden on the slot
+# reverted to a default. bot_service builds a live engine from the SAVED config,
+# so the two paths ran different parameters for the same slot.
+
+def test_the_backtest_starts_from_the_saved_strategy_block():
+    from backend.api.routes.backtest import seed_strategy_blocks
+    from backend.core.config_schema import UserConfigV2
+
+    config = UserConfigV2()
+    assert config.drift_jump_alpha.max_daily_risk_pct == 4.0, "the dataclass default"
+
+    seed_strategy_blocks(config, {"drift_jump_alpha": {"max_daily_risk_pct": 20,
+                                                       "max_trades_per_day": 20},
+                                  "orb": {"range_minutes": 60}})
+    assert config.drift_jump_alpha.max_daily_risk_pct == 20
+    assert config.drift_jump_alpha.max_trades_per_day == 20
+    assert config.orb.range_minutes == 60
+
+
+def test_seeding_ignores_keys_a_block_does_not_have():
+    from backend.api.routes.backtest import seed_strategy_blocks
+    from backend.core.config_schema import UserConfigV2
+
+    config = UserConfigV2()
+    seed_strategy_blocks(config, {"drift_jump_alpha": {"not_a_field": 1, "max_daily_risk_pct": 9},
+                                  "no_such_block": {"x": 1}})
+    assert config.drift_jump_alpha.max_daily_risk_pct == 9
+    assert not hasattr(config.drift_jump_alpha, "not_a_field")
+
+
+def test_both_routes_seed_the_saved_blocks_before_the_slot_overrides():
+    import inspect
+
+    from backend.api.routes import backtest as bt
+
+    src = inspect.getsource(bt)
+    calls = src.count("seed_strategy_blocks(config,") - src.count("def seed_strategy_blocks(config,")
+    assert calls == 2, "the single run and every portfolio row must both seed"
+    # order matters: the slot's own parameters are applied AFTER the saved block
+    for marker in ("seed_strategy_blocks(config, await load_saved_strategy_blocks(current_user.id))",
+                   "seed_strategy_blocks(config, _saved_strategy_blocks)"):
+        seed_at = src.index(marker)
+        apply_at = src.index("apply_strategy_params(config", seed_at)
+        assert seed_at < apply_at
+
+
+# ── A run that fails must say so ────────────────────────────────────────────
+#
+# Found 2026-09-21 while reproducing the run above: the data fetch failed in
+# under a second ("MT5 returned no data"), the handler broadcast over the
+# websocket and returned, and the PERSISTED state stayed
+# {"status": "running", "stage": "Fetching historical data...", "pct": 5}.
+# The page showed a run that never finished — indistinguishable from a slow one
+# — and every later run was refused with "A backtest is already running".
+
+def test_a_failed_fetch_writes_an_error_state():
+    import inspect
+
+    from backend.api.routes import backtest as bt
+
+    src = inspect.getsource(bt)
+    start = src.index("except DataFetchError as e:")
+    end = src.index("def _index_candles", start)
+    block = src[start:end]
+    assert block.count("await _fail(") == 2, \
+        "both the fetch failure and the empty-data case must persist an error state"
+    assert "broadcast_to_user(current_user.id, {\"type\": \"backtest_error\"" not in block, \
+        "a websocket broadcast alone leaves the saved state at 'running'"
+
+
+def test_a_dead_run_does_not_lock_the_user_out():
+    import time
+
+    from backend.api.routes.backtest import STALE_RUN_SECONDS, _is_live_run
+
+    now = time.time()
+    assert _is_live_run({"status": "running", "heartbeat": now}) is True
+    assert _is_live_run({"status": "running", "heartbeat": now - STALE_RUN_SECONDS - 1}) is False
+    assert _is_live_run({"status": "completed", "heartbeat": now}) is False
+    assert _is_live_run(None) is False
+    # a state written before heartbeats existed is taken at its word
+    assert _is_live_run({"status": "running"}) is True
+
+
+def test_both_run_endpoints_use_the_liveness_check():
+    import inspect
+
+    from backend.api.routes import backtest as bt
+
+    src = inspect.getsource(bt)
+    assert src.count("if _is_live_run(state):") == 2, \
+        "the single and the portfolio endpoint must both allow a new run after a dead one"
+    assert src.count('state["heartbeat"] = _time.time()') == 2, \
+        "both tasks must stamp their state, or liveness cannot be judged"

@@ -1410,6 +1410,35 @@ html, body {
   overflow-wrap: anywhere;
 }
 
+.slot-editor__blocked {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  order: 3;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  color: var(--yellow);
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.slot-editor__warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--yellow);
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
 .slot-editor__actions {
   display: flex;
   order: 4;

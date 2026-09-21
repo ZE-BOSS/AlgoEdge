@@ -492,6 +492,14 @@ function EmptyResultDiagnostic({ funnel, blocked }) {
       "The session filter excluded every candidate. Widen the session window, or disable it for this strategy.",
     session_exclusion:
       "The session filter excluded every candidate. Widen the session window, or disable it for this strategy.",
+    daily_risk_cap:
+      "The strategy refused every bar on its OWN daily risk cap: risk per trade alone is above its "
+      + "Max daily risk pct. Raise that on the slot's Strategy tab, or lower risk per trade. It is "
+      + "checked before any signal is formed, which is why the run found none.",
+    daily_trade_cap:
+      "The strategy's own Max trades per day was used up (or is 0). Raise it on the slot's Strategy tab.",
+    crash_symbol_only:
+      "This strategy only trades CRASH symbols. Run it on a Crash index, or pick another strategy.",
   };
   const advice = ADVICE[topCause]
     || (topKind === 'gate'

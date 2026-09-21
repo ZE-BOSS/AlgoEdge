@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Trash2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Copy, Trash2 } from 'lucide-react';
 import SchemaForm from './SchemaForm';
 import { SLOT_RISK_KEYS, SLOT_RISK_SECTIONS, STRATEGY_GROUP, STRATEGY_LABEL, STRATEGY_OPTIONS, slotSummary } from './slotSpec';
 import SymbolPicker from './SymbolPicker';
@@ -72,6 +72,35 @@ export default function SlotEditor({
     ]).filter(([, rows]) => rows.length);
   }, [schema, accountRisk]);
 
+  // What this slot would actually run with: its own value, else the account's
+  // (risk) or the strategy's (parameters), else the schema default.
+  const effective = (rows, values, name) => {
+    const own = values?.[name];
+    if (own !== undefined && own !== null) return own;
+    const row = rows.find(r => r.key.split('.').slice(1).join('.') === name);
+    return row ? row.default : undefined;
+  };
+
+  // Settings that make signals impossible, not merely rare. Both are strategy
+  // guardrails checked BEFORE a signal is formed, so the run reports "no signals
+  // at all" and the reason is invisible until you read the gate breakdown.
+  const blockers = useMemo(() => {
+    const out = [];
+    const flatRisk = riskRowsBySection.flatMap(([, rows]) => rows);
+    const riskPct = Number(effective(flatRisk, slot.risk, 'risk_per_trade_pct'));
+    const dailyCap = effective(strategyRows, slot.strategy_params, 'max_daily_risk_pct');
+    if (dailyCap !== undefined && Number.isFinite(riskPct) && riskPct > Number(dailyCap)) {
+      out.push(`Risk per trade (${riskPct}%) is above this strategy's own daily risk cap `
+        + `(${dailyCap}%), so it will refuse every bar before forming a signal. `
+        + `Raise "Max daily risk pct" on the Strategy tab, or lower risk per trade.`);
+    }
+    const tradeCap = effective(strategyRows, slot.strategy_params, 'max_trades_per_day');
+    if (tradeCap !== undefined && Number(tradeCap) <= 0) {
+      out.push('This strategy\'s "Max trades per day" is 0, so it will never enter.');
+    }
+    return out;
+  }, [riskRowsBySection, strategyRows, slot.risk, slot.strategy_params]);
+
   const tabs = [
     ['strategy', `Strategy${strategyRows.length ? ` (${strategyRows.length})` : ''}`],
     ['risk', `Risk & exits${Object.keys(slot.risk || {}).filter(k => SLOT_RISK_KEYS.includes(k)).length
@@ -99,6 +128,11 @@ export default function SlotEditor({
           {STRATEGY_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
         </select>
         <span className="slot-editor__summary">{slotSummary(slot, accountRisk)}</span>
+        {blockers.length > 0 && (
+          <span className="slot-editor__blocked" title={blockers.join(' ')}>
+            <AlertTriangle size={11} /> cannot trade
+          </span>
+        )}
         <div className="slot-editor__actions">
           {collapsible && (
             <button
@@ -131,6 +165,9 @@ export default function SlotEditor({
       </div>)}
 
       {isOpen && (<div className="slot-editor__body">
+        {blockers.map((msg, i) => (
+          <p key={i} className="slot-editor__warn"><AlertTriangle size={12} /> {msg}</p>
+        ))}
         {tab === 'strategy' ? (
           <>
             <label className="slot-editor__measured" title="On: this slot runs the settings measured for this symbol. Off: the parameters below apply exactly as entered.">
