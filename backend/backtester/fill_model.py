@@ -202,6 +202,15 @@ _GENERIC_PROFILE = OvershootProfile(
 SPIKE_FILLS: dict[str, tuple[int, float]] = {
     "CRASH 1000 INDEX": (-1, 0.80), "CRASH 500 INDEX": (-1, 0.65), "CRASH 300 INDEX": (-1, 0.60),
     "BOOM 1000 INDEX": (1, 0.80), "BOOM 500 INDEX": (1, 0.70), "BOOM 300 INDEX": (1, 0.65),
+    # The 900s were NOT in the tick study and these two lambdas are ASSUMED, not
+    # measured: the family's most adverse value (the 1000s'), because being too
+    # harsh on a spike-side stop costs a strategy that does not exist, while being
+    # too kind invents one. Absent from this table they fell through to the
+    # generic 0.02 overshoot profile, which on a Boom/Crash instrument prices a
+    # spike-side stop as if it filled at the stop -- the exact error that had
+    # random Boom shorts booking +0.76R a trade. Re-measure from ticks before
+    # trusting a 900 result to the second decimal.
+    "BOOM 900 INDEX": (1, 0.80), "CRASH 900 INDEX": (-1, 0.80),
     "JUMP 10 INDEX": (2, 0.30), "JUMP 25 INDEX": (2, 0.30), "JUMP 50 INDEX": (2, 0.30),
     "JUMP 75 INDEX": (2, 0.30), "JUMP 100 INDEX": (2, 0.30),
     "RANGE BREAK 100 INDEX": (2, 0.85), "RANGE BREAK 200 INDEX": (2, 0.85),
@@ -233,6 +242,20 @@ def _stable_u(seed: str, key: str) -> float:
     """
     h = hashlib.sha256(f"{seed}|{key}".encode()).digest()
     return int.from_bytes(h[:8], "big") / float(1 << 64)
+
+
+def position_fill_key(position: dict) -> str:
+    """A position's identity for _stable_u, from the trade itself.
+
+    `pos["id"]` is a fresh `uuid4()` per position per RUN, so passing it made
+    every EMPIRICAL fill a different random draw on every run of the same
+    backtest -- the exact non-determinism _stable_u exists to avoid, and exactly
+    the "same settings, different results" complaint. These four fields identify
+    a leg uniquely within a run (one symbol cannot open the same TP level in the
+    same direction on the same bar twice) and are identical across runs.
+    """
+    return "|".join(str(position.get(k, "")) for k in
+                    ("symbol", "strategy_id", "direction", "entry_time", "tp_level"))
 
 
 @dataclass

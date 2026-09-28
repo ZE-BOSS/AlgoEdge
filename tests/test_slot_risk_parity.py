@@ -845,3 +845,114 @@ def test_both_engines_attach_the_breakdown_to_every_closed_leg():
         assert attaches == appends, (
             f"{name}: {appends} places record a closed leg but {attaches} attribute its costs"
         )
+
+
+# ── A dead terminal must not take the API down ──────────────────────────────
+#
+# Reported 2026-09-25: "MT5 initialize() failed" repeating, and the frontend
+# could not reach the backend. Every MT5 call is serialised onto ONE thread on
+# purpose (mt5/executor.py — the package is not thread-safe), and the reconnect
+# loop retried `connect()` every 10s. `mt5.initialize()` against an absent
+# terminal blocks for longer than that, so the single worker was busy
+# permanently and every MT5-backed endpoint sat in its queue until the
+# frontend's 60s timeout. `/api/health` is pure and kept answering, which is why
+# the app looked up but empty.
+
+def test_the_reconnect_loop_backs_off_instead_of_hammering():
+    import inspect
+
+    from backend.brokers.mt5_broker import MT5Broker
+
+    assert MT5Broker.RECONNECT_MIN_DELAY == 10.0
+    assert MT5Broker.RECONNECT_MAX_DELAY >= 300.0, \
+        "a terminal that is gone stays gone; the retry must get cheap"
+
+    src = inspect.getsource(MT5Broker._reconnect_loop)
+    assert "delay = min(delay * 2, self.RECONNECT_MAX_DELAY)" in src
+    assert "random.uniform" in src, "de-sync retries so several processes do not line up"
+    # a success must return to the fast cadence
+    assert src.count("delay = self.RECONNECT_MIN_DELAY") >= 2
+
+
+def test_the_broker_defines_one_reconnect_loop():
+    from pathlib import Path
+
+    src = Path("backend/brokers/mt5_broker.py").read_text(encoding="utf-8")
+    assert src.count("async def _reconnect_loop") == 1, \
+        "the file used to define it twice, so the second silently won"
+
+
+def test_an_initialize_failure_says_why():
+    import inspect
+
+    from backend.brokers.mt5_broker import MT5Broker
+
+    src = inspect.getsource(MT5Broker.connect)
+    assert "mt5.last_error()" in src, \
+        "'initialize() failed' alone gives the operator nothing to act on"
+
+
+def test_the_health_endpoint_touches_nothing():
+    """It is what the frontend polls, so it must answer while MT5 is stuck."""
+    import inspect
+
+    from backend import main
+
+    src = inspect.getsource(main.health_check)
+    for forbidden in ("mt5", "broker", "await "):
+        assert forbidden not in src, f"health_check must not touch {forbidden}"
+
+
+# ── The stop-fill model must be a setting, not a hidden default ─────────────
+#
+# On Crash/Boom every spike happens inside a bar, so whether a backtest fills a
+# stop AT the stop or charges the measured overshoot is worth a factor of 2.5 on
+# the result ($116,509 vs $46,152 on the same 2026 trades). It existed only as a
+# request field with no schema entry, so no screen could show it and a value
+# chosen in Settings never reached a run.
+
+def test_the_stop_fill_model_is_an_editable_account_setting():
+    from backend.core.config_schema import RiskParams
+    from backend.core.schema_introspection import build_full_schema
+    from backend.risk.slot_book import ACCOUNT_ONLY_KEYS
+
+    assert RiskParams().stop_fill_model == "CONSERVATIVE", "realistic fills are the default"
+    schema = {f["key"]: f for f in build_full_schema()}
+    row = schema.get("risk.stop_fill_model")
+    assert row is not None, "it must be in the parameter schema or no form can render it"
+    assert set(row["enum_options"]) == {"OFF", "CONSERVATIVE", "EMPIRICAL"}
+    # account-owned, so it lands on Settings > Defaults > Account & broker
+    assert "stop_fill_model" in ACCOUNT_ONLY_KEYS
+
+
+def test_the_fill_model_changes_what_a_stop_costs():
+    from backend.backtester.fill_model import build_stop_fill_model
+
+    kw = dict(direction="SELL", open_p=14695.0, high=14760.0, low=14690.0,
+              stop_level=14700.0, stop_distance=20.0, symbol="Boom 1000 Index",
+              slippage_pips=0.0, position_key="t1")
+
+    off = build_stop_fill_model({"stop_fill_model": "OFF"}).resolve_stop_fill(**kw)
+    real = build_stop_fill_model({"stop_fill_model": "CONSERVATIVE"}).resolve_stop_fill(**kw)
+
+    assert off[2] == pytest.approx(0.0), "OFF books the stop exactly — the fiction"
+    assert real[2] > 2.0, "a Boom up-spike must cost far more than the stop"
+    assert real[0] > off[0], "the short fills WORSE than its stop"
+
+
+def test_a_run_inherits_the_saved_fill_model():
+    import inspect
+
+    from backend.api.routes import backtest as bt
+
+    m = {"stop_fill_model": None}
+    bt.apply_saved_sim_settings(m, {"stop_fill_model": "OFF"})
+    assert m["stop_fill_model"] == "OFF", "Settings must reach a run that did not override it"
+
+    m2 = {"stop_fill_model": "EMPIRICAL"}
+    bt.apply_saved_sim_settings(m2, {"stop_fill_model": "OFF"})
+    assert m2["stop_fill_model"] == "EMPIRICAL", "an explicit request still wins"
+
+    src = inspect.getsource(bt)
+    assert src.count("apply_saved_sim_settings(merged_risk_config,") == 2, \
+        "the single run and the portfolio run must both inherit it"

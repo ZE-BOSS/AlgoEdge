@@ -11,7 +11,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
+import pytz
 
 from backend.utils.logger import get_logger
 from backend.mt5.executor import mt5_executor
@@ -51,6 +53,90 @@ def _get_timeframe_code(tf_str: str):
 
 
 
+_TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
+
+
+def terminal_max_bars() -> int:
+    """How many bars this terminal will serve in ONE history request.
+
+    MT5's `maxbars` (Tools > Options > Charts > "Max bars in chart") caps every
+    history request, and `copy_rates_range` measures a request against the number
+    of PERIODS the span covers rather than the number of bars that exist inside
+    it. So an 11-month M5 range holding 68,617 real bars is still refused with
+    (-2, 'Terminal: Invalid params'), because the span is 101,952 five-minute
+    slots against a `maxbars` of 100,000. A request for exactly `maxbars` is
+    refused as well, hence the margin.
+
+    Measured on the FundedNext terminal, 2026-09-25: 99,000 bars returns 99,000;
+    100,000 and above return nothing with (-2). Before this, `get_data_range`
+    asked `copy_rates_from` for up to 200,000 as its fallback, so any M5 backtest
+    whose window plus warm-up exceeded a year failed outright.
+    """
+    try:
+        n = int(getattr(mt5.terminal_info(), "maxbars", 0) or 0)
+    except Exception:
+        n = 0
+    return max(1000, int((n or 100_000) * 0.95))
+
+
+_NY = pytz.timezone("America/New_York")
+# Candidate server offsets, in hours. Real MT5 servers sit on whole or half hours
+# between UTC-2 and UTC+5; scoring a continuum would only fit noise.
+_OFFSET_CANDIDATES = [h / 2 for h in range(-4, 11)]
+# Symbols to read the cash open off, best first: an index has the sharpest jump.
+_OFFSET_PROBE_SYMBOLS = ("US30", "SPX500", "NAS100", "US100", "USTEC", "US Tech 100",
+                         "GER40", "Germany 40", "XAUUSD", "EURUSD")
+_OFFSET_PROBE_BARS = 12 * 288          # ~12 days of M5
+
+
+def _ny_open_epoch(utc_day: int) -> int:
+    """09:30 New York on the true-UTC day `utc_day`, as epoch seconds."""
+    d = datetime.fromtimestamp(utc_day * 86400, timezone.utc).date()
+    return int(_NY.localize(datetime(d.year, d.month, d.day, 9, 30)).timestamp())
+
+
+def _offset_from_volume_profile() -> float | None:
+    """The server's UTC offset, read from WHERE the New York cash open sits.
+
+    Independent of whether the market is open right now, which is the whole point
+    — see detect_server_utc_offset_hours. Index (and FX) tick volume jumps at
+    09:30 New York; the boundary is resolved per DAY through pytz, so it is right
+    on both sides of a DST change, and only whole/half-hour candidates are scored.
+
+    Returns None rather than a guess when no probe symbol has usable bars.
+    """
+    if mt5 is None:
+        return None
+    for symbol in _OFFSET_PROBE_SYMBOLS:
+        try:
+            rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 0, _OFFSET_PROBE_BARS)
+        except Exception:
+            continue
+        if rates is None or len(rates) < 2000:
+            continue
+        t = np.asarray([int(r[0]) for r in rates], dtype=np.int64)
+        vol = np.asarray([float(r[5]) for r in rates], dtype=float)   # tick_volume
+        if vol.sum() <= 0:
+            continue
+        best, best_score = None, -1.0
+        for off in _OFFSET_CANDIDATES:
+            true_utc = t - int(off * 3600)
+            days = true_utc // 86400
+            opens = {int(d): _ny_open_epoch(int(d)) for d in np.unique(days)}
+            base = np.asarray([opens[int(d)] for d in days], dtype=np.int64)
+            rel = (true_utc - base) // 60
+            inside = (rel >= 0) & (rel < 30)          # the opening half hour
+            if not inside.any():
+                continue
+            score = float(vol[inside].mean())
+            if score > best_score:
+                best, best_score = off, score
+        if best is not None:
+            logger.info(f"[DATA] Server offset from {symbol}'s cash open: {best:+.1f}h")
+            return best
+    return None
+
+
 def detect_server_utc_offset_hours() -> float:
     """
     Return the broker server's UTC offset in hours, so bar timestamps can be
@@ -69,6 +155,17 @@ def detect_server_utc_offset_hours() -> float:
 
     Preference order:
       1. ALGOEDGE_MT5_SERVER_UTC_OFFSET env var (explicit override, in hours)
+      1b. WHERE THE NEW YORK CASH OPEN SITS IN THE BARS, which does not care
+          whether the market is open now. A tick-based estimate is only trusted
+          when it agrees with this one, because a STALE TICK CAN ONLY
+          UNDERESTIMATE: the tick is in the past, so `tick.time - now` is the
+          offset MINUS however long the market has been shut. Measured on the
+          FundedNext terminal on 2026-09-25, whose real offset is +3h: two
+          backends started 33 minutes apart, both after the Friday close, read
+          +2.0h and +1.0h. Every session-anchored strategy -- VWAP, ORB, APA's
+          session modes, IVW's day-end flat, OvernightSession_v1 and
+          OpeningDrive_v1 -- therefore traded up to two hours early, and which
+          hours depended on when the backend happened to start.
       2. Live measurement: the gap between the server's clock and true UTC
       3. 0.0 — assume already-UTC, and warn
     """
@@ -83,6 +180,7 @@ def detect_server_utc_offset_hours() -> float:
     if _SERVER_OFFSET_CACHE is not None:
         return _SERVER_OFFSET_CACHE
 
+    from_ticks = None
     try:
         if mt5 is not None:
             tick = mt5.symbol_info_tick("EURUSD")
@@ -93,11 +191,30 @@ def detect_server_utc_offset_hours() -> float:
                 # nearest half hour to absorb latency and clock skew.
                 offset = round(delta_h * 2) / 2
                 if -12 <= offset <= 14:
-                    _SERVER_OFFSET_CACHE = offset
-                    logger.info(f"[DATA] Detected MT5 server UTC offset: {offset:+.1f}h")
-                    return offset
+                    from_ticks = offset
     except Exception as e:
-        logger.debug(f"[DATA] Server offset detection failed: {e}")
+        logger.debug(f"[DATA] Tick-based server offset failed: {e}")
+
+    from_bars = None
+    try:
+        from_bars = _offset_from_volume_profile()
+    except Exception as e:
+        logger.debug(f"[DATA] Bar-based server offset failed: {e}")
+
+    # A stale tick reads LOW, never high, so the larger estimate is the one to
+    # trust when they disagree. Agreement is the common case and says nothing new.
+    if from_bars is not None and from_ticks is not None and from_bars != from_ticks:
+        logger.warning(
+            f"[DATA] Server UTC offset: the live tick says {from_ticks:+.1f}h but the "
+            f"New York cash open sits at {from_bars:+.1f}h. A tick read while the market "
+            f"is shut can only read LOW, so using {max(from_bars, from_ticks):+.1f}h. "
+            f"Set ALGOEDGE_MT5_SERVER_UTC_OFFSET to pin it."
+        )
+    chosen = max([x for x in (from_bars, from_ticks) if x is not None], default=None)
+    if chosen is not None:
+        _SERVER_OFFSET_CACHE = chosen
+        logger.info(f"[DATA] Detected MT5 server UTC offset: {chosen:+.1f}h")
+        return chosen
 
     logger.warning(
         "[DATA] Could not determine MT5 server UTC offset — assuming server time IS UTC. "
@@ -259,29 +376,49 @@ class DataFetcher:
         end_ts = int(end.timestamp()) if hasattr(end, 'timestamp') else end
 
         loop = asyncio.get_running_loop()
-        rates = None
-        for attempt in range(2):
-            rates = await loop.run_in_executor(
-                _executor, 
-                lambda: mt5.copy_rates_range(symbol, tf_code, start_ts, end_ts)
+        # Slice the range so no single request covers more PERIODS than the
+        # terminal will serve — see terminal_max_bars(). A window short enough
+        # is still one request, so the common case is byte-for-byte unchanged.
+        step = _TF_MINUTES.get(str(timeframe).upper(), 5) * 60
+        max_span = terminal_max_bars() * step
+        cuts = list(range(start_ts, end_ts, max_span)) or [start_ts]
+        cuts.append(end_ts)
+        if len(cuts) > 2:
+            logger.info(
+                f"{symbol} {timeframe}: {end_ts - start_ts} seconds is more than this "
+                f"terminal serves in one request; fetching in {len(cuts) - 1} slices"
             )
-            if rates is not None and len(rates) > 0:
-                break
-                
-            mt5_err = await loop.run_in_executor(_executor, mt5.last_error)
-            if mt5_err[0] == 1:
-                logger.info(f"MT5 downloading history for {symbol} {timeframe}, attempt {attempt+1}... waiting 2s")
-                await asyncio.sleep(2.0)
-            else:
-                break
+        pieces = []
+        for lo_ts, hi_ts in zip(cuts, cuts[1:]):
+            got = None
+            for attempt in range(2):
+                got = await loop.run_in_executor(
+                    _executor,
+                    lambda a=lo_ts, b=hi_ts: mt5.copy_rates_range(symbol, tf_code, a, b)
+                )
+                if got is not None and len(got) > 0:
+                    break
+
+                mt5_err = await loop.run_in_executor(_executor, mt5.last_error)
+                if mt5_err[0] == 1:
+                    logger.info(f"MT5 downloading history for {symbol} {timeframe}, attempt {attempt+1}... waiting 2s")
+                    await asyncio.sleep(2.0)
+                else:
+                    break
+            # A slice can legitimately be empty (a holiday week, or history that
+            # starts mid-range); only every slice being empty is a failure.
+            if got is not None and len(got) > 0:
+                pieces.append(got)
+        rates = np.concatenate(pieces) if pieces else None
 
         
         if rates is None or len(rates) == 0:
             # Fallback: copy_rates_range often fails with (-2, Invalid params) if start_ts is too old.
             # Attempt to fetch using copy_rates_from which is more resilient to history bounds.
-            tf_minutes = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
-            minutes = tf_minutes.get(timeframe, 5)
-            estimated_bars = min(int((end_ts - start_ts) / (minutes * 60)), 200000) # Cap at 200k bars
+            minutes = _TF_MINUTES.get(str(timeframe).upper(), 5)
+            # Capped at what the terminal will actually serve: 200,000 was above
+            # every real `maxbars`, so this fallback could only ever fail too.
+            estimated_bars = min(int((end_ts - start_ts) / (minutes * 60)), terminal_max_bars())
             logger.info(f"copy_rates_range failed for {timeframe}. Falling back to copy_rates_from with count={estimated_bars}")
             rates = await loop.run_in_executor(
                 _executor, 

@@ -28,6 +28,8 @@ from backend.risk.prop_firm_validator import PropFirmValidator
 from backend.utils.logger import get_logger
 from backend.utils.timeutils import detect_session
 from backend.utils.trade_grouper import group_trades
+from backend.backtester.fill_model import position_fill_key
+from backend.risk.profit_target import note_and_check as _note_and_check
 
 logger = get_logger(__name__)
 
@@ -570,7 +572,7 @@ class CostModelMixin:
                 stop_level=pos["stop_loss"],
                 stop_distance=abs(pos["entry_price"] - pos.get("initial_stop_loss", pos["stop_loss"])),
                 symbol=sym, slippage_pips=self._costs_for(sym)["exit_slippage_pips"],
-                position_key=pos["id"],
+                position_key=position_fill_key(pos),
             )
             pos["exit_price"], pos["gap_fill"], pos["stop_overshoot_r"] = fill, gapped, round(ov, 6)
             pos["exit_reason"] = "SL"
@@ -1150,7 +1152,7 @@ class BacktestEngine(CostModelMixin):
                         stop_distance=abs(pos["entry_price"] - pos.get("initial_stop_loss", pos["stop_loss"])),
                         symbol=pos.get("symbol", ""),
                         slippage_pips=_exit_slip,
-                        position_key=pos["id"],
+                        position_key=position_fill_key(pos),
                     )
                     pos["exit_price"] = _fill
                     pos["gap_fill"] = _gapped
@@ -1262,6 +1264,34 @@ class BacktestEngine(CostModelMixin):
                             if new_sl < pos["stop_loss"]:
                                 pos["stop_loss"] = new_sl
                                 pos["be_applied"] = True
+
+            # ── Profit targets (risk/profit_target.py) ──────────────────
+            # After BE/trailing/SL/TP, so a target never pre-empts an exit the
+            # bar had already earned, and before closed_this_bar is drained so a
+            # target close is booked on this bar like any other.
+            if self.risk_config.get("target_profit_enabled"):
+                _still_open = [p for p in self.open_positions if p not in closed_this_bar]
+                _to_close = _note_and_check(
+                    self.risk_engine.circuit, _still_open,
+                    lambda p: self._calc_pnl(p["direction"], p["entry_price"], current_price,
+                                             p["volume"], p.get("symbol", "")),
+                    balance,
+                )
+                if _to_close:
+                    _wanted = set(_to_close)
+                    for pos in _still_open:
+                        if pos.get("group_id") not in _wanted:
+                            continue
+                        _slip = self._costs_for(pos.get("symbol", ""))["exit_slippage_pips"]
+                        pos["exit_price"] = _apply_exit_slippage(
+                            pos["direction"], current_price, pos.get("symbol", ""), _slip)
+                        pos["exit_reason"] = "PROFIT_TARGET"
+                        pos["pnl"] = self._calc_pnl(
+                            pos["direction"], pos["entry_price"], pos["exit_price"],
+                            pos["volume"], pos.get("symbol", ""),
+                            pos.get("entry_time"), current_time,
+                        )
+                        closed_this_bar.append(pos)
 
             # Close positions and build exit confirmations
             # FIX 2: Collect positions to remove after the loop (avoids O(n) list.remove in hot loop)

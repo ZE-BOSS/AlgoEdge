@@ -172,7 +172,9 @@ async def get_all_strategy_defaults(current_user: User = Depends(get_current_use
     reads this so the parameter panel can show the measured-best values for
     whichever strategy is selected, per strategy rather than per account.
     """
-    from backend.strategies.strategy_defaults import STRATEGY_DEFAULTS, OVERRIDABLE
+    from backend.strategies.strategy_defaults import (
+        NO_MEASURED_TARGET, OVERRIDABLE, STRATEGY_DEFAULTS,
+    )
 
     # `live_applies`: the measured fields the LIVE bot will actually lay on this
     # account's trades — bot_service applies a strategy default only where the
@@ -205,6 +207,10 @@ async def get_all_strategy_defaults(current_user: User = Depends(get_current_use
         out[sid] = {
             "defaults": defaults,
             "evidence": cfg.get("evidence", ""),
+            # tp1_rr is a placeholder for these: the measured rule has no target
+            # and leaves on a trail, a session close or a holding period. The UI
+            # warns instead of presenting it as a tunable.
+            "no_measured_target": sid in NO_MEASURED_TARGET,
             "live_applies": [
                 k for k in defaults if k != "session_filter_enabled" and (
                     saved_risk is None or not hasattr(_base, k)

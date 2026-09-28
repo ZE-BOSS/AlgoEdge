@@ -106,6 +106,11 @@ MIGRATIONS = [
         "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS title TEXT;",
         "ALTER TABLE backtest_runs DROP COLUMN IF EXISTS title;",
     ),
+    (
+        "Add group_id to trades, so a live position maps to its circuit-breaker group",
+        "ALTER TABLE trades ADD COLUMN IF NOT EXISTS group_id VARCHAR(36);",
+        "ALTER TABLE trades DROP COLUMN IF EXISTS group_id;",
+    ),
 ]
 
 

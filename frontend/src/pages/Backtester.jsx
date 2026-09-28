@@ -1751,6 +1751,11 @@ export default function Backtester() {
       ? {}
       : (allStrategyDefaults?.[strategyId]?.defaults || {})
   ), [allStrategyDefaults, userCfg]);
+  // Whether the strategy HAS a measured target is a fact about the strategy, so
+  // unlike the exits above it does not depend on the account's switch.
+  const noTargetFor = useCallback((strategyId) => (
+    Boolean(allStrategyDefaults?.[strategyId]?.no_measured_target)
+  ), [allStrategyDefaults]);
 
   // [18.3] Adopt the selected strategy's MEASURED exit settings (research/16,
   // 285 cells / 23,989 trades). Previously these were displayed in the defaults
@@ -2185,6 +2190,7 @@ export default function Backtester() {
                 accountRisk={userCfg?.config?.risk}
                 strategyDefaults={userCfg?.config?.[STRATEGY_GROUP[form.strategy_id]] || {}}
                 measuredExits={measuredExitsFor(form.strategy_id)}
+                noMeasuredTarget={noTargetFor(form.strategy_id)}
                 showEnabled={false}
                 showSymbol={false}
                 collapsible
@@ -2220,6 +2226,7 @@ export default function Backtester() {
                     accountRisk={userCfg?.config?.risk}
                     strategyDefaults={userCfg?.config?.[STRATEGY_GROUP[item.strategy_id]] || {}}
                     measuredExits={measuredExitsFor(item.strategy_id)}
+                    noMeasuredTarget={noTargetFor(item.strategy_id)}
                     symbols={backtestSymbols}
                     showEnabled={false}
                     collapsible

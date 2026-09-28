@@ -112,3 +112,12 @@ research/data/ticks/
 # scripts/run_vwap_research.py). Everything else under data/ is committed.
 data/vwap_research/vwap_a.pkl
 data/vwap_research/vwap_b.pkl
+
+# Regenerable research caches (152MB of bars); refetch with scripts/fetch_zone_bars.py
+data/zone_study/
+data/deribit/
+data/expiry/
+data/vix_regime/
+data/opex/
+data/spike_resumption/
+data/strike_levels/

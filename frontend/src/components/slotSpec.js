@@ -10,6 +10,10 @@ export const STRATEGY_OPTIONS = [
   ['VWAP_v1', 'VWAP Institutional', 'vwap'],
   ['ORB_v1', 'Opening Range Breakout', 'orb'],
   ['IVW_v1', 'IV Walls Breakout', 'ivw'],
+  ['TrendBreakout_v1', 'Trend Breakout (Donchian)', 'trend_breakout'],
+  ['OvernightSession_v1', 'Overnight Session (index)', 'overnight_session'],
+  ['OpeningDrive_v1', 'Opening Drive (5m vs EMA)', 'opening_drive'],
+  ['SpikeResumption_v1', 'Spike Resumption (Boom/Crash)', 'spike_resumption'],
   ['DriftJumpAlpha_v1', 'Drift & Jump Alpha', 'drift_jump_alpha'],
   ['BoomDriftJump_v1', 'Boom Drift & Jump', 'boom_drift_jump'],
   ['HTFFVGFlip_v1', 'HTF FVG Flip', 'htf_fvg_flip'],
@@ -33,7 +37,12 @@ export const SLOT_RISK_SECTIONS = [
   ['Entry limits', ['max_daily_trades', 'max_concurrent_positions', 'max_positions_per_symbol',
     'max_daily_drawdown_pct', 'max_weekly_drawdown_pct', 'min_bars_between_entries',
     'allow_pyramiding']],
-  ['Profit halts', ['target_profit_enabled', 'max_daily_profit', 'max_weekly_profit']],
+  // A target is (scope, basis, action, amount), resolved per symbol x strategy.
+  // The amounts are ordered under the switches that decide which of them is read
+  // at all, because a $50 per-trade amount means nothing until TRADE is armed.
+  ['Profit targets', ['target_profit_enabled', 'profit_target_scopes', 'profit_target_basis',
+    'profit_target_action', 'profit_target_is_pct',
+    'max_trade_profit', 'max_daily_profit', 'max_weekly_profit', 'max_monthly_profit']],
   // The full ladder: every field here is read by multi_tp / trailing_manager /
   // exit_replay, and the per-TP rows are hidden above this slot's TP count (see
   // SlotEditor) so a 1-TP slot is not asked about TP5.

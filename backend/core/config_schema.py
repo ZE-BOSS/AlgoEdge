@@ -16,6 +16,10 @@ from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
 from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
 from backend.strategies.strategy_orb.params import ORBParams
 from backend.strategies.strategy_ivw.params import IVWParams
+from backend.strategies.strategy_opening_drive.params import OpeningDriveParams
+from backend.strategies.strategy_overnight.params import OvernightSessionParams
+from backend.strategies.strategy_spike_resumption.params import SpikeResumptionParams
+from backend.strategies.strategy_trend.params import TrendBreakoutParams
 from backend.strategies.strategy_vwap.params import VWAPParams
 # ─────────────────────────────────────────────────────────────────────────────
 # RISK MANAGEMENT PARAMETERS
@@ -136,6 +140,26 @@ class RiskParams:
     rejected for "requote"/"off quotes" on a fast-moving symbol, raise this for that
     instrument (or globally) rather than assuming the default is wrong.
     """
+
+    # ── Backtest fill realism ─────────────────────────────────────────────
+    stop_fill_model: Literal["CONSERVATIVE", "EMPIRICAL", "OFF"] = "CONSERVATIVE"
+    """
+    How a BACKTEST fills a stop that a bar traded through.
+
+    OFF          fill at the stop price. Only ever correct for reproducing an
+                 old run bit-for-bit; on a jump market it is fiction.
+    CONSERVATIVE (default) charge the measured MEAN overshoot for that symbol.
+    EMPIRICAL    sample the measured overshoot distribution per trade.
+
+    Measured from 365 days of ticks (backtester/fill_model.py): Crash 1000 mean
+    0.403, Boom 1000 mean 0.353 of the distance to the bar extreme, against
+    0.000 for a bar backtest. On the 2026 Crash/Boom book this setting alone is
+    the difference between +1,065% and +361%. Live trading is unaffected -- real
+    fills are whatever the broker gives.
+    """
+
+    stop_fill_seed: str = "algoedge"
+    """Seed for EMPIRICAL sampling, so a run is reproducible."""
 
     # ── Margin / sizing-truth guards (Phase 2, [A1]-[A12]) ────────────────
     max_margin_utilisation_pct: float = 30.0
@@ -581,8 +605,66 @@ class RiskParams:
 
     # Target profit halts
     target_profit_enabled: bool = False
+    """Master switch for this slot's profit targets. Off means no target of any
+    scope is armed, whatever the amounts below say."""
+
+    profit_target_scopes: list[Literal["TRADE", "DAY", "WEEK", "MONTH"]] = field(
+        default_factory=lambda: ["DAY"])
+    """Which profit targets are armed, any combination of "TRADE", "DAY",
+    "WEEK" and "MONTH". More than one can run at once: a $50 per-trade target
+    and a $200 weekly target coexist, and whichever is reached first acts.
+
+    A target is always resolved PER SLOT (symbol x strategy) because a slot owns
+    its own circuit breaker, so it counts this slot's trades and nothing else's.
+    That is the whole point: a Boom slot $20 in profit against a $50 target must
+    not be closed because a Crash slot is $40 up at the same moment."""
+
+    profit_target_basis: Literal["BALANCE", "FLOATING"] = "BALANCE"
+    """What the target measures.
+
+    "BALANCE" counts REALISED profit only — trades this slot has already closed
+    in the period. A position still open contributes nothing until it closes.
+
+    "FLOATING" counts realised profit PLUS the unrealised profit of this slot's
+    open positions, which is what lets a target fire while a trade is running.
+    It reads only this slot's own positions, never account equity: account
+    equity is the sum of every slot's floating P&L, so using it would close one
+    symbol's trade because a different symbol was up."""
+
+    profit_target_action: Literal["PAUSE", "CLOSE_AND_PAUSE"] = "PAUSE"
+    """What happens when a target is reached.
+
+    "PAUSE" stops this slot taking NEW entries for the rest of the period and
+    leaves open positions alone — the behaviour every version before 2026-09-27
+    had, and the only one it had.
+
+    "CLOSE_AND_PAUSE" flattens this slot's open positions first, then pauses.
+    "TRADE" scope always closes, because a per-trade target that did not close
+    the trade would mean nothing."""
+
+    profit_target_is_pct: bool = False
+    """Read the amounts below as a PERCENT of the period's starting balance
+    rather than as money. The period start is the day/week/month start balance,
+    or for "TRADE" scope the account balance when that trade opened."""
+
+    max_trade_profit: float = 50.0
+    """"TRADE" scope target: close a single signal group once it is this far in
+    profit. Measured on that group alone, so two open groups each need to reach
+    it on their own.
+
+    This is deliberately NOT the same thing as `tp1_rr`. A take-profit is a
+    resting order at a price fixed when the trade opened; this is a running
+    check on money, it can be changed mid-trade, and it fires on the bar the
+    threshold is crossed rather than needing the price to trade there."""
+
     max_daily_profit: float = 500.0
+    """"DAY" scope target, on this slot's profit since the day rolled over."""
+
     max_weekly_profit: float = 2000.0
+    """"WEEK" scope target, on this slot's profit since the week rolled over."""
+
+    max_monthly_profit: float = 8000.0
+    """"MONTH" scope target, on this slot's profit since the month rolled over."""
 
     # Trailing stops
     trail_method_tp1: str = "NONE"
@@ -1111,6 +1193,10 @@ class UserConfigV2(UserConfig):
     vwap: VWAPParams = field(default_factory=VWAPParams)
     orb: ORBParams = field(default_factory=ORBParams)
     ivw: IVWParams = field(default_factory=IVWParams)
+    trend_breakout: TrendBreakoutParams = field(default_factory=TrendBreakoutParams)
+    overnight_session: OvernightSessionParams = field(default_factory=OvernightSessionParams)
+    opening_drive: OpeningDriveParams = field(default_factory=OpeningDriveParams)
+    spike_resumption: SpikeResumptionParams = field(default_factory=SpikeResumptionParams)
     synth: SynthParams = field(default_factory=SynthParams)
     htf_fvg_flip: HTFFVGFlipParams = field(default_factory=HTFFVGFlipParams)
     bias_ifvg: BiasIFVGParams = field(default_factory=BiasIFVGParams)
@@ -1127,6 +1213,10 @@ class UserConfigV2(UserConfig):
         vwap_data = data.pop("vwap", {})
         orb_data = data.pop("orb", {})
         ivw_data = data.pop("ivw", {})
+        trend_breakout_data = data.pop("trend_breakout", {})
+        overnight_session_data = data.pop("overnight_session", {})
+        opening_drive_data = data.pop("opening_drive", {})
+        spike_resumption_data = data.pop("spike_resumption", {})
         synth_data = data.pop("synth", {})
         htf_fvg_flip_data = data.pop("htf_fvg_flip", {})
         bias_ifvg_data = data.pop("bias_ifvg", {})
@@ -1149,6 +1239,10 @@ class UserConfigV2(UserConfig):
         config.vwap = VWAPParams(**filter_kwargs(VWAPParams, vwap_data))
         config.orb = ORBParams(**filter_kwargs(ORBParams, orb_data))
         config.ivw = IVWParams(**filter_kwargs(IVWParams, ivw_data))
+        config.trend_breakout = TrendBreakoutParams(**filter_kwargs(TrendBreakoutParams, trend_breakout_data))
+        config.overnight_session = OvernightSessionParams(**filter_kwargs(OvernightSessionParams, overnight_session_data))
+        config.opening_drive = OpeningDriveParams(**filter_kwargs(OpeningDriveParams, opening_drive_data))
+        config.spike_resumption = SpikeResumptionParams(**filter_kwargs(SpikeResumptionParams, spike_resumption_data))
         config.synth = SynthParams(**filter_kwargs(SynthParams, synth_data))
         config.htf_fvg_flip = HTFFVGFlipParams(**filter_kwargs(HTFFVGFlipParams, htf_fvg_flip_data))
         config.bias_ifvg = BiasIFVGParams(**filter_kwargs(BiasIFVGParams, bias_ifvg_data))
@@ -1215,6 +1309,14 @@ class UserConfigV2(UserConfig):
             self.orb = ORBParams()
         if self.ivw is None:
             self.ivw = IVWParams()
+        if self.trend_breakout is None:
+            self.trend_breakout = TrendBreakoutParams()
+        if self.overnight_session is None:
+            self.overnight_session = OvernightSessionParams()
+        if self.opening_drive is None:
+            self.opening_drive = OpeningDriveParams()
+        if self.spike_resumption is None:
+            self.spike_resumption = SpikeResumptionParams()
         if self.synth is None:
             self.synth = SynthParams()
         if self.htf_fvg_flip is None:

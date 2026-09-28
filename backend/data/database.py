@@ -94,6 +94,7 @@ async def init_db():
             "ALTER TABLE backtest_runs ADD COLUMN confluence_stats TEXT;",
             "ALTER TABLE backtest_runs ADD COLUMN title TEXT;",
             "ALTER TABLE backtest_runs ADD COLUMN replay_data TEXT;",
+            "ALTER TABLE trades ADD COLUMN group_id VARCHAR(36);",
             # `strategy_id` was added to the BacktestTrade MODEL without a
             # matching migration, so every save failed with
             # "table backtest_trades has no column named strategy_id" — a hard

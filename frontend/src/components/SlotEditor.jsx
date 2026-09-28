@@ -29,6 +29,11 @@ export default function SlotEditor({
   // resolve_slot_risk_config lays these over the account default for any field
   // this slot has not set itself, so they are what the run will use.
   measuredExits = {},
+  // True when this strategy's measured rule has NO profit target and its
+  // `tp1_rr` is only a placeholder (strategy_defaults.NO_MEASURED_TARGET, served
+  // as `no_measured_target`). A property of the strategy, so it is read straight
+  // from the endpoint and NOT gated on the account's measured-exits switch.
+  noMeasuredTarget = false,
   symbols = [],
   onChange,
   onRemove,
@@ -140,6 +145,24 @@ export default function SlotEditor({
     return out;
   }, [riskRowsBySection, strategyRows, slot.risk, slot.strategy_params]);
 
+  // A rule that leaves on a trailing stop, a session close or a holding period
+  // has no target at all; "TP1 R:R" only exists because the engine needs a price.
+  // Lowering it does not add a target, it caps the handful of very large winners
+  // the rule lives on — and that is invisible in the result, so it is said here.
+  const targetNote = useMemo(() => {
+    if (!noMeasuredTarget) return null;
+    const label = STRATEGY_LABEL[slot.strategy_id] || slot.strategy_id;
+    const head = `${label} has no measured profit target: it leaves on its own exit, and `
+      + '"TP1 R:R" is a placeholder set far enough away never to fill.';
+    const own = Number(slot.risk?.tp1_rr);
+    const measured = Number(measuredExits?.tp1_rr);
+    if (Number.isFinite(own) && Number.isFinite(measured) && own < measured) {
+      return `${head} This slot has it at ${own}R instead of ${measured}R, which caps the large `
+        + 'winners the rule depends on.';
+    }
+    return head;
+  }, [noMeasuredTarget, slot.strategy_id, slot.risk, measuredExits]);
+
   const tabs = [
     ['strategy', `Strategy${strategyRows.length ? ` (${strategyRows.length})` : ''}`],
     ['risk', `Risk & exits${Object.keys(slot.risk || {}).filter(k => SLOT_RISK_KEYS.includes(k)).length
@@ -207,6 +230,9 @@ export default function SlotEditor({
         {blockers.map((msg, i) => (
           <p key={i} className="slot-editor__warn"><AlertTriangle size={12} /> {msg}</p>
         ))}
+        {targetNote && (
+          <p className="slot-editor__warn"><AlertTriangle size={12} /> {targetNote}</p>
+        )}
         {tab === 'strategy' ? (
           <>
             <label className="slot-editor__measured" title="On: this slot runs the settings measured for this symbol. Off: the parameters below apply exactly as entered.">

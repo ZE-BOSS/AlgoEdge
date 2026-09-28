@@ -303,3 +303,46 @@ def test_group_without_gapped_legs_reports_no_gap():
     g = group_trades(legs)[0]
     assert g["gap_fill"] is False
     assert g["stop_overshoot_r"] is None
+
+
+# -- reproducibility: the same backtest must price the same fills twice --------
+#
+# `_stable_u`'s whole docstring is about NOT letting a fill depend on anything
+# outside the trade, and the call sites passed `pos["id"]` -- a fresh uuid4() per
+# position per RUN. So in EMPIRICAL mode every run of the same backtest drew a
+# different overshoot, which is the "same settings, different results" failure.
+def test_position_fill_key_is_a_function_of_the_trade_only():
+    from backend.backtester.fill_model import position_fill_key
+    pos = {"id": "irrelevant", "symbol": "XAUUSD", "strategy_id": "TrendBreakout_v1",
+           "direction": "BUY", "entry_time": 1_700_000_000, "tp_level": 1}
+    first = position_fill_key(pos)
+    assert first == position_fill_key({**pos, "id": "a different uuid"})
+    for field, other in (("symbol", "EURUSD"), ("direction", "SELL"),
+                         ("entry_time", 1_700_000_300), ("tp_level", 2),
+                         ("strategy_id", "ORB_v1")):
+        assert position_fill_key({**pos, field: other}) != first, f"{field} must matter"
+
+
+def test_empirical_fills_repeat_across_runs():
+    from backend.backtester.fill_model import StopFillModel, position_fill_key
+    pos = {"symbol": "XAUUSD", "strategy_id": "TrendBreakout_v1", "direction": "BUY",
+           "entry_time": 1_700_000_000, "tp_level": 1}
+    kw = dict(direction="BUY", open_p=2000.5, high=2001.0, low=1998.0,
+              stop_level=1999.0, stop_distance=4.0, symbol="XAUUSD", slippage_pips=0.0)
+    a = StopFillModel(mode="EMPIRICAL").resolve_stop_fill(**kw, position_key=position_fill_key(pos))
+    b = StopFillModel(mode="EMPIRICAL").resolve_stop_fill(**kw, position_key=position_fill_key(pos))
+    assert a == b
+    # and a DIFFERENT trade still gets its own draw, so this is not just a constant
+    other = position_fill_key({**pos, "entry_time": 1_700_003_600})
+    assert StopFillModel(mode="EMPIRICAL").resolve_stop_fill(**kw, position_key=other) != a
+
+
+def test_the_engines_pass_the_stable_key_not_the_run_local_uuid():
+    """Coverage by construction: a new call site that reaches for pos["id"] again
+    reintroduces the bug silently, because the numbers still look plausible."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[1]
+    for name in ("backend/backtester/engine.py", "backend/backtester/portfolio_engine.py"):
+        src = (root / name).read_text(encoding="utf-8")
+        assert 'position_key=pos["id"]' not in src, f"{name} passes the per-run uuid4()"
+        assert "position_key=position_fill_key(pos)" in src, f"{name} has no stable-key call"

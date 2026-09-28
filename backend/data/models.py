@@ -103,6 +103,12 @@ class Trade(Base):
     confluence_score = Column(Integer)
     chart_data = Column(Text)
     mt5_ticket = Column(BigInteger)
+    # [2026-09-27] The circuit breaker's signal-group id, so a LIVE position can
+    # be matched back to the group its slot's profit target is measured on. The
+    # breaker keys everything by group; without this, a live target could only be
+    # resolved by symbol, which is ambiguous the moment a slot holds two groups.
+    # Nullable: rows written before this change simply have no group.
+    group_id = Column(String(36), index=True)
     created_at = Column(DateTime, server_default=func.now())
     positions = relationship("TradePosition", back_populates="parent_trade", cascade="all, delete-orphan")
 

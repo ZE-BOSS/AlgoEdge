@@ -753,6 +753,102 @@ class BotService:
         events = list(self._events)[:limit]
         return {"events": events, "total": len(self._events)}
 
+    async def _apply_profit_targets(self, config) -> None:
+        """Feed each slot its own open positions' P&L, and act on any target hit.
+
+        This lives in bot_service rather than position_manager because the live
+        circuit breakers live here (SlotBook), and a profit target is measured on
+        the breaker's own numbers: its realised day/week/month P&L, and the
+        unrealised P&L of the groups IT opened.
+
+        The attribution rule, which is the whole point of the design: a slot's
+        floating P&L is the sum of its OWN positions and nothing else. MT5's
+        account equity is every slot's floating P&L added together, so reading it
+        here would close a Boom trade sitting at +$20 because a Crash trade was
+        +$40 at the same moment. Positions are therefore matched to their group
+        through `Trade.group_id`, which is what the breaker keys on.
+
+        The same policy object, fed the same shaped numbers, runs in both
+        backtesters — risk/profit_target.py::note_and_check.
+        """
+        if self.slot_book is None:
+            return
+        slots = [sl for sl in (getattr(config, "instrument_slots", None) or [])
+                 if getattr(sl, "enabled", True) is not False]
+        if not slots:
+            return
+        try:
+            import MetaTrader5 as mt5
+
+            from sqlalchemy import select
+
+            from backend.data.database import async_session
+            from backend.data.models import Trade
+            from backend.mt5.order_manager import OrderManager
+            from backend.risk.profit_target import note_and_check
+            from backend.services.trade_ownership import is_bot_position
+
+            live = [pos for pos in (mt5.positions_get() or [])
+                    if is_bot_position(pos, magic_base=self._magic_base)]
+            if not live:
+                return
+            tickets = {int(pos.ticket): pos for pos in live}
+
+            async with async_session() as session:
+                rows = (await session.execute(
+                    select(Trade).where(Trade.user_id == self.user_id,
+                                        Trade.status == "OPEN"))).scalars().all()
+            # ticket -> (group_id, symbol, strategy_id), for the trades still open
+            owner = {int(t.mt5_ticket): (t.group_id, t.symbol, t.strategy_id)
+                     for t in rows if t.mt5_ticket and t.group_id}
+
+            for slot in slots:
+                cfg = self.slot_book.config_for(slot.slot_id)
+                if not cfg.get("target_profit_enabled"):
+                    continue
+                circuit = self.slot_book.engine(slot.slot_id).circuit
+                # Only THIS slot's positions: same symbol, same strategy.
+                mine = []
+                for ticket, pos in tickets.items():
+                    got = owner.get(ticket)
+                    if got is None:
+                        continue
+                    group_id, symbol, strategy_id = got
+                    if str(symbol).upper() != str(slot.symbol).upper():
+                        continue
+                    if strategy_id != slot.strategy_id:
+                        continue
+                    mine.append({"group_id": group_id, "ticket": ticket,
+                                 "profit": float(pos.profit) + float(getattr(pos, "swap", 0.0) or 0.0)})
+                if not mine:
+                    continue
+
+                to_close = set(note_and_check(
+                    circuit, mine, lambda p: p["profit"], self.account_balance))
+                if not to_close:
+                    continue
+                hit = circuit.last_target_hit
+                self._log_event(
+                    f"[{slot.symbol}] {slot.strategy_id}: {getattr(hit, 'reason', 'profit target reached')}"
+                    f" — closing {len(to_close)} group(s)",
+                    "INFO", "RISK",
+                )
+                for entry in mine:
+                    if entry["group_id"] not in to_close:
+                        continue
+                    ok = await OrderManager.close_position(entry["ticket"])
+                    if not ok:
+                        logger.warning(
+                            f"[TARGET] {slot.symbol}: close failed for ticket {entry['ticket']} "
+                            f"— will retry next cycle"
+                        )
+                        # Put it back so the next cycle tries again rather than
+                        # silently leaving a position the target wanted banked.
+                        circuit.pending_closes.add(entry["group_id"])
+        except Exception as e:
+            # A profit target must never take the scan loop down with it.
+            logger.error(f"[TARGET] live profit-target pass failed: {e}", exc_info=True)
+
     async def _scan_loop(self, user_id: str):
         """Main scanning loop — runs the SMC strategy on each symbol."""
         import time
@@ -1601,6 +1697,10 @@ class BotService:
                                                         confluence_score=getattr(signal, 'confluence_score', None),
                                                         balance_before=account_balance,
                                                         mt5_ticket=db_positions[0]["ticket"] if db_positions else None,
+                                                        # The breaker's signal-group id, so this slot's profit
+                                                        # target can find this trade's group later — the breaker
+                                                        # keys floating P&L by group, not by symbol.
+                                                        group_id=group_id,
                                                         # Was missing entirely — Trade.strategy_id defaults to
                                                         # "APA_v1" at the model level, so every live trade was
                                                         # silently mislabeled regardless of which strategy actually
@@ -1686,6 +1786,10 @@ class BotService:
                         self._log_event(f"Data fetch error for {symbol}: {str(e)[:150]}", "ERROR", "DATA")
 
                 self.last_scan = datetime.now(timezone.utc).isoformat()
+
+                # Profit targets, once per cycle, after every slot has been
+                # scanned -- see _apply_profit_targets.
+                await self._apply_profit_targets(config)
                 
                 if had_execution_failure:
                     self._log_event(

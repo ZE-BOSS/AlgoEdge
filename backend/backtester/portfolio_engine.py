@@ -33,7 +33,13 @@ from backend.backtester.engine import (
     validate_at_fill_price,
     _breakeven_stop,
 )
-from backend.backtester.fill_model import build_stop_fill_model
+from backend.backtester.fill_model import build_stop_fill_model, position_fill_key
+# Aliased: run() does its own local `from ... import _apply_exit_slippage`
+# further down, and a local import makes that name FUNCTION-LOCAL for the
+# whole of run() -- so any earlier use of it raises UnboundLocalError. Same
+# shadowing hazard tests/test_closure_scope_hazards.py exists for.
+from backend.backtester.engine import _apply_exit_slippage as _exit_slippage
+from backend.risk.profit_target import note_and_check as _note_and_check
 from backend.backtester.report import apply_bar_level_drawdown, apply_leg_level_hit_rates, compute_significance
 
 logger = get_logger(__name__)
@@ -552,7 +558,7 @@ class PortfolioBacktestEngine(CostModelMixin):
                         stop_distance=abs(pos["entry_price"] - pos.get("initial_stop_loss", pos["stop_loss"])),
                         symbol=sym,
                         slippage_pips=self._costs_for(sym)["slippage_pips"],
-                        position_key=pos["id"],
+                        position_key=position_fill_key(pos),
                     )
                     pos["exit_price"] = _fill
                     pos["gap_fill"] = _gapped
@@ -658,6 +664,45 @@ class PortfolioBacktestEngine(CostModelMixin):
                             if new_sl < pos["stop_loss"]:
                                 pos["stop_loss"] = new_sl
                                 pos["be_applied"] = True
+
+            # -- Profit targets, PER SLOT (risk/profit_target.py) ------------
+            # Grouped by cache key so each slot's breaker is handed its OWN
+            # positions and nothing else: a basket must not close one symbol's
+            # trade because a different symbol is in profit. Each position is
+            # valued at its own symbol's last close, not the bar loop's
+            # `current_price`, which belongs to whichever symbol the timeline is
+            # on and is usually a different instrument entirely.
+            _open_by_slot: dict[str, list] = {}
+            for pos in self.open_positions:
+                if pos in closed_this_bar:
+                    continue
+                _open_by_slot.setdefault(pos.get("_cache_key", pos.get("symbol", "")), []).append(pos)
+            for _ckey, _slot_positions in _open_by_slot.items():
+                _sid = _slot_positions[0].get("strategy_id")
+                if not self._slot_config(_ckey, _sid).get("target_profit_enabled"):
+                    continue
+                _circuit = self._slot_engine(_ckey, _sid).circuit
+                _to_close = set(_note_and_check(
+                    _circuit, _slot_positions,
+                    lambda p: self._calc_pnl(
+                        p["direction"], p["entry_price"],
+                        p.get("_last_known_close", p["entry_price"]),
+                        p["volume"], p.get("symbol", "")),
+                    balance,
+                ))
+                for pos in _slot_positions:
+                    if pos.get("group_id") not in _to_close:
+                        continue
+                    _psym = pos.get("symbol", "")
+                    _mkt = pos.get("_last_known_close", pos["entry_price"])
+                    pos["exit_price"] = _exit_slippage(
+                        pos["direction"], _mkt, _psym,
+                        self._costs_for(_psym)["exit_slippage_pips"])
+                    pos["exit_reason"] = "PROFIT_TARGET"
+                    pos["pnl"] = self._calc_pnl(
+                        pos["direction"], pos["entry_price"], pos["exit_price"],
+                        pos["volume"], _psym, pos.get("entry_time"), current_time)
+                    closed_this_bar.append(pos)
 
             positions_to_remove = []
             for pos in closed_this_bar:

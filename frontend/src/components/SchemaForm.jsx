@@ -94,6 +94,37 @@ function Field({ row, value, onChange }) {
     );
   }
 
+  // List of a FIXED set of choices — e.g. profit_target_scopes. The options come
+  // from the backend dataclass (list[Literal[...]] -> enum_options), so there is
+  // nothing mirrored here to drift. Toggles rather than a comma list, because
+  // typing one of four exact strings from memory is a needless way to get it
+  // wrong and a typo would silently disarm the setting.
+  if (row.type === 'list' && row.enum_options?.length) {
+    const picked = Array.isArray(v) ? v : (row.default || []);
+    return (
+      <div style={{ gridColumn: '1 / -1' }}>
+        {label}
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {row.enum_options.map(opt => {
+            const on = picked.includes(opt);
+            return (
+              <button
+                key={opt}
+                type="button"
+                className={`btn btn-sm ${on ? 'btn-green' : 'btn-secondary'}`}
+                onClick={() => onChange(name, on
+                  ? picked.filter(x => x !== opt)
+                  : row.enum_options.filter(x => picked.includes(x) || x === opt))}
+              >
+                {opt}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   // List of numbers — e.g. tp_splits, vwap_band_sigmas. Editable as a comma list
   // rather than raw JSON, and validated back into an array.
   if (Array.isArray(row.default)) {

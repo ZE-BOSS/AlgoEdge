@@ -35,6 +35,10 @@ const STRATEGIES = [
   { id: 'VWAP_v1', group: 'vwap', label: 'VWAP reversion' },
   { id: 'ORB_v1', group: 'orb', label: 'Opening range breakout' },
   { id: 'IVW_v1', group: 'ivw', label: 'IV walls breakout' },
+  { id: 'TrendBreakout_v1', group: 'trend_breakout', label: 'Trend breakout (Donchian)' },
+  { id: 'OvernightSession_v1', group: 'overnight_session', label: 'Overnight session (index)' },
+  { id: 'OpeningDrive_v1', group: 'opening_drive', label: 'Opening drive (5m vs EMA)' },
+  { id: 'SpikeResumption_v1', group: 'spike_resumption', label: 'Spike resumption (Boom/Crash)' },
   { id: 'DriftJumpAlpha_v1', group: 'drift_jump_alpha', label: 'Drift / jump alpha' },
   { id: 'HTFFVGFlip_v1', group: 'htf_fvg_flip', label: 'HTF FVG flip' },
   { id: 'BiasIFVG_v1', group: 'bias_ifvg', label: 'Bias + key level IFVG' },
@@ -127,7 +131,11 @@ export default function StrategyLab() {
         end_date: endDate,
         initial_balance: 10000,
         risk_config: riskParams,
-        [strategy.group]: params,
+        // `strategy_params`, NOT a group-keyed block. BacktestRequest has one
+        // field for strategy parameters and Pydantic DROPS anything it does not
+        // declare — so sending `{ivw: {...}}` ran the dataclass defaults and
+        // reported them as if they were your settings, with no error anywhere.
+        strategy_params: params,
       });
     } catch (e) {
       setRunError(e?.response?.data?.detail || e.message || 'Preview failed to start');
@@ -167,7 +175,11 @@ export default function StrategyLab() {
       localStorage.setItem(PROMOTE_KEY, JSON.stringify({
         ...existing, ...riskParams,
         symbol, strategy_id: strategyId,
-        [strategy.group]: { ...(existing[strategy.group] || {}), ...params },
+        // The Backtester reads strategy parameters from `slot_strategy_params`
+        // (its NESTED_FORM_KEYS) and sends that as `strategy_params`. A
+        // group-keyed block landed as a top-level key nothing reads, so a
+        // promoted config arrived stripped of every parameter that was tuned.
+        slot_strategy_params: { ...(existing.slot_strategy_params || {}), ...params },
       }));
       setPromoted(true);
       setTimeout(() => setPromoted(false), 2500);

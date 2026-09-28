@@ -409,6 +409,10 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
     "BoomDriftJump_v1": "boom_drift_jump",
     "ORB_v1": "orb",
     "IVW_v1": "ivw",
+    "TrendBreakout_v1": "trend_breakout",
+    "OvernightSession_v1": "overnight_session",
+    "OpeningDrive_v1": "opening_drive",
+    "SpikeResumption_v1": "spike_resumption",
     "HTFFVGFlip_v1": "htf_fvg_flip",
     "BiasIFVG_v1": "bias_ifvg",
     "SpikeFade_v1": "synth",
@@ -446,6 +450,44 @@ async def load_saved_strategy_blocks(user_id: str) -> dict:
     sections = set(STRATEGY_PARAM_SECTION.values())
     return {name: saved[name] for name in sections
             if isinstance(saved.get(name), dict)}
+
+
+async def load_saved_risk(user_id: str) -> dict:
+    """The user's saved `risk` block, for the account-level simulation settings.
+
+    `stop_fill_model` is the one that matters: a request that does not set it
+    leaves None, and `build_stop_fill_model` then falls back to its own default
+    — so a value chosen in Settings never reached a run. On Crash/Boom that
+    setting is worth a factor of 2.5 on the result.
+    """
+    import json as _json
+
+    from backend.data.database import async_session
+    from backend.data.models import UserConfigModel
+
+    try:
+        async with async_session() as session:
+            row = (await session.execute(
+                select(UserConfigModel).where(UserConfigModel.user_id == user_id)
+            )).scalar_one_or_none()
+        if not row:
+            return {}
+        return (_json.loads(row.config_json) or {}).get("risk") or {}
+    except Exception as exc:
+        logger.warning(f"[BACKTEST] saved risk block not loaded: {exc}")
+        return {}
+
+
+# Simulation settings a run inherits from Settings when the request is silent.
+SAVED_SIM_KEYS = ("stop_fill_model", "stop_fill_seed", "simulate_wicks",
+                  "max_account_leverage", "max_margin_utilisation_pct")
+
+
+def apply_saved_sim_settings(merged: dict, saved_risk: dict) -> None:
+    """Request wins; otherwise the saved value; otherwise the dataclass default."""
+    for key in SAVED_SIM_KEYS:
+        if merged.get(key) is None and saved_risk.get(key) is not None:
+            merged[key] = saved_risk[key]
 
 
 def seed_strategy_blocks(config, saved_blocks: dict) -> None:
@@ -1523,6 +1565,9 @@ async def run_backtest_endpoint(
             candles = indexed_by_tf.get("M5", indexed_by_tf[primary_tf])
 
             merged_risk_config = build_merged_risk_config(req)
+            # Settings supplies anything the request left unset (the stop-fill
+            # model above all), so a toggle on the Defaults page changes a run.
+            apply_saved_sim_settings(merged_risk_config, await load_saved_risk(current_user.id))
 
             current_state = await _get_state()
             # [T2.1] The simulation reports its own progress across 35-90 via
@@ -2010,6 +2055,7 @@ async def run_portfolio_backtest_endpoint(
             # [parity] Read once: every row starts from what Settings has saved
             # for its strategy, the way bot_service builds a live engine.
             _saved_strategy_blocks = await load_saved_strategy_blocks(current_user.id)
+            apply_saved_sim_settings(merged_risk_config, await load_saved_risk(current_user.id))
 
             for sym_idx, sym_cfg in enumerate(req.symbols):
                 sym = sym_cfg.symbol
@@ -3453,6 +3499,7 @@ def build_merged_risk_config(req: "BacktestRequest") -> dict[str, Any]:
         "swap_short_per_lot_per_day": req.swap_short_per_lot_per_day,
         "stops_level_pips": req.stops_level_pips,
         "simulate_wicks": req.simulate_wicks,
+        # None means "use what Settings has saved" — the request only overrides.
         "stop_fill_model": req.stop_fill_model,
         "stop_fill_seed": req.stop_fill_seed,
         "vol_target_annual_pct": req.vol_target_annual_pct,

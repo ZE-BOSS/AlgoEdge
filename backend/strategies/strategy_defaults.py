@@ -57,6 +57,22 @@ OVERRIDABLE: frozenset[str] = frozenset({
 })
 
 
+# Strategies whose MEASURED rule has no profit target at all: they leave on a
+# trailing stop, a session close or a holding period. The engine always needs a
+# take-profit price, so their `tp1_rr` below is a PLACEHOLDER put far beyond
+# anything observed (the best single trade in five years of TrendBreakout_v1 was
+# +5.9R) so that it never fills.
+#
+# This set exists so the fact is machine-readable rather than folklore: the
+# /strategy-factory/strategy-defaults endpoint publishes it, the slot editor warns
+# when a user lowers the placeholder, and tests can hold these to a different
+# range from a real measured R:R. Lowering it does not "add a target" — it
+# truncates the right tail the rule lives on.
+NO_MEASURED_TARGET: frozenset[str] = frozenset({
+    "TrendBreakout_v1", "OvernightSession_v1", "OpeningDrive_v1",
+})
+
+
 STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
 
     # ── DriftJumpAlpha — trailing HURTS; leave exits alone ────────────────
@@ -172,6 +188,90 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
             "breakout of the 90th-percentile wall from a low cumulative-vol regime on a liquidation-"
             "bubble bar, chosen on 2013-19, was +0.152R (t 3.3, n 512) on 2020-26 and positive on "
             "10/10 markets with enough trades."
+        ),
+    },
+
+    # ── The 2026-09-25 book: three rules whose exit IS the strategy ──────
+    #
+    # All three leave on something the STRATEGY decides (a chandelier trail, the
+    # next cash open, the cash close) and none of them has a profit target in the
+    # measured rule. The engine always needs one, so `tp1_rr` is a PLACEHOLDER set
+    # far beyond anything observed — the best single trade in five years of the
+    # trend system was +5.9R — so it never fills and the measured exit is the one
+    # that books the trade. Lowering it does not "add a target", it truncates the
+    # right tail these rules live on.
+    #
+    # `trail_mode`/`trail_method_tp1` are OFF on purpose: RiskParams' ATR_TRAIL
+    # trails the STRATEGY TIMEFRAME's ATR from the extreme PRICE, while these
+    # trail the DAILY ATR from the extreme CLOSE. On M15 those are two different
+    # stops and only one of them was measured. See strategies/core/trail.py.
+    "TrendBreakout_v1": {
+        "tp_count": 1,
+        "tp1_rr": 20.0,
+        "be_mode": "NONE",
+        "trail_method_tp1": "NONE",
+        "trail_mode": "NONE",
+        "evidence": (
+            "app-form check 2026-09-25 (scripts/run_app_form_check.py), Deriv M15 2021-10 -> "
+            "2026-09, 10 markets: 876 trades, +0.063R, 40.0% win, payoff 1.86, t +2.17, "
+            "Sharpe 1.34, +32.6% on $10k at 0.5% risk, max DD 6.3%; 9/10 markets positive. "
+            "Every earlier screen used a FIXED target and measured nothing — that was the "
+            "error, not the market. NEGATIVE on FundedNext's own 16 months (-0.092R, t -1.75)."
+        ),
+    },
+    "OvernightSession_v1": {
+        "tp_count": 1,
+        "tp1_rr": 20.0,
+        "be_mode": "NONE",
+        "trail_method_tp1": "NONE",
+        "trail_mode": "NONE",
+        "evidence": (
+            "app-form check 2026-09-25, Deriv M5 2021-10 -> 2026-09, US Tech 100 / US SP 500 / "
+            "Germany 40: 2,006 nights, +0.065R, 52.8% win, t +3.15, Sharpe 1.28, +80.1% at "
+            "0.5% risk, max DD 21.7%. Stop swept 0.5/1/1.5/2/3 x daily ATR — 0.5 best. The "
+            "ONLY strategy in this book still positive on FundedNext's bars (+0.056R, t +1.73)."
+        ),
+    },
+    "OpeningDrive_v1": {
+        "tp_count": 1,
+        "tp1_rr": 20.0,
+        "be_mode": "NONE",
+        "trail_method_tp1": "NONE",
+        "trail_mode": "NONE",
+        "evidence": (
+            "app-form check 2026-09-25: the marketed \"first 5-minute candle vs the 12 EMA\" "
+            "rule. Its claims DO NOT reproduce — 49.8% win and 1.07 profit factor over 5,081 "
+            "sessions against \"57% and 1.29\". What is left is small and index-only: pooled "
+            "+0.012R (t +1.89), US Tech 100 +0.052R (t +2.49), BTCUSD -0.005R, every FX pair "
+            "negative, and NEGATIVE on FundedNext (-0.008R). Run it on US Tech 100 or not at all."
+        ),
+    },
+
+    # ── SpikeResumption — built to order, and it does not hold up ────────
+    #
+    # Measured with ONE target, no break-even and no trailing, plus the bar-count
+    # exit the engine applies itself through MaxHoldExit. target="spike" (back
+    # past the spike bar) and a fixed 3R measured the same, so the simpler one
+    # ships.
+    #
+    # It is enabled on NOTHING by default and there are deliberately no entries
+    # for it in SLOT_TP1_RR or SYNTH_SLOT_PARAMS: recommending a symbol would
+    # mean a measurement supports one, and none does.
+    "SpikeResumption_v1": {
+        "tp_count": 1,
+        "tp1_rr": 3.0,
+        "be_mode": "NONE",
+        "trail_method_tp1": "NONE",
+        "trail_mode": "NONE",
+        "evidence": (
+            "NO RELIABLE EDGE — shipped so it can be run and judged, not because it passed. "
+            "Implementation/SPIKE-RESUMPTION-2026-09-27.md: on Boom/Crash 1000 over 2021-10 -> "
+            "2024-09, three years its parameters were never fitted to, it loses 0.098R a trade "
+            "(-6.1%). Per instrument Jan 2026 to date at 0.5% risk: Crash 1000 +11.9% (PF 3.51) "
+            "carries it while Boom 900 is the worst of eight at -5.4% (PF 0.38, 23.5% win). And "
+            "the families SWAP SIGN between windows — Boom +0.335R / Crash -0.094R in-sample, "
+            "Boom -0.382R / Crash +0.735R out-of-sample, on all eight parameter variants tried. "
+            "Use EMPIRICAL stop fills or the numbers are fiction."
         ),
     },
 
@@ -321,6 +421,15 @@ def get_strategy_defaults(strategy_id: str) -> dict[str, Any]:
     """
     raw = STRATEGY_DEFAULTS.get(strategy_id) or {}
     return {k: v for k, v in raw.items() if k != "evidence"}
+
+
+def has_measured_target(strategy_id: str) -> bool:
+    """False when this strategy's `tp1_rr` is a never-filled placeholder.
+
+    See NO_MEASURED_TARGET. Callers that present the target to a user should say
+    so rather than offering it as a tunable.
+    """
+    return strategy_id not in NO_MEASURED_TARGET
 
 
 def get_strategy_evidence(strategy_id: str) -> str:

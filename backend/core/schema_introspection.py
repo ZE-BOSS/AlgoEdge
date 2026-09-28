@@ -68,6 +68,16 @@ def _resolve_type_str(field_type: typing.Any) -> tuple[str, list[str] | None]:
     if origin is typing.Literal:
         return "enum", [str(a) for a in args]
     if origin in (list, typing.List):
+        # A list of a FIXED set of choices (list[Literal["DAY", "WEEK", ...]])
+        # carries those choices through, so the form can offer them as toggles
+        # instead of asking the user to type a comma list from memory. Without
+        # this the options would have to be mirrored by hand in the frontend,
+        # which is the drift this whole module exists to prevent.
+        inner = args[0] if args else None
+        if inner is not None:
+            _, inner_enum = _resolve_type_str(inner)
+            if inner_enum:
+                return "list", inner_enum
         return "list", None
     if origin in (dict, typing.Dict):
         return "map", None
@@ -133,6 +143,10 @@ def build_full_schema() -> list[dict]:
     from backend.strategies.strategy_vwap.params import VWAPParams
     from backend.strategies.strategy_orb.params import ORBParams
     from backend.strategies.strategy_ivw.params import IVWParams
+    from backend.strategies.strategy_opening_drive.params import OpeningDriveParams
+    from backend.strategies.strategy_overnight.params import OvernightSessionParams
+    from backend.strategies.strategy_spike_resumption.params import SpikeResumptionParams
+    from backend.strategies.strategy_trend.params import TrendBreakoutParams
     from backend.core.config_schema import DriftJumpAlphaParams
 
     groups: list[tuple[type, str]] = [
@@ -142,6 +156,10 @@ def build_full_schema() -> list[dict]:
         (VWAPParams, "vwap"),
         (ORBParams, "orb"),
         (IVWParams, "ivw"),
+        (TrendBreakoutParams, "trend_breakout"),
+        (OvernightSessionParams, "overnight_session"),
+        (OpeningDriveParams, "opening_drive"),
+        (SpikeResumptionParams, "spike_resumption"),
         (DriftJumpAlphaParams, "drift_jump_alpha"),
     ]
     from backend.core.config_schema import SynthParams

@@ -72,7 +72,10 @@ class MT5Broker(BaseBroker):
         )
         
         if not init_ok:
-            logger.error("MT5 initialize() failed")
+            # Without the reason this is undiagnosable: the common causes are a
+            # terminal that is closed or crashed, a wrong `path`, a terminal
+            # already owned by another process, or "AutoTrading" disabled.
+            logger.error(f"MT5 initialize() failed: {mt5.last_error()} (path={cfg.path or 'auto'})")
             return False
 
         if cfg.account and cfg.password and cfg.server:
@@ -264,11 +267,22 @@ class MT5Broker(BaseBroker):
         """Return the currently connected MT5 account number."""
         return self._connected_account
 
+    # Reconnect pacing. `mt5.initialize()` against a terminal that is gone blocks
+    # for tens of seconds, and it runs on the ONE thread every MT5 call shares
+    # (mt5/executor.py), so retrying it on a short fixed period starves every
+    # other MT5 call in the process and the API stops answering.
+    RECONNECT_MIN_DELAY = 10.0
+    RECONNECT_MAX_DELAY = 300.0
+
     async def _reconnect_loop(self):
-        """Background daemon to check MT5 health and auto-reconnect every 10s."""
+        """Watch the terminal and reconnect, backing off when it stays down."""
+        import random
+
+        delay = self.RECONNECT_MIN_DELAY
         while True:
-            await asyncio.sleep(10)
+            await asyncio.sleep(delay)
             if getattr(self, '_intentional_disconnect', False) or not getattr(self, '_last_method', None) or not mt5:
+                delay = self.RECONNECT_MIN_DELAY
                 continue
 
             try:
@@ -278,17 +292,30 @@ class MT5Broker(BaseBroker):
             except Exception:
                 is_connected = False
 
-            if not is_connected:
-                logger.warning("MT5 connection lost! Attempting to auto-reconnect...")
-                self.connected = False
-                try:
-                    success = await self._last_method(**self._last_kwargs)
-                    if success:
-                        logger.info("MT5 auto-reconnect successful.")
-                    else:
-                        logger.error("MT5 auto-reconnect failed. Retrying in 10s...")
-                except Exception as e:
-                    logger.error(f"Error during auto-reconnect: {e}")
+            if is_connected:
+                delay = self.RECONNECT_MIN_DELAY
+                continue
+
+            logger.warning(
+                f"MT5 connection lost! Attempting to auto-reconnect (next check in {delay:.0f}s)..."
+            )
+            self.connected = False
+            try:
+                success = await self._last_method(**self._last_kwargs)
+            except Exception as e:
+                logger.error(f"Error during auto-reconnect: {e}")
+                success = False
+
+            if success:
+                logger.info("MT5 auto-reconnect successful.")
+                delay = self.RECONNECT_MIN_DELAY
+            else:
+                # Back off: while initialize() is blocked nothing else can use
+                # the terminal, so hammering it is what turns a dead terminal
+                # into a dead backend.
+                delay = min(delay * 2, self.RECONNECT_MAX_DELAY)
+                delay *= 1 + random.uniform(-0.1, 0.1)  # de-sync retries
+                logger.error(f"MT5 auto-reconnect failed. Retrying in {delay:.0f}s...")
 
     # --- BaseBroker Interface Implementation ---
     
@@ -382,31 +409,6 @@ class MT5Broker(BaseBroker):
         """Return the currently connected MT5 account number."""
         return self._connected_account
 
-    async def _reconnect_loop(self):
-        """Background daemon to check MT5 health and auto-reconnect every 10s."""
-        while True:
-            await asyncio.sleep(10)
-            if getattr(self, '_intentional_disconnect', False) or not getattr(self, '_last_method', None) or not mt5:
-                continue
-
-            try:
-                loop = asyncio.get_event_loop()
-                terminal = await loop.run_in_executor(self._executor, mt5.terminal_info)
-                is_connected = terminal is not None and terminal.connected
-            except Exception:
-                is_connected = False
-
-            if not is_connected:
-                logger.warning("MT5 connection lost! Attempting to auto-reconnect...")
-                self.connected = False
-                try:
-                    success = await self._last_method(**self._last_kwargs)
-                    if success:
-                        logger.info("MT5 auto-reconnect successful.")
-                    else:
-                        logger.error("MT5 auto-reconnect failed. Retrying in 10s...")
-                except Exception as e:
-                    logger.error(f"Error during auto-reconnect: {e}")
 
     # --- BaseBroker Interface Implementation ---
     

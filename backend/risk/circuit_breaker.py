@@ -62,6 +62,16 @@ class CircuitBreaker:
         self.target_profit_enabled = config.get("target_profit_enabled", False)
         self.max_daily_profit = config.get("max_daily_profit", 500.0)
         self.max_weekly_profit = config.get("max_weekly_profit", 2000.0)
+        # [2026-09-27] The profit target is now (scope, basis, action, amount) —
+        # risk/profit_target.py. This breaker belongs to ONE SLOT, so every number
+        # it feeds the policy is that slot's own and account equity never enters.
+        from backend.risk.profit_target import ProfitTargetPolicy
+        self.profit_target = ProfitTargetPolicy.from_config(config)
+        # Groups this slot wants flattened, drained by whoever manages positions
+        # (both backtesters and position_manager). A set, because a target may be
+        # evaluated more than once before the close is actually executed.
+        self.pending_closes: set[str] = set()
+        self.last_target_hit: Any = None
         # [2.18/2.19 / P2-R3/R4] Per-strategy overrides, keyed by strategy_id.
         # A strategy not present here falls back to the global limit above —
         # empty dicts (the default) reproduce today's global-only behaviour
@@ -87,6 +97,7 @@ class CircuitBreaker:
         self.losses_today_by_slot: dict[str, int] = {}  # [12.6]
         self.daily_pnl = 0.0
         self.weekly_pnl = 0.0
+        self.monthly_pnl = 0.0
         # [9.7] Per-strategy realised P&L — feeds RiskParams.strategy_risk_budget_pct
         # so a high-frequency engine can't consume a low-frequency one's share of
         # the daily/weekly drawdown budget. Open (unrealised) risk stays globally
@@ -144,6 +155,9 @@ class CircuitBreaker:
         # balloons non-linearly as losses accumulate instead of using a fixed
         # week-start denominator.
         self._week_start_balance: float = 0.0
+        # Same anchoring again for the MONTH scope (2026-09-27), so a percentage
+        # monthly profit target measures against the month's opening balance.
+        self._month_start_balance: float = 0.0
 
         # Bug 2: In backtest mode, initialize to None so the first bar's date
         # drives the reset — not today's real-world date. Without this, every
@@ -152,9 +166,12 @@ class CircuitBreaker:
         if is_backtest:
             self.last_reset_day = None
             self.last_reset_week = None
+            self.last_reset_month = None
         else:
             self.last_reset_day = datetime.now(timezone.utc).date()
             self.last_reset_week = datetime.now(timezone.utc).isocalendar()[1]
+            _now = datetime.now(timezone.utc)
+            self.last_reset_month = (_now.year, _now.month)
 
         # Track active grouped trades (signal)
         self.active_groups = {}  # group_id -> {"pnl": 0.0, "sub_trades": 0}
@@ -168,6 +185,7 @@ class CircuitBreaker:
         """Run all active circuit breaker checks."""
         self._check_daily_reset(current_time)
         self._check_weekly_reset(current_time)
+        self._check_monthly_reset(current_time)
 
         result = self._check_all_inner(account_balance, current_time, strategy_id)
         ok, reason = result
@@ -226,6 +244,8 @@ class CircuitBreaker:
         # made the computed % non-linear and inconsistent with max_weekly_drawdown_pct.
         if self._week_start_balance <= 0:
             self._week_start_balance = account_balance
+        if self._month_start_balance <= 0:
+            self._month_start_balance = account_balance
         if self.max_weekly_drawdown_pct > 0 and self.weekly_pnl < 0 and self._week_start_balance > 0:
             weekly_dd_pct = (-self.weekly_pnl / self._week_start_balance) * 100
             if weekly_dd_pct >= self.max_weekly_drawdown_pct:
@@ -233,19 +253,76 @@ class CircuitBreaker:
                 self.pause_reason = f"Weekly drawdown limit reached: {weekly_dd_pct:.2f}% >= {self.max_weekly_drawdown_pct}%"
                 return False, self.pause_reason
 
-        # 6. Target Profit
-        if self.target_profit_enabled:
-            if self.daily_pnl >= self.max_daily_profit:
-                self.is_paused = True
-                self.pause_reason = f"Daily profit target reached: ${self.daily_pnl:.2f} / ${self.max_daily_profit:.2f}"
-                return False, self.pause_reason
-            
-            if self.weekly_pnl >= self.max_weekly_profit:
-                self.is_paused = True
-                self.pause_reason = f"Weekly profit target reached: ${self.weekly_pnl:.2f} / ${self.max_weekly_profit:.2f}"
-                return False, self.pause_reason
+        # 6. Profit targets (risk/profit_target.py)
+        hit = self.check_profit_target(account_balance)
+        if hit is not None and hit.scope != "TRADE":
+            self.is_paused = True
+            self.pause_reason = hit.reason
+            return False, self.pause_reason
 
         return True, "OK"
+
+    # ── profit targets ──────────────────────────────────────────────────────
+    def note_group_floating(self, group_id: str, unrealised_pnl: float,
+                            account_balance: float | None = None) -> None:
+        """Record one of THIS SLOT's open groups' unrealised P&L.
+
+        Called once per bar per open group by both backtesters, and once per
+        cycle by position_manager. The value is stored on the group itself, so
+        `floating_pnl` can only ever add up groups this slot opened — the
+        attribution rule the whole design rests on.
+        """
+        group = self.active_groups.get(group_id)
+        if group is None:
+            return
+        group["floating"] = float(unrealised_pnl)
+        if account_balance and not group.get("start_balance"):
+            group["start_balance"] = float(account_balance)
+
+    @property
+    def floating_pnl(self) -> float:
+        """This slot's unrealised P&L — its own open groups, summed, nothing else."""
+        return sum(float(g.get("floating", 0.0) or 0.0) for g in self.active_groups.values())
+
+    def check_profit_target(self, account_balance: float = 0.0):
+        """The first profit target this slot has reached, or None.
+
+        Records any groups that must be flattened in `pending_closes` for the
+        caller to act on, and leaves pausing to the caller — `check_all` pauses
+        on a period target, while a TRADE target closes one group and lets the
+        slot keep trading.
+        """
+        if not self.target_profit_enabled:
+            return None
+        realised = {"DAY": self.daily_pnl, "WEEK": self.weekly_pnl, "MONTH": self.monthly_pnl}
+        group_floating = {gid: float(g.get("floating", 0.0) or 0.0)
+                          for gid, g in self.active_groups.items()}
+        group_realised = {gid: float(g.get("pnl", 0.0) or 0.0)
+                          for gid, g in self.active_groups.items()}
+        group_start = {gid: float(g.get("start_balance", 0.0) or 0.0)
+                       for gid, g in self.active_groups.items()}
+        hit = self.profit_target.evaluate(
+            realised=realised,
+            floating_total=self.floating_pnl,
+            group_floating=group_floating,
+            group_realised=group_realised,
+            period_start_balance={
+                "DAY": self._day_start_balance or account_balance,
+                "WEEK": self._week_start_balance or account_balance,
+                "MONTH": self._month_start_balance or account_balance,
+            },
+            group_start_balance=group_start,
+        )
+        if hit is not None:
+            self.last_target_hit = hit
+            self.pending_closes.update(hit.group_ids)
+        return hit
+
+    def take_pending_closes(self) -> list[str]:
+        """Groups this slot's targets want flattened, handed over exactly once."""
+        out = sorted(self.pending_closes)
+        self.pending_closes.clear()
+        return out
 
     def get_open_risk(self) -> float:
         """Calculate the total initial risk dollars of all currently active groups."""
@@ -752,6 +829,7 @@ class CircuitBreaker:
             self.peak_r = max(self.peak_r, self.cum_r)
         self.daily_pnl += pnl
         self.weekly_pnl += pnl
+        self.monthly_pnl += pnl
         self._cumulative_pnl += pnl
         if strategy_id:
             self.strategy_daily_pnl[strategy_id] = self.strategy_daily_pnl.get(strategy_id, 0.0) + pnl
@@ -898,5 +976,28 @@ class CircuitBreaker:
             # _check_daily_reset's _day_start_balance reset).
             self._week_start_balance = 0.0
             if "Weekly" in self.pause_reason:
+                self.is_paused = False
+                self.pause_reason = ""
+
+    def _check_monthly_reset(self, current_time: datetime | None = None):
+        """Reset the month's counters when the calendar month changes.
+
+        Mirrors the daily and weekly resets, including re-anchoring the start
+        balance so a percentage target measures against the month's opening
+        balance rather than whatever the balance happened to be at the first
+        check.
+        """
+        now = current_time if current_time is not None else datetime.now(timezone.utc)
+        if hasattr(now, "year"):
+            current_month = (now.year, now.month)
+        else:
+            day, _ = self._parse_timestamp_date(now)
+            current_month = (day.year, day.month)
+
+        if self.last_reset_month is None or current_month != self.last_reset_month:
+            self.monthly_pnl = 0.0
+            self.last_reset_month = current_month
+            self._month_start_balance = 0.0
+            if "Monthly" in self.pause_reason:
                 self.is_paused = False
                 self.pause_reason = ""

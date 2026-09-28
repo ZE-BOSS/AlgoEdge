@@ -288,6 +288,10 @@ export default function StrategySettings() {
       ? {}
       : (strategyDefaultsResp?.strategy_defaults?.[strategyId]?.defaults || {})
   );
+  // A fact about the strategy, not about this account's measured-exits switch.
+  const noTargetFor = (strategyId) => Boolean(
+    strategyDefaultsResp?.strategy_defaults?.[strategyId]?.no_measured_target,
+  );
 
   // Broker names first (Deriv lists the Nasdaq as "US Tech 100"), then the
   // symbols this book already trades. Typing anything else is still allowed.
@@ -386,6 +390,7 @@ export default function StrategySettings() {
               accountRisk={config.risk}
               strategyDefaults={config[STRATEGY_GROUP[slot.strategy_id]] || {}}
               measuredExits={measuredExitsFor(slot.strategy_id)}
+              noMeasuredTarget={noTargetFor(slot.strategy_id)}
               symbols={symbolOptions}
               collapsible
               defaultOpen={false}
