@@ -1,0 +1,27 @@
+# What EAS Build uploads. EAS archives the whole git repository, not just
+# mobile/, so without this file every build uploaded the trading bot, the
+# research data (data/*.pkl) and the rest: about 500 MB for a ~1 MB app.
+#
+# When this file exists EAS ignores .gitignore, so anything the app folder
+# should not ship is listed here too. Same syntax as .gitignore.
+
+# everything at the top level except the Expo app
+/*
+!/mobile/
+
+# inside the app: dependencies, caches and generated folders
+/mobile/node_modules/
+/mobile/.expo/
+/mobile/dist/
+/mobile/web-build/
+/mobile/android/
+/mobile/ios/
+/mobile/.kotlin/
+/mobile/*.jks
+/mobile/*.p8
+/mobile/*.p12
+/mobile/*.key
+/mobile/*.mobileprovision
+/mobile/*.pem
+/mobile/.env*.local
+/mobile/*.tsbuildinfo

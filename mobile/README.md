@@ -43,7 +43,13 @@ You need a free Expo account, once.
      cloud and produces a signed `.apk`.
    - The API address baked in is `EXPO_PUBLIC_API_URL` from `eas.json`:
      `https://api.alphavantiqcapital.com`.
-5. Download the APK from the link EAS prints.
+   - It first uploads the project. That upload should be about **1 MB**. EAS
+     packs the whole git repository, so the root `.easignore` limits it to
+     `mobile/`. If it ever says hundreds of MB, that file is missing or out of
+     date; as a fallback, run the build with the repository ignored entirely:
+     `$env:EAS_NO_VCS=1; npm run build:apk` (PowerShell).
+5. Download the APK from the link EAS prints. Expect roughly 60 to 90 MB: one
+   file that runs on every Android phone.
 6. Publish it: **Admin console → Investors → App releases**. Upload the file,
    enter the same version name and code, add a line of release notes, then
    **Upload and publish**.
