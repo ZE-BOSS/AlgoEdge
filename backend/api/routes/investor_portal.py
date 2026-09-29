@@ -259,7 +259,10 @@ async def me(inv: Investor = Depends(current_investor), db: AsyncSession = Depen
             "withdrawal_cap_pct": _pct(terms.withdrawal_cap_pct),
             "lockup_days": terms.lockup_days,
             "notice_days": terms.notice_days,
-            "min_investment": _s(live.min_investment),
+            "min_investment": _s(navmod.money(terms.min_investment)),
+            # how the management fee works: a share of each two-month period's profit
+            "management_fee_basis": "period_profit",
+            "fee_period_months": 2,
             "base_currency": live.base_currency,
         },
     }

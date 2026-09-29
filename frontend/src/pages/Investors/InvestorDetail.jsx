@@ -207,6 +207,8 @@ function Money({ investor }) {
                     { name: 'on', label: 'Date it arrived', type: 'date',
                       hint: 'Leave blank for today. Units are issued at the NAV of this day.' },
                     { name: 'note', label: 'Note' },
+                    { name: 'min_override_reason', label: 'Below the minimum? Reason to accept it',
+                      hint: 'Only for a first deposit under this investor\'s minimum. Recorded in the audit log.' },
                   ]}
                   onSubmit={(b) => deposit.mutateAsync(b)} />
       <ActionForm label="Correct units" icon={Wrench} submitLabel="Write correction"
@@ -216,6 +218,67 @@ function Money({ investor }) {
                       hint: 'A compensating ledger row. History is never edited.' },
                   ]}
                   onSubmit={(b) => correct.mutateAsync(b)} />
+    </div>
+  );
+}
+
+/** Gross (no fees ever charged) against net (what the investor sees). Both are
+ *  real ledger figures; the difference is exactly what fees have cost them. */
+function GrossNet({ g }) {
+  return (
+    <div className="card">
+      <div className="card-header"><span className="card-title">Before and after fees</span></div>
+      <div className="kpi-strip" style={{ margin: 0 }}>
+        <div className="kpi"><div className="kpi-label">Gross value (no fees)</div>
+          <div className="kpi-value">{fmtMoney(g.gross_value)}</div></div>
+        <div className="kpi"><div className="kpi-label">Net value (investor sees)</div>
+          <div className="kpi-value">{fmtMoney(g.net_value)}</div></div>
+        <div className="kpi"><div className="kpi-label">Difference</div>
+          <div className="kpi-value">{fmtMoney(g.difference)}</div>
+          <div className="inv-hint" style={{ margin: 0 }}>{g.difference_pct}% of gross</div></div>
+        <div className="kpi"><div className="kpi-label">Fees charged (at the time)</div>
+          <div className="kpi-value">{fmtMoney(g.fees_charged)}</div></div>
+      </div>
+      <p className="inv-hint">The difference is the fees at today&apos;s value; &quot;fees charged&quot; is the dollar
+        amount on the day each was taken. They differ only by how the fund has moved since.</p>
+    </div>
+  );
+}
+
+/** This investor's own fee rates and minimum. Blank = the fund's terms. The
+ *  investor's app shows exactly these, and the fees engine charges exactly these. */
+function Terms({ investor, terms }) {
+  const save = useInvAction((b) => inv.setTerms(investor.id, {
+    performance_fee_pct: b.performance_fee_pct === '' || b.performance_fee_pct == null ? null : b.performance_fee_pct,
+    management_fee_pct: b.management_fee_pct === '' || b.management_fee_pct == null ? null : b.management_fee_pct,
+    min_investment: b.min_investment === '' || b.min_investment == null ? null : b.min_investment,
+    reason: b.reason,
+  }));
+  const own = (k) => terms.overridden.includes(k);
+  return (
+    <div className="card">
+      <div className="card-header"><span className="card-title">Fee terms for this investor</span></div>
+      <div className="detail-pairs inv-pairs">
+        <span>Performance fee</span><span className="num">{terms.performance_fee_pct}%{own('performance_fee_pct') ? ' (own)' : ' (fund)'}</span>
+        <span>Management fee</span><span className="num">{terms.management_fee_pct}% of each two-month period&apos;s profit{own('management_fee_pct') ? ' (own)' : ' (fund)'}</span>
+        <span>Minimum first deposit</span><span className="num">{fmtMoney(terms.min_investment)}{own('min_investment') ? ' (own)' : ' (fund)'}</span>
+      </div>
+      {investor.status !== 'closed' && (
+        <div style={{ marginTop: 10 }}>
+          <ActionForm label="Change this investor's terms" submitLabel="Save terms"
+                      fields={[
+                        { name: 'performance_fee_pct', label: 'Performance fee %', type: 'number',
+                          defaultValue: investor.performance_fee_pct ?? '', hint: 'Blank = the fund\'s rate.' },
+                        { name: 'management_fee_pct', label: 'Management fee % of period profit', type: 'number',
+                          defaultValue: investor.management_fee_pct ?? '', hint: 'Blank = the fund\'s rate.' },
+                        { name: 'min_investment', label: 'Minimum first deposit (USD)', type: 'number',
+                          defaultValue: investor.min_investment ?? '', hint: 'Blank = the fund\'s minimum.' },
+                        { name: 'reason', label: 'Reason', type: 'textarea', required: true },
+                      ]}
+                      onSubmit={(b) => save.mutateAsync(b)} />
+          <p className="inv-hint">Applies from the next fee period charged. Periods already charged stay as they were.</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -259,6 +322,11 @@ export default function InvestorDetail() {
 
             <Statement s={d.statement} />
             <Money investor={d.investor} />
+
+            <div className="grid-2">
+              <GrossNet g={d.gross_net} />
+              <Terms investor={d.investor} terms={d.terms} />
+            </div>
 
             <div className="grid-2">
               <div className="card">

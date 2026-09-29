@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { UserPlus } from 'lucide-react';
 import { inv } from '../../services/api';
 import { ActionForm, Empty, QueryState, StateBadge } from './shared';
-import { fmtMoney, fmtUnits, isNeg, useInvAction } from './format';
+import { fmtMoney, isNeg, useInvAction } from './format';
 
 const FILTERS = ['all', 'active', 'pending', 'closing', 'closed'];
 
@@ -50,8 +50,11 @@ export default function InvestorList() {
             <table>
               <thead>
                 <tr>
-                  <th>Investor</th><th>Status</th><th className="num">Units</th>
-                  <th className="num">Value</th><th className="num">Capital in</th>
+                  <th>Investor</th><th>Status</th>
+                  <th className="num" title="What the investor sees">Value (net)</th>
+                  <th className="num" title="With no fees ever charged">Gross</th>
+                  <th className="num">Fees cost</th>
+                  <th className="num">Capital in</th>
                   <th className="num">Withdrawn</th><th className="num">Profit</th>
                   <th className="num">Share</th>
                 </tr>
@@ -64,8 +67,9 @@ export default function InvestorList() {
                       <div className="inv-hint">{i.email}</div>
                     </td>
                     <td><StateBadge state={i.status} /></td>
-                    <td className="num">{fmtUnits(i.units)}</td>
                     <td className="num">{fmtMoney(i.current_value)}</td>
+                    <td className="num">{fmtMoney(i.gross_value)}</td>
+                    <td className="num">{fmtMoney(i.difference)}<div className="inv-hint">{i.difference_pct}%</div></td>
                     <td className="num">{fmtMoney(i.capital_in)}</td>
                     <td className="num">{fmtMoney(i.withdrawn)}</td>
                     <td className="num" style={{ color: isNeg(i.profit) ? 'var(--red)' : 'var(--green)' }}>
@@ -74,6 +78,18 @@ export default function InvestorList() {
                   </tr>
                 ))}
               </tbody>
+              {d.totals && (
+                <tfoot>
+                  <tr>
+                    <td colSpan={2}><strong>All investors</strong></td>
+                    <td className="num"><strong>{fmtMoney(d.totals.net_value)}</strong></td>
+                    <td className="num"><strong>{fmtMoney(d.totals.gross_value)}</strong></td>
+                    <td className="num"><strong>{fmtMoney(d.totals.difference)}</strong>
+                      <div className="inv-hint">{d.totals.difference_pct}%</div></td>
+                    <td colSpan={4} />
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         )}

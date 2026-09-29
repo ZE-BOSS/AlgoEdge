@@ -99,6 +99,9 @@ class Harness:
     async def patch(self, path, json):
         return await self.client.patch(BASE + path, json=json)
 
+    async def put(self, path, json):
+        return await self.client.put(BASE + path, json=json)
+
     async def investor(self, name="Ada", email=None, deposit=None, on=None):
         r = await self.post("", {"name": name, "email": email or f"{name.lower()}@x.com"})
         assert r.status_code == 201, r.text
@@ -432,9 +435,9 @@ def test_closure_pays_out_zeroes_units_and_erases_the_person_not_the_history():
 
             wid = await _withdrawal(h, iid, D("50"), justification="x")
             quote = (await h.get(f"/{iid}/closure")).json()
-            # $1,100 less this month's fees: management 1100 x 2% x 1/365 = 0.06,
-            # performance 20% x (100.00 - 0.06) = 19.99
-            assert quote["fees_owed"] == "20.05" and quote["net_payable"] == "1079.95"
+            # $1,100 less this period's fees: management 2% of the period's
+            # $100 profit = 2.00, then performance 20% x (100.00 - 2.00) = 19.60
+            assert quote["fees_owed"] == "21.60" and quote["net_payable"] == "1078.40"
             assert quote["blockers"]
             blocked = await h.post(f"/{iid}/closure/approve", {"payment_reference": "TX9"})
             assert blocked.status_code == 400 and "decide them first" in blocked.json()["detail"]
@@ -442,7 +445,7 @@ def test_closure_pays_out_zeroes_units_and_erases_the_person_not_the_history():
             await h.post(f"/withdrawals/{wid}/decline", {"reason": "closing instead"})
             r = await h.post(f"/{iid}/closure/approve", {"payment_reference": "TX9"})
             assert r.status_code == 200, r.text
-            assert r.json()["amount_paid"] == "1079.95"
+            assert r.json()["amount_paid"] == "1078.40"
 
             detail = (await h.get(f"/{iid}")).json()
             inv = detail["investor"]
@@ -462,9 +465,9 @@ def test_closure_pays_out_zeroes_units_and_erases_the_person_not_the_history():
 
             # the remaining investor is untouched and the books still balance
             assert (await h.get(f"/{other}")).json()["statement"]["current_value"] == "1100.00"
-            # the broker still holds Ada's $20.05 of fees until the manager takes
-            # them out: 2200 - 1079.95 paid = 1120.05, of which 20.05 is owed
-            rec = (await h.get("/reconciliation", params={"pool_equity": "1120.05"})).json()
+            # the broker still holds Ada's $21.60 of fees until the manager takes
+            # them out: 2200 - 1078.40 paid = 1121.60, of which 21.60 is owed
+            rec = (await h.get("/reconciliation", params={"pool_equity": "1121.60"})).json()
             assert rec["healthy"] is True, rec
     run(go())
 
@@ -549,8 +552,64 @@ def test_fees_preview_close_once_and_mark_paid():
             assert (await h.post("/fees/close", {"year": 2099, "month": 1})).status_code == 400
             periods = (await h.get("/fees/periods")).json()
             assert periods[0]["charged"] == pv["total"] and periods[0]["paid"] == "0.00"
-            assert (await h.post("/fees/paid", {"period_start": "2026-06-01", "period_end": "2026-06-30",
+            assert (await h.post("/fees/paid", {"period_start": "2026-05-01", "period_end": "2026-06-30",
                                                 "on": "2026-07-03",
                                                 "reference": "MGR"})).status_code == 200
             assert (await h.get("/fees/periods")).json()[0]["paid"] == pv["total"]
+    run(go())
+
+
+# ── per-investor terms, the minimum, gross vs net ───────────────────────────
+
+def test_an_investors_own_terms_are_what_they_see_and_what_is_charged():
+    async def go():
+        async with Harness() as h:
+            iid = await h.investor("Ada", deposit=D("1000"))
+            r = await h.put(f"/{iid}/terms", {"performance_fee_pct": "35", "management_fee_pct": None,
+                                              "min_investment": None, "reason": "agreed at signing"})
+            assert r.status_code == 200, r.text
+            assert r.json()["performance_fee_pct"] == "35" and r.json()["management_fee_pct"] is None
+            detail = (await h.get(f"/{iid}")).json()
+            assert detail["terms"]["performance_fee_pct"] == "35"
+            assert detail["terms"]["overridden"] == ["performance_fee_pct"]
+            # a reason is required, and it is on the record
+            assert (await h.put(f"/{iid}/terms", {"performance_fee_pct": "10"})).status_code == 422
+    run(go())
+
+
+def test_the_minimum_applies_to_the_first_deposit_only_and_can_be_overridden_with_a_reason():
+    async def go():
+        async with Harness() as h:
+            r = await h.post("", {"name": "Bo", "email": "bo@x.com"})
+            iid = r.json()["id"]
+            low = await h.post(f"/{iid}/deposits", {"amount": "150"})          # test minimum is 200
+            assert low.status_code == 400 and "minimum first deposit" in low.json()["detail"]
+            ok = await h.post(f"/{iid}/deposits", {"amount": "150", "min_override_reason": "pilot"})
+            assert ok.status_code == 201, ok.text
+            # a top-up has no minimum
+            assert (await h.post(f"/{iid}/deposits", {"amount": "10"})).status_code == 201
+            # an investor's own minimum wins over the fund's
+            r = await h.post("", {"name": "Cy", "email": "cy@x.com"})
+            cy = r.json()["id"]
+            await h.put(f"/{cy}/terms", {"min_investment": "5000", "reason": "large ticket"})
+            assert (await h.post(f"/{cy}/deposits", {"amount": "1000"})).status_code == 400
+    run(go())
+
+
+def test_gross_and_net_differ_by_exactly_the_fees():
+    async def go():
+        async with Harness() as h:
+            await h.investor("Ada", deposit=D("1000"), on=date(2026, 5, 31))
+            await h.post("/nav/snapshot", {"pool_equity": "1100", "on": "2026-06-30"})
+            closed = (await h.post("/fees/close", {"year": 2026, "month": 6})).json()
+            rows = (await h.get("")).json()
+            ada = rows["investors"][0]
+            # before any fee: gross == net. After: the difference is the fee at today's price
+            assert D(ada["gross_value"]) - D(ada["current_value"]) == D(ada["difference"])
+            assert D(ada["difference"]) == D(closed["charged"])            # same day, same price
+            assert D(ada["difference_pct"]) == (D(ada["difference"]) / D(ada["gross_value"]) * 100).quantize(D("0.01"))
+            assert rows["totals"]["difference"] == ada["difference"]
+            detail = (await h.get(f"/{ada['id']}")).json()
+            assert detail["gross_net"]["fees_charged"] == closed["charged"]
+            assert detail["gross_net"]["net_value"] == ada["current_value"]
     run(go())

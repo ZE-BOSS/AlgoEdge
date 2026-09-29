@@ -43,8 +43,9 @@ export default function How() {
 
           <Card title="Your terms">
             <dl className="pairs">
-              <dt>Performance fee</dt><dd>{terms.performance_fee_pct}% of new profit</dd>
-              <dt>Management fee</dt><dd>{terms.management_fee_pct}% a year</dd>
+              <dt>Performance fee</dt><dd>{terms.performance_fee_pct}% of new profit, after the management fee</dd>
+              <dt>Minimum first deposit</dt><dd>{money(terms.min_investment)}</dd>
+              <dt>Management fee</dt><dd>{terms.management_fee_pct}% of each two-month period&rsquo;s profit (nothing in a losing period)</dd>
               <dt>Standard withdrawal limit</dt><dd>{terms.withdrawal_cap_pct}% of each month&rsquo;s profit</dd>
               <dt>Lock-up</dt><dd>{terms.lockup_days} days from your first deposit</dd>
               <dt>Notice</dt><dd>{terms.notice_days} days to pay a standard withdrawal</dd>

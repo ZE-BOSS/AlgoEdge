@@ -1,18 +1,26 @@
 """
 backend/investor/fees.py
 
-Management and performance fees, charged monthly per investor.
+Management and performance fees, charged per investor every two months
+(Jan-Feb, Mar-Apr, ... Nov-Dec, WAT calendar).
 
 THE ARITHMETIC
 --------------
-For one investor over one period (normally a WAT calendar month):
+For one investor over one period:
 
-  value      = their units at period end x the period-end NAV
-  management = value x management_pct / 100 x days_held / 365
-  profit     = value - management + paid out to them - paid in by them
-               (lifetime, from their own ledger, up to the period end)
-  performance= performance_pct / 100 x max(0, profit - high_water_mark)
-  new mark   = max(old mark, profit - performance)
+  value         = their units at period end x the period-end NAV
+  value_before  = their units the day before the period x that day's NAV
+  period profit = value - value_before + paid out to them in the period
+                  - paid in by them in the period
+  management    = management_pct / 100 x max(0, period profit)
+                  (a share of the period's returns; nothing in a losing period)
+  profit        = value - management + paid out to them - paid in by them
+                  (lifetime, from their own ledger, up to the period end)
+  performance   = performance_pct / 100 x max(0, profit - high_water_mark)
+  new mark      = max(old mark, profit - performance)
+
+The management fee comes off first and the performance fee is worked out on
+what is left, so no dollar of profit is charged twice.
 
 THE HIGH-WATER MARK is kept in MONEY (lifetime profit, net of fees), per
 investor, on each performance accrual. An investor is charged only on profit
@@ -22,11 +30,12 @@ after the fee (profit - performance) rather than before is what stops the
 investor paying twice: if the mark were set at the pre-fee peak, they would have
 to re-earn the fee itself before being charged again.
 
-Profit is measured with the management fee already taken off. Management is
-charged whether or not the fund made money; performance only on net gains.
+Profit is measured with the management fee already taken off. Both fees are
+charged only on gains.
 
-Rates come from the terms the investor COMMITTED under (fund.terms_for), not
-today's terms: a fee is part of the promise, like the lock-up.
+Rates come from the terms the investor is held under (fund.terms_for): the
+terms they committed under, with any per-investor rates the admin set. A fee
+is part of the promise, like the lock-up.
 
 CHARGING
 --------
@@ -69,6 +78,8 @@ class FeeLine:
     units: Decimal
     nav: Decimal
     value: Decimal
+    value_before: Decimal
+    period_profit: Decimal
     days: int
     management_pct: Decimal
     management: Decimal
@@ -87,6 +98,7 @@ class FeeLine:
         return {
             "investor_id": self.investor_id, "name": self.name, "units": t(self.units),
             "nav_per_unit": t(self.nav), "value": t(self.value), "days": self.days,
+            "value_before": t(self.value_before), "period_profit": t(self.period_profit),
             "management_pct": t(self.management_pct.normalize()), "management": t(self.management),
             "profit": t(self.profit), "high_water_mark": t(self.high_water_mark),
             "performance_pct": t(self.performance_pct.normalize()), "performance": t(self.performance),
@@ -138,23 +150,38 @@ async def compute(session, investor_id: str, period_start: date, period_end: dat
     )).scalar_one()
     start = max(period_start, first) if first else period_start
     days = max(0, (period_end - start).days + 1)
-    management = navmod.money(value * mgmt_pct / D("100") * D(days) / D("365"))
 
     paid_in = await _ledger_sum(session, investor_id, KIND_SUBSCRIBE, period_end, UnitTransaction.amount)
     paid_out = await _ledger_sum(session, investor_id, KIND_REDEEM, period_end, UnitTransaction.amount)
+
+    # the period's own result: what the holding gained, net of money in and out
+    day_before = period_start - timedelta(days=1)
+    held_before = await _units_at(session, investor_id, day_before)
+    value_before = (navmod.amount_for_units(held_before, await fundmod.latest_nav(session, day_before))
+                    if held_before > 0 else D("0.00"))
+    in_before = await _ledger_sum(session, investor_id, KIND_SUBSCRIBE, day_before, UnitTransaction.amount)
+    out_before = await _ledger_sum(session, investor_id, KIND_REDEEM, day_before, UnitTransaction.amount)
+    period_profit = navmod.money(value - value_before + (paid_out - out_before) - (paid_in - in_before))
+    management = navmod.money(max(D("0"), period_profit) * mgmt_pct / D("100"))
     profit = navmod.money(value - management + paid_out - paid_in)
     mark = await high_water_mark(session, investor_id)
     performance = navmod.money(max(D("0"), profit - mark) * perf_pct / D("100"))
     new_mark = navmod.money(max(mark, profit - performance))
 
     investor = await session.get(Investor, investor_id)
-    return FeeLine(investor_id, getattr(investor, "name", None), held, price, value, days,
-                   mgmt_pct, management, profit, mark, perf_pct, performance, new_mark)
+    return FeeLine(investor_id, getattr(investor, "name", None), held, price, value, value_before,
+                   period_profit, days, mgmt_pct, management, profit, mark, perf_pct, performance, new_mark)
 
 
 def month_period(year: int, month: int) -> tuple[date, date]:
     first = date(year, month, 1)
     return first, navmod.month_bounds(first)[1]
+
+
+def fee_period(year: int, month: int) -> tuple[date, date]:
+    """The two-month fee period that contains this month: Jan-Feb, Mar-Apr, ..."""
+    start_month = month if month % 2 == 1 else month - 1
+    return date(year, start_month, 1), month_period(year, start_month + 1)[1]
 
 
 async def _check_price(session, period_end: date) -> NavSnapshot:
@@ -191,11 +218,12 @@ async def charged_lines(session, period_start: date, period_end: date) -> list[d
     for acc, name in rows:
         line = by.setdefault(acc.investor_id, {
             "investor_id": acc.investor_id, "name": name, "value": None, "days": None,
+            "period_profit": None,
             "management_pct": None, "management": "0.00", "profit": None,
             "high_water_mark": None, "performance_pct": None, "performance": "0.00",
             "state": acc.state})
         if acc.kind == FEE_MANAGEMENT:
-            line.update(value=navmod.text(acc.basis_amount), days=acc.days,
+            line.update(period_profit=navmod.text(acc.basis_amount), days=acc.days,
                         management_pct=navmod.text(D(str(acc.rate_pct)).normalize()),
                         management=navmod.text(acc.fee_amount))
         else:
@@ -261,8 +289,8 @@ async def charge(session, line: FeeLine, *, period_start: date, period_end: date
     """
     out = []
     m = await _record(session, line, FEE_MANAGEMENT, line.management, period_start=period_start,
-                      period_end=period_end, waived=waive, actor_id=actor_id, basis=line.value,
-                      rate=line.management_pct, days=line.days)
+                      period_end=period_end, waived=waive, actor_id=actor_id,
+                      basis=max(D("0"), line.period_profit), rate=line.management_pct, days=line.days)
     if m:
         out.append(m)
     out.append(await _record(session, line, FEE_PERFORMANCE, line.performance,
@@ -338,6 +366,12 @@ async def periods(session) -> list[dict]:
             p[state] += amt
     return [{k: (navmod.text(navmod.money(v)) if isinstance(v, D) else v) for k, v in p.items()}
             for p in out.values()]
+
+
+def previous_fee_period(today: date | None = None) -> tuple[date, date]:
+    """The last two-month period that has fully ended."""
+    start, _ = fee_period(*((today or navmod.accounting_date()).timetuple()[:2]))
+    return fee_period(*((start - timedelta(days=1)).timetuple()[:2]))
 
 
 def previous_month(today: date | None = None) -> tuple[date, date]:

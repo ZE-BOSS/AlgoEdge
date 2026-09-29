@@ -6,7 +6,7 @@ import { fmtDate, fmtMoney, useInvAction } from './format';
 
 const FIELDS = [
   ['performance_fee_pct', 'Performance fee %', 'number'],
-  ['management_fee_pct', 'Management fee % (annual)', 'number'],
+  ['management_fee_pct', 'Management fee % (of each two-month period\'s profit)', 'number'],
   ['withdrawal_cap_pct', 'Withdrawal cap, % of month’s profit', 'number'],
   ['min_investment', 'Minimum investment (USD)', 'number'],
   ['lockup_days', 'Lock-up (days)', 'number'],

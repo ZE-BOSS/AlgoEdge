@@ -53,10 +53,10 @@ class FundError(RuntimeError):
 # ── settings ─────────────────────────────────────────────────────────────────
 
 DEFAULT_SETTINGS = {
-    "performance_fee_pct": D("20"),
-    "management_fee_pct": D("2"),
+    "performance_fee_pct": D("50"),
+    "management_fee_pct": D("5"),
     "withdrawal_cap_pct": D("30"),
-    "min_investment": D("200"),
+    "min_investment": D("3000"),
     "lockup_days": 30,
     "notice_days": 7,
     "base_currency": "USD",
@@ -199,7 +199,8 @@ async def take_snapshot(session, *, pool_equity, liabilities=0,
 
 async def record_admin_deposit(session, *, investor_id: str, amount, actor_id: str,
                                on: date | None = None, method: str = METHOD_OFF_PLATFORM,
-                               note: str | None = None) -> Deposit:
+                               note: str | None = None,
+                               min_override_reason: str | None = None) -> Deposit:
     """Admin records money that has already arrived, including historic ones.
 
     This is the Phase 1 onboarding path: the people already in the fund are
@@ -209,9 +210,10 @@ async def record_admin_deposit(session, *, investor_id: str, amount, actor_id: s
     await _open_investor(session, investor_id)
     settings = await current_settings(session)
     cash = navmod.money(amount)
-    if cash < navmod.money(settings.min_investment):
-        raise FundError(
-            f"minimum investment is {navmod.money(settings.min_investment)}, got {cash}")
+    if cash <= 0:
+        raise FundError("a deposit must be positive")
+    await first_deposit_minimum(session, investor_id, cash, override_reason=min_override_reason,
+                                actor_id=actor_id)
 
     day = on or navmod.accounting_date()
     deposit = Deposit(investor_id=investor_id, method=method, amount_claimed=cash,
@@ -231,7 +233,7 @@ async def record_admin_deposit(session, *, investor_id: str, amount, actor_id: s
 
 
 async def confirm_deposit(session, *, deposit_id: int, amount_confirmed, actor_id: str,
-                          on: date | None = None) -> Deposit:
+                          on: date | None = None, min_override_reason: str | None = None) -> Deposit:
     """Admin confirms what actually landed, and units are issued for THAT figure.
 
     The investor's claimed amount is not evidence. Units are issued against the
@@ -248,6 +250,8 @@ async def confirm_deposit(session, *, deposit_id: int, amount_confirmed, actor_i
     cash = navmod.money(amount_confirmed)
     if cash <= 0:
         raise FundError("a confirmed deposit must be positive")
+    await first_deposit_minimum(session, deposit.investor_id, cash,
+                                override_reason=min_override_reason, actor_id=actor_id)
 
     deposit.amount_confirmed = cash
     deposit.state = DEPOSIT_CONFIRMED
@@ -345,21 +349,65 @@ async def month_profit(session, investor_id: str, on: date | None = None) -> Dec
     return navmod.money(opening_units * (navmod.nav(now_price) - navmod.nav(start_price)))
 
 
-async def terms_for(session, investor_id: str) -> FundSettings:
-    """The terms this investor committed under — not today's.
+OVERRIDABLE_TERMS = ("performance_fee_pct", "management_fee_pct", "min_investment")
+
+
+async def terms_for(session, investor_id: str):
+    """The terms this investor is held under: the fund terms they committed
+    under (not today's), with any per-investor terms the admin set on top.
 
     A lock-up and a notice period are promises made when the money went in, so
     a later settings version must not lengthen them for money already committed.
     Falls back to the live terms for an investor with no commitment yet.
+
+    Returns a read-only view with the FundSettings attributes, plus
+    `overridden`: the names the admin set for this investor. The investor is
+    shown exactly these figures and is charged exactly these, so what they see
+    and what the fees engine uses can never differ.
     """
+    from types import SimpleNamespace
+
     investor = await session.get(Investor, investor_id)
+    row = None
     if investor is not None and investor.terms_version is not None:
         row = (await session.execute(
             select(FundSettings).where(FundSettings.version == investor.terms_version)
         )).scalar_one_or_none()
-        if row is not None:
-            return row
-    return await current_settings(session)
+    if row is None:
+        row = await current_settings(session)
+    view = SimpleNamespace(**{c.name: getattr(row, c.name) for c in FundSettings.__table__.columns})
+    view.overridden = []
+    for name in OVERRIDABLE_TERMS:
+        value = getattr(investor, name, None) if investor is not None else None
+        if value is not None:
+            setattr(view, name, value)
+            view.overridden.append(name)
+    return view
+
+
+async def first_deposit_minimum(session, investor_id: str, cash: Decimal, *,
+                                override_reason: str | None = None,
+                                actor_id: str | None = None) -> None:
+    """The minimum applies to an investor's FIRST deposit only; top-ups can be
+    any amount. The admin may accept less with a written reason, which is
+    audited. The investor's own minimum (if the admin set one) wins over the
+    fund's."""
+    has_money = (await session.execute(
+        select(func.count(UnitTransaction.id)).where(UnitTransaction.investor_id == investor_id,
+                                                     UnitTransaction.kind == KIND_SUBSCRIBE)
+    )).scalar_one() > 0
+    if has_money:
+        return
+    minimum = navmod.money((await terms_for(session, investor_id)).min_investment)
+    if cash >= minimum:
+        return
+    if override_reason and override_reason.strip() and actor_id:
+        await audit(session, actor_id=actor_id, action="deposit.below_minimum_accepted",
+                    entity_type="investor", entity_id=investor_id,
+                    detail={"amount": str(cash), "minimum": str(minimum), "reason": override_reason.strip()})
+        return
+    raise FundError(f"the minimum first deposit is ${minimum:,.2f}"
+                    + ("; to accept less, give a reason" if actor_id else ""))
 
 
 async def lockup_until(session, investor_id: str) -> date | None:
@@ -657,20 +705,20 @@ async def closure_blockers(session, investor_id: str) -> list[str]:
         else:
             out.append(f"{n} withdrawal request(s) still {state} — decide them first")
 
-    # Last month's fees must be charged before the account empties, or they are
-    # never charged at all: a month close skips holders of zero units.
+    # The last fee period's fees must be charged before the account empties, or
+    # they are never charged at all: a period close skips holders of zero units.
     from backend.investor import fees as feesmod
-    start, end = feesmod.previous_month()
+    start, end = feesmod.previous_fee_period()
     held_then = await feesmod._units_at(session, investor_id, end)
     if held_then > 0 and not await feesmod.already_closed(session, start, end):
-        out.append(f"fees for {start:%B %Y} have not been charged yet — close that month first")
+        out.append(f"fees for {start:%b}-{end:%b %Y} have not been charged yet; close that period first")
     return out
 
 
 async def _closure_fees(session, investor_id: str, day: date):
-    """Fees for the part of this month before the account closes."""
+    """Fees for the part of this fee period before the account closes."""
     from backend.investor import fees as feesmod
-    start = day.replace(day=1)
+    start = feesmod.fee_period(day.year, day.month)[0]
     if await feesmod.already_closed(session, start, day):
         return None, start
     return await feesmod.compute(session, investor_id, start, day), start
@@ -818,8 +866,9 @@ async def claim_deposit(session, *, investor_id: str, amount, note: str | None =
         raise FundError("your account is being closed, so it cannot take new money")
     settings = await current_settings(session)
     cash = navmod.money(amount)
-    if cash < navmod.money(settings.min_investment):
-        raise FundError(f"the minimum is ${navmod.money(settings.min_investment)}")
+    if cash <= 0:
+        raise FundError("enter the amount you sent")
+    await first_deposit_minimum(session, investor_id, cash)
     open_claims = (await session.execute(
         select(func.count(Deposit.id)).where(Deposit.investor_id == investor_id,
                                              Deposit.state.in_(OPEN_DEPOSIT_STATES))

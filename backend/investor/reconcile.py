@@ -22,6 +22,7 @@ from backend.investor import nav as navmod
 from backend.investor import units as unitsmod
 from backend.investor.models import (
     DEPOSIT_CONFIRMED,
+    KIND_FEE,
     KIND_SUBSCRIBE,
     WITHDRAWAL_APPROVED,
     Deposit,
@@ -147,6 +148,33 @@ async def build(session, *, pool_equity, on: date | None = None) -> Report:
 
     report.ledger_drift = await unitsmod.assert_cache_matches_ledger(session)
     return report
+
+
+async def gross_net(session, investor_id: str, price: Decimal | None = None) -> dict:
+    """What an investor's holding would be worth with no fees ever charged
+    (gross), what it is worth (net, the figure they see), and the difference.
+
+    Every fee cancelled units; had those units stayed, they would be worth
+    fee_units x today's price. So gross = (units held + units cancelled for
+    fees) x price, and gross - net is what the fees have cost the investor at
+    today's value. `fees_charged` is the dollar amount on the day each fee was
+    taken, which differs from the cost today by how the fund has moved since.
+    Both come straight off the ledger, so both reconcile.
+    """
+    price = navmod.nav(price if price is not None else await fundmod.latest_nav(session))
+    held = await unitsmod.ledger_units(session, investor_id)
+    fee_units, fee_amount = (await session.execute(
+        select(func.coalesce(func.sum(UnitTransaction.units), 0),
+               func.coalesce(func.sum(UnitTransaction.amount), 0))
+        .where(UnitTransaction.investor_id == investor_id, UnitTransaction.kind == KIND_FEE))).one()
+    fee_units = navmod.units(-D(str(fee_units)))            # stored negative
+    net = navmod.amount_for_units(held, price)
+    gross = navmod.amount_for_units(held + fee_units, price)
+    diff = navmod.money(gross - net)
+    pct = navmod.money(diff / gross * D("100")) if gross > 0 else D("0.00")
+    return {"gross_value": navmod.text(gross), "net_value": navmod.text(net),
+            "difference": navmod.text(diff), "difference_pct": navmod.text(pct),
+            "fees_charged": navmod.text(navmod.money(D(str(fee_amount))))}
 
 
 async def investor_statement(session, investor_id: str, on: date | None = None) -> dict:

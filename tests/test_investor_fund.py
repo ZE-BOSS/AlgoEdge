@@ -61,6 +61,7 @@ async def _investor(session, investor_id="a", name="A"):
 
 # ── settings ─────────────────────────────────────────────────────────────────
 
+@pytest.mark.real_terms
 def test_settings_default_to_the_agreed_terms():
     async def go():
         engine, S = await _fresh()
@@ -68,7 +69,9 @@ def test_settings_default_to_the_agreed_terms():
             cfg = await fundmod.current_settings(s)
             assert cfg.version == 1
             assert D(str(cfg.withdrawal_cap_pct)) == D("30")
-            assert navmod.money(cfg.min_investment) == D("200.00")
+            assert navmod.money(cfg.min_investment) == D("3000.00")
+            assert D(str(cfg.performance_fee_pct)) == D("50")
+            assert D(str(cfg.management_fee_pct)) == D("5")
             assert cfg.lockup_days == 30 and cfg.notice_days == 7
             assert cfg.base_currency == "USD"
         await engine.dispose()

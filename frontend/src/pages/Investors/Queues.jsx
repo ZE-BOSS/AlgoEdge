@@ -36,6 +36,7 @@ function Deposits() {
                                       required: true, defaultValue: r.amount_claimed || '',
                                       hint: 'Units are issued for THIS figure, at the NAV of the day below.' },
                                     { name: 'on', label: 'Date it arrived', type: 'date' },
+                                    { name: 'min_override_reason', label: 'Below the minimum? Reason to accept it' },
                                   ]}
                                   onSubmit={(b) => confirm.mutateAsync({ id: r.id, ...b })} />
                       <ActionForm label="Reject" icon={X} tone="danger" compact

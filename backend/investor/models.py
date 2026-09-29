@@ -99,6 +99,10 @@ class Investor(Base):
     # lock-up or notice period must not retroactively trap money committed under
     # the old terms, so the terms travel with the commitment.
     terms_version = Column(Integer)
+    # per-investor terms, set by the admin; NULL = the fund's terms apply
+    performance_fee_pct = Column(Numeric(9, 4))
+    management_fee_pct = Column(Numeric(9, 4))
+    min_investment = Column(MONEY)
 
     created_at = Column(DateTime, server_default=func.now())
     activated_at = Column(DateTime)
@@ -341,7 +345,7 @@ class FundSettings(Base):
     version = Column(Integer, nullable=False, unique=True)
 
     performance_fee_pct = Column(Numeric(9, 4), nullable=False, default=20)
-    management_fee_pct = Column(Numeric(9, 4), nullable=False, default=2)      # annual
+    management_fee_pct = Column(Numeric(9, 4), nullable=False, default=5)      # of each two-month period's profit
     withdrawal_cap_pct = Column(Numeric(9, 4), nullable=False, default=30)     # of the month's profit
     min_investment = Column(MONEY, nullable=False, default=200)
     lockup_days = Column(Integer, nullable=False, default=30)

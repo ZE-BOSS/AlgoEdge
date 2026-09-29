@@ -73,6 +73,10 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE;",
             # investor platform, Phase 4 — fee lifecycle
             "ALTER TABLE fee_accruals ADD COLUMN paid_at TIMESTAMP;",
+            # per-investor fee terms and minimum
+            "ALTER TABLE investors ADD COLUMN performance_fee_pct NUMERIC(9, 4);",
+            "ALTER TABLE investors ADD COLUMN management_fee_pct NUMERIC(9, 4);",
+            "ALTER TABLE investors ADD COLUMN min_investment NUMERIC(18, 2);",
             "ALTER TABLE fee_accruals ADD COLUMN days INTEGER;",
             "ALTER TABLE fee_accruals ADD COLUMN decided_by VARCHAR(36);",
             "ALTER TABLE backtest_runs ADD COLUMN sl_hit_rate FLOAT;",

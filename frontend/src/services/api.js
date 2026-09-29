@@ -336,6 +336,7 @@ export const inv = {
   get: (id) => api.get(`${INV}/${id}`),
   update: (id, data) => api.patch(`${INV}/${id}`, data),
   recordDeposit: (id, data) => api.post(`${INV}/${id}/deposits`, data),
+  setTerms: (id, data) => api.put(`${INV}/${id}/terms`, data),
   correct: (id, data) => api.post(`${INV}/${id}/corrections`, data),
   closureQuote: (id) => api.get(`${INV}/${id}/closure`),
   loginLink: (id, purpose, send = false) => api.post(`${INV}/${id}/login-link`, { purpose, send }),

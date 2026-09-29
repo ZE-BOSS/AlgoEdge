@@ -37,7 +37,7 @@ export default function How() {
             </Card>
             <Card title="Your terms">
               <Pairs rows={[['Performance fee', `${terms.performance_fee_pct}% of new profit`],
-                ['Management fee', `${terms.management_fee_pct}% a year`],
+                ['Management fee', `${terms.management_fee_pct}% of each two-month period's profit`],
                 ['Standard withdrawal limit', `${terms.withdrawal_cap_pct}% of monthly profit`],
                 ['Lock-up', `${terms.lockup_days} days`], ['Notice', `${terms.notice_days} days`]]} />
               <T tone="muted" size={13}>These are the terms in force when your money went in (version {terms.version}). The

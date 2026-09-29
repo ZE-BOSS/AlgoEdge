@@ -124,6 +124,15 @@ class AdminDeposit(BaseModel):
     amount: Decimal = Field(gt=0)
     on: date | None = None           # historic onboarding: the day they actually paid
     note: str | None = None
+    min_override_reason: str | None = None   # accept a first deposit below the minimum
+
+
+class InvestorTerms(BaseModel):
+    """This investor's own terms. null = the fund's terms apply."""
+    performance_fee_pct: Decimal | None = Field(default=None, ge=0, le=100)
+    management_fee_pct: Decimal | None = Field(default=None, ge=0, le=100)
+    min_investment: Decimal | None = Field(default=None, ge=0)
+    reason: str = Field(min_length=1)
 
 
 class Correction(BaseModel):
@@ -135,6 +144,7 @@ class Correction(BaseModel):
 class ConfirmDeposit(BaseModel):
     amount_confirmed: Decimal = Field(gt=0)
     on: date | None = None
+    min_override_reason: str | None = None
 
 
 class Reason(BaseModel):
@@ -227,6 +237,10 @@ async def overview(db: AsyncSession = Depends(get_db)):
 
 # ── investors ────────────────────────────────────────────────────────────────
 
+def _pct_or_none(v):
+    return None if v is None else navmod.text(D(str(v)).normalize())
+
+
 def _investor_row(inv: Investor) -> dict:
     return {
         "id": inv.id, "name": inv.name, "email": inv.email, "phone": inv.phone,
@@ -235,6 +249,10 @@ def _investor_row(inv: Investor) -> dict:
         "payout_account_number": inv.payout_account_number,
         "payout_account_name": inv.payout_account_name,
         "terms_version": inv.terms_version,
+        # this investor's own terms (null = the fund's)
+        "performance_fee_pct": _pct_or_none(inv.performance_fee_pct),
+        "management_fee_pct": _pct_or_none(inv.management_fee_pct),
+        "min_investment": _s(inv.min_investment),
         "created_at": _iso(inv.created_at), "activated_at": _iso(inv.activated_at),
         "closed_at": _iso(inv.closed_at),
     }
@@ -263,6 +281,9 @@ async def list_investors(status: str | None = None, db: AsyncSession = Depends(g
     taken = dict((await db.execute(
         select(Withdrawal.investor_id, func.coalesce(func.sum(Withdrawal.amount_paid), 0))
         .group_by(Withdrawal.investor_id))).all())
+    fee_units = dict((await db.execute(
+        select(UnitTransaction.investor_id, func.coalesce(func.sum(UnitTransaction.units), 0))
+        .where(UnitTransaction.kind == "FEE").group_by(UnitTransaction.investor_id))).all())
 
     price = await fundmod.latest_nav(db)
     outstanding = await unitsmod.units_in_issue(db)
@@ -273,14 +294,24 @@ async def list_investors(status: str | None = None, db: AsyncSession = Depends(g
         cap_in = navmod.money(paid_in.get(inv.id, 0))
         out_ = navmod.money(taken.get(inv.id, 0))
         share = units / outstanding * D("100") if outstanding > 0 else D("0")
+        # gross = no fees ever charged; net = what the investor sees
+        gross = navmod.amount_for_units(units + navmod.units(-D(str(fee_units.get(inv.id, 0)))), price)
+        diff = navmod.money(gross - value)
         out.append({
             **_investor_row(inv),
             "units": _s(units), "current_value": _s(value),
             "capital_in": _s(cap_in), "withdrawn": _s(out_),
             "profit": _s(navmod.money(value + out_ - cap_in)),
             "share_of_pool_pct": _s(navmod.money(share)),
+            "gross_value": _s(gross), "difference": _s(diff),
+            "difference_pct": _s(navmod.money(diff / gross * D("100")) if gross > 0 else D("0.00")),
         })
-    return {"nav_per_unit": _s(price), "investors": out}
+    tg = sum((D(r["gross_value"]) for r in out), D("0"))
+    tn = sum((D(r["current_value"]) for r in out), D("0"))
+    totals = {"gross_value": _s(navmod.money(tg)), "net_value": _s(navmod.money(tn)),
+              "difference": _s(navmod.money(tg - tn)),
+              "difference_pct": _s(navmod.money((tg - tn) / tg * D("100")) if tg > 0 else D("0.00"))}
+    return {"nav_per_unit": _s(price), "investors": out, "totals": totals}
 
 
 @router.post("", status_code=201)
@@ -332,9 +363,16 @@ async def get_investor(investor_id: str, db: AsyncSession = Depends(get_db)):
         .order_by(desc(Adjustment.created_at), desc(Adjustment.id))
     )).scalars().all()
 
+    terms = await fundmod.terms_for(db, investor_id)
     return {
         "investor": _investor_row(inv),
         "statement": await recmod.investor_statement(db, investor_id),
+        "gross_net": await recmod.gross_net(db, investor_id),
+        # the terms in force for this investor: exactly what they are shown and charged
+        "terms": {"performance_fee_pct": _pct_or_none(terms.performance_fee_pct),
+                  "management_fee_pct": _pct_or_none(terms.management_fee_pct),
+                  "min_investment": _s(navmod.money(terms.min_investment)),
+                  "overridden": list(terms.overridden), "version": terms.version},
         "ledger": [_ledger_row(t) for t in ledger],
         "deposits": [_deposit_row(d) for d in deposits],
         "withdrawals": [_withdrawal_row(w) for w in withdrawals],
@@ -369,8 +407,31 @@ async def record_deposit(investor_id: str, body: AdminDeposit,
     await _get_investor(db, investor_id)
     with refusals():
         dep = await fundmod.record_admin_deposit(db, investor_id=investor_id, amount=body.amount,
-                                                 actor_id=admin.id, on=body.on, note=body.note)
+                                                 actor_id=admin.id, on=body.on, note=body.note,
+                                                 min_override_reason=body.min_override_reason)
     return _deposit_row(dep)
+
+
+@router.put("/{investor_id}/terms")
+async def set_investor_terms(investor_id: str, body: InvestorTerms,
+                             admin: User = Depends(require_admin),
+                             db: AsyncSession = Depends(get_db)):
+    """Set this investor's own fee rates and minimum; null goes back to the
+    fund's. The investor's app shows these same figures and the fees engine
+    charges them, so the two cannot differ. Applies from the next fee period
+    that is charged; periods already charged are not recalculated."""
+    inv = await _get_investor(db, investor_id)
+    if inv.status == "closed":
+        raise HTTPException(status_code=400, detail="that account is closed")
+    before = {k: _s(getattr(inv, k)) for k in fundmod.OVERRIDABLE_TERMS}
+    for k in fundmod.OVERRIDABLE_TERMS:
+        setattr(inv, k, getattr(body, k))
+    after = {k: _s(getattr(inv, k)) for k in fundmod.OVERRIDABLE_TERMS}
+    await fundmod.audit(db, actor_id=admin.id, action="investor.terms_changed", entity_type="investor",
+                        entity_id=investor_id, detail={"before": before, "after": after,
+                                                       "reason": body.reason.strip()})
+    await db.flush()
+    return _investor_row(inv)
 
 
 @router.post("/{investor_id}/corrections", status_code=201)
@@ -517,7 +578,8 @@ async def confirm_deposit(deposit_id: int, body: ConfirmDeposit,
     with refusals():
         dep = await fundmod.confirm_deposit(db, deposit_id=deposit_id,
                                             amount_confirmed=body.amount_confirmed,
-                                            actor_id=admin.id, on=body.on)
+                                            actor_id=admin.id, on=body.on,
+                                            min_override_reason=body.min_override_reason)
     tx = (await db.execute(select(UnitTransaction).where(
         UnitTransaction.source_kind == "deposit", UnitTransaction.source_id == dep.id))).scalar_one()
     outbox.queue(db, mail.deposit_confirmed(await db.get(Investor, dep.investor_id), dep,
@@ -701,9 +763,10 @@ class FeesPaid(BaseModel):
 @router.get("/fees/preview")
 async def fee_preview(year: int = Query(..., ge=2020, le=2100), month: int = Query(..., ge=1, le=12),
                       db: AsyncSession = Depends(get_db)):
-    """Every investor's fees for a month, calculated and not charged."""
+    """Every investor's fees for the two-month period containing this month,
+    calculated and not charged."""
     from backend.investor import fees as feesmod
-    start, end = feesmod.month_period(year, month)
+    start, end = feesmod.fee_period(year, month)
     with refusals():
         return await feesmod.preview(db, start, end)
 
@@ -711,11 +774,11 @@ async def fee_preview(year: int = Query(..., ge=2020, le=2100), month: int = Que
 @router.post("/fees/close", status_code=201)
 async def fee_close(body: FeePeriod, admin: User = Depends(require_admin),
                     db: AsyncSession = Depends(get_db)):
-    """Charge a month's fees. Once per month; refused if already done."""
+    """Charge a two-month period's fees. Once per period; refused if already done."""
     from backend.investor import fees as feesmod
-    start, end = feesmod.month_period(body.year, body.month)
+    start, end = feesmod.fee_period(body.year, body.month)
     if end >= navmod.accounting_date():
-        raise HTTPException(status_code=400, detail="a month can be closed once it has ended")
+        raise HTTPException(status_code=400, detail="a fee period can be closed once it has ended")
     with refusals():
         return await feesmod.close_period(db, start, end, actor_id=admin.id, waive=set(body.waive))
 
@@ -774,8 +837,11 @@ async def send_statements(body: SendStatements, admin: User = Depends(require_ad
     start, end = feesmod.month_period(body.year, body.month)
     if end >= navmod.accounting_date():
         raise HTTPException(status_code=400, detail="statements go out once the month has ended")
-    if not await feesmod.already_closed(db, start, end):
-        raise HTTPException(status_code=400, detail="charge this month's fees first (Fees tab), "
+    # fees are charged every two months; a month that ends a fee period must
+    # have them charged first, so the statement shows the final figures
+    f_start, f_end = feesmod.fee_period(body.year, body.month)
+    if f_end == end and not await feesmod.already_closed(db, f_start, f_end):
+        raise HTTPException(status_code=400, detail="charge this period's fees first (Fees tab), "
                                                     "so the statement shows the final figures")
     key = f"{body.year}-{body.month:02d}"
     if (await db.execute(select(JobRun).where(JobRun.job == "statements",

@@ -104,23 +104,90 @@ async def test_a_backdated_snapshot_counts_what_was_owed_on_that_day(s):
 # ── management fee ───────────────────────────────────────────────────────────
 
 @session_test
-async def test_management_fee_is_value_times_rate_times_days_over_365(s):
+async def test_management_fee_is_a_share_of_the_periods_profit(s):
+    """Flat to the end of June, +1,000 by the end of August: the Jul-Aug period
+    made 1,000, so management is 2% of that; performance is then 20% of the
+    lifetime profit left after management."""
     await _people(s, "a")
     await _deposit(s, "a", 10_000, date(2026, 6, 1))
-    await fundmod.take_snapshot(s, pool_equity=10_000, on=date(2026, 9, 30))
-    line = await feesmod.compute(s, "a", date(2026, 9, 1), date(2026, 9, 30))
-    assert line.days == 30
-    assert line.management == D("16.44")            # 10000 x 2% x 30/365
-    assert line.performance == D("0.00")            # no profit
+    await fundmod.take_snapshot(s, pool_equity=10_000, on=date(2026, 6, 30))
+    await fundmod.take_snapshot(s, pool_equity=11_000, on=date(2026, 8, 31))
+    start, end = feesmod.fee_period(2026, 8)
+    line = await feesmod.compute(s, "a", start, end)
+    assert (start, end) == (date(2026, 7, 1), date(2026, 8, 31))
+    assert line.value_before == D("10000.00") and line.period_profit == D("1000.00")
+    assert line.management == D("20.00")            # 2% of 1,000
+    assert line.profit == D("980.00")               # 11,000 - 20 - 10,000
+    assert line.performance == D("196.00")          # 20% of 980, never of the 20 already taken
 
 
 @session_test
-async def test_a_first_part_month_is_pro_rated(s):
+async def test_no_management_fee_in_a_losing_period(s):
     await _people(s, "a")
-    await _deposit(s, "a", 10_000, date(2026, 9, 21))
-    await fundmod.take_snapshot(s, pool_equity=10_000, on=date(2026, 9, 30))
-    line = await feesmod.compute(s, "a", date(2026, 9, 1), date(2026, 9, 30))
-    assert line.days == 10 and line.management == D("5.48")
+    await _deposit(s, "a", 10_000, date(2026, 6, 1))
+    await fundmod.take_snapshot(s, pool_equity=10_000, on=date(2026, 6, 30))
+    await fundmod.take_snapshot(s, pool_equity=9_500, on=date(2026, 8, 31))
+    line = await feesmod.compute(s, "a", *feesmod.fee_period(2026, 7))
+    assert line.period_profit == D("-500.00")
+    assert line.management == D("0.00") and line.performance == D("0.00")
+
+
+@session_test
+async def test_money_added_during_the_period_is_not_profit(s):
+    await _people(s, "a")
+    await _deposit(s, "a", 10_000, date(2026, 6, 1))
+    await fundmod.take_snapshot(s, pool_equity=10_000, on=date(2026, 6, 30))
+    await _deposit(s, "a", 5_000, date(2026, 7, 15))        # at 100 a unit
+    await fundmod.take_snapshot(s, pool_equity=15_600, on=date(2026, 8, 31))
+    line = await feesmod.compute(s, "a", *feesmod.fee_period(2026, 8))
+    assert line.period_profit == D("600.00")                # 15,600 - 10,000 - 5,000
+    assert line.management == D("12.00")
+
+
+@session_test
+async def test_a_first_deposit_inside_the_period_counts_from_what_it_paid_in(s):
+    await _people(s, "a")
+    await _deposit(s, "a", 10_000, date(2026, 8, 21))
+    await fundmod.take_snapshot(s, pool_equity=10_200, on=date(2026, 8, 31))
+    line = await feesmod.compute(s, "a", *feesmod.fee_period(2026, 8))
+    assert line.value_before == D("0.00") and line.period_profit == D("200.00")
+    assert line.days == 11 and line.management == D("4.00")
+
+
+@pytest.mark.real_terms
+@session_test
+async def test_the_agreed_terms_5pct_of_period_profit_then_50pct(s):
+    await _people(s, "a")
+    await _deposit(s, "a", 10_000, date(2026, 6, 1))
+    await fundmod.take_snapshot(s, pool_equity=10_000, on=date(2026, 6, 30))
+    await fundmod.take_snapshot(s, pool_equity=11_000, on=date(2026, 8, 31))
+    line = await feesmod.compute(s, "a", *feesmod.fee_period(2026, 8))
+    assert line.management == D("50.00")            # 5% of the period's 1,000
+    assert line.performance == D("475.00")          # 50% of the 950 left
+    assert line.total == D("525.00")
+
+
+@session_test
+async def test_an_investors_own_rates_are_the_ones_charged(s):
+    await _people(s, "a")
+    await _deposit(s, "a", 10_000, date(2026, 6, 1))
+    inv = await s.get(Investor, "a")
+    inv.performance_fee_pct, inv.management_fee_pct = D("30"), D("0")
+    await fundmod.take_snapshot(s, pool_equity=10_000, on=date(2026, 6, 30))
+    await fundmod.take_snapshot(s, pool_equity=11_000, on=date(2026, 8, 31))
+    line = await feesmod.compute(s, "a", *feesmod.fee_period(2026, 8))
+    assert line.management == D("0.00") and line.performance == D("300.00")
+    terms = await fundmod.terms_for(s, "a")
+    assert sorted(terms.overridden) == ["management_fee_pct", "performance_fee_pct"]
+
+
+def test_fee_periods_are_pairs_of_months():
+    assert feesmod.fee_period(2026, 1) == (date(2026, 1, 1), date(2026, 2, 28))
+    assert feesmod.fee_period(2026, 2) == (date(2026, 1, 1), date(2026, 2, 28))
+    assert feesmod.fee_period(2028, 2) == (date(2028, 1, 1), date(2028, 2, 29))
+    assert feesmod.fee_period(2026, 12) == (date(2026, 11, 1), date(2026, 12, 31))
+    assert feesmod.previous_fee_period(date(2026, 9, 29)) == (date(2026, 7, 1), date(2026, 8, 31))
+    assert feesmod.previous_fee_period(date(2026, 1, 5)) == (date(2025, 11, 1), date(2025, 12, 31))
 
 
 # ── performance fee and the high-water mark ─────────────────────────────────
