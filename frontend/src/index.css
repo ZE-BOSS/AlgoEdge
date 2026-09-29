@@ -1556,3 +1556,34 @@ html, body {
     margin-left: 0;
   }
 }
+
+/* ── Investors section (investor platform Phase 2) ───────────── */
+.inv-hint { font-size: 0.74rem; color: var(--text-muted); line-height: 1.5; }
+.inv-count {
+  margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 0.66rem; font-weight: 700;
+  background: var(--gold); color: var(--bg-primary); font-variant-numeric: tabular-nums;
+}
+.inv-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
+.inv-action-form {
+  display: grid; gap: 8px; padding: 10px; min-width: 240px; max-width: 360px;
+  background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.inv-action-form label, .inv-inline label { font-size: 0.72rem; }
+.inv-action-form textarea { width: 100%; resize: vertical; }
+.inv-inline { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.inv-inline > div { flex: 1 1 220px; }
+.inv-health { display: flex; gap: 12px; align-items: center; color: inherit; text-decoration: none; }
+.inv-queue-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.inv-queue-card { display: flex; flex-direction: column; gap: 6px; color: inherit; text-decoration: none; }
+.inv-queue-card:hover, a.inv-health:hover { border-color: var(--border-accent); }
+.inv-pairs { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: 0.82rem; }
+.inv-pairs > span:nth-child(odd) { color: var(--text-muted); }
+.inv-blockers { margin: 0; padding-left: 18px; color: var(--red); font-size: 0.8rem; }
+.inv-json { font-size: 0.7rem; word-break: break-all; white-space: pre-wrap; }
+.inv-section a:not(.btn) { color: var(--blue); text-decoration: none; }
+.inv-section a:not(.btn):hover { text-decoration: underline; }
+.inv-section a.btn { text-decoration: none; }
+.inv-section .filter-tabs { flex-wrap: wrap; }
+/* Buttons and inline forms sit in grid columns here; without this they stretch
+   to the column's full width. */
+.inv-section .btn, .inv-section .inv-action-form { justify-self: start; }

@@ -406,8 +406,8 @@ Each phase ends with something usable, because a nine-week big-bang is how this 
 
 | Phase | Delivers | Rough |
 |---|---|---|
-| **1. Ledger** | unitisation, NAV snapshots, investor/deposit/withdrawal tables, admin-entered deposits, reconciliation — **no investor login yet** | 1–1.5 wk |
-| **2. Admin console** | Investors section, all queues, disclosure, adjustments, audit log | 1–1.5 wk |
+| **1. Ledger** | unitisation, NAV snapshots, investor/deposit/withdrawal tables, admin-entered deposits, reconciliation — **no investor login yet** | 1–1.5 wk **Done** — `PHASE-1-LEDGER-2026-09-29.md` |
+| **2. Admin console** | Investors section, all queues, disclosure, adjustments, audit log | 1–1.5 wk **Done** — `PHASE-2-ADMIN-CONSOLE-2026-09-29.md` |
 | **3. Investor web** | auth, dashboard, statements, deposit/withdrawal requests, trade list | 1.5–2 wk |
 | **4. Email** | Resend, all templates, statements as PDF | 0.5 wk |
 | **5. Landing + domain** | public site, DNS, TLS, CORS, hardening | 1 wk |

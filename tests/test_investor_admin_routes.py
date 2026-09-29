@@ -485,3 +485,36 @@ def test_overview_counts_the_queues():
             assert ov["queues"]["exceptions"] == 1 and ov["queues"]["closures"] == 1
             assert ov["aum"] == "1000.00" and ov["investors"] == {"closing": 1}
     run(go())
+
+
+def test_the_cap_explanation_reads_30_percent_not_30_point_0000():
+    """The cap percentage comes back from a NUMERIC(9,4) column as 30.0000, and
+    the explanation the investor reads used to print it that way."""
+    async def go():
+        async with Harness() as h:
+            iid = await h.investor("Ada", deposit=D("1000"), on=date(2026, 1, 5))
+            # the setting must be read back from the database, not the in-memory default
+            await h.post("/settings", {"notice_days": 8})
+            await h.post("/nav/snapshot", {"pool_equity": "1100"})
+            text = (await h.get(f"/{iid}")).json()["statement"]["withdrawable_explanation"]
+            assert text.startswith("30% of this month"), text
+    run(go())
+
+
+def test_a_zero_balance_is_0_not_scientific_notation():
+    """Decimal('0E-8') — zero quantized to 8dp — prints as "0E-8" through str().
+    A fully redeemed investor showed "0E-8" units on screen."""
+    async def go():
+        async with Harness() as h:
+            iid = await h.investor("Ada", deposit=D("1000"))
+            pending = await h.investor("Bea")
+            await h.post(f"/{iid}/closure/request", {})
+            await h.post(f"/{iid}/closure/approve", {"payment_reference": "T"})
+            for who in (iid, pending):
+                st = (await h.get(f"/{who}")).json()["statement"]
+                assert "E" not in st["units"] and D(st["units"]) == 0, st["units"]
+            rows = (await h.get("")).json()["investors"]
+            assert all("E" not in r["units"] for r in rows)
+            rec = (await h.get("/reconciliation", params={"pool_equity": "0"})).json()
+            assert "E" not in rec["units_in_issue"], rec["units_in_issue"]
+    run(go())

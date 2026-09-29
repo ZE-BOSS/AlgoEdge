@@ -279,7 +279,9 @@ class CapCheck:
         if self.month_profit <= 0:
             return ("no profit this month, so nothing is available under the standard "
                     "limit — this needs an exception request")
-        return (f"{self.cap_pct:g}% of this month's profit of "
+        # normalize() so a percentage read back from a NUMERIC(9,4) column
+        # reads "30%", not "30.0000%"; the :f stops 30 becoming "3E+1".
+        return (f"{self.cap_pct.normalize():f}% of this month's profit of "
                 f"${self.month_profit} is ${self.cap}")
 
 
@@ -553,13 +555,13 @@ async def closure_quote(session, investor_id: str, on: date | None = None) -> di
     return {
         "investor_id": investor_id,
         "as_of": day.isoformat(),
-        "units": str(held),
-        "nav_per_unit": str(price),
-        "gross_value": str(value),
+        "units": navmod.text(held),
+        "nav_per_unit": navmod.text(price),
+        "gross_value": navmod.text(value),
         # Fee accrual is not built yet (see PHASE-2 doc); when it is, accrued
         # but uncharged fees come off here.
         "fees_owed": "0.00",
-        "net_payable": str(value),
+        "net_payable": navmod.text(value),
         "blockers": await closure_blockers(session, investor_id),
     }
 
@@ -637,9 +639,9 @@ async def approve_closure(session, *, investor_id: str, actor_id: str,
 
     await audit(session, actor_id=actor_id, action="closure.approved",
                 entity_type="investor", entity_id=investor_id,
-                detail={"units": str(held), "nav": str(price), "paid": str(paid),
+                detail={"units": navmod.text(held), "nav": navmod.text(price), "paid": navmod.text(paid),
                         "reference": payment_reference})
     logger.info(f"[FUND] closed {investor_id}: {held} units, ${paid} paid ({payment_reference})")
-    return {"investor_id": investor_id, "units_redeemed": str(held),
-            "nav_per_unit": str(price), "amount_paid": str(paid),
+    return {"investor_id": investor_id, "units_redeemed": navmod.text(held),
+            "nav_per_unit": navmod.text(price), "amount_paid": navmod.text(paid),
             "payment_reference": payment_reference}

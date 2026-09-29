@@ -324,4 +324,43 @@ export const activateStrategy = (strategyId, data = {}) =>
 export const deleteStrategy = (strategyId) =>
   api.delete(`/strategy-factory/${strategyId}`);
 
+// ── Investors (admin) — investor platform Phase 2 ───────────────────────────
+// Money and units arrive as STRINGS and are sent back as strings: a JSON number
+// is a float in the browser, and a float is how a statement ends up a cent out.
+
+const INV = '/admin/investors';
+export const inv = {
+  overview: () => api.get(`${INV}/overview`),
+  list: (params) => api.get(INV, { params }),
+  create: (data) => api.post(INV, data),
+  get: (id) => api.get(`${INV}/${id}`),
+  update: (id, data) => api.patch(`${INV}/${id}`, data),
+  recordDeposit: (id, data) => api.post(`${INV}/${id}/deposits`, data),
+  correct: (id, data) => api.post(`${INV}/${id}/corrections`, data),
+  closureQuote: (id) => api.get(`${INV}/${id}/closure`),
+  requestClosure: (id, data) => api.post(`${INV}/${id}/closure/request`, data || {}),
+  cancelClosure: (id) => api.post(`${INV}/${id}/closure/cancel`),
+  approveClosure: (id, data) => api.post(`${INV}/${id}/closure/approve`, data),
+  depositQueue: (state) => api.get(`${INV}/queues/deposits`, { params: state ? { state } : {} }),
+  confirmDeposit: (id, data) => api.post(`${INV}/deposits/${id}/confirm`, data),
+  rejectDeposit: (id, data) => api.post(`${INV}/deposits/${id}/reject`, data),
+  withdrawalQueue: (state) => api.get(`${INV}/queues/withdrawals`, { params: state ? { state } : {} }),
+  approveWithdrawal: (id, data) => api.post(`${INV}/withdrawals/${id}/approve`, data || {}),
+  payWithdrawal: (id, data) => api.post(`${INV}/withdrawals/${id}/pay`, data),
+  declineWithdrawal: (id, data) => api.post(`${INV}/withdrawals/${id}/decline`, data),
+  closureQueue: () => api.get(`${INV}/queues/closures`),
+  navHistory: () => api.get(`${INV}/nav/history`),
+  snapshot: (data) => api.post(`${INV}/nav/snapshot`, data),
+  settings: () => api.get(`${INV}/settings/current`),
+  changeSettings: (data) => api.post(`${INV}/settings`, data),
+  disclosures: (state) => api.get(`${INV}/disclosures`, { params: { state } }),
+  publishTrade: (tradeId, data) => api.post(`${INV}/disclosures/${tradeId}/publish`, data || {}),
+  hideTrade: (tradeId, data) => api.post(`${INV}/disclosures/${tradeId}/hide`, data || {}),
+  disclosurePreview: () => api.get(`${INV}/disclosures/preview`),
+  reconciliation: (poolEquity) => api.get(`${INV}/reconciliation`,
+    { params: poolEquity ? { pool_equity: poolEquity } : {} }),
+  auditLog: (params) => api.get(`${INV}/audit/log`, { params }),
+  adjustments: (params) => api.get(`${INV}/audit/adjustments`, { params }),
+};
+
 export default api;

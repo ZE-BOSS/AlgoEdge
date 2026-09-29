@@ -96,7 +96,7 @@ def public_view(row: TradeDisclosure) -> dict:
     for f in PUBLIC_FIELDS:
         v = getattr(row, f)
         out[f] = v.isoformat() if isinstance(v, date) else (None if v is None else
-                                                            (str(v) if isinstance(v, D) else v))
+                                                            (navmod.text(v) if isinstance(v, D) else v))
     return out
 
 
@@ -119,7 +119,7 @@ def admin_view(trade: Trade, row: TradeDisclosure | None) -> dict:
             "pnl": None if trade.pnl is None else str(navmod.money(str(trade.pnl))),
             "exit_reason": trade.exit_reason,
             "closed_on": raw["closed_on"].isoformat() if raw["closed_on"] else None,
-            "result_pct": None if raw["result_pct"] is None else str(raw["result_pct"]),
+            "result_pct": None if raw["result_pct"] is None else navmod.text(raw["result_pct"]),
         },
         "published": public_view(row) if row and row.state == DISCLOSURE_PUBLISHED else None,
         "edited": bool(row and row.edited),
@@ -210,8 +210,10 @@ async def publish(session, *, trade_id: int, actor_id: str,
     for f in figure_changes:
         session.add(Adjustment(
             entity_type="trade_disclosure", entity_id=str(trade_id), field=f,
-            old_value=None if baseline[f] is None else str(baseline[f]),
-            new_value=None if target[f] is None else str(target[f]),
+            old_value=None if baseline[f] is None else
+            (navmod.text(baseline[f]) if isinstance(baseline[f], D) else str(baseline[f])),
+            new_value=None if target[f] is None else
+            (navmod.text(target[f]) if isinstance(target[f], D) else str(target[f])),
             reason=reason, actor_id=actor_id))
     await fundmod.audit(session, actor_id=actor_id, action="disclosure.published",
                         entity_type="trade", entity_id=str(trade_id),

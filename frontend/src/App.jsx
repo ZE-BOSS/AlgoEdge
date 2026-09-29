@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   LayoutDashboard, BookOpen, FlaskConical, BarChart3,
   Zap, Settings, Wifi, WifiOff, Loader2, LogOut, ChevronLeft, ChevronRight,
-  Sparkles, Activity, Terminal, Menu, X
+  Sparkles, Activity, Terminal, Menu, X, Users
 } from 'lucide-react';
 import { useState } from 'react';
 import { useBackendConnection, useWebSocket } from './hooks/useBackendConnection';
@@ -26,6 +26,7 @@ const StrategyLab = lazy(() => import('./pages/StrategyLab'));
 const Fundamentals = lazy(() => import('./pages/Fundamentals'));
 const Logs = lazy(() => import('./pages/Logs'));
 const SettingsPage = lazy(() => import('./pages/Settings/index'));
+const Investors = lazy(() => import('./pages/Investors/index'));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30000, retry: 1 } },
@@ -64,6 +65,7 @@ function Sidebar({ isCollapsed, setIsCollapsed, isNavOpen, closeNav }) {
     { to: '/strategy-lab', icon: FlaskConical, label: 'Strategy Lab' },
     { to: '/fundamentals', icon: Activity, label: 'Fundamentals' },
     { to: '/analysis', icon: Sparkles, label: 'Analysis' },
+    { to: '/investors', icon: Users, label: 'Investors' },
     { to: '/logs', icon: Terminal, label: 'Logs' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ];
@@ -151,6 +153,7 @@ function AppContent() {
               <Route path="/strategy-lab" element={<StrategyLab />} />
               <Route path="/fundamentals" element={<Fundamentals />} />
               <Route path="/analysis" element={<Analysis />} />
+              <Route path="/investors/*" element={<Investors />} />
               <Route path="/logs" element={<Logs />} />
               <Route path="/settings/*" element={<SettingsPage />} />
             </Routes>

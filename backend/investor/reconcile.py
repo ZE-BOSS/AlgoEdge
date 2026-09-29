@@ -72,17 +72,17 @@ class Report:
     def as_dict(self) -> dict:
         return {
             "as_of": self.as_of.isoformat(),
-            "nav_per_unit": str(self.nav_per_unit),
-            "units_in_issue": str(self.units_in_issue),
+            "nav_per_unit": navmod.text(self.nav_per_unit),
+            "units_in_issue": navmod.text(self.units_in_issue),
             "healthy": self.healthy,
             "ledger_drift": [
-                {"investor_id": i, "ledger": str(w), "cache": str(g)}
+                {"investor_id": i, "ledger": navmod.text(w), "cache": navmod.text(g)}
                 for i, w, g in self.ledger_drift
             ],
             "lines": [
-                {"label": ln.label, "pool": str(ln.pool),
-                 "investor_facing": str(ln.investor_facing),
-                 "difference": str(ln.difference), "ok": ln.ok, "note": ln.note}
+                {"label": ln.label, "pool": navmod.text(ln.pool),
+                 "investor_facing": navmod.text(ln.investor_facing),
+                 "difference": navmod.text(ln.difference), "ok": ln.ok, "note": ln.note}
                 for ln in self.lines
             ],
         }
@@ -174,15 +174,15 @@ async def investor_statement(session, investor_id: str, on: date | None = None) 
         "investor_id": investor_id,
         "name": getattr(investor, "name", None),
         "as_of": day.isoformat(),
-        "units": str(held),
-        "nav_per_unit": str(price),
-        "current_value": str(value),
-        "capital_in": str(paid_in),
-        "withdrawn": str(taken_out),
+        "units": navmod.text(held),
+        "nav_per_unit": navmod.text(price),
+        "current_value": navmod.text(value),
+        "capital_in": navmod.text(paid_in),
+        "withdrawn": navmod.text(taken_out),
         # profit is value + what they have taken out, less what they put in —
         # the only definition that stays right across partial withdrawals
-        "profit": str(navmod.money(value + taken_out - paid_in)),
-        "share_of_pool_pct": str(navmod.money(share)),
-        "withdrawable_now": str(cap.cap),
+        "profit": navmod.text(navmod.money(value + taken_out - paid_in)),
+        "share_of_pool_pct": navmod.text(navmod.money(share)),
+        "withdrawable_now": navmod.text(cap.cap),
         "withdrawable_explanation": cap.explanation,
     }

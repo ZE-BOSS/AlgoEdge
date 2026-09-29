@@ -83,6 +83,8 @@ def _s(value) -> str | None:
         return None
     if isinstance(value, date):
         return value.isoformat()
+    if isinstance(value, Decimal):
+        return navmod.text(value)
     return str(value)
 
 
@@ -202,9 +204,9 @@ async def overview(db: AsyncSession = Depends(get_db)):
     )).all())
     return {
         "as_of": navmod.accounting_date().isoformat(),
-        "nav_per_unit": str(price),
-        "units_in_issue": str(outstanding),
-        "aum": str(navmod.amount_for_units(outstanding, price)),
+        "nav_per_unit": _s(price),
+        "units_in_issue": _s(outstanding),
+        "aum": _s(navmod.amount_for_units(outstanding, price)),
         "last_snapshot": _s(snap.as_of_date) if snap else None,
         "investors": by_status,
         "queues": {
@@ -268,12 +270,12 @@ async def list_investors(status: str | None = None, db: AsyncSession = Depends(g
         share = units / outstanding * D("100") if outstanding > 0 else D("0")
         out.append({
             **_investor_row(inv),
-            "units": str(units), "current_value": str(value),
-            "capital_in": str(cap_in), "withdrawn": str(out_),
-            "profit": str(navmod.money(value + out_ - cap_in)),
-            "share_of_pool_pct": str(navmod.money(share)),
+            "units": _s(units), "current_value": _s(value),
+            "capital_in": _s(cap_in), "withdrawn": _s(out_),
+            "profit": _s(navmod.money(value + out_ - cap_in)),
+            "share_of_pool_pct": _s(navmod.money(share)),
         })
-    return {"nav_per_unit": str(price), "investors": out}
+    return {"nav_per_unit": _s(price), "investors": out}
 
 
 @router.post("", status_code=201)
@@ -376,14 +378,14 @@ async def correct_units(investor_id: str, body: Correction,
                                       price=price, effective=day, reason=body.reason,
                                       created_by=admin.id)
         db.add(Adjustment(entity_type="investor", entity_id=investor_id, field="units",
-                          old_value=str(before), new_value=str(before + move.units),
+                          old_value=_s(before), new_value=_s(before + move.units),
                           reason=body.reason, actor_id=admin.id))
         await fundmod.audit(db, actor_id=admin.id, action="ledger.corrected",
                             entity_type="investor", entity_id=investor_id,
-                            detail={"unit_delta": str(move.units), "nav": str(price),
+                            detail={"unit_delta": _s(move.units), "nav": _s(price),
                                     "reason": body.reason})
-    return {"investor_id": investor_id, "unit_delta": str(move.units),
-            "nav_per_unit": str(price), "units_after": str(before + move.units)}
+    return {"investor_id": investor_id, "unit_delta": _s(move.units),
+            "nav_per_unit": _s(price), "units_after": _s(before + move.units)}
 
 
 # ── closure ──────────────────────────────────────────────────────────────────
@@ -517,9 +519,9 @@ async def withdrawal_queue(state: str | None = Query(None, description="comma-se
             held = await unitsmod.ledger_units(db, w.investor_id)
             value = navmod.amount_for_units(held, price)
             cap = await fundmod.withdrawal_cap(db, w.investor_id)
-            row.update({"holding_value_now": str(value),
+            row.update({"holding_value_now": _s(value),
                         "affordable_now": value >= navmod.money(w.amount_requested),
-                        "cap_now": str(cap.cap), "cap_explanation": cap.explanation})
+                        "cap_now": _s(cap.cap), "cap_explanation": cap.explanation})
         out.append(row)
     return out
 
@@ -610,8 +612,8 @@ async def take_snapshot(body: Snapshot, admin: User = Depends(require_admin),
                               actor_id=admin.id))
         await fundmod.audit(db, actor_id=admin.id, action="nav.snapshot",
                             entity_type="nav_snapshot", entity_id=day.isoformat(),
-                            detail={"pool_equity": str(body.pool_equity),
-                                    "liabilities": str(body.liabilities),
+                            detail={"pool_equity": _s(body.pool_equity),
+                                    "liabilities": _s(body.liabilities),
                                     "nav": _s(snap.nav_per_unit), "replaced": old_nav,
                                     "reason": body.reason})
     return _snapshot_row(snap)
@@ -702,7 +704,7 @@ async def reconciliation(pool_equity: Decimal | None = Query(None, ge=0),
         pool_equity = snap.pool_equity if snap else D("0")
         source = f"snapshot {snap.as_of_date.isoformat()}" if snap else "none"
     report = await recmod.build(db, pool_equity=pool_equity)
-    return {**report.as_dict(), "pool_equity": str(navmod.money(pool_equity)),
+    return {**report.as_dict(), "pool_equity": _s(navmod.money(pool_equity)),
             "pool_equity_source": source}
 
 

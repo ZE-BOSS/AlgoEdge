@@ -1,0 +1,254 @@
+import { Link, useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { ArrowLeft, Plus, Wrench, Pencil, Landmark, DoorOpen, Undo2 } from 'lucide-react';
+import { inv } from '../../services/api';
+import { ActionForm, Empty, QueryState, StateBadge } from './shared';
+import { fmtDate, fmtMoney, fmtUnits, isNeg, useInvAction } from './format';
+
+function Statement({ s }) {
+  return (
+    <div className="kpi-strip">
+      <div className="kpi"><div className="kpi-label">Current value</div>
+        <div className="kpi-value">{fmtMoney(s.current_value)}</div></div>
+      <div className="kpi"><div className="kpi-label">Units</div>
+        <div className="kpi-value">{fmtUnits(s.units)}</div></div>
+      <div className="kpi"><div className="kpi-label">Capital in</div>
+        <div className="kpi-value">{fmtMoney(s.capital_in)}</div></div>
+      <div className="kpi"><div className="kpi-label">Withdrawn</div>
+        <div className="kpi-value">{fmtMoney(s.withdrawn)}</div></div>
+      <div className="kpi"><div className="kpi-label">Profit</div>
+        <div className="kpi-value" style={{ color: isNeg(s.profit) ? 'var(--red)' : 'var(--green)' }}>
+          {fmtMoney(s.profit, { sign: true })}</div></div>
+      <div className="kpi"><div className="kpi-label">Share of pool</div>
+        <div className="kpi-value">{s.share_of_pool_pct}%</div></div>
+      <div className="kpi"><div className="kpi-label">Withdrawable now</div>
+        <div className="kpi-value">{fmtMoney(s.withdrawable_now)}</div>
+        <div className="inv-hint">{s.withdrawable_explanation}</div></div>
+    </div>
+  );
+}
+
+function Closure({ investor }) {
+  const id = investor.id;
+  const quote = useQuery({
+    queryKey: ['inv', 'closure', id], queryFn: () => inv.closureQuote(id),
+    enabled: investor.status === 'closing',
+  });
+  const request = useInvAction((b) => inv.requestClosure(id, b));
+  const cancel = useInvAction(() => inv.cancelClosure(id));
+  const approve = useInvAction((b) => inv.approveClosure(id, b));
+
+  if (investor.status === 'closed') {
+    return <div className="inv-hint">Closed {fmtDate(investor.closed_at)}. Personal details were
+      erased on approval; the ledger and audit trail are kept.</div>;
+  }
+  if (investor.status !== 'closing') {
+    return (
+      <ActionForm label="Request closure" icon={DoorOpen} tone="danger" submitLabel="Mark as closing"
+                  fields={[{ name: 'reason', label: 'Why (optional)', type: 'textarea' }]}
+                  onSubmit={(b) => request.mutateAsync(b)} />
+    );
+  }
+  return (
+    <QueryState q={quote}>
+      {(qt) => (
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div className="detail-pairs inv-pairs">
+            <span>Units</span><span className="num">{fmtUnits(qt.units)}</span>
+            <span>NAV / unit</span><span className="num">{fmtUnits(qt.nav_per_unit)}</span>
+            <span>Gross value</span><span className="num">{fmtMoney(qt.gross_value)}</span>
+            <span>Fees owed</span><span className="num">{fmtMoney(qt.fees_owed)}</span>
+            <span><strong>Net payable</strong></span><span className="num"><strong>{fmtMoney(qt.net_payable)}</strong></span>
+          </div>
+          {qt.blockers.length > 0 && (
+            <ul className="inv-blockers">{qt.blockers.map(b => <li key={b}>{b}</li>)}</ul>
+          )}
+          <div className="inv-hint">
+            Pay {fmtMoney(qt.net_payable)} to the investor first, then approve with the transfer
+            reference. Approval redeems every unit and <strong>permanently erases</strong> their
+            name, email, phone and bank details. This cannot be undone.
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            <ActionForm label="Approve closure" tone="danger" submitLabel="Close account"
+                        disabled={qt.blockers.length > 0}
+                        fields={[{ name: 'payment_reference', label: 'Payout transfer reference', required: true }]}
+                        confirm={{ label: `Type the investor's name to confirm`, match: investor.name }}
+                        onSubmit={(b) => approve.mutateAsync(b)} />
+            <ActionForm label="Cancel closure" icon={Undo2} onSubmit={() => cancel.mutateAsync()} />
+          </div>
+        </div>
+      )}
+    </QueryState>
+  );
+}
+
+function Profile({ investor }) {
+  const id = investor.id;
+  const update = useInvAction((b) => inv.update(id, b));
+  const closed = investor.status === 'closed';
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div className="detail-pairs inv-pairs">
+        <span>Email</span><span>{investor.email}</span>
+        <span>Phone</span><span>{investor.phone || '—'}</span>
+        <span>Country</span><span>{investor.country || '—'}</span>
+        <span>KYC</span><span>{investor.kyc_status}</span>
+        <span>Terms version</span><span>{investor.terms_version ?? '—'}</span>
+        <span>Joined</span><span>{fmtDate(investor.activated_at || investor.created_at)}</span>
+      </div>
+      {!closed && (
+        <ActionForm label="Edit details" icon={Pencil} submitLabel="Save"
+                    fields={[
+                      { name: 'name', label: 'Name', defaultValue: investor.name },
+                      { name: 'phone', label: 'Phone', defaultValue: investor.phone || '' },
+                      { name: 'country', label: 'Country', defaultValue: investor.country || '' },
+                      { name: 'kyc_status', label: 'KYC status', defaultValue: investor.kyc_status },
+                    ]}
+                    onSubmit={(b) => update.mutateAsync(b)} />
+      )}
+
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+        <div className="kpi-label">Payout account</div>
+        <div className="detail-pairs inv-pairs">
+          <span>Bank</span><span>{investor.payout_bank_name || '—'}</span>
+          <span>Account no.</span><span className="num">{investor.payout_account_number || '—'}</span>
+          <span>Account name</span><span>{investor.payout_account_name || '—'}</span>
+        </div>
+        {!closed && (
+          <ActionForm label="Change payout account" icon={Landmark} submitLabel="Save"
+                      fields={[
+                        { name: 'payout_bank_name', label: 'Bank', defaultValue: investor.payout_bank_name || '' },
+                        { name: 'payout_account_number', label: 'Account number', defaultValue: investor.payout_account_number || '' },
+                        { name: 'payout_account_name', label: 'Account name', defaultValue: investor.payout_account_name || '' },
+                        { name: 'reason', label: 'Reason', type: 'textarea', required: true,
+                          hint: 'Where withdrawals go. Recorded with the old account — say how the change was verified.' },
+                      ]}
+                      onSubmit={(b) => update.mutateAsync(b)} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Money({ investor }) {
+  const id = investor.id;
+  const deposit = useInvAction((b) => inv.recordDeposit(id, b));
+  const correct = useInvAction((b) => inv.correct(id, b));
+  if (investor.status === 'closed') return null;
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <ActionForm label="Record deposit" icon={Plus} tone="primary" submitLabel="Record"
+                  fields={[
+                    { name: 'amount', label: 'Amount received (USD)', type: 'number', required: true },
+                    { name: 'on', label: 'Date it arrived', type: 'date',
+                      hint: 'Leave blank for today. Units are issued at the NAV of this day.' },
+                    { name: 'note', label: 'Note' },
+                  ]}
+                  onSubmit={(b) => deposit.mutateAsync(b)} />
+      <ActionForm label="Correct units" icon={Wrench} submitLabel="Write correction"
+                  fields={[
+                    { name: 'unit_delta', label: 'Units (+ to add, − to remove)', type: 'number', required: true },
+                    { name: 'reason', label: 'Reason', type: 'textarea', required: true,
+                      hint: 'A compensating ledger row. History is never edited.' },
+                  ]}
+                  onSubmit={(b) => correct.mutateAsync(b)} />
+    </div>
+  );
+}
+
+function Table({ title, rows, cols, empty }) {
+  return (
+    <div className="card">
+      <div className="card-header"><span className="card-title">{title}</span></div>
+      {rows.length === 0 ? <div className="inv-hint">{empty}</div> : (
+        <div className="table-wrapper">
+          <table>
+            <thead><tr>{cols.map(c => <th key={c[0]} className={c[2] ? 'num' : ''}>{c[0]}</th>)}</tr></thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id}>{cols.map(c => <td key={c[0]} className={c[2] ? 'num' : ''}>{c[1](r)}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function InvestorDetail() {
+  const { id } = useParams();
+  const q = useQuery({ queryKey: ['inv', 'investor', id], queryFn: () => inv.get(id) });
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <Link to="/investors/list" className="inv-hint" style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+        <ArrowLeft size={14} /> All investors
+      </Link>
+      <QueryState q={q}>
+        {(d) => !d ? <Empty>Investor not found</Empty> : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <h3 style={{ margin: 0 }}>{d.investor.name}</h3>
+              <StateBadge state={d.investor.status} />
+            </div>
+
+            <Statement s={d.statement} />
+            <Money investor={d.investor} />
+
+            <div className="grid-2">
+              <div className="card">
+                <div className="card-header"><span className="card-title">Details</span></div>
+                <Profile investor={d.investor} />
+              </div>
+              <div className="card">
+                <div className="card-header"><span className="card-title">Closure</span></div>
+                <Closure investor={d.investor} />
+              </div>
+            </div>
+
+            <Table title="Unit ledger" rows={d.ledger} empty="No movements yet."
+                   cols={[
+                     ['Date', r => r.effective_date],
+                     ['Kind', r => r.kind],
+                     ['Units', r => fmtUnits(r.units), true],
+                     ['NAV', r => fmtUnits(r.nav_per_unit), true],
+                     ['Amount', r => fmtMoney(r.amount), true],
+                     ['Source', r => r.source_kind ? `${r.source_kind}${r.source_id ? ' ' + r.source_id : ''}` : '—'],
+                     ['Note', r => r.note || ''],
+                   ]} />
+            <Table title="Deposits" rows={d.deposits} empty="No deposits."
+                   cols={[
+                     ['Created', r => fmtDate(r.created_at)],
+                     ['State', r => <StateBadge state={r.state} />],
+                     ['Claimed', r => fmtMoney(r.amount_claimed), true],
+                     ['Confirmed', r => fmtMoney(r.amount_confirmed), true],
+                     ['Priced on', r => r.effective_date || '—'],
+                     ['Method', r => r.method],
+                     ['Reason', r => r.rejected_reason || ''],
+                   ]} />
+            <Table title="Withdrawals" rows={d.withdrawals} empty="No withdrawals."
+                   cols={[
+                     ['Created', r => fmtDate(r.created_at)],
+                     ['State', r => <StateBadge state={r.state} />],
+                     ['Requested', r => fmtMoney(r.amount_requested), true],
+                     ['Paid', r => fmtMoney(r.amount_paid), true],
+                     ['Cap at request', r => fmtMoney(r.cap_at_request), true],
+                     ['Reference', r => r.payment_reference || ''],
+                     ['Note', r => r.justification || r.declined_reason || ''],
+                   ]} />
+            <Table title="Adjustments" rows={d.adjustments} empty="No adjustments — nothing about this investor has been overridden."
+                   cols={[
+                     ['When', r => fmtDate(r.created_at)],
+                     ['Field', r => r.field],
+                     ['Old', r => r.old_value ?? '—'],
+                     ['New', r => r.new_value ?? '—'],
+                     ['Reason', r => r.reason],
+                     ['By', r => r.actor_id],
+                   ]} />
+          </>
+        )}
+      </QueryState>
+    </div>
+  );
+}

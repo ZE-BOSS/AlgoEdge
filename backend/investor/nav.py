@@ -83,6 +83,18 @@ def nav(value) -> Decimal:
     return _dec(value).quantize(NAV_Q, rounding=ROUND_HALF_UP)
 
 
+def text(value) -> str | None:
+    """A Decimal as the plain string an API returns — never scientific notation.
+
+    `str()` is not safe here: a zero quantized to 8dp is `Decimal('0E-8')`, and
+    str() prints exactly that. Every fully-redeemed investor's balance would
+    reach the screen as "0E-8". format(..., "f") always writes positional digits.
+    """
+    if value is None:
+        return None
+    return format(_dec(value), "f")
+
+
 def nav_per_unit(pool_equity, liabilities, units_in_issue) -> Decimal:
     """What one unit is worth right now.
 
