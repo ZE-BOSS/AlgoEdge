@@ -284,6 +284,23 @@ class BotService:
     # does in a backtest of that slot — see risk/slot_book.py and
     # implementation/PER-SLOT-RISK-DESIGN-2026-09-19.md.
 
+    @staticmethod
+    def _strategy_params_fingerprint(config, slot, block: str | None) -> str:
+        """Everything that decides a slot engine's parameters, as one string:
+        the saved settings block the engine reads (`block`, recorded when the
+        engine was built), this slot's own overrides, and whether measured
+        per-symbol values apply. Read from the freshly loaded config."""
+        import dataclasses
+        import json as _json
+        value = getattr(config, block, None) if block else None
+        if dataclasses.is_dataclass(value):
+            value = dataclasses.asdict(value)
+        elif value is not None:
+            value = getattr(value, "__dict__", repr(value))
+        return _json.dumps([value, getattr(slot, "strategy_params_override", None) or {},
+                            getattr(slot, "use_measured_params", True) is not False],
+                           sort_keys=True, default=str)
+
     def _rebuild_slot_book(self, config, risk_dict: dict) -> None:
         """Point the book at the current account config; slots resolve on use."""
         from backend.risk.slot_book import SlotBook
@@ -980,8 +997,13 @@ class BotService:
                 # engine instance across scan cycles — a fresh id every cycle
                 # would silently wipe every strategy's internal state machine
                 # on every single scan.
+                import copy as _copy_mod
                 import uuid as _uuid_mod
                 from backend.core.config_schema import InstrumentSlot as _InstrumentSlot
+                # the settings exactly as saved, for the engine fingerprints below:
+                # building an engine can adjust `config` in memory (the measured
+                # session-filter default), which must not read as a user change
+                _config_saved = _copy_mod.deepcopy(config)
                 _slots_by_symbol: dict[str, list] = {}
                 for _slot in (getattr(config, 'instrument_slots', None) or []):
                     if _slot.enabled:
@@ -1049,12 +1071,40 @@ class BotService:
                                 )
                             continue
 
+                        # A settings change must reach the ENGINE, not only the
+                        # breaker. The engine used to be built once per slot and
+                        # kept until the bot restarted, so editing a strategy's
+                        # parameters (globally or on the slot) changed the form
+                        # and nothing else, and two bots showing identical
+                        # settings could be trading different ones: whichever
+                        # was restarted last had the new values. Now the slot's
+                        # parameter inputs are fingerprinted every scan and the
+                        # engine is rebuilt (and re-warmed on history, exactly as
+                        # after a restart) when they change.
+                        _existing = self.engines.get(slot.slot_id)
+                        if (_existing is not None
+                                and getattr(_existing, 'strategy_id', None) == strategy_id
+                                and getattr(_existing, '_params_fp', None) is not None
+                                and _existing._params_fp != self._strategy_params_fingerprint(
+                                    _config_saved, slot, getattr(_existing, '_params_block', None))):
+                            self._log_event(
+                                f"[{symbol}] {strategy_id}: strategy settings changed — rebuilding the "
+                                f"engine (slot {slot.slot_id}) so the new values are traded",
+                                "INFO", "BOT")
+                            self.engines.pop(slot.slot_id, None)
+                            self.__dict__.setdefault("_bar_feeds", {}).pop(slot.slot_id, None)
+
                         # Instantiate engine if not exists — keyed by slot_id so
                         # two slots on the same symbol never share one engine's
                         # (and therefore one strategy's) internal state dict.
                         if slot.slot_id not in self.engines or getattr(self.engines[slot.slot_id], 'strategy_id', None) != strategy_id:
                             engine_class = get_strategy(strategy_id)
                             new_engine = engine_class(config)
+                            # which saved settings block this engine reads (by
+                            # identity, before any override makes it a copy)
+                            _params_block = next((n for n, v in vars(config).items()
+                                                  if v is not None and v is getattr(new_engine, "params", object())),
+                                                 None)
                             # [12.1/12.7] strategy_params_override — engine.params
                             # starts as a REFERENCE to the shared config.<strategy>
                             # object (config.apa, config.vwap, ...), which every
@@ -1102,6 +1152,8 @@ class BotService:
                                         setattr(new_engine.params, _k, _v)
                                     else:
                                         logger.warning(f"[{symbol}] slot {slot.slot_id}: strategy_params_override key '{_k}' not found on {strategy_id} params — ignored")
+                            new_engine._params_block = _params_block
+                            new_engine._params_fp = self._strategy_params_fingerprint(_config_saved, slot, _params_block)
                             self.engines[slot.slot_id] = new_engine
                             # [T3.5] Session gating is a per-strategy verdict, not a global
                             # one: the ablation measured -0.170 for HTFFVGFlip (actively

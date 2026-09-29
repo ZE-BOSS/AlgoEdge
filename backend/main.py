@@ -322,10 +322,25 @@ async def log_requests(request: Request, call_next):
 
 # ── Health Check ─────────────────────────────────────────────────────────────
 
+def _running_commit() -> str | None:
+    """The git commit this process was started from, read once at import.
+    Two bots that should trade identically must report the same value."""
+    import subprocess
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+                             timeout=5, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return out.stdout.strip() or None
+    except Exception:
+        return None
+
+
+_COMMIT = _running_commit()
+
+
 @app.get("/api/health")
 async def health_check():
-    """Basic health check endpoint."""
-    return {"status": "ok", "service": "AlgoEdge Backend", "version": "1.0.0"}
+    """Basic health check endpoint. `commit` is the code version running."""
+    return {"status": "ok", "service": "AlgoEdge Backend", "version": "1.0.0", "commit": _COMMIT}
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
