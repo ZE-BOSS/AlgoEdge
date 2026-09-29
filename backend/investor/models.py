@@ -440,3 +440,27 @@ class TradeDisclosure(Base):
     edited = Column(Boolean, nullable=False, default=False)
     decided_by = Column(String(36), nullable=False)
     decided_at = Column(DateTime, server_default=func.now())
+
+
+# ── investor credentials ─────────────────────────────────────────────────────
+
+TOKEN_INVITE = "invite"        # first password, from a link the admin sends
+TOKEN_RESET = "reset"          # forgotten password (emailed from Phase 4)
+
+
+class InvestorToken(Base):
+    """A single-use link token: an invitation to set a first password, or a reset.
+
+    Only the SHA-256 of the token is stored. The raw token exists once, in the
+    link, so a leaked database row cannot be replayed as a login link.
+    """
+    __tablename__ = "investor_tokens"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    investor_id = Column(String(36), ForeignKey("investors.id"), nullable=False, index=True)
+    purpose = Column(String(16), nullable=False)
+    token_hash = Column(String(64), nullable=False, unique=True)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime)
+    created_by = Column(String(36))
+    created_at = Column(DateTime, server_default=func.now())

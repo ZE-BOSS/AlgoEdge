@@ -388,6 +388,32 @@ async def correct_units(investor_id: str, body: Correction,
             "nav_per_unit": _s(price), "units_after": _s(before + move.units)}
 
 
+# ── investor login links ─────────────────────────────────────────────────────
+
+class LinkRequest(BaseModel):
+    purpose: str = Field(default="invite", pattern="^(invite|reset)$")
+
+
+@router.post("/{investor_id}/login-link", status_code=201)
+async def login_link(investor_id: str, body: LinkRequest, admin: User = Depends(require_admin),
+                     db: AsyncSession = Depends(get_db)):
+    """A single-use link for the investor to set their password.
+
+    Returned ONCE — only its hash is stored — and any earlier unused link of the
+    same kind stops working. Until Phase 4 emails it, the admin sends it by hand.
+    """
+    import os
+
+    from backend.investor import auth as authmod
+    await _get_investor(db, investor_id)
+    with refusals():
+        raw, expires = await authmod.create_link(db, investor_id=investor_id,
+                                                 purpose=body.purpose, actor_id=admin.id)
+    base = os.getenv("INVESTOR_APP_URL", "http://localhost:5174").rstrip("/")
+    return {"url": f"{base}/accept?token={raw}", "expires_at": _iso(expires),
+            "purpose": body.purpose}
+
+
 # ── closure ──────────────────────────────────────────────────────────────────
 
 @router.get("/{investor_id}/closure")

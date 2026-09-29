@@ -11,7 +11,7 @@ here ends up appending to the ledger in units.py. No route writes a
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import desc, func, select
@@ -311,6 +311,45 @@ async def month_profit(session, investor_id: str, on: date | None = None) -> Dec
     return navmod.money(opening_units * (navmod.nav(now_price) - navmod.nav(start_price)))
 
 
+async def terms_for(session, investor_id: str) -> FundSettings:
+    """The terms this investor committed under — not today's.
+
+    A lock-up and a notice period are promises made when the money went in, so
+    a later settings version must not lengthen them for money already committed.
+    Falls back to the live terms for an investor with no commitment yet.
+    """
+    investor = await session.get(Investor, investor_id)
+    if investor is not None and investor.terms_version is not None:
+        row = (await session.execute(
+            select(FundSettings).where(FundSettings.version == investor.terms_version)
+        )).scalar_one_or_none()
+        if row is not None:
+            return row
+    return await current_settings(session)
+
+
+async def lockup_until(session, investor_id: str) -> date | None:
+    """First day money may leave under the standard path, or None if never funded.
+
+    Counted from the investor's FIRST subscription, under the terms of that
+    commitment. A top-up does not restart the clock: the agreed term is "one
+    month's lock-up", and restarting it on every top-up would quietly turn a
+    one-month promise into an indefinite one for anyone who adds money.
+
+    Inside the lock-up a withdrawal is not refused outright; like a request
+    over the cap, it becomes an exception needing a written reason.
+    """
+    first = (await session.execute(
+        select(func.min(UnitTransaction.effective_date))
+        .where(UnitTransaction.investor_id == investor_id,
+               UnitTransaction.kind == KIND_SUBSCRIBE)
+    )).scalar_one()
+    if first is None:
+        return None
+    terms = await terms_for(session, investor_id)
+    return first + timedelta(days=int(terms.lockup_days or 0))
+
+
 async def withdrawal_cap(session, investor_id: str, on: date | None = None) -> CapCheck:
     settings = await current_settings(session)
     pct = D(str(settings.withdrawal_cap_pct))
@@ -342,8 +381,14 @@ async def request_withdrawal(session, *, investor_id: str, amount,
         raise FundError(f"holding is worth ${held_value}; cannot withdraw ${cash}")
 
     check = await withdrawal_cap(session, investor_id, day)
-    over = cash > check.cap
+    until = await lockup_until(session, investor_id)
+    locked = until is not None and day < until
+    over = cash > check.cap or locked
     if over and not (justification or "").strip():
+        if locked:
+            raise FundError(
+                f"your money is in its lock-up period until {until.isoformat()}. "
+                f"A request before then needs a written reason.")
         raise FundError(
             f"${cash} is above the standard limit — {check.explanation}. "
             f"A request above it needs a written reason.")
@@ -645,3 +690,52 @@ async def approve_closure(session, *, investor_id: str, actor_id: str,
     return {"investor_id": investor_id, "units_redeemed": navmod.text(held),
             "nav_per_unit": navmod.text(price), "amount_paid": navmod.text(paid),
             "payment_reference": payment_reference}
+
+
+# ── money in, from the investor's side ───────────────────────────────────────
+
+MAX_OPEN_CLAIMS = 3
+
+
+def reference_code(investor_id: str) -> str:
+    """The code an investor puts on a bank transfer so it can be matched.
+
+    Stable per investor rather than per deposit: people save a payee once and
+    reuse it, and a code that changed every time would be left off half the
+    transfers. Derived from the id, so it needs no column and cannot collide
+    with another investor's.
+    """
+    return "AVQ-" + investor_id.replace("-", "")[:8].upper()
+
+
+async def claim_deposit(session, *, investor_id: str, amount, note: str | None = None,
+                        ip: str | None = None) -> Deposit:
+    """The investor says "I have sent it". Nothing is credited.
+
+    This only puts the claim in the admin's queue. Units are issued by
+    confirm_deposit, for the amount that actually arrived, on the day it
+    arrived. The claim is a prompt to go and look, never evidence.
+    """
+    investor = await _open_investor(session, investor_id)
+    if investor.status == "closing":
+        raise FundError("your account is being closed, so it cannot take new money")
+    settings = await current_settings(session)
+    cash = navmod.money(amount)
+    if cash < navmod.money(settings.min_investment):
+        raise FundError(f"the minimum is ${navmod.money(settings.min_investment)}")
+    open_claims = (await session.execute(
+        select(func.count(Deposit.id)).where(Deposit.investor_id == investor_id,
+                                             Deposit.state.in_(OPEN_DEPOSIT_STATES))
+    )).scalar_one()
+    if open_claims >= MAX_OPEN_CLAIMS:
+        raise FundError(f"you already have {open_claims} transfers waiting to be confirmed; "
+                        f"we will confirm those first")
+    row = Deposit(investor_id=investor_id, method="BANK_TRANSFER", amount_claimed=cash,
+                  currency=settings.base_currency, state=DEPOSIT_CLAIMED,
+                  reference_code=reference_code(investor_id))
+    session.add(row)
+    await session.flush()
+    await audit(session, actor_id=investor_id, actor_kind="investor", action="deposit.claimed",
+                entity_type="deposit", entity_id=str(row.id),
+                detail={"amount": navmod.text(cash), "note": note}, ip=ip)
+    return row
