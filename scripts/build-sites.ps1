@@ -14,8 +14,11 @@ Write-Host "Building against $api"
 # keeps Vite's native binary open — and `npm ci` must delete node_modules first,
 # so it fails with EPERM on rolldown-binding.win32-x64-msvc.node. Stop it first.
 # (Behind Caddy it is not used at all; ALGOEDGE_CADDY=1 stops PM2 starting it.)
+# Run through cmd so pm2's "not found" (normal behind Caddy, where that app no
+# longer exists) is not turned into a terminating error by PowerShell 5.1,
+# which treats any native stderr as an error under $ErrorActionPreference = Stop.
 if (Get-Command pm2 -ErrorAction SilentlyContinue) {
-    pm2 stop algoedge-frontend 2>$null | Out-Null
+    cmd /c "pm2 stop algoedge-frontend >nul 2>&1"
     Start-Sleep -Seconds 2
 }
 
