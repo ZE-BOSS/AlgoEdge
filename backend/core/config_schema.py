@@ -631,16 +631,36 @@ class RiskParams:
     equity is the sum of every slot's floating P&L, so using it would close one
     symbol's trade because a different symbol was up."""
 
-    profit_target_action: Literal["PAUSE", "CLOSE_AND_PAUSE"] = "PAUSE"
+    profit_target_action: Literal["CLOSE", "PAUSE", "CLOSE_AND_PAUSE"] = "CLOSE"
     """What happens when a target is reached.
+
+    "CLOSE" banks it and carries on: this slot's open positions are closed and
+    the slot stays free to take the next signal. This is the default and is what
+    a profit target means to most people — on a daily target it takes the money
+    off the table without ending the day.
 
     "PAUSE" stops this slot taking NEW entries for the rest of the period and
     leaves open positions alone — the behaviour every version before 2026-09-27
     had, and the only one it had.
 
-    "CLOSE_AND_PAUSE" flattens this slot's open positions first, then pauses.
-    "TRADE" scope always closes, because a per-trade target that did not close
-    the trade would mean nothing."""
+    "CLOSE_AND_PAUSE" does both: flattens, then stops the slot for the rest of
+    the period.
+
+    "TRADE" scope always closes and never pauses, whatever this says: a per-trade
+    target that did not close the trade would mean nothing, and one that paused
+    the slot would end the day on the first winner."""
+
+    accounting_utc_offset_hours: float = 1.0
+    """The hour offset from UTC at which this account's DAY, WEEK and MONTH roll
+    over, for every daily/weekly/monthly limit and profit target.
+
+    1.0 is West Africa Time, which has no daylight saving, so a fixed offset is
+    exact. Before 2026-09-29 every counter rolled at midnight UTC — 1am WAT —
+    so "today's profit" reset an hour into the trading day. Deriv's synthetics
+    trade 24/7, so there is no session close to anchor to and the boundary has
+    to be chosen deliberately.
+
+    This moves the BOUNDARY only. Timestamps are still stored in UTC."""
 
     profit_target_is_pct: bool = False
     """Read the amounts below as a PERCENT of the period's starting balance

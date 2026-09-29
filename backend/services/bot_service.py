@@ -818,7 +818,7 @@ class BotService:
                         continue
                     if strategy_id != slot.strategy_id:
                         continue
-                    mine.append({"group_id": group_id, "ticket": ticket,
+                    mine.append({"group_id": group_id, "ticket": ticket, "symbol": symbol,
                                  "profit": float(pos.profit) + float(getattr(pos, "swap", 0.0) or 0.0)})
                 if not mine:
                     continue

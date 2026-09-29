@@ -42,7 +42,9 @@ export const SLOT_RISK_SECTIONS = [
   // at all, because a $50 per-trade amount means nothing until TRADE is armed.
   ['Profit targets', ['target_profit_enabled', 'profit_target_scopes', 'profit_target_basis',
     'profit_target_action', 'profit_target_is_pct',
-    'max_trade_profit', 'max_daily_profit', 'max_weekly_profit', 'max_monthly_profit']],
+    'max_trade_profit', 'max_daily_profit', 'max_weekly_profit', 'max_monthly_profit',
+    // where DAY/WEEK/MONTH roll over; WAT (+1) by default, not midnight UTC
+    'accounting_utc_offset_hours']],
   // The full ladder: every field here is read by multi_tp / trailing_manager /
   // exit_replay, and the per-TP rows are hidden above this slot's TP count (see
   // SlotEditor) so a 1-TP slot is not asked about TP5.

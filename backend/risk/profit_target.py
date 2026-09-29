@@ -55,6 +55,14 @@ BASIS_FLOATING = "FLOATING"
 
 ACTION_PAUSE = "PAUSE"
 ACTION_CLOSE = "CLOSE_AND_PAUSE"
+# "Bank it and carry on." Closes the position(s) that reached the target and
+# leaves the slot free to take the next signal. This is the one most people
+# actually want from a profit target: CLOSE_AND_PAUSE stops the slot trading for
+# the rest of the period, which on a per-DAY target means one good morning ends
+# the day. Added 2026-09-29 at the user's request.
+ACTION_CLOSE_ONLY = "CLOSE"
+CLOSING_ACTIONS = (ACTION_CLOSE, ACTION_CLOSE_ONLY)
+VALID_ACTIONS = (ACTION_PAUSE, ACTION_CLOSE, ACTION_CLOSE_ONLY)
 
 # scope -> the ADJECTIVE its pause message uses. Not cosmetic: the breaker's
 # auto-resume looks for "daily" / "Weekly" / "Monthly" inside `pause_reason` to
@@ -117,7 +125,7 @@ class ProfitTargetPolicy:
         if basis not in (BASIS_BALANCE, BASIS_FLOATING):
             basis = BASIS_BALANCE
         action = str(cfg.get("profit_target_action") or ACTION_PAUSE).upper()
-        if action not in (ACTION_PAUSE, ACTION_CLOSE):
+        if action not in VALID_ACTIONS:
             action = ACTION_PAUSE
 
         amounts = {}
@@ -180,8 +188,10 @@ class ProfitTargetPolicy:
                 made += float(floating_total)
             if made < target:
                 continue
-            # CLOSE_AND_PAUSE flattens everything this slot has open; PAUSE does not.
-            groups = tuple(group_floating) if self.action == ACTION_CLOSE else ()
+            # Both closing actions flatten everything this slot has open; they
+            # differ only in whether the slot then stops trading for the period,
+            # which is the caller's business (see CircuitBreaker.check_all).
+            groups = tuple(group_floating) if self.action in CLOSING_ACTIONS else ()
             return TargetHit(
                 scope=scope, amount=target, reached=made, basis=self.basis, action=self.action,
                 group_ids=groups,
@@ -211,10 +221,25 @@ class ProfitTargetPolicy:
         was about to bank running to its stop, which is the opposite of what it
         is for — so `action` is not consulted here.
         """
+        amount = self.amounts.get(SCOPE_TRADE)
+        if amount is None or amount <= 0:
+            return None                           # no per-trade amount set at all
+
+        # EVERY group that has reached it, not just the first. Returning on the
+        # first meant that with two trades past the target only one was banked
+        # per evaluation — live that is one per 60-second scan cycle, so the
+        # second trade kept running for a minute with its profit already made.
+        won: list[str] = []
+        best_made = 0.0
+        target_used = float(amount)
         for group_id, floating in group_floating.items():
             target = self._target_for(SCOPE_TRADE, group_start_balance.get(group_id, 0.0))
             if target is None:
-                return None                       # no per-trade amount set at all
+                # Only reachable when the target is a PERCENT and this group's
+                # start balance is unknown. Skip this group and judge the rest —
+                # `return` here meant one unknown balance disabled the target for
+                # every other open group too.
+                continue
             made = float(floating)
             if self.basis == BASIS_BALANCE:
                 # realised-only on a still-open group is its already-banked legs
@@ -222,13 +247,18 @@ class ProfitTargetPolicy:
             else:
                 made += float(group_realised.get(group_id, 0.0))
             if made >= target:
-                return TargetHit(
-                    scope=SCOPE_TRADE, amount=target, reached=made, basis=self.basis,
-                    action=ACTION_CLOSE, group_ids=(group_id,),
-                    reason=(f"{SCOPE_LABEL[SCOPE_TRADE]} profit target reached: ${made:.2f} / "
-                            f"${target:.2f} ({self.basis.lower()})"),
-                )
-        return None
+                won.append(group_id)
+                if made > best_made:
+                    best_made, target_used = made, target
+        if not won:
+            return None
+        return TargetHit(
+            scope=SCOPE_TRADE, amount=target_used, reached=best_made, basis=self.basis,
+            action=ACTION_CLOSE, group_ids=tuple(won),
+            reason=(f"{SCOPE_LABEL[SCOPE_TRADE]} profit target reached on "
+                    f"{len(won)} trade(s): best ${best_made:.2f} / "
+                    f"${target_used:.2f} ({self.basis.lower()})"),
+        )
 
 
 def note_and_check(circuit: Any, positions, pnl_of, account_balance: float = 0.0) -> list[str]:
@@ -244,15 +274,25 @@ def note_and_check(circuit: Any, positions, pnl_of, account_balance: float = 0.0
     PAUSE-action target and for no target at all.
     """
     by_group: dict[str, float] = {}
+    by_symbol: dict[str, str] = {}
     for pos in positions:
         gid = pos.get("group_id")
         if not gid:
+            # A position with no group cannot be attributed to a slot, so it
+            # cannot be targeted. Loud, because it means Trade.group_id was
+            # never written and the target is silently inert for that position.
+            logger.warning(
+                f"[TARGET] open position {pos.get('ticket') or pos.get('symbol') or '?'} "
+                f"has no group_id — it cannot be profit-targeted"
+            )
             continue
         try:
             by_group[gid] = by_group.get(gid, 0.0) + float(pnl_of(pos) or 0.0)
+            if pos.get("symbol"):
+                by_symbol[gid] = str(pos["symbol"])
         except Exception:  # a valuation failure must never stop position management
             logger.debug(f"[TARGET] could not value {gid}", exc_info=True)
     for gid, value in by_group.items():
-        circuit.note_group_floating(gid, value, account_balance)
+        circuit.note_group_floating(gid, value, account_balance, symbol=by_symbol.get(gid))
     circuit.check_profit_target(account_balance)
     return circuit.take_pending_closes()
