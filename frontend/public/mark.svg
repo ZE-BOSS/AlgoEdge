@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"
+     role="img" aria-label="Alphavantiq Capital">
+  <title>Alphavantiq Capital</title>
+  <defs>
+    <!-- Two tones, not one gradient: the left plane is shadowed and the right is
+         lit, so the monogram reads as a single folded surface catching light
+         rather than a flat letter. The seam falls exactly on the apex. -->
+    <linearGradient id="avLit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8E6B4"/>
+      <stop offset="0.55" stop-color="#E4C273"/>
+      <stop offset="1" stop-color="#C9963A"/>
+    </linearGradient>
+    <linearGradient id="avShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#CFA245"/>
+      <stop offset="0.55" stop-color="#A97E28"/>
+      <stop offset="1" stop-color="#835F1C"/>
+    </linearGradient>
+
+    <!-- Tapered legs (drawn as filled planes, not uniform strokes) and a counter
+         whose base RISES left to right, carried through to the outer notch. That
+         tilt is the trend line living inside the letter; flat would be a plain A. -->
+    <path id="avGlyph" fill-rule="evenodd"
+          d="M32 4.5 L57.5 59 L47.4 59 L42.9 48.4 L21.1 50.6 L16.6 59 L6.5 59 Z
+             M26.1 41.9 L38.2 39.7 L32 24.6 Z"/>
+
+    <clipPath id="avL"><rect x="0" y="0" width="32" height="64"/></clipPath>
+    <clipPath id="avR"><rect x="32" y="0" width="32" height="64"/></clipPath>
+  </defs>
+
+  <use href="#avGlyph" fill="url(#avShade)" clip-path="url(#avL)"/>
+  <use href="#avGlyph" fill="url(#avLit)"   clip-path="url(#avR)"/>
+</svg>

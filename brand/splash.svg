@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1284 2778" width="1284" height="2778"
+     role="img" aria-label="Alphavantiq Capital">
+  <title>Alphavantiq Capital</title>
+  <defs>
+    <linearGradient id="avSpLit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8E6B4"/>
+      <stop offset="0.55" stop-color="#E4C273"/>
+      <stop offset="1" stop-color="#C9963A"/>
+    </linearGradient>
+    <linearGradient id="avSpShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#CFA245"/>
+      <stop offset="0.55" stop-color="#A97E28"/>
+      <stop offset="1" stop-color="#835F1C"/>
+    </linearGradient>
+    <radialGradient id="avSpGlow" cx="50%" cy="45%" r="45%">
+      <stop offset="0" stop-color="#1B2942"/>
+      <stop offset="1" stop-color="#0B1220"/>
+    </radialGradient>
+    <path id="avSpGlyph" fill-rule="evenodd"
+          d="M32 4.5 L57.5 59 L47.4 59 L42.9 48.4 L21.1 50.6 L16.6 59 L6.5 59 Z
+             M26.1 41.9 L38.2 39.7 L32 24.6 Z"/>
+    <clipPath id="avSpL"><rect x="0" y="0" width="32" height="64"/></clipPath>
+    <clipPath id="avSpR"><rect x="32" y="0" width="32" height="64"/></clipPath>
+  </defs>
+  <!-- Expo crops this to whatever aspect ratio the device is, so everything that
+       matters sits well inside the centre and the edges are flat colour — a
+       gradient running to the edge would show the crop as a seam. -->
+  <rect width="1284" height="2778" fill="#0B1220"/>
+  <rect width="1284" height="2778" fill="url(#avSpGlow)"/>
+  <g transform="translate(642,1215) scale(5.4) translate(-32,-32)">
+    <use href="#avSpGlyph" fill="url(#avSpShade)" clip-path="url(#avSpL)"/>
+    <use href="#avSpGlyph" fill="url(#avSpLit)"   clip-path="url(#avSpR)"/>
+  </g>
+  <text x="642" y="1580" text-anchor="middle" fill="#F5F7FA"
+        font-family="'Inter','Segoe UI',system-ui,-apple-system,sans-serif"
+        font-size="78" font-weight="650" letter-spacing="1.5">ALPHAVANTIQ</text>
+  <text x="642" y="1654" text-anchor="middle" fill="#F5F7FA" opacity="0.6"
+        font-family="'Inter','Segoe UI',system-ui,-apple-system,sans-serif"
+        font-size="34" font-weight="500" letter-spacing="18">CAPITAL</text>
+</svg>

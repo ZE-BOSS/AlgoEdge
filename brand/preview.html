@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><title>Alphavantiq Capital — brand review</title>
+<style>
+  :root { --ink:#0B1220; --paper:#F5F7FA; }
+  body { margin:0; font:14px/1.5 Inter,'Segoe UI',system-ui,sans-serif; }
+  section { padding:26px 32px; }
+  .dark  { background:var(--ink); color:var(--paper); }
+  .light { background:var(--paper); color:var(--ink); }
+  h2 { font-size:12px; letter-spacing:.14em; text-transform:uppercase; opacity:.55;
+       margin:0 0 18px; font-weight:600; }
+  .row { display:flex; align-items:flex-end; gap:30px; flex-wrap:wrap; }
+  .cell { text-align:center; }
+  .cell small { display:block; margin-top:8px; opacity:.5; font-size:11px; }
+  .swatches { display:flex; gap:12px; flex-wrap:wrap; }
+  .sw { width:118px; border-radius:8px; overflow:hidden; font-size:11px; background:#111a2b; }
+  .sw i { display:block; height:52px; }
+  .sw b { display:block; padding:6px 8px; font-weight:600; }
+  .sw span { display:block; padding:0 8px 7px; opacity:.6; font-family:ui-monospace,monospace; }
+  .bar { display:flex; align-items:center; gap:11px; padding:12px 16px;
+         background:#111a2b; border-radius:10px; width:max-content; }
+  .wm { font-weight:650; letter-spacing:.02em; font-size:17px; line-height:1.05; }
+  .wm em { display:block; font-style:normal; font-size:9px; letter-spacing:.34em;
+           opacity:.55; font-weight:500; margin-top:2px; }
+  .loader { stroke-dasharray:96; stroke-dashoffset:96; animation:draw 1.5s ease-in-out infinite; }
+  .sheen{animation:sweep 1.6s ease-in-out infinite}
+  @keyframes sweep{0%{transform:translateX(-70px)}60%,100%{transform:translateX(70px)}}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="lit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8E6B4"/><stop offset=".55" stop-color="#E4C273"/><stop offset="1" stop-color="#C9963A"/>
+    </linearGradient>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#CFA245"/><stop offset=".55" stop-color="#A97E28"/><stop offset="1" stop-color="#835F1C"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#FFF6DC" stop-opacity=".85"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <path id="glyph" fill-rule="evenodd"
+      d="M32 4.5 L57.5 59 L47.4 59 L42.9 48.4 L21.1 50.6 L16.6 59 L6.5 59 Z M26.1 41.9 L38.2 39.7 L32 24.6 Z"/>
+    <clipPath id="cl"><rect x="0" y="0" width="32" height="64"/></clipPath>
+    <clipPath id="cr"><rect x="32" y="0" width="32" height="64"/></clipPath>
+    <clipPath id="cg"><use href="#glyph"/></clipPath>
+    <symbol id="mark" viewBox="0 0 64 64">
+      <use href="#glyph" fill="url(#shade)" clip-path="url(#cl)"/>
+      <use href="#glyph" fill="url(#lit)" clip-path="url(#cr)"/>
+    </symbol>
+    <symbol id="fav" viewBox="0 0 64 64">
+      <rect width="64" height="64" rx="14" fill="#0B1220"/>
+      <g transform="translate(32,32) scale(0.8) translate(-32,-32)">
+        <use href="#glyph" fill="url(#shade)" clip-path="url(#cl)"/>
+        <use href="#glyph" fill="url(#lit)" clip-path="url(#cr)"/>
+      </g>
+    </symbol>
+    <symbol id="seal" viewBox="0 0 80 80">
+      <circle cx="40" cy="40" r="37.5" fill="none" stroke="url(#lit)" stroke-width="1.4" opacity=".55"/>
+      <circle cx="40" cy="40" r="33.5" fill="none" stroke="url(#lit)" stroke-width=".6" opacity=".35"/>
+      <g transform="translate(40,41) scale(0.78) translate(-32,-32)">
+        <use href="#glyph" fill="url(#shade)" clip-path="url(#cl)"/>
+        <use href="#glyph" fill="url(#lit)" clip-path="url(#cr)"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<section class="dark">
+  <h2>Mark on ink — the size ladder</h2>
+  <div class="row">
+    <div class="cell"><svg width="128" height="128"><use href="#mark"/></svg><small>128</small></div>
+    <div class="cell"><svg width="64" height="64"><use href="#mark"/></svg><small>64</small></div>
+    <div class="cell"><svg width="40" height="40"><use href="#mark"/></svg><small>40</small></div>
+    <div class="cell"><svg width="24" height="24"><use href="#mark"/></svg><small>24</small></div>
+    <div class="cell"><svg width="16" height="16"><use href="#mark"/></svg><small>16 — the real test</small></div>
+  </div>
+</section>
+
+<section class="light">
+  <h2>Mark on paper</h2>
+  <div class="row">
+    <div class="cell"><svg width="96" height="96"><use href="#mark"/></svg><small>96</small></div>
+    <div class="cell"><svg width="40" height="40"><use href="#mark"/></svg><small>40</small></div>
+    <div class="cell"><svg width="24" height="24"><use href="#mark"/></svg><small>24</small></div>
+  </div>
+</section>
+
+<section class="dark">
+  <h2>Favicon tile</h2>
+  <div class="row">
+    <div class="cell"><svg width="96" height="96"><use href="#fav"/></svg><small>96</small></div>
+    <div class="cell"><svg width="32" height="32"><use href="#fav"/></svg><small>32</small></div>
+    <div class="cell"><svg width="16" height="16"><use href="#fav"/></svg><small>16</small></div>
+  </div>
+</section>
+
+<section class="light">
+  <h2>Favicon tile on light browser chrome</h2>
+  <div class="row">
+    <div class="cell"><svg width="64" height="64"><use href="#fav"/></svg><small>64</small></div>
+    <div class="cell"><svg width="16" height="16"><use href="#fav"/></svg><small>16</small></div>
+  </div>
+</section>
+
+<section class="dark">
+  <h2>Seal — statements, certificates, PDFs</h2>
+  <div class="row">
+    <div class="cell"><svg width="120" height="120"><use href="#seal"/></svg><small>120</small></div>
+    <div class="cell"><svg width="56" height="56"><use href="#seal"/></svg><small>56</small></div>
+    <div class="cell"><svg width="40" height="40"><use href="#seal"/></svg><small>40 — minimum</small></div>
+  </div>
+</section>
+
+<section class="dark">
+  <h2>Horizontal lockup</h2>
+  <div class="row">
+    <div class="cell">
+      <div class="bar" style="background:none;padding:0">
+        <svg width="54" height="54"><use href="#mark"/></svg>
+        <div class="wm" style="font-size:29px">ALPHAVANTIQ<em style="font-size:13px">CAPITAL</em></div>
+      </div><small>large</small>
+    </div>
+  </div>
+  <div class="row" style="margin-top:26px">
+    <div class="cell">
+      <div class="bar">
+        <svg width="30" height="30"><use href="#mark"/></svg>
+        <div class="wm">ALPHAVANTIQ<em>CAPITAL</em></div>
+      </div><small>app sidebar</small>
+    </div>
+    <div class="cell">
+      <svg width="56" height="56" viewBox="0 0 64 64">
+        <use href="#glyph" fill="url(#shade)" clip-path="url(#cl)"/>
+        <use href="#glyph" fill="url(#lit)" clip-path="url(#cr)"/>
+        <g clip-path="url(#cg)"><rect class="sheen" x="-22" y="-4" width="26" height="72" fill="url(#sheen)"/></g>
+      </svg><small>loader</small>
+    </div>
+  </div>
+</section>
+
+<section class="light">
+  <h2>Lockup on paper</h2>
+  <div class="bar" style="background:none;padding:0">
+    <svg width="42" height="42"><use href="#mark"/></svg>
+    <div class="wm" style="font-size:23px;color:#0B1220">ALPHAVANTIQ<em style="font-size:11px">CAPITAL</em></div>
+  </div>
+</section>
+
+<section class="dark">
+  <h2>Palette</h2>
+  <div class="swatches">
+    <div class="sw"><i style="background:#0B1220;box-shadow:inset 0 0 0 1px #223"></i><b>Ink</b><span>#0B1220</span></div>
+    <div class="sw"><i style="background:linear-gradient(135deg,#F2D384,#C08A2A)"></i><b>Gold</b><span>#F2D384→#C08A2A</span></div>
+    <div class="sw"><i style="background:#F2D384"></i><b>Gold light</b><span>#F2D384</span></div>
+    <div class="sw"><i style="background:#C08A2A"></i><b>Gold deep</b><span>#C08A2A</span></div>
+    <div class="sw"><i style="background:#F5F7FA"></i><b>Paper</b><span>#F5F7FA</span></div>
+    <div class="sw"><i style="background:#1B2942"></i><b>Ink raised</b><span>#1B2942</span></div>
+  </div>
+</section>
+
+<section style="background:#0B1220;padding:0">
+  <div style="padding:26px 32px"><h2 style="color:#F5F7FA">Mobile splash</h2></div>
+  <div style="display:flex;justify-content:center;padding-bottom:30px">
+    <div style="width:210px;height:420px;border-radius:22px;border:1px solid #223;
+                background:radial-gradient(ellipse at 50% 44%, #1B2942, #0B1220);
+                display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px">
+      <svg width="86" height="86"><use href="#mark"/></svg>
+      <div style="text-align:center;color:#F5F7FA">
+        <div style="font-weight:650;font-size:17px;letter-spacing:.03em">ALPHAVANTIQ</div>
+        <div style="font-size:8px;letter-spacing:.42em;opacity:.6;margin-top:3px">CAPITAL</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogIn, UserPlus, Eye, EyeOff, Activity } from 'lucide-react';
+import { LogIn, UserPlus, Eye, EyeOff } from 'lucide-react';
+import { Mark } from '../components/Brand';
 import { useAuthStore } from '../store';
 import { login as apiLogin, register as apiRegister } from '../services/api';
 
@@ -42,8 +43,8 @@ export default function Login() {
       <div className="login-card">
         <div className="login-header">
           <div className="login-logo">
-            <Activity size={32} />
-            <span>AlgoEdge</span>
+            <Mark size={34} />
+            <span>ALPHAVANTIQ<em>CAPITAL</em></span>
           </div>
           <p className="login-subtitle">
             {isRegister ? 'Create your trading account' : 'Sign in to your dashboard'}

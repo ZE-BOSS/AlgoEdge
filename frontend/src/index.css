@@ -86,11 +86,24 @@ body {
 }
 
 .sidebar-brand h1 {
-  font-size: 1.25rem;
-  font-weight: 700;
-  background: linear-gradient(135deg, var(--green), var(--blue));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  /* The gold mark carries the colour; a gradient on the words as well made two
+     competing accents and neither read as the brand. */
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1.05;
+  color: var(--text-primary);
+}
+
+.sidebar-brand h1 em,
+.login-logo span em {
+  display: block;
+  font-style: normal;
+  font-size: 0.5em;
+  letter-spacing: 0.34em;
+  font-weight: 500;
+  opacity: 0.55;
+  margin-top: 2px;
 }
 
 .sidebar-brand .dot {
@@ -937,11 +950,13 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 8px;
-  color: var(--green);
+  color: var(--text-primary);
   font-size: 1.5rem;
-  font-weight: 700;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1.05;
 }
 
 .login-subtitle {

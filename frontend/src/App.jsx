@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { useBackendConnection, useWebSocket } from './hooks/useBackendConnection';
 import { useConnectionStore, useAuthStore, useLoadingStore } from './store';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { Mark } from './components/Brand';
 import { NotificationContainer } from './components/NotificationToast';
 import Login from './pages/Login';
 import './index.css';
@@ -73,8 +74,8 @@ function Sidebar({ isCollapsed, setIsCollapsed, isNavOpen, closeNav }) {
         {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
       </button>
       <div className="sidebar-brand">
-        <div className="dot" />
-        <h1>AlgoEdge</h1>
+        <Mark size={26} />
+        <h1>ALPHAVANTIQ<em>CAPITAL</em></h1>
       </div>
       <nav className="sidebar-nav">
         {links.map(({ to, icon: Icon, label }) => (

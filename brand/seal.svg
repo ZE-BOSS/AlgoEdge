@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="80" height="80"
+     role="img" aria-label="Alphavantiq Capital">
+  <title>Alphavantiq Capital</title>
+  <defs>
+    <linearGradient id="avSealLit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8E6B4"/>
+      <stop offset="0.55" stop-color="#E4C273"/>
+      <stop offset="1" stop-color="#C9963A"/>
+    </linearGradient>
+    <linearGradient id="avSealShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#CFA245"/>
+      <stop offset="0.55" stop-color="#A97E28"/>
+      <stop offset="1" stop-color="#835F1C"/>
+    </linearGradient>
+    <path id="avSealGlyph" fill-rule="evenodd"
+          d="M32 4.5 L57.5 59 L47.4 59 L42.9 48.4 L21.1 50.6 L16.6 59 L6.5 59 Z
+             M26.1 41.9 L38.2 39.7 L32 24.6 Z"/>
+    <clipPath id="avSealL"><rect x="0" y="0" width="32" height="64"/></clipPath>
+    <clipPath id="avSealR"><rect x="32" y="0" width="32" height="64"/></clipPath>
+  </defs>
+  <!-- Two rings at different weights, the way an engraved certificate mark is
+       drawn. Use on statements, PDFs and anywhere the brand should read as a
+       seal rather than an app icon. Minimum 40px — the hairline drops out below. -->
+  <circle cx="40" cy="40" r="37.5" fill="none" stroke="url(#avSealLit)"
+          stroke-width="1.4" opacity="0.55"/>
+  <circle cx="40" cy="40" r="33.5" fill="none" stroke="url(#avSealLit)"
+          stroke-width="0.6" opacity="0.35"/>
+  <g transform="translate(40,41) scale(0.78) translate(-32,-32)">
+    <use href="#avSealGlyph" fill="url(#avSealShade)" clip-path="url(#avSealL)"/>
+    <use href="#avSealGlyph" fill="url(#avSealLit)"   clip-path="url(#avSealR)"/>
+  </g>
+</svg>
