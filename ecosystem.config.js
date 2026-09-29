@@ -67,8 +67,29 @@ const PYTHON = resolvePython();
 //     audit log see the visitor's address rather than 127.0.0.1 for everyone
 //   * Caddy serves the sites on 80/443, so `vite preview` on :80 is not started
 // Without it, nothing changes from the layout this file always had.
-const BEHIND_CADDY = process.env.ALGOEDGE_CADDY === "1";
-const CADDY = process.env.CADDY_BIN || (isWindows ? "C:/caddy/caddy.exe" : "/usr/bin/caddy");
+//
+// These four settings may be set in the environment or in the repo's .env (the
+// environment wins). Reading .env too means a setting there takes effect on the
+// next `pm2 start`, without reopening PowerShell to see a new Machine variable.
+const CADDY_KEYS = ["ALGOEDGE_CADDY", "CADDY_BIN", "ACME_EMAIL", "ADMIN_ALLOW_IPS"];
+
+function readDotenv(keys) {
+  const file = path.resolve(__dirname, ".env");
+  const out = {};
+  if (!fs.existsSync(file)) return out;
+  for (const raw of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const m = raw.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!m || !keys.includes(m[1])) continue;
+    out[m[1]] = m[2].replace(/^(["'])(.*)\1$/, "$2");
+  }
+  return out;
+}
+
+const DOTENV = readDotenv(CADDY_KEYS);
+const setting = (key) => process.env[key] || DOTENV[key] || "";
+
+const BEHIND_CADDY = setting("ALGOEDGE_CADDY") === "1";
+const CADDY = setting("CADDY_BIN") || (isWindows ? "C:/caddy/caddy.exe" : "/usr/bin/caddy");
 const BACKEND_ARGS = BEHIND_CADDY
   ? "-m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1"
   : "-m uvicorn backend.main:app --host 0.0.0.0 --port 8000";
@@ -115,8 +136,8 @@ module.exports = {
         // forward slashes, even on Windows: Caddy reads them fine and a
         // backslash in a Caddyfile placeholder is an escape
         ALGOEDGE_ROOT: __dirname.replace(/\\/g, "/"),
-        ACME_EMAIL: process.env.ACME_EMAIL || "",
-        ADMIN_ALLOW_IPS: process.env.ADMIN_ALLOW_IPS || "0.0.0.0/0 ::/0",
+        ACME_EMAIL: setting("ACME_EMAIL"),
+        ADMIN_ALLOW_IPS: setting("ADMIN_ALLOW_IPS") || "0.0.0.0/0 ::/0",
       },
     }] : []),
   ],

@@ -150,6 +150,14 @@ With `CORS_STRICT=1`, only these four sites may call the API from a browser.
 
 Close and reopen PowerShell so the new variables are picked up.
 
+**Or put the same four lines in `.env` instead** (`ALGOEDGE_CADDY=1`,
+`CADDY_BIN=...`, `ACME_EMAIL=...`, `ADMIN_ALLOW_IPS=...`). `ecosystem.config.js`
+reads them from there on every `pm2 start`, so no reopening is needed. A Machine
+variable, when set, wins over `.env`.
+
+`ADMIN_ALLOW_IPS` is the address **you browse from** (your home or office, from
+https://ifconfig.me on that computer), never the server's own address.
+
 About `ADMIN_ALLOW_IPS`:
 - If you leave it unset, **everyone** can reach the admin console (it still
   needs a login). Set it.
@@ -167,6 +175,7 @@ git pull origin dev
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
 pm2 stop all           # a running `vite preview` locks frontend\node_modules (npm ci fails with EPERM)
 powershell -ExecutionPolicy Bypass -File scripts\build-sites.ps1
+$env:ACME_EMAIL = "you@yourdomain.com"   # validate reads it from this window
 C:\caddy\caddy.exe validate --config deploy\Caddyfile --adapter caddyfile
 pm2 delete all; pm2 start ecosystem.config.js; pm2 save
 pm2 ls
