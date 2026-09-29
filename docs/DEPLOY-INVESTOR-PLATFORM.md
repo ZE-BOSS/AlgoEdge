@@ -165,6 +165,7 @@ About `ADMIN_ALLOW_IPS`:
 cd C:\Users\Administrator\Documents\AlgoEdge
 git pull origin dev
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
+pm2 stop all           # a running `vite preview` locks frontend\node_modules (npm ci fails with EPERM)
 powershell -ExecutionPolicy Bypass -File scripts\build-sites.ps1
 C:\caddy\caddy.exe validate --config deploy\Caddyfile --adapter caddyfile
 pm2 delete all; pm2 start ecosystem.config.js; pm2 save
