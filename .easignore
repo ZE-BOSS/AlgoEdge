@@ -5,9 +5,13 @@
 # When this file exists EAS ignores .gitignore, so anything the app folder
 # should not ship is listed here too. Same syntax as .gitignore.
 
-# everything at the top level except the Expo app
+# everything at the top level except the Expo app. No trailing slash on the
+# re-include: EAS tests the folder as "mobile", which "!/mobile/" does not
+# match, so the first build shipped an empty mobile/ ("package.json does not
+# exist in /home/expo/workingdir/build/mobile").
 /*
-!/mobile/
+!/mobile
+!/mobile/**
 
 # inside the app: dependencies, caches and generated folders
 /mobile/node_modules/
