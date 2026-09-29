@@ -71,8 +71,8 @@ def performance_from(points: list[tuple]) -> dict:
         "months": months,
         "basis": "live",
         "gross_of_fees": True,
-        "note": ("Change in the fund's price per unit from live trading, before fees. "
-                 "Investors' own returns are lower by the fees they pay. "
+        "note": ("Percentage change in the value of money invested at launch, from live trading, "
+                 "before fees. An investor's own return is lower by the fees they pay. "
                  "Past performance does not guarantee future results."),
     }
 
@@ -147,11 +147,11 @@ async def apply(body: Apply, request: Request, db: AsyncSession = Depends(get_db
     if not body.consent:
         raise HTTPException(status_code=400, detail="please confirm you have read the risk notice")
     ip = request.client.host if request.client else "?"
-    thanks = {"ok": True, "message": "Thank you — we will be in touch within two working days."}
+    thanks = {"ok": True, "message": "Thank you. We will be in touch within two working days."}
     if body.website:                      # a bot: say thanks, keep nothing
         return thanks
     if _braked(f"ip:{ip}") or _braked(f"email:{body.email.lower()}"):
-        raise HTTPException(status_code=429, detail="too many applications — please try again later")
+        raise HTTPException(status_code=429, detail="too many applications, please try again later")
     row = Application(name=body.name.strip(), email=body.email.strip().lower(), phone=body.phone,
                       country=body.country, amount_band=body.amount_band, message=body.message, ip=ip)
     db.add(row)

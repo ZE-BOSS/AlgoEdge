@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Alphavantiq Capital — systematic trading, run like a fund</title>
-  <meta name="description" content="A systematic, risk-managed trading programme with unit pricing, monthly statements and a live, published track record." />
+  <title>Alphavantiq Capital | Systematic trading you can follow closely</title>
+  <meta name="description" content="Systematic, risk-limited trading with an investor dashboard: your balance in dollars, your return in percent, and the trades we close with their results." />
   <meta name="theme-color" content="#0b1017" />
   <meta property="og:title" content="Alphavantiq Capital" />
-  <meta property="og:description" content="Systematic trading, run like a fund: unit pricing, monthly statements, a live track record." />
+  <meta property="og:description" content="Systematic trading you can follow closely. Your balance, your return and our closed trades, in your investor dashboard." />
   <meta property="og:type" content="website" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -24,168 +24,274 @@
     <span>ALPHAVANTIQ<em>CAPITAL</em></span>
   </a>
   <nav aria-label="Sections">
-    <a href="#approach">Approach</a>
+    <a href="#dashboard">Dashboard</a>
     <a href="#performance">Performance</a>
-    <a href="#terms">Terms</a>
+    <a href="#risk">Risk</a>
+    <a href="#fees">Fees</a>
     <a href="#faq">FAQ</a>
   </nav>
   <div class="nav-actions">
-    <a class="link" data-app-link href="#">Investor sign in</a>
-    <a class="btn btn-gold" href="#apply">Apply</a>
+    <a class="link" data-app-link href="#">Investor dashboard</a>
+    <a class="btn btn-gold" href="#apply">Open an account</a>
   </div>
 </header>
 
 <main id="main">
   <section class="hero" id="top">
-    <p class="eyebrow">Systematic trading · Pooled capital</p>
-    <h1>A trading programme,<br />run like a fund.</h1>
-    <p class="lede">Your money buys units in a pooled, algorithmically traded portfolio. The unit price
-      moves with the results; you see every movement, a statement every month, and the same live
-      track record we show here.</p>
-    <div class="hero-cta">
-      <a class="btn btn-gold btn-lg" href="#apply">Apply to invest</a>
-      <a class="btn btn-ghost btn-lg" href="#performance">See the live record</a>
+    <div class="hero-copy">
+      <p class="eyebrow">Systematic trading with full visibility</p>
+      <h1>Watch your capital work, trade by trade.</h1>
+      <p class="lede">Your money is traded by a rules-based, risk-limited programme. Your investor dashboard
+        shows your balance in dollars, your return in percent, and the trades we close with their results.
+        No waiting for a quarterly letter to find out how you are doing.</p>
+      <div class="hero-cta">
+        <a class="btn btn-gold btn-lg" href="#apply">Open an account</a>
+        <a class="btn btn-ghost btn-lg" href="#performance">See live results</a>
+      </div>
+      <dl class="hero-facts" aria-live="polite">
+        <div><dt>Minimum first deposit</dt><dd data-term="min">$3,000</dd></div>
+        <div><dt>Performance fee</dt><dd data-term="perf">50%</dd></div>
+        <div><dt>Management fee</dt><dd data-term="mgmt-short">5% of profit</dd></div>
+        <div><dt>Statements</dt><dd>Monthly</dd></div>
+      </dl>
     </div>
-    <dl class="hero-facts" id="hero-facts" aria-live="polite">
-      <div><dt>Minimum</dt><dd data-term="min">—</dd></div>
-      <div><dt>Lock-up</dt><dd data-term="lockup">—</dd></div>
-      <div><dt>Statements</dt><dd>Monthly</dd></div>
-    </dl>
+    <figure class="hero-visual" aria-label="Illustration of the investor dashboard">
+      <div class="mock">
+        <div class="mock-top">
+          <span class="mock-label">Your balance</span>
+          <span class="mock-live"><span class="pulse"></span>Updated</span>
+        </div>
+        <div class="mock-value">$12,480.00</div>
+        <div class="mock-change">+$2,480.00 <span>(+24.80%) since you joined</span></div>
+        <svg class="mock-chart" viewBox="0 0 320 110" role="img" aria-label="Illustrative balance chart rising over time">
+          <defs>
+            <linearGradient id="fill" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0" stop-color="#c9a227" stop-opacity="0.35" />
+              <stop offset="1" stop-color="#c9a227" stop-opacity="0" />
+            </linearGradient>
+          </defs>
+          <path d="M0,92 L28,88 L56,90 L84,78 L112,80 L140,66 L168,70 L196,56 L224,50 L252,54 L280,36 L320,24 L320,110 L0,110 Z" fill="url(#fill)" />
+          <path d="M0,92 L28,88 L56,90 L84,78 L112,80 L140,66 L168,70 L196,56 L224,50 L252,54 L280,36 L320,24" fill="none" stroke="#c9a227" stroke-width="2.5" stroke-linejoin="round" />
+          <circle cx="320" cy="24" r="4" fill="#c9a227" />
+        </svg>
+        <div class="mock-trades">
+          <div class="mock-row head"><span>Closed trade</span><span>Side</span><span>Result</span></div>
+          <div class="mock-row"><span>EUR/USD</span><span>Buy</span><span class="up">+0.42%</span></div>
+          <div class="mock-row"><span>XAU/USD</span><span>Sell</span><span class="up">+0.31%</span></div>
+          <div class="mock-row"><span>GBP/JPY</span><span>Buy</span><span class="down">-0.18%</span></div>
+          <div class="mock-row"><span>US500</span><span>Buy</span><span class="up">+0.27%</span></div>
+        </div>
+      </div>
+      <figcaption>Illustration of the dashboard layout. Figures are examples, not results.</figcaption>
+    </figure>
   </section>
 
-  <section class="band" id="how">
-    <h2 class="section-title">How it works</h2>
-    <ol class="steps">
-      <li><span class="step-n">1</span><h3>Apply</h3>
-        <p>Tell us about yourself. We reply within two working days and open your account.</p></li>
-      <li><span class="step-n">2</span><h3>Fund by bank transfer</h3>
-        <p>Send a transfer with your personal reference. When it lands we buy your units at that day's
-          price — the amount that arrived, on the day it arrived.</p></li>
-      <li><span class="step-n">3</span><h3>Follow it</h3>
-        <p>Your holding is units × the price. See it any time in the app, with every transaction, the
-          trades we publish, and a PDF statement each month.</p></li>
-      <li><span class="step-n">4</span><h3>Withdraw</h3>
-        <p>Request from the app; money is paid only to the bank account on file. Larger or earlier
-          requests are reviewed first — the rules are set out plainly below.</p></li>
-    </ol>
-  </section>
-
-  <section class="band split" id="approach">
-    <div>
-      <h2 class="section-title">Approach</h2>
-      <p class="big-copy">Systematic, multi-strategy and volatility-aware. Decisions are made by tested
-        rules, executed by software, and bounded by hard risk limits.</p>
+  <section class="band" id="dashboard">
+    <h2 class="section-title">Your investor dashboard</h2>
+    <p class="section-lede">Everything about your money, in one place, updated every time the account is
+      valued. Open it in any browser or in the Android app.</p>
+    <div class="cards cards-3">
+      <article>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-5 4 4 8-8M15 8h5v5" /></svg>
+        <h3>Your balance, in dollars</h3>
+        <p>See exactly what your account is worth right now, what you have paid in, what you have taken out,
+          and your profit or loss in dollars.</p>
+      </article>
+      <article>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19L19 5M7 8a1 1 0 100-2 1 1 0 000 2zM17 18a1 1 0 100-2 1 1 0 000 2z" /></svg>
+        <h3>Your return, in percent</h3>
+        <p>Your return since you joined and the fund's return since launch, so you can compare them at a glance.</p>
+      </article>
+      <article>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
+        <h3>The trades we close</h3>
+        <p>Closed trades with their market, direction, date and result in percent and dollars, so you can
+          follow how your capital is being traded.</p>
+      </article>
+      <article>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
+        <h3>Monthly statements</h3>
+        <p>A PDF every month that adds up on the page: opening balance, money in and out, result,
+          fees and closing balance.</p>
+      </article>
+      <article>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1112 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4" /></svg>
+        <h3>Alerts on your phone</h3>
+        <p>A notification when your money arrives, when a withdrawal is approved or paid, and when a
+          new statement is ready.</p>
+      </article>
+      <article>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z" /></svg>
+        <h3>Withdrawals you control</h3>
+        <p>Request a withdrawal from the dashboard. Money is only ever paid to the bank account held
+          on file for you, never to an account typed into a request.</p>
+      </article>
     </div>
-    <ul class="points">
-      <li><h3>Rules, not moods</h3><p>Every entry and exit comes from a strategy that was researched and
-        tested before it traded real money. Nothing is discretionary on the day.</p></li>
-      <li><h3>Risk first</h3><p>Position sizing, per-strategy risk caps and daily loss limits are enforced in
-        the trading system itself, not left to judgement.</p></li>
-      <li><h3>Several engines</h3><p>More than one strategy, across more than one market, so the programme
-        does not depend on a single idea working.</p></li>
-      <li><h3>Kept private</h3><p>We describe the approach, not the parameters. Publishing the rules would
-        be the fastest way to stop them working.</p></li>
-    </ul>
   </section>
 
   <section class="band" id="performance">
     <div class="section-head">
       <h2 class="section-title">Live performance</h2>
-      <p class="muted" id="perf-asof">Loading the latest figures…</p>
+      <p class="muted" id="perf-asof">Loading the latest figures...</p>
     </div>
     <div id="perf" class="perf" aria-live="polite">
       <div class="stats">
-        <div class="stat"><span>Return since start</span><strong data-perf="return">—</strong></div>
-        <div class="stat"><span>Worst fall from a peak</span><strong data-perf="dd">—</strong></div>
-        <div class="stat"><span>Track record</span><strong data-perf="since">—</strong></div>
+        <div class="stat"><span>Return since launch</span><strong data-perf="return">-</strong></div>
+        <div class="stat"><span>Best month</span><strong data-perf="best">-</strong></div>
+        <div class="stat"><span>Worst month</span><strong data-perf="worst">-</strong></div>
+        <div class="stat"><span>Largest fall from a peak</span><strong data-perf="dd">-</strong></div>
+        <div class="stat"><span>Months tracked</span><strong data-perf="since">-</strong></div>
       </div>
-      <figure class="chart-card">
-        <figcaption>What $100 invested at launch is worth</figcaption>
-        <div class="chart" id="nav-chart"></div>
-      </figure>
-      <figure class="chart-card">
-        <figcaption>Monthly return</figcaption>
-        <div class="months" id="months"></div>
-      </figure>
-      <p class="fine" id="perf-note">Figures are the change in the value of $100 invested at launch, from live trading,
-        <strong>before fees</strong>; an investor's own return is lower by the fees they pay. These are not
+      <div class="chart-grid">
+        <figure class="chart-card wide">
+          <figcaption>Growth of $10,000 invested at launch</figcaption>
+          <div class="chart" id="growth-chart"></div>
+        </figure>
+        <figure class="chart-card">
+          <figcaption>Monthly return</figcaption>
+          <div class="chart" id="months"></div>
+        </figure>
+        <figure class="chart-card">
+          <figcaption>Distance below the previous high</figcaption>
+          <div class="chart" id="dd-chart"></div>
+        </figure>
+      </div>
+      <p class="fine" id="perf-note">Figures are the percentage change in the value of money invested at launch,
+        from live trading, before fees. An investor's own return is lower by the fees they pay. These are not
         backtests or simulations. Past performance does not guarantee future results.</p>
     </div>
   </section>
 
-  <section class="band" id="transparency">
-    <h2 class="section-title">What you will see</h2>
-    <div class="cards">
-      <article><h3>Your number, explained</h3><p>Units × price = your holding. The app shows the inputs,
-        not just the answer.</p></article>
-      <article><h3>Every movement</h3><p>Each deposit, withdrawal and fee is a line on your ledger, with
-        the price it happened at.</p></article>
-      <article><h3>Monthly statements</h3><p>A PDF every month that adds up on the page: opening value,
-        money in and out, result, fees, closing value.</p></article>
-      <article><h3>Published trades</h3><p>Closed trades with market, side, date and result — without the
-        strategy details that would give the edge away.</p></article>
-    </div>
+  <section class="band" id="how">
+    <h2 class="section-title">How it works</h2>
+    <ol class="steps">
+      <li><span class="step-n">1</span><h3>Open an account</h3>
+        <p>Sign up in minutes. We confirm your email and you can log in to your investor dashboard straight away.</p></li>
+      <li><span class="step-n">2</span><h3>Fund by bank transfer</h3>
+        <p>Send your first deposit of at least <span data-term="min">$3,000</span> with your personal reference.
+          It is invested on the day it arrives, for the amount that arrived.</p></li>
+      <li><span class="step-n">3</span><h3>Monitor your capital</h3>
+        <p>Follow your balance, your return and our closed trades from your dashboard, with a statement every month.</p></li>
+      <li><span class="step-n">4</span><h3>Withdraw</h3>
+        <p>Request a withdrawal from the dashboard. Standard requests are paid within the notice period to
+          your bank account on file.</p></li>
+    </ol>
   </section>
 
-  <section class="band" id="terms">
-    <h2 class="section-title">Terms</h2>
-    <div class="terms">
-      <div><span>Minimum investment</span><strong data-term="min">—</strong></div>
-      <div><span>Management fee</span><strong data-term="mgmt">—</strong></div>
-      <div><span>Performance fee</span><strong data-term="perf">—</strong>
-        <em>only on profit above your own previous high point</em></div>
-      <div><span>Lock-up</span><strong data-term="lockup">—</strong><em>from your first deposit</em></div>
-      <div><span>Standard withdrawal limit</span><strong data-term="cap">—</strong>
-        <em>larger requests are reviewed, not refused</em></div>
-      <div><span>Notice</span><strong data-term="notice">—</strong><em>to pay a standard withdrawal</em></div>
+  <section class="band split" id="risk">
+    <div>
+      <h2 class="section-title">How we manage risk</h2>
+      <p class="big-copy">Every decision comes from tested rules, executed by software, and bounded by hard
+        limits that are enforced by the trading system itself.</p>
     </div>
-    <p class="fine">Terms apply to money from the day it is committed; a later change to the terms does not
-      alter money already invested. Amounts in US dollars.</p>
+    <ul class="points">
+      <li><h3>Rules, not moods</h3><p>Every entry and exit comes from a strategy that was researched and
+        tested before it traded real money. Nothing is decided on impulse on the day.</p></li>
+      <li><h3>Hard risk limits</h3><p>Position size, risk per strategy and daily loss limits are enforced by
+        the trading system itself, not left to judgement on the day.</p></li>
+      <li><h3>More than one engine</h3><p>Several strategies across several markets, so results do not depend
+        on a single idea working.</p></li>
+      <li><h3>Open to inspection</h3><p>Closed trades are published to your dashboard with their results,
+        and every movement of your money is on your statement.</p></li>
+    </ul>
+  </section>
+
+  <section class="band" id="fees">
+    <h2 class="section-title">Fees, in plain numbers</h2>
+    <p class="section-lede">We only earn when you do. Both fees are a share of profit. In a period without
+      profit, you pay neither.</p>
+    <div class="fee-grid">
+      <div class="fee-rules">
+        <div class="fee-rule">
+          <strong data-term="mgmt-short">5% of profit</strong>
+          <span>Management fee, charged every two months on the profit made in those two months.
+            Nothing is charged in a period that did not make money.</span>
+        </div>
+        <div class="fee-rule">
+          <strong data-term="perf">50%</strong>
+          <span>Performance fee, on the profit left after the management fee, and only on profit above your
+            own previous high point. After a loss, nothing is charged until the loss has been earned back.</span>
+        </div>
+      </div>
+      <figure class="chart-card fee-example">
+        <figcaption>Example at the standard rates: a $10,000 account makes $1,000 in a two-month period</figcaption>
+        <svg viewBox="0 0 520 150" role="img" aria-label="Of $1,000 profit, $50 management fee, $475 performance fee, $475 kept by the investor">
+          <rect x="0" y="30" width="26" height="40" rx="4" class="seg-mgmt" />
+          <rect x="26" y="30" width="247" height="40" class="seg-perf" />
+          <rect x="273" y="30" width="247" height="40" rx="4" class="seg-keep" />
+          <text x="0" y="20" class="ex-label">Management 5% of $1,000 = $50</text>
+          <text x="150" y="98" class="ex-label" text-anchor="middle">Performance 50% of $950 = $475</text>
+          <text x="396" y="98" class="ex-label" text-anchor="middle">You keep $475</text>
+          <text x="0" y="136" class="ex-note">Your balance goes from $10,000 to $10,475 after fees (+4.75%).</text>
+        </svg>
+      </figure>
+    </div>
+    <div class="terms">
+      <div><span>Minimum first deposit</span><strong data-term="min">$3,000</strong><em>top-ups can be any amount</em></div>
+      <div><span>Management fee</span><strong data-term="mgmt">5% of profit, every two months</strong><em>nothing in a losing period</em></div>
+      <div><span>Performance fee</span><strong data-term="perf">50%</strong><em>only on profit above your previous high</em></div>
+      <div><span>Lock-up</span><strong data-term="lockup">-</strong><em>from your first deposit</em></div>
+      <div><span>Standard withdrawal limit</span><strong data-term="cap">-</strong><em>larger requests are reviewed, not refused</em></div>
+      <div><span>Notice</span><strong data-term="notice">-</strong><em>to pay a standard withdrawal</em></div>
+    </div>
+    <p class="fine">Fees are shown on your statement and in your dashboard, split into management and
+      performance. Terms apply from the day your money is committed, and a later change does not alter money
+      already invested unless you agree to it. All amounts are in US dollars.</p>
   </section>
 
   <section class="band" id="faq">
     <h2 class="section-title">Questions</h2>
     <div class="faq">
-      <details><summary>What exactly do I own?</summary>
-        <p>Units in the pool. Everyone's units are priced the same, so when the pool gains or loses, every
-          holding moves by the same percentage. Someone who joins later buys at the later price, so they
-          never share in profit made before their money arrived — and you never share in theirs.</p></details>
+      <details><summary>How is my balance worked out?</summary>
+        <p>Your balance moves by the same percentage as the programme's trading results from the day your
+          money arrives. If the programme gains 3% after you join, your balance gains 3%. Money added later
+          only shares in results from the day it arrives, so nobody benefits from profit made before their
+          money was invested.</p></details>
+      <details><summary>Can I really see the trades?</summary>
+        <p>Yes. Your dashboard lists the trades we close, with the market, direction, date and result. We do
+          not publish the strategy settings behind them, because publishing them would stop them working.</p></details>
       <details><summary>How do I get my money out?</summary>
-        <p>Request a withdrawal in the app. It is paid to the bank account we hold for you — never to an
-          account typed into the request. Requests within the standard limit are paid within the notice
-          period; larger or earlier ones are reviewed with you first.</p></details>
-      <details><summary>What if the fund loses money?</summary>
-        <p>Your holding falls with the unit price. The performance fee is charged only on profit above your
-          own previous high point, so after a loss nothing is charged until that loss has been earned back.
-          You can lose money investing; only invest what you can leave invested through a bad period.</p></details>
-      <details><summary>How are fees taken?</summary>
-        <p>Monthly, by cancelling a small number of your units at the month-end price. Each fee is a line on
-          your statement, split into management and performance.</p></details>
+        <p>Request a withdrawal in your dashboard. It is paid to the bank account we hold for you. Requests
+          within the standard limit are paid within the notice period; larger or earlier ones are reviewed
+          with you first.</p></details>
+      <details><summary>What if the programme loses money?</summary>
+        <p>Your balance falls by the same percentage. No management fee is charged for a period without
+          profit, and the performance fee is only charged on profit above your own previous high point, so
+          after a loss nothing is charged until that loss has been earned back. You can lose money
+          investing; only invest what you can leave invested through a bad period.</p></details>
+      <details><summary>When are fees taken?</summary>
+        <p>Every two months, at the end of February, April, June, August, October and December. Each fee
+          appears on your statement and in your dashboard.</p></details>
       <details><summary>Is there an app?</summary>
-        <p>Yes. On Android, install it from the download link below. On iPhone, open the investor site in
-          Safari and choose Share → Add to Home Screen.</p></details>
+        <p>Yes. On Android, install it from the download link below. On iPhone, open the investor dashboard
+          in Safari and choose Share, then Add to Home Screen.</p></details>
       <details><summary>Can I close my account?</summary>
-        <p>Yes, from the app. We sell your units, pay the proceeds to your account on file, send a final
-          statement, and delete your personal details.</p></details>
+        <p>Yes, from the dashboard. We pay your balance to your bank account on file, send a final
+          statement, and delete your personal details, keeping only the records the law requires.</p></details>
     </div>
   </section>
 
   <section class="band app-band" id="app">
     <div>
       <h2 class="section-title">The investor app</h2>
-      <p>Your holding, statements and requests, on your phone.</p>
+      <p>Your balance, your trades, statements and requests, on your phone.</p>
     </div>
     <div class="app-actions">
       <a class="btn btn-gold" id="apk-link" href="#" hidden>Download for Android <span id="apk-version"></span></a>
       <p class="muted small" id="apk-missing">Android download coming soon.</p>
-      <p class="muted small">iPhone: open <a data-app-link href="#">the investor site</a> in Safari, then Share → Add to Home Screen.</p>
+      <p class="muted small">iPhone: open the <a data-app-link href="#">investor dashboard</a> in Safari, then
+        choose Share and Add to Home Screen.</p>
     </div>
   </section>
 
   <section class="band apply" id="apply">
     <div>
-      <h2 class="section-title">Apply to invest</h2>
-      <p>We read every application and reply within two working days. Applying commits you to nothing.</p>
+      <h2 class="section-title">Open an account</h2>
+      <p>Create your account now and log in to your investor dashboard as soon as you have confirmed your email.
+        The minimum first deposit is <span data-term="min">$3,000</span>.</p>
+      <p><a class="btn btn-gold btn-lg" id="signup-link" href="#">Create your account</a></p>
+      <p class="muted small">Prefer to talk to us first? Send the form and we will reply within two working days.
+        It commits you to nothing.</p>
     </div>
     <form id="apply-form" novalidate>
       <label>Full name<input name="name" autocomplete="name" required minlength="2" maxlength="120" /></label>
@@ -196,17 +302,18 @@
       </div>
       <label>How much are you thinking of investing?
         <select name="amount_band">
-          <option value="">Choose…</option>
-          <option>Under $1,000</option><option>$1,000 – $5,000</option>
-          <option>$5,000 – $25,000</option><option>$25,000 – $100,000</option><option>Over $100,000</option>
+          <option value="">Choose one</option>
+          <option>$3,000 to $5,000</option>
+          <option>$5,000 to $25,000</option><option>$25,000 to $100,000</option><option>Over $100,000</option>
         </select></label>
-      <label>Anything you'd like us to know <span class="opt">(optional)</span>
+      <label>Anything you would like us to know <span class="opt">(optional)</span>
         <textarea name="message" rows="3" maxlength="2000"></textarea></label>
       <label class="hp" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off" /></label>
       <label class="check"><input type="checkbox" name="consent" required />
         <span>I understand that investing involves risk, that I can lose money, and that past performance
-          does not guarantee future results.</span></label>
-      <button class="btn btn-gold btn-lg" type="submit">Send application</button>
+          does not guarantee future results. I have read the <a href="/terms.html">Terms and Conditions</a>
+          and the <a href="/privacy.html">Privacy Policy</a>.</span></label>
+      <button class="btn btn-gold btn-lg" type="submit">Send</button>
       <p class="form-msg" role="status" id="apply-msg"></p>
     </form>
   </section>
@@ -219,8 +326,11 @@
     put in. Past performance does not guarantee future results. Nothing on this site is personal financial
     advice.</p>
   <p class="fine" id="regulatory" hidden></p>
-  <p class="fine">© <span id="year"></span> Alphavantiq Capital · <a id="contact" href="#">Contact</a> ·
-    <a data-app-link href="#">Investor sign in</a></p>
+  <p class="fine footer-links">Copyright <span id="year"></span> Alphavantiq Capital.
+    <a href="/terms.html">Terms and Conditions</a>
+    <a href="/privacy.html">Privacy Policy</a>
+    <a id="contact" href="#">Contact</a>
+    <a data-app-link href="#">Investor dashboard</a></p>
 </footer>
 </body>
 </html>
