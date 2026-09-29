@@ -277,7 +277,18 @@ those, statements land in spam. That is part of the domain work in §10.
 
 ## 8. Mobile app — Expo
 
-Android first, sideloaded from the website, iOS later when the Apple account exists.
+Android only for now. You asked whether iOS can be done without an Apple Developer
+account: **no, not for real investors.** Apple requires every iOS binary to be signed
+by a paid account ($99/yr) before it will run on someone else's phone. The sideloading
+workarounds (AltStore, Sideloadly) need the user to plug into a computer and re-sign
+every 7 days, which is not something you can ask an investor to do.
+
+**The fallback that works today:** the investor web app is built as an installable
+**PWA**, so an iPhone user opens `app.alphavantiqcapital.com` in Safari and taps Share
+-> Add to Home Screen. It gets the icon, the splash and a full-screen shell, and it
+uses the same code as the website — no extra build. It cannot do native push on iOS
+below 16.4, which is the only real loss. That is a few hours of work and covers iOS
+until the $99 is worth spending.
 
 - **Expo + React Native**, TypeScript, sharing `packages/api-client` with the web app so
   types and endpoints cannot drift.
@@ -317,30 +328,60 @@ Strategy secrecy is preserved throughout: mechanism described in general terms
 
 ---
 
-## 10. Domain, VPS, TLS
+## 10. Domain, DNS, TLS — and why the subdomain would not save
 
-You are on `16.60.51.87` over plain HTTP today, which is why the browser shows the
-"not secure" warning in your screenshots. Target:
+`alphavantiqcapital.com`, registered at Hostinger, expires 2027-04-28, auto-renew on.
 
-| Host | Serves |
-|---|---|
-| `algoedgecapital.com` | landing page |
-| `app.algoedgecapital.com` | investor web app |
-| `admin.algoedgecapital.com` | admin console |
-| `api.algoedgecapital.com` | FastAPI |
+### The reason you could not create the admin subdomain
 
-Steps, once you have bought the domain (Namecheap/Cloudflare both fine):
+Two separate things were in the way.
 
-1. Point an `A` record for `@`, `app`, `admin`, `api` at `16.60.51.87`.
-2. Install Caddy or nginx + certbot on the VPS as a reverse proxy.
-3. TLS certificates via Let's Encrypt — Caddy does this automatically.
-4. Lock the API to those origins with CORS; close every other port at the firewall.
-5. Add Resend's SPF/DKIM/DMARC TXT records for the sending domain.
-6. **Admin console behind an IP allowlist or VPN** in addition to login.
+**1. Your DNS is not at Hostinger.** The domain's nameservers are:
 
-I will write this as a runnable script plus a checklist when we get there.
+```
+ns1.vercel-dns.com
+ns2.vercel-dns.com
+```
 
----
+Hostinger is the **registrar** (who you bought it from); Vercel is the **DNS host**
+(who actually answers queries for it). Records created in Hostinger's DNS panel are
+ignored by the entire internet while those nameservers are set — which is exactly why
+that Subdomains tab sat empty and would not stick.
+
+**2. "Subdomains" is the wrong tool anyway.** That Hostinger feature creates
+subdomains for *websites hosted on Hostinger*. To point a name at your own VPS you
+create a plain **A record**. There is no "subdomain" object involved.
+
+### Pick one of these
+
+**Option A — keep DNS at Vercel** (recommended if anything is deployed there). Do
+everything in the Vercel dashboard → the domain → DNS:
+
+| Type | Name | Value |
+|---|---|---|
+| A | `admin` | `16.60.51.87` |
+| A | `app` | `16.60.51.87` |
+| A | `api` | `16.60.51.87` |
+| A | `@` | landing page host |
+
+**Option B — move DNS to Hostinger.** In Hostinger → DNS/Nameservers → change
+nameservers to Hostinger's own, wait for propagation (up to 24h, usually much less),
+then add the same A records under **DNS records** — *not* under Subdomains.
+
+Do not split them. Whichever holds the nameservers holds all the records; a half-moved
+zone is the most confusing failure mode in DNS.
+
+### Then
+
+1. Install Caddy on the VPS as a reverse proxy — it obtains and renews Let's Encrypt
+   certificates automatically, which removes the "Not secure" warning you are seeing.
+2. Proxy `admin.` and `app.` to their static builds, `api.` to uvicorn on :8000.
+3. Lock CORS to those origins; close every other port at the firewall.
+4. Add Resend's SPF, DKIM and DMARC TXT records **in whichever DNS host you chose** —
+   without them, investor statements go to spam.
+5. Put the admin console behind an IP allowlist or VPN **in addition** to login.
+
+A minimal Caddyfile is about fifteen lines and I will write it when we get there.
 
 ## 11. Security baseline
 
@@ -378,20 +419,34 @@ if the ledger is wrong, everything else is confidently-presented wrong numbers.
 
 ---
 
-## 13. What I need from you before Phase 1
+## 13. Decisions — LOCKED 2026-09-29
 
-1. **Unitisation — yes or no.** (§0. My strong recommendation: yes.)
-2. **Fee model.** Performance fee % and whether there is a management fee. High-water
-   mark per investor, I assume — confirm.
-3. **The 30% withdrawal cap** — 30% of the month's profit, or of total profit to date?
-   You said "30% of the user's profit monthly" and later "30% of their capital"; those
-   are very different numbers.
-4. **Base currency** — USD throughout, or NGN for deposits/withdrawals with a recorded
-   FX rate? This changes the ledger, so it matters now.
-5. **Minimum investment**, lock-up period (if any), and notice period for withdrawals.
-6. **Domain name** you want to buy.
-7. Whether you have an **Apple Developer account** yet (decides if iOS is Phase 6 or
-   later).
+All seven answered. These are now the spec, not open questions.
+
+| # | Decision | Consequence |
+|---|---|---|
+| 1 | **Unitisation: YES** | `unit_transactions` is the source of truth; percentage is display-only |
+| 2 | **Performance fee AND management fee**, both admin-set | high-water mark per investor; accrued in `fee_accruals` |
+| 3 | **Withdrawal cap = 30% of the investor's profit in the current month (WAT)**, and the **percentage is admin-configurable** | not 30% of capital; stored as a setting, default 30 |
+| 4 | **Base currency USD** | NGN deposits, if any, are converted at a recorded rate stored on the deposit row |
+| 5 | **Minimum $200**, **lock-up 1 month**, **notice period 1 week** — all three admin-updatable | stored as settings, not constants; changes apply to NEW commitments only |
+| 6 | **Domain: `alphavantiqcapital.com`** (Hostinger registrar, Vercel DNS) | see §10 |
+| 7 | **No Apple Developer account** | Android only. iOS is not possible without one — see §8 |
+
+Two things that follow from #5 and need care at build time:
+
+- **A lock-up and a notice period are promises to an investor**, so changing them must
+  not retroactively trap money already committed under the old terms. The settings are
+  versioned and each `unit_transaction` records the terms in force when it was made.
+- **The 30% cap is monthly profit, not capital.** An investor whose account is flat for
+  the month can withdraw nothing under the standard path and must use the exception
+  request. That is a real customer-service edge and the UI must state the reason
+  plainly rather than showing a disabled button.
+
+### Brand
+
+Company name is now **Alphavantiq Capital**, after the domain. Mark, favicon, lockup,
+splash and loader are in `/brand` (see `brand/README.md`); the admin app is rebranded.
 
 ---
 

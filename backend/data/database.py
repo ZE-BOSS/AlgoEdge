@@ -52,6 +52,12 @@ async_session = async_sessionmaker(
 
 async def init_db():
     """Create all tables if they don't exist."""
+    # A model registers with Base.metadata when its MODULE is imported, so the
+    # investor tables are only created if something has imported them first.
+    # Without this line create_all silently skips them and the first deposit
+    # fails against a table that does not exist.
+    import backend.investor.models  # noqa: F401 — imported for the side effect
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         
