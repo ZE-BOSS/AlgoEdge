@@ -124,7 +124,7 @@ export const api = {
   changePassword: (current_password: string, new_password: string) =>
     call<Session>('/auth/password', { method: 'POST', body: { current_password, new_password } }),
   me: () => call('/me'),
-  nav: () => call<{ date: string; nav_per_unit: string }[]>('/nav'),
+  nav: () => call<{ date: string; nav_per_unit: string; value: string | null }[]>('/nav'),
   activity: () => call('/activity'),
   trades: () => call<any[]>('/trades'),
   statements: () => call<{ year: number; month: number; label: string }[]>('/statements'),

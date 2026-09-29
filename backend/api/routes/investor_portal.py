@@ -268,11 +268,29 @@ async def me(inv: Investor = Depends(current_investor), db: AsyncSession = Depen
 @router.get("/nav")
 async def nav_history(limit: int = Query(730, le=5000), db: AsyncSession = Depends(get_db),
                       inv: Investor = Depends(current_investor)):
-    """The unit price over time. Price only — not the size of the fund."""
-    rows = (await db.execute(
+    """The fund's price over time, and what THIS investor's holding was worth
+    in dollars on each of those days (null before they held anything).
+
+    `value` is what the app charts: people read dollars, not unit prices. The
+    unit price is still returned, because the fund's own growth ("$100 at
+    launch is now worth…") is the price itself — the fund opens at 100.
+    Never the size of the fund.
+    """
+    rows = list(reversed((await db.execute(
         select(NavSnapshot.as_of_date, NavSnapshot.nav_per_unit)
-        .order_by(desc(NavSnapshot.as_of_date)).limit(limit))).all()
-    return [{"date": d.isoformat(), "nav_per_unit": _s(n)} for d, n in reversed(rows)]
+        .order_by(desc(NavSnapshot.as_of_date)).limit(limit))).all()))
+    moves = (await db.execute(
+        select(UnitTransaction.effective_date, UnitTransaction.units)
+        .where(UnitTransaction.investor_id == inv.id)
+        .order_by(UnitTransaction.effective_date, UnitTransaction.id))).all()
+    out, held, i = [], Decimal("0"), 0
+    for d, n in rows:
+        while i < len(moves) and moves[i][0] <= d:
+            held += Decimal(str(moves[i][1]))
+            i += 1
+        value = navmod.amount_for_units(held, n) if held > 0 else None
+        out.append({"date": d.isoformat(), "nav_per_unit": _s(n), "value": _s(value)})
+    return out
 
 
 KIND_LABEL = {"SUBSCRIBE": "Units bought", "REDEEM": "Units sold",

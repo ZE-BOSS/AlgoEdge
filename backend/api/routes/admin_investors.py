@@ -631,6 +631,8 @@ def _snapshot_row(s: NavSnapshot) -> dict:
     return {"as_of_date": _s(s.as_of_date), "pool_equity": _s(s.pool_equity),
             "liabilities": _s(s.liabilities), "units_in_issue": _s(s.units_in_issue),
             "nav_per_unit": _s(s.nav_per_unit), "source": s.source,
+            # what the investors' money is worth in total that day, in dollars
+            "fund_value": _s(navmod.money(D(str(s.pool_equity)) - D(str(s.liabilities or 0)))),
             "created_at": _iso(s.created_at)}
 
 
@@ -1061,7 +1063,7 @@ async def reconciliation(pool_equity: Decimal | None = Query(None, ge=0),
             select(NavSnapshot).order_by(desc(NavSnapshot.as_of_date)).limit(1)
         )).scalar_one_or_none()
         pool_equity = snap.pool_equity if snap else D("0")
-        source = f"snapshot {snap.as_of_date.isoformat()}" if snap else "none"
+        source = f"valuation {snap.as_of_date.isoformat()}" if snap else "none"
     report = await recmod.build(db, pool_equity=pool_equity)
     return {**report.as_dict(), "pool_equity": _s(navmod.money(pool_equity)),
             "pool_equity_source": source}

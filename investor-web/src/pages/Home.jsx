@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useLoad } from '../hooks';
 import { Card, Loaded } from '../components/ui';
 import NavChart from '../components/NavChart';
-import { day, isNeg, money, units } from '../format';
+import { day, isNeg, money, sinceLaunch } from '../format';
 
 export default function Home() {
   const me = useLoad(api.me);
@@ -33,14 +33,18 @@ export default function Home() {
           <div className="tiles">
             <div className="tile"><span>Paid in</span><strong>{money(s.capital_in)}</strong></div>
             <div className="tile"><span>Paid out to you</span><strong>{money(s.withdrawn)}</strong></div>
-            <div className="tile"><span>Units held</span><strong>{units(s.units)}</strong></div>
-            <div className="tile"><span>Price per unit</span><strong>{units(s.nav_per_unit)}</strong></div>
             <div className="tile"><span>Your share of the fund</span><strong>{s.share_of_pool_pct}%</strong></div>
+            <div className="tile"><span>Fund since launch</span><strong>{sinceLaunch(s.nav_per_unit)}</strong></div>
           </div>
 
-          <Card title="Price per unit">
-            <Loaded q={nav}>{(points) => <NavChart points={points} />}</Loaded>
-          </Card>
+          <Loaded q={nav}>{(points) => {
+            const mine = points.some((p) => p.value !== null);
+            return (
+              <Card title={mine ? 'Your holding value' : 'What $100 invested at launch is worth'}>
+                <NavChart points={points} field={mine ? 'value' : 'nav_per_unit'} />
+              </Card>
+            );
+          }}</Loaded>
 
           <Card title="Available to withdraw" aside={<Link className="btn small" to="/money/withdraw">Withdraw</Link>}>
             <div className="big">{money(s.withdrawable_now)}</div>

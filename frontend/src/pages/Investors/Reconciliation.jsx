@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { inv } from '../../services/api';
 import { QueryState } from './shared';
-import { fmtMoney, fmtUnits, isZero } from './format';
+import { fmtMoney, fmtUnits, isZero, fmtPrice } from './format';
 
 export default function Reconciliation() {
   const [draft, setDraft] = useState('');
@@ -18,13 +18,13 @@ export default function Reconciliation() {
           <div>
             <label>Broker equity right now (USD)</label>
             <input inputMode="decimal" value={draft} onChange={e => setDraft(e.target.value)}
-                   placeholder="blank = latest NAV snapshot" />
+                   placeholder="blank = latest valuation" />
           </div>
           <button className="btn btn-primary btn-sm" type="submit">Reconcile</button>
         </form>
         <div className="inv-hint" style={{ marginTop: 6 }}>
           The investor side never reads MT5 directly, so the live figure is entered here. Without one,
-          the latest snapshot's equity is used — which only proves the books agree with themselves.
+          the latest valuation's equity is used — which only proves the books agree with themselves.
         </div>
       </div>
 
@@ -37,7 +37,7 @@ export default function Reconciliation() {
                 <div style={{ fontWeight: 600 }}>{r.healthy ? 'Everything agrees' : 'Something does not add up'}</div>
                 <div className="inv-hint">
                   As of {r.as_of} · pool equity {fmtMoney(r.pool_equity)} ({r.pool_equity_source}) ·
-                  NAV {fmtUnits(r.nav_per_unit)} · {fmtUnits(r.units_in_issue, 2)} units
+                  unit price {fmtPrice(r.nav_per_unit)} · {fmtUnits(r.units_in_issue, 2)} units
                 </div>
               </div>
             </div>

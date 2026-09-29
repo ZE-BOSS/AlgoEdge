@@ -1,7 +1,7 @@
 import { View } from 'react-native';
 import { router } from 'expo-router';
 import { api } from '../../lib/api';
-import { day, isNeg, money, units } from '../../lib/format';
+import { day, isNeg, money, sinceLaunch } from '../../lib/format';
 import { useLoad } from '../../lib/hooks';
 import { color } from '../../lib/theme';
 import NavChart from '../../components/NavChart';
@@ -34,14 +34,19 @@ export default function Overview() {
             <Card>
               <Pairs rows={[
                 ['Paid in', money(s.capital_in)], ['Paid out to you', money(s.withdrawn)],
-                ['Units held', units(s.units)], ['Price per unit', units(s.nav_per_unit)],
                 ['Your share of the fund', `${s.share_of_pool_pct}%`],
+                ['Fund since launch', sinceLaunch(s.nav_per_unit)],
               ]} />
             </Card>
 
-            <Card title="Price per unit">
-              <Loaded q={nav}>{(points) => <NavChart points={points} />}</Loaded>
-            </Card>
+            <Loaded q={nav}>{(points) => {
+              const mine = points.some((p) => p.value !== null);
+              return (
+                <Card title={mine ? 'Your holding value' : 'What $100 invested at launch is worth'}>
+                  <NavChart points={points} field={mine ? 'value' : 'nav_per_unit'} />
+                </Card>
+              );
+            }}</Loaded>
 
             <Card title="Available to withdraw" right={<Button label="Withdraw" kind="link" onPress={() => router.push('/money?tab=withdraw')} />}>
               <T size={28} bold>{money(s.withdrawable_now)}</T>

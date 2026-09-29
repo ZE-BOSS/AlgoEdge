@@ -25,6 +25,16 @@ export function units(v, dp = 4) {
   return `${neg ? '−' : ''}${group(i)}.${(f + '0'.repeat(dp)).slice(0, dp)}`;
 }
 
+/** The fund's change since launch, from its unit price: it opens at 100, so a
+ *  price of 104.20 means $100 invested at launch is worth $104.20 (+4.20%).
+ *  Display only — nothing is computed from this string. */
+export function sinceLaunch(navPerUnit) {
+  if (navPerUnit === null || navPerUnit === undefined || navPerUnit === '') return '—';
+  const pct = Number(navPerUnit) - 100;
+  const s = Math.abs(pct).toFixed(2);
+  return pct > 0.004 ? `+${s}%` : pct < -0.004 ? `−${s}%` : '0.00%';
+}
+
 export const isNeg = (v) => typeof v === 'string' && v.startsWith('-') && !/^-0*(\.0*)?$/.test(v);
 
 export function day(v) {

@@ -85,13 +85,13 @@ export default function Activity() {
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>Date</th><th>What</th><th className="num">Units</th>
-                    <th className="num hide-sm">Price</th><th className="num">Amount</th></tr></thead>
+                    <th className="num hide-sm">Unit price</th><th className="num">Amount</th></tr></thead>
                   <tbody>
                     {ledger.map((t) => (
                       <tr key={t.id}>
                         <td>{day(t.date)}</td><td>{t.label}</td>
                         <td className={`num ${isNeg(t.units) ? 'bad' : ''}`}>{units(t.units)}</td>
-                        <td className="num hide-sm">{units(t.nav_per_unit)}</td>
+                        <td className="num hide-sm">{money(t.nav_per_unit)}</td>
                         <td className="num">{money(t.amount)}</td>
                       </tr>
                     ))}

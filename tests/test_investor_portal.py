@@ -230,6 +230,7 @@ def test_an_investor_sees_their_own_position_and_not_the_funds_size():
             assert me["statement"]["share_of_pool_pct"] == "25.00"
             nav = (await a.inv("GET", "/nav", ada)).json()
             assert nav[-1]["nav_per_unit"] == "110.00000000"
+            assert nav[-1]["value"] == "1100.00"          # their holding, in dollars
             for body in (me, nav, (await a.inv("GET", "/activity", ada)).json()):
                 text = str(body)
                 assert "pool_equity" not in text and "4400" not in text and "Bea" not in text

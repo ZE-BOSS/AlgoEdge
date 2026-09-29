@@ -14,11 +14,13 @@ export default function How() {
           <Card title="How your value is calculated">
             <p>The fund is divided into <strong>units</strong>. When you add money you buy units at that
               day&rsquo;s price; when you withdraw, units are sold at that day&rsquo;s price. The price moves
-              with the fund&rsquo;s trading results, so everyone&rsquo;s holding moves by the same percentage.</p>
+              with the fund&rsquo;s trading results, so everyone&rsquo;s holding moves by the same percentage.
+              The fund started at $100 a unit: a unit price of {money(s.nav_per_unit)} means every $100
+              invested at launch is now worth {money(s.nav_per_unit)}.</p>
             <div className="sum">
               <div><span className="muted">Units you hold</span><strong className="num">{units(s.units)}</strong></div>
               <div className="op">×</div>
-              <div><span className="muted">Price per unit</span><strong className="num">{units(s.nav_per_unit)}</strong></div>
+              <div><span className="muted">Unit price</span><strong className="num">{money(s.nav_per_unit)}</strong></div>
               <div className="op">=</div>
               <div><span className="muted">Your holding</span><strong className="num">{money(s.current_value)}</strong></div>
             </div>

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Check, Banknote } from 'lucide-react';
 import { inv } from '../../services/api';
 import { ActionForm, Empty, ErrorLine, QueryState } from './shared';
-import { fmtMoney, fmtUnits, useInvAction } from './format';
+import { fmtMoney, useInvAction, fmtPrice } from './format';
 
 function lastMonth() {
   const d = new Date();
@@ -23,7 +23,7 @@ function Preview({ year, month }) {
       {(p) => (
         <>
           <p className="inv-hint" style={{ marginTop: 0 }}>
-            {p.already_closed ? 'Charged — these are the recorded charges. ' : `Priced at the NAV of ${p.priced_on} (${fmtUnits(p.nav_per_unit)}). `}
+            {p.already_closed ? 'Charged — these are the recorded charges. ' : `Valued as of ${p.priced_on} (unit price ${fmtPrice(p.nav_per_unit)}). `}
             Management = value × rate × days ÷ 365.
             Performance = rate × lifetime profit above the investor's high-water mark, which is set net of the fee.
             Rates are each investor's committed terms.

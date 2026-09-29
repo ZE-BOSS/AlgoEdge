@@ -173,7 +173,7 @@ def deposit_confirmed(inv, dep, units_issued, price) -> Message:
                 [f"Hello {_first(inv)},", "Your transfer has arrived and has been invested.", *extra],
                 pairs=[("Amount invested", money(dep.amount_confirmed)),
                        ("Units bought", units(units_issued)),
-                       ("Price per unit", units(price)),
+                       ("Unit price", f"${units(price)}"),
                        ("Priced on", dep.effective_date.strftime("%d %b %Y"))],
                 button=("See your account", _app()))
 

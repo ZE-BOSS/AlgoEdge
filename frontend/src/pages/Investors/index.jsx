@@ -29,7 +29,7 @@ function SectionNav() {
     { to: '/investors/applications', label: 'Applications', icon: UserPlus, badge: q.applications },
     { to: '/investors/queues', label: 'Queues', icon: Inbox, badge: queueCount },
     { to: '/investors/disclosure', label: 'Disclosure', icon: Eye, badge: q.disclosures },
-    { to: '/investors/nav', label: 'NAV', icon: LineChart },
+    { to: '/investors/nav', label: 'Valuation', icon: LineChart },
     { to: '/investors/fees', label: 'Fees', icon: Percent },
     { to: '/investors/reconciliation', label: 'Reconciliation', icon: Scale },
     { to: '/investors/terms', label: 'Fund terms', icon: FileText },

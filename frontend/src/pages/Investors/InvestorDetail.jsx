@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Plus, Wrench, Pencil, Landmark, DoorOpen, Undo2, KeyRound, Copy } from 'lucide-react';
 import { inv } from '../../services/api';
 import { ActionForm, Empty, ErrorLine, QueryState, StateBadge } from './shared';
-import { fmtDate, fmtMoney, fmtUnits, isNeg, useInvAction } from './format';
+import { fmtDate, fmtMoney, fmtUnits, isNeg, useInvAction, fmtPrice } from './format';
 
 function Statement({ s }) {
   return (
@@ -56,7 +56,7 @@ function Closure({ investor }) {
         <div style={{ display: 'grid', gap: 10 }}>
           <div className="detail-pairs inv-pairs">
             <span>Units</span><span className="num">{fmtUnits(qt.units)}</span>
-            <span>NAV / unit</span><span className="num">{fmtUnits(qt.nav_per_unit)}</span>
+            <span>Unit price</span><span className="num">{fmtPrice(qt.nav_per_unit)}</span>
             <span>Gross value</span><span className="num">{fmtMoney(qt.gross_value)}</span>
             <span>Fees owed</span><span className="num">{fmtMoney(qt.fees_owed)}</span>
             <span><strong>Net payable</strong></span><span className="num"><strong>{fmtMoney(qt.net_payable)}</strong></span>
@@ -284,7 +284,7 @@ export default function InvestorDetail() {
                      ['Date', r => r.effective_date],
                      ['Kind', r => r.kind],
                      ['Units', r => fmtUnits(r.units), true],
-                     ['NAV', r => fmtUnits(r.nav_per_unit), true],
+                     ['Unit price', r => fmtPrice(r.nav_per_unit), true],
                      ['Amount', r => fmtMoney(r.amount), true],
                      ['Source', r => r.source_kind ? `${r.source_kind}${r.source_id ? ' ' + r.source_id : ''}` : '—'],
                      ['Note', r => r.note || ''],

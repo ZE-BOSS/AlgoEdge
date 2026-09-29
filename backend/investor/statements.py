@@ -203,8 +203,9 @@ def render(st: Statement) -> bytes:
     pdf.set_text_color(*muted)
     pdf.multi_cell(0, 5, safe(
         f"Units held: {_u(st.opening_units)} at the start, {_u(st.closing_units)} at the end. "
-        f"Price per unit: {_u(st.opening_nav)} at the start, {_u(st.closing_nav)} at the end. "
-        f"Value = units {'×' if fonts else 'x'} price per unit. All amounts in US dollars."))
+        f"Unit price: ${_u(st.opening_nav)} at the start, ${_u(st.closing_nav)} at the end "
+        f"(the fund launched at $100 a unit). "
+        f"Value = units {'×' if fonts else 'x'} unit price. All amounts in US dollars."))
     pdf.ln(4)
 
     # transactions
@@ -212,7 +213,7 @@ def render(st: Statement) -> bytes:
     pdf.set_text_color(*ink)
     pdf.cell(0, 8, "Transactions in this period", new_x="LMARGIN", new_y="NEXT")
     cols = [("Date", 30, "L"), ("Description", 50, "L"), ("Units", 35, "R"),
-            ("Price per unit", 35, "R"), ("Amount", 30, "R")]
+            ("Unit price", 35, "R"), ("Amount", 30, "R")]
     pdf.set_font(face, "B", 9)
     pdf.set_text_color(*muted)
     for title, w, a in cols:
@@ -224,7 +225,7 @@ def render(st: Statement) -> bytes:
         pdf.cell(0, 7, "No transactions in this period.", new_x="LMARGIN", new_y="NEXT")
     for r in st.rows:
         for (_, w, a), v in zip(cols, (r["date"].strftime("%d %b %Y"), r["what"], _u(r["units"]),
-                                       _u(r["nav"]), _m(r["amount"]))):
+                                       "$" + _u(r["nav"]), _m(r["amount"]))):
             pdf.cell(w, 7, v, align=a)
         pdf.ln()
     pdf.ln(6)

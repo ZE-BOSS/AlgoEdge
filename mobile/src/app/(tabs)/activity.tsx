@@ -70,7 +70,7 @@ export default function Activity() {
                 <View key={t.id} style={s.row}>
                   <View style={{ flex: 1, gap: 2 }}>
                     <T bold>{t.label}</T>
-                    <T tone="muted" size={13}>{day(t.date)} · at {units(t.nav_per_unit)}</T>
+                    <T tone="muted" size={13}>{day(t.date)} · at {money(t.nav_per_unit)} a unit</T>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     <T mono tone={isNeg(t.units) ? 'bad' : undefined}>{units(t.units)}</T>

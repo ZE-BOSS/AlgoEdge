@@ -25,6 +25,21 @@ export function fmtUnits(v, dp = 4) {
   return `${neg ? '-' : ''}${group(i)}${dp ? '.' + (f + '0'.repeat(dp)).slice(0, dp) : ''}`;
 }
 
+/** The fund's change since launch, read off the unit price: it opens at 100, so
+ *  104.20 means $100 invested at launch is now $104.20 (+4.20%). Display only. */
+export function fmtSinceLaunch(navPerUnit) {
+  if (navPerUnit === null || navPerUnit === undefined || navPerUnit === '') return '—';
+  const pct = Number(navPerUnit) - 100;
+  const s = Math.abs(pct).toFixed(2);
+  return pct > 0.004 ? `+${s}%` : pct < -0.004 ? `-${s}%` : '0.00%';
+}
+
+/** A unit price in dollars, to 4dp: the precision units are bought and sold at. */
+export function fmtPrice(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  return `$${fmtUnits(v, 4)}`;
+}
+
 export function fmtPct(v) {
   if (v === null || v === undefined || v === '') return '—';
   return `${v}%`;

@@ -29,7 +29,7 @@ export default function How() {
             <Card title="Your value">
               <T tone="text2">The fund is divided into units. Money in buys units at that day’s price; a withdrawal sells them.
                 The price moves with the fund’s results, so everyone’s holding moves by the same percentage.</T>
-              <Sum parts={[['Units you hold', units(s.units)], ['× price per unit', units(s.nav_per_unit)], ['= your holding', money(s.current_value)]]} />
+              <Sum parts={[['Units you hold', units(s.units)], ['× unit price', money(s.nav_per_unit)], ['= your holding', money(s.current_value)]]} />
             </Card>
             <Card title="Your profit">
               <Sum parts={[['Holding', money(s.current_value)], ['+ paid out to you', money(s.withdrawn)],

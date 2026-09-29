@@ -68,7 +68,7 @@
     // drawn at the container's real width, so axis text stays readable on a
     // phone instead of a fixed-width chart shrunk to fit
     const W = Math.max(280, Math.round(el.clientWidth || 720)), H = W < 500 ? 180 : 220;
-    const P = { t: 12, r: 12, b: 26, l: 52 };
+    const P = { t: 12, r: 12, b: 26, l: 62 };
     const ys = pts.map((p) => Number(p.nav));
     let lo = Math.min(...ys), hi = Math.max(...ys);
     const pad = (hi - lo || 1) * 0.08; lo -= pad; hi += pad;
@@ -76,8 +76,8 @@
     const y = (v) => P.t + (1 - (v - lo) / (hi - lo)) * (H - P.t - P.b);
     const d = ys.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
     const ticks = [0, 0.5, 1].map((f) => lo + pad + f * (hi - lo - 2 * pad));
-    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Price per unit from ${fmtDate(pts[0].date)} to ${fmtDate(pts.at(-1).date)}">
-      ${ticks.map((t) => `<line class="grid" x1="${P.l}" x2="${W - P.r}" y1="${y(t)}" y2="${y(t)}"/><text class="axis" x="${P.l - 8}" y="${y(t)}" dy="0.32em" text-anchor="end">${t.toFixed(1)}</text>`).join('')}
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Value of $100 invested at launch, from ${fmtDate(pts[0].date)} to ${fmtDate(pts.at(-1).date)}">
+      ${ticks.map((t) => `<line class="grid" x1="${P.l}" x2="${W - P.r}" y1="${y(t)}" y2="${y(t)}"/><text class="axis" x="${P.l - 8}" y="${y(t)}" dy="0.32em" text-anchor="end">$${t.toFixed(hi - lo < 10 ? 2 : 0)}</text>`).join('')}
       <text class="axis" x="${P.l}" y="${H - 6}">${fmtDate(pts[0].date)}</text>
       <text class="axis" x="${W - P.r}" y="${H - 6}" text-anchor="end">${fmtDate(pts.at(-1).date)}</text>
       <path class="line" d="${d}"/>
@@ -94,7 +94,7 @@
       cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('visibility', 'visible');
       dot.setAttribute('cx', x(i)); dot.setAttribute('cy', y(ys[i])); dot.setAttribute('visibility', 'visible');
       tip.hidden = false;
-      tip.innerHTML = `<b>${Number(pts[i].nav).toFixed(4)}</b>${fmtDate(pts[i].date, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+      tip.innerHTML = `<b>$${Number(pts[i].nav).toFixed(2)}</b>${fmtDate(pts[i].date, { day: 'numeric', month: 'short', year: 'numeric' })}`;
       tip.style.left = Math.min(Math.max((x(i) / W) * r.width, 60), r.width - 60) + 'px';
     };
     svg.addEventListener('pointermove', move);

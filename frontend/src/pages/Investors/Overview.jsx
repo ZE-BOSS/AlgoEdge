@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { inv } from '../../services/api';
 import { QueryState } from './shared';
-import { fmtMoney, fmtUnits } from './format';
+import { fmtMoney, fmtSinceLaunch } from './format';
 
 const QUEUES = [
   { key: 'deposits', label: 'Deposits to confirm', to: '/investors/queues' },
@@ -48,21 +48,20 @@ export default function Overview() {
           <div className="kpi-strip">
             <div className="kpi"><div className="kpi-label">Assets under management</div>
               <div className="kpi-value">{fmtMoney(o.aum)}</div></div>
-            <div className="kpi"><div className="kpi-label">NAV / unit</div>
-              <div className="kpi-value">{fmtUnits(o.nav_per_unit, 4)}</div></div>
-            <div className="kpi"><div className="kpi-label">Units in issue</div>
-              <div className="kpi-value">{fmtUnits(o.units_in_issue, 2)}</div></div>
+            <div className="kpi"><div className="kpi-label">Fund since launch</div>
+              <div className="kpi-value">{fmtSinceLaunch(o.nav_per_unit)}</div>
+              <div className="inv-hint" style={{ margin: 0 }}>$100 at launch is now {fmtMoney(o.nav_per_unit)}</div></div>
             <div className="kpi"><div className="kpi-label">Active investors</div>
               <div className="kpi-value">{o.investors.active || 0}</div></div>
-            <div className="kpi"><div className="kpi-label">Last NAV snapshot</div>
+            <div className="kpi"><div className="kpi-label">Last valuation</div>
               <div className="kpi-value" style={{ fontSize: '0.95rem' }}>
                 {o.last_snapshot || 'none yet'}</div></div>
           </div>
 
           {!o.last_snapshot && (
             <div className="card inv-hint" style={{ borderColor: 'var(--yellow)' }}>
-              No NAV snapshot has been taken, so every deposit is priced at the opening NAV.
-              Take one on the <Link to="/investors/nav">NAV</Link> tab once the pool has traded.
+              The fund has not been valued yet, so every deposit buys in at the launch price ($100 a unit).
+              Record a valuation on the <Link to="/investors/nav">Valuation</Link> tab once the pool has traded.
             </div>
           )}
 

@@ -477,7 +477,7 @@ def test_reconciliation_uses_the_latest_snapshot_when_no_equity_is_given():
             assert none["pool_equity_source"] == "none"
             await h.post("/nav/snapshot", {"pool_equity": "1000"})
             rec = (await h.get("/reconciliation")).json()
-            assert rec["pool_equity_source"].startswith("snapshot ")
+            assert rec["pool_equity_source"].startswith("valuation ")
             assert rec["healthy"] is True
             gap = (await h.get("/reconciliation", params={"pool_equity": "900"})).json()
             assert gap["healthy"] is False

@@ -25,6 +25,15 @@ export function units(v: string | null | undefined, dp = 4): string {
   return `${neg ? '−' : ''}${group(i)}.${(f + '0'.repeat(dp)).slice(0, dp)}`;
 }
 
+/** The fund's change since launch, from its unit price (it opens at 100, so
+ *  104.20 means $100 at launch is worth $104.20: +4.20%). Display only. */
+export function sinceLaunch(navPerUnit?: string | null): string {
+  if (navPerUnit === null || navPerUnit === undefined || navPerUnit === '') return '—';
+  const pct = Number(navPerUnit) - 100;
+  const s = Math.abs(pct).toFixed(2);
+  return pct > 0.004 ? `+${s}%` : pct < -0.004 ? `−${s}%` : '0.00%';
+}
+
 export const isNeg = (v?: string | null) => !!v && v.startsWith('-') && !/^-0*(\.0*)?$/.test(v);
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
