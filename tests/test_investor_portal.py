@@ -387,3 +387,13 @@ def test_the_lockup_applies_even_when_the_amount_is_within_the_cap():
             r = await a.inv("POST", "/withdrawals", ada, {"amount": "20"})
             assert r.status_code == 400 and "lock-up period" in r.json()["detail"]
     run(go())
+
+
+def test_terms_read_as_people_write_percentages():
+    async def go():
+        async with App() as a:
+            _, ada = await a.onboard(deposit=D("1000"))
+            terms = (await a.inv("GET", "/me", ada)).json()["terms"]
+            assert (terms["performance_fee_pct"], terms["management_fee_pct"],
+                    terms["withdrawal_cap_pct"]) == ("20", "2", "30")
+    run(go())

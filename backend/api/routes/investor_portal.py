@@ -65,6 +65,11 @@ def _s(v):
     return navmod.text(v) if isinstance(v, Decimal) else (None if v is None else str(v))
 
 
+def _pct(v):
+    """A NUMERIC(9,4) percentage as a person writes it: 20 -> "20", 2.5 -> "2.5"."""
+    return None if v is None else navmod.text(Decimal(str(v)).normalize())
+
+
 def _iso(v):
     return v.isoformat() if v is not None else None
 
@@ -161,9 +166,9 @@ async def me(inv: Investor = Depends(current_investor), db: AsyncSession = Depen
         # the terms their money is held under, which may be older than today's
         "terms": {
             "version": terms.version,
-            "performance_fee_pct": _s(terms.performance_fee_pct),
-            "management_fee_pct": _s(terms.management_fee_pct),
-            "withdrawal_cap_pct": _s(terms.withdrawal_cap_pct),
+            "performance_fee_pct": _pct(terms.performance_fee_pct),
+            "management_fee_pct": _pct(terms.management_fee_pct),
+            "withdrawal_cap_pct": _pct(terms.withdrawal_cap_pct),
             "lockup_days": terms.lockup_days,
             "notice_days": terms.notice_days,
             "min_investment": _s(live.min_investment),

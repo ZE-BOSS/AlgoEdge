@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Plus, Wrench, Pencil, Landmark, DoorOpen, Undo2 } from 'lucide-react';
+import { ArrowLeft, Plus, Wrench, Pencil, Landmark, DoorOpen, Undo2, KeyRound, Copy } from 'lucide-react';
 import { inv } from '../../services/api';
-import { ActionForm, Empty, QueryState, StateBadge } from './shared';
+import { ActionForm, Empty, ErrorLine, QueryState, StateBadge } from './shared';
 import { fmtDate, fmtMoney, fmtUnits, isNeg, useInvAction } from './format';
 
 function Statement({ s }) {
@@ -79,6 +80,44 @@ function Closure({ investor }) {
         </div>
       )}
     </QueryState>
+  );
+}
+
+/**
+ * A single-use link for the investor to set their password. Shown once: only
+ * its hash is stored, so if it is lost the answer is a new link (which also
+ * retires this one). Until Phase 4 emails it, the admin sends it by hand.
+ */
+function LoginLink({ investor }) {
+  const [link, setLink] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const make = useInvAction((purpose) => inv.loginLink(investor.id, purpose),
+    { onSuccess: (res) => { setLink(res.data); setCopied(false); } });
+  if (investor.status === 'closed') return null;
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div className="inv-hint">
+        Investors sign in at the investor app with their own password. Create a link and send it to
+        {' '}{investor.email} yourself — it works once and expires in
+        {' '}{link?.purpose === 'reset' ? '30 minutes' : '72 hours'}. A new link cancels the previous one.
+      </div>
+      <div className="inv-actions">
+        <button className="btn btn-secondary btn-sm" disabled={make.isPending}
+                onClick={() => make.mutate('invite')}><KeyRound size={12} /> Invitation link</button>
+        <button className="btn btn-secondary btn-sm" disabled={make.isPending}
+                onClick={() => make.mutate('reset')}><KeyRound size={12} /> Password reset link</button>
+      </div>
+      <ErrorLine error={make.error} />
+      {link && (
+        <div className="inv-link-box">
+          <code>{link.url}</code>
+          <button className="btn btn-primary btn-sm" onClick={() => {
+            navigator.clipboard?.writeText(link.url).then(() => setCopied(true));
+          }}><Copy size={12} /> {copied ? 'Copied' : 'Copy'}</button>
+          <span className="inv-hint">Expires {fmtDate(link.expires_at)} UTC. This is the only time it is shown.</span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -202,8 +241,12 @@ export default function InvestorDetail() {
                 <Profile investor={d.investor} />
               </div>
               <div className="card">
-                <div className="card-header"><span className="card-title">Closure</span></div>
+                <div className="card-header"><span className="card-title">Access &amp; closure</span></div>
                 <Closure investor={d.investor} />
+                <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
+                  <div className="kpi-label" style={{ marginBottom: 6 }}>Investor app login</div>
+                  <LoginLink investor={d.investor} />
+                </div>
               </div>
             </div>
 

@@ -1587,3 +1587,6 @@ html, body {
 /* Buttons and inline forms sit in grid columns here; without this they stretch
    to the column's full width. */
 .inv-section .btn, .inv-section .inv-action-form { justify-self: start; }
+.inv-link-box { display: grid; gap: 6px; padding: 10px; background: var(--bg-tertiary);
+  border: 1px solid var(--gold); border-radius: var(--radius); }
+.inv-link-box code { font-size: 0.72rem; word-break: break-all; }

@@ -338,6 +338,7 @@ export const inv = {
   recordDeposit: (id, data) => api.post(`${INV}/${id}/deposits`, data),
   correct: (id, data) => api.post(`${INV}/${id}/corrections`, data),
   closureQuote: (id) => api.get(`${INV}/${id}/closure`),
+  loginLink: (id, purpose) => api.post(`${INV}/${id}/login-link`, { purpose }),
   requestClosure: (id, data) => api.post(`${INV}/${id}/closure/request`, data || {}),
   cancelClosure: (id) => api.post(`${INV}/${id}/closure/cancel`),
   approveClosure: (id, data) => api.post(`${INV}/${id}/closure/approve`, data),
