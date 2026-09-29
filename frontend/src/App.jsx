@@ -7,9 +7,10 @@ import {
   Sparkles, Activity, Terminal, Menu, X, Users
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { getMe } from './services/api';
 import { useBackendConnection, useWebSocket } from './hooks/useBackendConnection';
 import { useConnectionStore, useAuthStore, useLoadingStore } from './store';
+// after ./store: services/api and store import each other, and loading api first breaks that cycle
+import { getMe } from './services/api';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Mark } from './components/Brand';
 import { NotificationContainer } from './components/NotificationToast';
