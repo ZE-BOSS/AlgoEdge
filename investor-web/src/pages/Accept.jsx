@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, setSession } from '../api';
 import { Mark } from '../components/Brand';
 import { useSubmit } from '../hooks';
-import { Field, Problem } from '../components/ui';
+import { Field, Problem, PasswordInput } from '../components/ui';
 
 /** Set a password from an invitation or reset link. The link works once. */
 export default function Accept() {
@@ -33,11 +33,11 @@ export default function Accept() {
         <div className="auth-brand"><Mark size={44} /><h1>ALPHAVANTIQ<em>CAPITAL</em></h1></div>
         <p className="center">Choose a password for your account</p>
         <Field label="New password" hint="At least 10 characters. A short sentence works well.">
-          <input type="password" autoComplete="new-password" value={password} minLength={10} maxLength={72}
+          <PasswordInput autoComplete="new-password" value={password} minLength={10} maxLength={72}
                  required onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <Field label="The same again">
-          <input type="password" autoComplete="new-password" value={again} required
+          <PasswordInput autoComplete="new-password" value={again} required
                  aria-invalid={mismatch || undefined} onChange={(e) => setAgain(e.target.value)} />
         </Field>
         {mismatch && <p className="bad small">The two passwords are different.</p>}

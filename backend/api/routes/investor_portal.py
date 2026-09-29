@@ -154,6 +154,69 @@ async def forgot_password(body: Forgot, request: Request, db: AsyncSession = Dep
                                    "It works once, for 30 minutes."}
 
 
+class Signup(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=255)
+    phone: str | None = Field(default=None, max_length=40)
+    country: str | None = Field(default=None, max_length=80)
+    consent: bool
+    website: str | None = None           # honeypot: people never see this field; bots fill it
+
+
+@router.post("/auth/signup", status_code=201)
+async def signup(body: Signup, request: Request, db: AsyncSession = Depends(get_db)):
+    """Open an account from the app's sign-in page.
+
+    Nothing is usable until the person proves the address is theirs: the
+    account is created without a password and a single-use link to choose one
+    is emailed. The answer is the same whether or not the address already has
+    an account, so the form cannot be used to find out who is a client; an
+    existing open account is simply sent a fresh reset link instead.
+    """
+    import os
+    import uuid
+
+    from backend.api.routes.public import _braked
+    from backend.investor.models import Application
+
+    if not body.consent:
+        raise HTTPException(status_code=400, detail="please confirm you have read the risk notice")
+    done = {"ok": True, "message": "Check your email: we have sent a link to confirm your address "
+                                   "and choose a password."}
+    if body.website:
+        return done
+    email, ip = body.email.strip().lower(), _ip(request) or "?"
+    if _braked(f"signup-ip:{ip}") or _braked(f"signup:{email}"):
+        raise HTTPException(status_code=429, detail="too many attempts — please try again later")
+    base = os.getenv("INVESTOR_APP_URL", "http://localhost:5174").rstrip("/")
+
+    existing = (await db.execute(select(Investor).where(Investor.email == email))).scalar_one_or_none()
+    if existing is not None:
+        if existing.status != "closed":
+            purpose = "reset" if existing.password_hash else "invite"
+            raw, expires = await authmod.create_link(db, investor_id=existing.id, purpose=purpose,
+                                                     actor_id=None)
+            url = f"{base}/accept?token={raw}"
+            outbox.queue(db, mail.reset(existing, url) if existing.password_hash
+                         else mail.signup(existing, url, expires))
+        return done
+
+    inv = Investor(id=str(uuid.uuid4()), name=body.name.strip(), email=email,
+                   phone=body.phone, country=body.country, status="pending")
+    db.add(inv)
+    app_row = Application(name=inv.name, email=email, phone=body.phone, country=body.country,
+                          message="Signed up in the investor app.", status="accepted",
+                          investor_id=inv.id, ip=ip)
+    db.add(app_row)
+    await db.flush()
+    await fundmod.audit(db, actor_id=None, actor_kind="investor", action="investor.signed_up",
+                        entity_type="investor", entity_id=inv.id)
+    raw, expires = await authmod.create_link(db, investor_id=inv.id, purpose="invite", actor_id=None)
+    outbox.queue(db, mail.signup(inv, f"{base}/accept?token={raw}", expires))
+    outbox.queue(db, mail.admin_application(app_row))
+    return done
+
+
 @router.post("/auth/password")
 async def change_password(body: ChangePassword, inv: Investor = Depends(current_investor),
                           db: AsyncSession = Depends(get_db)):

@@ -379,3 +379,46 @@ def test_the_oldest_account_becomes_admin_when_nobody_is(monkeypatch):
             assert rows == {"owner@x.com": True, "later@x.com": True}
         await engine.dispose()
     run(go())
+
+
+# ── investors can sign themselves up ────────────────────────────────────────
+
+def test_an_investor_signs_up_confirms_by_email_and_signs_in(monkeypatch):
+    monkeypatch.setenv("EMAIL_MODE", "log")
+    from backend.api.routes import public
+    from backend.investor.models import Application, Investor
+    public.reset_rate_limit()
+
+    async def go():
+        async with App() as a:
+            body = {"name": "Ada Lovelace", "email": "Ada@Example.com", "consent": True}
+            first = await a.http.post(f"{INV}/auth/signup", json=body)
+            assert first.status_code == 201, first.text
+            # no password yet, so no sign-in until the emailed link is used
+            r = await a.http.post(f"{INV}/auth/login", json={"email": "ada@example.com", "password": PASSWORD})
+            assert r.status_code == 401
+            rows = await emails(a, "signup")
+            assert len(rows) == 1 and rows[0].to_address == "ada@example.com"
+            async with a.Session() as s:
+                inv = (await s.execute(select(Investor).where(Investor.email == "ada@example.com"))).scalar_one()
+                assert inv.status == "pending"
+                app_row = (await s.execute(select(Application))).scalar_one()
+                assert app_row.status == "accepted" and app_row.investor_id == inv.id
+
+            # the same answer for an address that already exists, and no second investor
+            r2 = await a.http.post(f"{INV}/auth/signup", json=body)
+            assert r2.status_code == 201 and r2.json() == first.json()
+            async with a.Session() as s:
+                assert len((await s.execute(select(Investor))).scalars().all()) == 1
+
+            # the admin's link still works for them; then they can sign in
+            r = await a.admin("post", f"/{inv.id}/login-link", json={"purpose": "invite", "send": False})
+            token = r.json()["url"].split("token=")[1]
+            r = await a.http.post(f"{INV}/auth/accept", json={"token": token, "password": PASSWORD})
+            assert r.status_code == 200
+            r = await a.http.post(f"{INV}/auth/login", json={"email": "ada@example.com", "password": PASSWORD})
+            assert r.status_code == 200
+
+            r = await a.http.post(f"{INV}/auth/signup", json={**body, "email": "b@x.com", "consent": False})
+            assert r.status_code == 400
+    run(go())

@@ -4,6 +4,7 @@ import { useSession } from './hooks';
 import { Mark } from './components/Brand';
 import Login from './pages/Login';
 import Accept from './pages/Accept';
+import Signup from './pages/Signup';
 import Home from './pages/Home';
 import Money from './pages/Money';
 import Activity from './pages/Activity';
@@ -66,6 +67,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={session?.access_token ? <Navigate to="/" replace /> : <Login />} />
+        <Route path="/signup" element={session?.access_token ? <Navigate to="/" replace /> : <Signup />} />
         <Route path="/accept" element={<Accept />} />
         <Route path="/" element={guard(<Home />)} />
         <Route path="/money/*" element={guard(<Money />)} />

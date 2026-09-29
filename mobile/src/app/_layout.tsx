@@ -39,6 +39,7 @@ function Gate() {
       <Stack.Protected guard={!session}>
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="forgot" options={{ title: 'Reset password' }} />
+        <Stack.Screen name="signup" options={{ title: 'Create an account' }} />
       </Stack.Protected>
     </Stack>
   );

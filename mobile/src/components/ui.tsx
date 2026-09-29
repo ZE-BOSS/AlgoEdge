@@ -70,6 +70,25 @@ export function Field({ label, hint, ...props }: TextInputProps & { label: strin
   );
 }
 
+/** A password field with Show / Hide, so a typo can be seen before it is sent. */
+export function PasswordField({ label, hint, ...props }: TextInputProps & { label: string; hint?: string }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={s.label}>{label}</Text>
+      <View style={{ justifyContent: 'center' }}>
+        <TextInput placeholderTextColor={color.muted} style={[s.input, { paddingRight: 72 }]}
+          autoCapitalize="none" autoCorrect={false} {...props} secureTextEntry={!shown} />
+        <Pressable onPress={() => setShown((v) => !v)} hitSlop={8} style={s.eye}
+          accessibilityRole="button" accessibilityLabel={shown ? 'Hide password' : 'Show password'}>
+          <Text style={{ color: color.gold, fontWeight: '600', fontSize: 14 }}>{shown ? 'Hide' : 'Show'}</Text>
+        </Pressable>
+      </View>
+      {hint ? <Text style={s.hint}>{hint}</Text> : null}
+    </View>
+  );
+}
+
 export function Problem({ error }: { error?: Error | null }) {
   if (!error) return null;
   return <Text style={{ color: color.bad, fontSize: 14 }} accessibilityRole="alert">{error.message}</Text>;
@@ -132,6 +151,7 @@ export const s = StyleSheet.create({
   hint: { color: color.muted, fontSize: 12 },
   input: { backgroundColor: color.bg, borderColor: color.line, borderWidth: 1, borderRadius: 12, color: color.text,
     fontSize: 16, paddingHorizontal: 14, paddingVertical: 12 },
+  eye: { position: 'absolute', right: 0, top: 0, bottom: 0, paddingHorizontal: 16, justifyContent: 'center' },
   pair: { flexDirection: 'row', justifyContent: 'space-between', gap: 16 },
   pairKey: { color: color.text2, fontSize: 15, flexShrink: 1 },
   pairVal: { color: color.text, fontSize: 15, textAlign: 'right', flexShrink: 1 },

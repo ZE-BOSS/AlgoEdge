@@ -6,7 +6,7 @@ import { api } from '../lib/api';
 import { useSubmit } from '../lib/hooks';
 import { useSession } from '../lib/session';
 import { color } from '../lib/theme';
-import { Button, Field, Problem } from '../components/ui';
+import { Button, Field, PasswordField, Problem } from '../components/ui';
 
 export default function Login() {
   const { signIn } = useSession();
@@ -23,15 +23,14 @@ export default function Login() {
         </View>
         <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" autoComplete="email"
           keyboardType="email-address" textContentType="username" />
-        <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry autoComplete="password"
+        <PasswordField label="Password" value={password} onChangeText={setPassword} autoComplete="password"
           textContentType="password" onSubmitEditing={submit} />
         <Problem error={error} />
         <Button label="Sign in" kind="primary" busy={busy} disabled={!email || !password} onPress={submit} />
         <View style={{ alignItems: 'center', gap: 10, marginTop: 6 }}>
           <Button label="Forgotten your password?" kind="link" onPress={() => router.push('/forgot')} />
-          <Text style={{ color: color.muted, fontSize: 13, textAlign: 'center' }}>
-            No password yet? Open the invitation link we emailed you, then sign in here.
-          </Text>
+          <Text style={{ color: color.muted, fontSize: 13, textAlign: 'center' }}>New to Alphavantiq?</Text>
+          <Button label="Create an account" kind="link" onPress={() => router.push('/signup')} />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

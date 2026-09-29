@@ -89,6 +89,7 @@ export async function download(path, filename, retry = true) {
 
 export const api = {
   login: (email, password) => call('/auth/login', { method: 'POST', body: { email, password }, auth: false }),
+  signup: (body) => call('/auth/signup', { method: 'POST', body, auth: false }),
   forgot: (email) => call('/auth/forgot', { method: 'POST', body: { email }, auth: false }),
   statements: () => call('/statements'),
   accept: (token, password) => call('/auth/accept', { method: 'POST', body: { token, password }, auth: false }),

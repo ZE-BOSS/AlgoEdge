@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, setSession } from '../api';
 import { useLoad, useSubmit } from '../hooks';
-import { Card, Field, Loaded, Problem } from '../components/ui';
+import { Card, Field, Loaded, Problem, PasswordInput } from '../components/ui';
 import { day, money } from '../format';
 
 function ChangePassword() {
@@ -15,10 +15,10 @@ function ChangePassword() {
   return (
     <form className="form" onSubmit={submit}>
       <Field label="Current password">
-        <input type="password" autoComplete="current-password" value={cur} required onChange={(e) => setCur(e.target.value)} />
+        <PasswordInput autoComplete="current-password" value={cur} required onChange={(e) => setCur(e.target.value)} />
       </Field>
       <Field label="New password" hint="At least 10 characters. Every other device is signed out.">
-        <input type="password" autoComplete="new-password" value={next} minLength={10} maxLength={72} required
+        <PasswordInput autoComplete="new-password" value={next} minLength={10} maxLength={72} required
                onChange={(e) => { setNext(e.target.value); setOk(false); }} />
       </Field>
       <Problem error={error} />

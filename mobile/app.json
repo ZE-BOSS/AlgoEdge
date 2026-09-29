@@ -46,25 +46,31 @@
       ],
       [
         "expo-secure-store",
-        { "configureAndroidBackup": true, "faceIDPermission": false }
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": false
+        }
       ],
       [
         "expo-local-authentication",
-        { "faceIDPermission": "Unlock your Alphavantiq account with Face ID." }
+        {
+          "faceIDPermission": "Unlock your Alphavantiq account with Face ID."
+        }
       ],
       [
         "expo-notifications",
-        { "icon": "./assets/notification-icon.png", "color": "#c9a227", "defaultChannel": "account" }
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#c9a227",
+          "defaultChannel": "account"
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": false
     },
     "extra": {
-      "apiUrl": "https://api.alphavantiqcapital.com",
-      "eas": {
-        "projectId": ""
-      }
+      "apiUrl": "https://api.alphavantiqcapital.com"
     }
   }
 }

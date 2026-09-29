@@ -118,6 +118,8 @@ export async function shareStatement(year: number, month: number) {
 export const api = {
   login: (email: string, password: string) =>
     call<Session>('/auth/login', { method: 'POST', body: { email, password }, auth: false }),
+  signup: (body: { name: string; email: string; phone: string | null; country: string | null; consent: boolean }) =>
+    call<{ message: string }>('/auth/signup', { method: 'POST', body, auth: false }),
   forgot: (email: string) => call<{ message: string }>('/auth/forgot', { method: 'POST', body: { email }, auth: false }),
   changePassword: (current_password: string, new_password: string) =>
     call<Session>('/auth/password', { method: 'POST', body: { current_password, new_password } }),

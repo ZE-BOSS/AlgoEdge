@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api, setSession } from '../api';
 import { Mark } from '../components/Brand';
 import { useSubmit } from '../hooks';
-import { Field, Problem } from '../components/ui';
+import { Field, PasswordInput, Problem } from '../components/ui';
 
 function Forgot({ onBack }) {
   const [email, setEmail] = useState('');
@@ -48,14 +48,14 @@ export default function Login() {
                  onChange={(e) => setEmail(e.target.value)} />
         </Field>
         <Field label="Password">
-          <input type="password" autoComplete="current-password" value={password} required
-                 onChange={(e) => setPassword(e.target.value)} />
+          <PasswordInput autoComplete="current-password" value={password} required
+                         onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <Problem error={error} />
         <button className="btn primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
         <button type="button" className="link small" style={{ justifySelf: 'center' }}
                 onClick={() => setForgot(true)}>Forgotten your password?</button>
-        <p className="muted small center">No password yet? Use the invitation link we emailed you.</p>
+        <p className="muted small center auth-switch">New to Alphavantiq? <Link to="/signup">Create an account</Link></p>
       </form>
     </div>
   );

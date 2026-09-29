@@ -189,3 +189,13 @@ input[aria-invalid] { border-color: var(--bad); }
   .sum { flex-direction: column; align-items: stretch; gap: 6px; }
   .sum .op { text-align: center; line-height: 1; }
 }
+
+/* password with a show/hide button */
+.pw { position: relative; display: block; }
+.pw input { padding-right: 48px; }
+.pw-eye { position: absolute; top: 0; right: 0; height: 100%; width: 46px; display: grid; place-items: center;
+  background: none; border: 0; color: var(--muted); cursor: pointer; border-radius: 0 10px 10px 0; }
+.pw-eye:hover, .pw-eye[aria-pressed="true"] { color: var(--gold); }
+.check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; font-size: 0.82rem; color: var(--text-2); }
+.check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--gold); }
+.auth-switch { border-top: 1px solid var(--line); padding-top: 14px; }

@@ -124,6 +124,16 @@ def invite(inv, url: str, expires) -> Message:
                 button=("Set your password", url))
 
 
+def signup(inv, url: str, expires) -> Message:
+    return _msg("signup", inv, "Confirm your email", "Welcome to Alphavantiq Capital",
+                [f"Hello {_first(inv)},",
+                 "Thank you for signing up. Confirm this is your email address by choosing a password; "
+                 "you can then sign in, see how to add money, and follow the fund.",
+                 f"This link works once and expires on {expires:%d %b %Y at %H:%M} UTC. "
+                 "If you did not sign up, ignore this email and nothing happens."],
+                button=("Confirm and choose a password", url))
+
+
 def reset(inv, url: str) -> Message:
     return _msg("reset", inv, "Reset your password", "Reset your password",
                 [f"Hello {_first(inv)},",

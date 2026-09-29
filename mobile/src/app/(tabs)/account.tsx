@@ -7,7 +7,7 @@ import { useLoad, useSubmit } from '../../lib/hooks';
 import { unregisterPush } from '../../lib/push';
 import { useSession } from '../../lib/session';
 import { color } from '../../lib/theme';
-import { Button, Card, Field, Loaded, Pairs, Problem, Screen, T } from '../../components/ui';
+import { Button, Card, Field, Loaded, PasswordField, Pairs, Problem, Screen, T } from '../../components/ui';
 
 function ChangePassword() {
   const { signIn } = useSession();
@@ -17,9 +17,9 @@ function ChangePassword() {
   const { busy, error, submit } = useSubmit(async () => { await signIn(await api.changePassword(cur, next)); setCur(''); setNext(''); setOk(true); });
   return (
     <View style={{ gap: 12 }}>
-      <Field label="Current password" value={cur} onChangeText={setCur} secureTextEntry autoComplete="password" />
-      <Field label="New password" hint="At least 10 characters. Every other device is signed out." value={next}
-        onChangeText={(t) => { setNext(t); setOk(false); }} secureTextEntry autoComplete="password-new" />
+      <PasswordField label="Current password" value={cur} onChangeText={setCur} autoComplete="password" />
+      <PasswordField label="New password" hint="At least 10 characters. Every other device is signed out." value={next}
+        onChangeText={(t) => { setNext(t); setOk(false); }} autoComplete="password-new" />
       <Problem error={error} />
       {ok && <T tone="good" size={13}>Password changed. Other devices have been signed out.</T>}
       <Button label="Change password" busy={busy} disabled={!cur || next.length < 10} onPress={submit} />
