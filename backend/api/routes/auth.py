@@ -85,7 +85,19 @@ def create_token(user_id: str, token_type: str = "access") -> str:
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    """Create a new user account and return JWT tokens."""
+    """Create a new user account and return JWT tokens.
+
+    Open only until the first account exists, or while ALLOW_REGISTRATION=1.
+    Every operator account can drive the bot and the broker, and the admin site
+    is reachable from any network, so a stranger must not be able to sign up.
+    """
+    if os.getenv("ALLOW_REGISTRATION", "").strip() != "1":
+        anyone = await db.execute(select(User.id).limit(1))
+        if anyone.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Registration is closed. Ask an administrator for an account.",
+            )
 
     # Check if email already exists
     existing = await db.execute(select(User).where(User.email == req.email.lower()))

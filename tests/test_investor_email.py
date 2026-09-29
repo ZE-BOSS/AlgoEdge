@@ -320,3 +320,28 @@ def test_a_rolled_back_transaction_sends_nothing_and_a_committed_one_does(monkey
                 await s.commit()
             assert len(await emails(a)) == 1
     run(go())
+
+
+# ── operator sign-up closes once someone exists ─────────────────────────────
+
+def test_registration_is_open_for_the_first_account_only(monkeypatch):
+    monkeypatch.delenv("ALLOW_REGISTRATION", raising=False)
+
+    async def go():
+        from sqlalchemy import delete
+        from backend.data.models import User
+        async with App() as a:
+            a.http._transport.app.include_router(authroutes.router)
+            async with a.Session() as s:
+                await s.execute(delete(User))
+                await s.commit()
+
+            def body(n):
+                return {"email": f"op{n}@x.com", "password": "long enough", "name": f"Op {n}"}
+            assert (await a.http.post("/api/auth/register", json=body(1))).status_code == 201
+            r = await a.http.post("/api/auth/register", json=body(2))
+            assert r.status_code == 403 and "closed" in r.json()["detail"]
+
+            monkeypatch.setenv("ALLOW_REGISTRATION", "1")
+            assert (await a.http.post("/api/auth/register", json=body(3))).status_code == 201
+    run(go())
