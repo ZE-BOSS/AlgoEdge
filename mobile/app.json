@@ -26,6 +26,10 @@
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "web": {
@@ -70,7 +74,12 @@
       "typedRoutes": false
     },
     "extra": {
-      "apiUrl": "https://api.alphavantiqcapital.com"
-    }
+      "apiUrl": "https://api.alphavantiqcapital.com",
+      "router": {},
+      "eas": {
+        "projectId": "c1ecf469-59ae-4e0a-901c-e9deac334c7b"
+      }
+    },
+    "owner": "ze-boss"
   }
 }
