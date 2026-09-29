@@ -1,9 +1,36 @@
-import { api } from '../api';
+import { api, download } from '../api';
 import { useLoad } from '../hooks';
-import { Badge, Card, Loaded } from '../components/ui';
+import { useState } from 'react';
+import { Badge, Card, Loaded, Problem } from '../components/ui';
 import { STATE_LABEL, day, isNeg, money, units } from '../format';
 
 const TONE = { paid: 'good', confirmed: 'good', declined: 'bad', rejected: 'bad', approved: 'info' };
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+  'September', 'October', 'November', 'December'];
+
+function Statements() {
+  const q = useLoad(api.statements);
+  const [error, setError] = useState(null);
+  return (
+    <Card title="Monthly statements">
+      <Loaded q={q}>
+        {(rows) => rows.length === 0 ? <p className="muted">Your first statement appears after your first full month.</p> : (
+          <ul className="rows">
+            {rows.slice(0, 24).map((r) => (
+              <li key={r.label}>
+                <strong>{MONTHS[r.month - 1]} {r.year}</strong>
+                <button className="btn small" onClick={() => download(`/statements/${r.year}-${r.month}.pdf`,
+                  `alphavantiq-statement-${r.label}.pdf`).catch(setError)}>Download PDF</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Loaded>
+      <Problem error={error} />
+    </Card>
+  );
+}
 
 export default function Activity() {
   const q = useLoad(api.activity);
@@ -11,6 +38,7 @@ export default function Activity() {
     <Loaded q={q}>
       {({ ledger, deposits, withdrawals }) => (
         <div className="stack">
+          <Statements />
           <Card title="Withdrawals">
             {withdrawals.length === 0 ? <p className="muted">None yet.</p> : (
               <ul className="rows">

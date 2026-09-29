@@ -67,8 +67,30 @@ export async function call(path, { method = 'GET', body, auth = true, params, re
   return data;
 }
 
+/** Fetch a file with the session (a statement PDF) and hand it to the browser. */
+export async function download(path, filename, retry = true) {
+  const s = getSession();
+  let r;
+  try {
+    r = await fetch(BASE + path, { headers: s?.access_token ? { Authorization: `Bearer ${s.access_token}` } : {} });
+  } catch {
+    throw new ApiError('No connection. Check your internet and try again.', 0);
+  }
+  if (r.status === 401 && retry) { await refresh(); return download(path, filename, false); }
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new ApiError(detail(body, r.status), r.status);
+  }
+  const url = URL.createObjectURL(await r.blob());
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 export const api = {
   login: (email, password) => call('/auth/login', { method: 'POST', body: { email, password }, auth: false }),
+  forgot: (email) => call('/auth/forgot', { method: 'POST', body: { email }, auth: false }),
+  statements: () => call('/statements'),
   accept: (token, password) => call('/auth/accept', { method: 'POST', body: { token, password }, auth: false }),
   changePassword: (current_password, new_password) =>
     call('/auth/password', { method: 'POST', body: { current_password, new_password } }),

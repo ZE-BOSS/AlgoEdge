@@ -91,21 +91,23 @@ function Closure({ investor }) {
 function LoginLink({ investor }) {
   const [link, setLink] = useState(null);
   const [copied, setCopied] = useState(false);
-  const make = useInvAction((purpose) => inv.loginLink(investor.id, purpose),
+  const make = useInvAction(({ purpose, send }) => inv.loginLink(investor.id, purpose, send),
     { onSuccess: (res) => { setLink(res.data); setCopied(false); } });
   if (investor.status === 'closed') return null;
   return (
     <div style={{ display: 'grid', gap: 8 }}>
       <div className="inv-hint">
-        Investors sign in at the investor app with their own password. Create a link and send it to
-        {' '}{investor.email} yourself — it works once and expires in
-        {' '}{link?.purpose === 'reset' ? '30 minutes' : '72 hours'}. A new link cancels the previous one.
+        Investors sign in at the investor app with their own password. An invitation is emailed to
+        {' '}{investor.email} (or copy the link and send it yourself). It works once and expires in
+        72 hours (a reset in 30 minutes); a new link cancels the previous one.
       </div>
       <div className="inv-actions">
+        <button className="btn btn-primary btn-sm" disabled={make.isPending}
+                onClick={() => make.mutate({ purpose: 'invite', send: true })}><KeyRound size={12} /> Email invitation</button>
         <button className="btn btn-secondary btn-sm" disabled={make.isPending}
-                onClick={() => make.mutate('invite')}><KeyRound size={12} /> Invitation link</button>
+                onClick={() => make.mutate({ purpose: 'invite', send: false })}><KeyRound size={12} /> Copy invitation link</button>
         <button className="btn btn-secondary btn-sm" disabled={make.isPending}
-                onClick={() => make.mutate('reset')}><KeyRound size={12} /> Password reset link</button>
+                onClick={() => make.mutate({ purpose: 'reset', send: true })}><KeyRound size={12} /> Email password reset</button>
       </div>
       <ErrorLine error={make.error} />
       {link && (
@@ -114,9 +116,32 @@ function LoginLink({ investor }) {
           <button className="btn btn-primary btn-sm" onClick={() => {
             navigator.clipboard?.writeText(link.url).then(() => setCopied(true));
           }}><Copy size={12} /> {copied ? 'Copied' : 'Copy'}</button>
-          <span className="inv-hint">Expires {fmtDate(link.expires_at)} UTC. This is the only time it is shown.</span>
+          <span className="inv-hint">{link.emailed ? `Emailed to ${investor.email}. ` : ''}Expires {fmtDate(link.expires_at)} UTC. This is the only time it is shown.</span>
         </div>
       )}
+    </div>
+  );
+}
+
+function Statements({ investor }) {
+  const [month, setMonth] = useState(() => {
+    const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  });
+  const [error, setError] = useState(null);
+  const open = async () => {
+    setError(null);
+    const [y, m] = month.split('-');
+    try {
+      const res = await inv.statementPdf(investor.id, +y, +m);
+      window.open(URL.createObjectURL(res.data), '_blank', 'noopener');
+    } catch (e) { setError(e); }
+  };
+  return (
+    <div className="inv-actions" style={{ alignItems: 'center' }}>
+      <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ maxWidth: 170 }} />
+      <button className="btn btn-secondary btn-sm" onClick={open}>Open statement (PDF)</button>
+      <ErrorLine error={error} />
     </div>
   );
 }
@@ -243,6 +268,10 @@ export default function InvestorDetail() {
               <div className="card">
                 <div className="card-header"><span className="card-title">Access &amp; closure</span></div>
                 <Closure investor={d.investor} />
+                <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
+                  <div className="kpi-label" style={{ marginBottom: 6 }}>Statements</div>
+                  <Statements investor={d.investor} />
+                </div>
                 <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 12 }}>
                   <div className="kpi-label" style={{ marginBottom: 6 }}>Investor app login</div>
                   <LoginLink investor={d.investor} />

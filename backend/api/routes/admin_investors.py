@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
@@ -36,6 +36,8 @@ from backend.investor import fund as fundmod
 from backend.investor import nav as navmod
 from backend.investor import reconcile as recmod
 from backend.investor import units as unitsmod
+from backend.notify import outbox
+from backend.notify import templates as mail
 from backend.investor.models import (
     DEPOSIT_CONFIRMED,
     WITHDRAWAL_APPROVED,
@@ -346,8 +348,13 @@ async def update_investor(investor_id: str, body: UpdateInvestor,
     changes = body.model_dump(exclude_unset=True)
     reason = changes.pop("reason", None)
     with refusals():
+        before = (await _get_investor(db, investor_id)).payout_account_number
         inv = await fundmod.update_investor(db, investor_id=investor_id, actor_id=admin.id,
                                             changes=changes, reason=reason)
+    if before and inv.payout_account_number != before:
+        # not the first time details are entered: an actual change of where money goes
+        outbox.queue(db, mail.payout_changed(inv, (inv.payout_account_number or "")[-4:],
+                                             fundmod.PAYOUT_COOLING_HOURS))
     return _investor_row(inv)
 
 
@@ -393,6 +400,7 @@ async def correct_units(investor_id: str, body: Correction,
 
 class LinkRequest(BaseModel):
     purpose: str = Field(default="invite", pattern="^(invite|reset)$")
+    send: bool = False               # email it to the investor as well as returning it
 
 
 @router.post("/{investor_id}/login-link", status_code=201)
@@ -401,7 +409,8 @@ async def login_link(investor_id: str, body: LinkRequest, admin: User = Depends(
     """A single-use link for the investor to set their password.
 
     Returned ONCE — only its hash is stored — and any earlier unused link of the
-    same kind stops working. Until Phase 4 emails it, the admin sends it by hand.
+    same kind stops working. With `send`, it is also emailed to the investor
+    (after the commit, so the emailed link is one that exists).
     """
     import os
 
@@ -411,8 +420,12 @@ async def login_link(investor_id: str, body: LinkRequest, admin: User = Depends(
         raw, expires = await authmod.create_link(db, investor_id=investor_id,
                                                  purpose=body.purpose, actor_id=admin.id)
     base = os.getenv("INVESTOR_APP_URL", "http://localhost:5174").rstrip("/")
-    return {"url": f"{base}/accept?token={raw}", "expires_at": _iso(expires),
-            "purpose": body.purpose}
+    url = f"{base}/accept?token={raw}"
+    if body.send:
+        inv = await _get_investor(db, investor_id)
+        outbox.queue(db, mail.invite(inv, url, expires) if body.purpose == "invite"
+                     else mail.reset(inv, url))
+    return {"url": url, "expires_at": _iso(expires), "purpose": body.purpose, "emailed": body.send}
 
 
 # ── closure ──────────────────────────────────────────────────────────────────
@@ -447,12 +460,21 @@ async def cancel_closure(investor_id: str, admin: User = Depends(require_admin),
 async def approve_closure(investor_id: str, body: CloseAccount,
                           admin: User = Depends(require_admin),
                           db: AsyncSession = Depends(get_db)):
-    """Irreversible: redeems every unit and erases the person's details."""
-    await _get_investor(db, investor_id)
+    """Irreversible: redeems every unit and erases the person's details.
+
+    The final statement and the address to send it to are captured BEFORE the
+    erasure; the email goes after the commit, to the address they had.
+    """
+    from backend.investor import statements as stmtmod
+    inv = await _get_investor(db, investor_id)
+    email, name = inv.email, inv.name
     with refusals():
-        return await fundmod.approve_closure(db, investor_id=investor_id, actor_id=admin.id,
-                                             payment_reference=body.payment_reference,
-                                             on=body.on)
+        result = await fundmod.approve_closure(db, investor_id=investor_id, actor_id=admin.id,
+                                               payment_reference=body.payment_reference,
+                                               on=body.on)
+        pdf = await stmtmod.final_statement_pdf(db, investor_id, name=name)
+    outbox.queue(db, mail.closure_approved(email=email, name=name, result=result, statement_pdf=pdf))
+    return result
 
 
 # ── deposit queue ────────────────────────────────────────────────────────────
@@ -494,6 +516,10 @@ async def confirm_deposit(deposit_id: int, body: ConfirmDeposit,
         dep = await fundmod.confirm_deposit(db, deposit_id=deposit_id,
                                             amount_confirmed=body.amount_confirmed,
                                             actor_id=admin.id, on=body.on)
+    tx = (await db.execute(select(UnitTransaction).where(
+        UnitTransaction.source_kind == "deposit", UnitTransaction.source_id == dep.id))).scalar_one()
+    outbox.queue(db, mail.deposit_confirmed(await db.get(Investor, dep.investor_id), dep,
+                                            tx.units, tx.nav_per_unit))
     return _deposit_row(dep)
 
 
@@ -503,6 +529,7 @@ async def reject_deposit(deposit_id: int, body: Reason, admin: User = Depends(re
     with refusals():
         dep = await fundmod.reject_deposit(db, deposit_id=deposit_id, reason=body.reason,
                                            actor_id=admin.id)
+    outbox.queue(db, mail.deposit_rejected(await db.get(Investor, dep.investor_id), dep))
     return _deposit_row(dep)
 
 
@@ -560,6 +587,7 @@ async def approve_withdrawal(withdrawal_id: int, body: ApproveWithdrawal,
     with refusals():
         w = await fundmod.approve_withdrawal(db, withdrawal_id=withdrawal_id,
                                              actor_id=admin.id, on=body.on)
+    outbox.queue(db, mail.withdrawal_approved(await db.get(Investor, w.investor_id), w))
     return _withdrawal_row(w)
 
 
@@ -571,6 +599,7 @@ async def pay_withdrawal(withdrawal_id: int, body: PayWithdrawal,
         w = await fundmod.mark_withdrawal_paid(db, withdrawal_id=withdrawal_id,
                                                actor_id=admin.id, reference=body.reference,
                                                on=body.on)
+    outbox.queue(db, mail.withdrawal_paid(await db.get(Investor, w.investor_id), w))
     return _withdrawal_row(w)
 
 
@@ -581,6 +610,7 @@ async def decline_withdrawal(withdrawal_id: int, body: Reason,
     with refusals():
         w = await fundmod.decline_withdrawal(db, withdrawal_id=withdrawal_id,
                                              reason=body.reason, actor_id=admin.id)
+    outbox.queue(db, mail.withdrawal_declined(await db.get(Investor, w.investor_id), w))
     return _withdrawal_row(w)
 
 
@@ -701,6 +731,83 @@ async def fee_paid(body: FeesPaid, admin: User = Depends(require_admin),
 async def fee_periods(db: AsyncSession = Depends(get_db)):
     from backend.investor import fees as feesmod
     return await feesmod.periods(db)
+
+
+# ── statements and email ────────────────────────────────────────────────────
+
+class SendStatements(BaseModel):
+    year: int = Field(ge=2020, le=2100)
+    month: int = Field(ge=1, le=12)
+
+
+@router.get("/statements/{investor_id}/{year}-{month}.pdf")
+async def statement_pdf(investor_id: str, year: int, month: int, db: AsyncSession = Depends(get_db)):
+    from backend.investor import fees as feesmod
+    from backend.investor import statements as stmtmod
+    await _get_investor(db, investor_id)
+    if not (2020 <= year <= 2100 and 1 <= month <= 12):
+        raise HTTPException(status_code=404, detail="no such month")
+    start, end = feesmod.month_period(year, month)
+    _, pdf = await stmtmod.pdf_for(db, investor_id, start, end)
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="statement-{investor_id[:8]}-{year}-{month:02d}.pdf"',
+        "Cache-Control": "private, no-store"})
+
+
+@router.post("/statements/send", status_code=202)
+async def send_statements(body: SendStatements, admin: User = Depends(require_admin),
+                          db: AsyncSession = Depends(get_db)):
+    """Email every investor who held units in the month their statement.
+
+    Refused until that month's fees are charged: a statement sent before would
+    show a closing value the fee charge then changes, and the investor would
+    hold two different figures for the same day. Once per month (the job-run
+    table), so a double click does not send everyone two copies.
+    """
+    from backend.investor import fees as feesmod
+    from backend.investor import statements as stmtmod
+    from backend.investor.models import JobRun
+    start, end = feesmod.month_period(body.year, body.month)
+    if end >= navmod.accounting_date():
+        raise HTTPException(status_code=400, detail="statements go out once the month has ended")
+    if not await feesmod.already_closed(db, start, end):
+        raise HTTPException(status_code=400, detail="charge this month's fees first (Fees tab), "
+                                                    "so the statement shows the final figures")
+    key = f"{body.year}-{body.month:02d}"
+    if (await db.execute(select(JobRun).where(JobRun.job == "statements",
+                                             JobRun.run_key == key))).scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"statements for {key} were already sent")
+    ids = (await db.execute(select(UnitTransaction.investor_id).distinct()
+                            .where(UnitTransaction.effective_date <= end))).scalars().all()
+    sent = 0
+    for iid in ids:
+        inv = await db.get(Investor, iid)
+        if inv is None or inv.status == "closed":
+            continue
+        st, pdf = await stmtmod.pdf_for(db, iid, start, end)
+        if st.opening_units <= 0 and st.closing_units <= 0 and not st.rows:
+            continue
+        outbox.queue(db, mail.statement(inv, st.label, pdf, st.closing_value))
+        sent += 1
+    db.add(JobRun(job="statements", run_key=key, result={"sent": sent, "by": admin.id}))
+    await fundmod.audit(db, actor_id=admin.id, action="statements.sent", entity_type="statement_month",
+                        entity_id=key, detail={"investors": sent})
+    return {"month": key, "queued": sent}
+
+
+@router.get("/audit/emails")
+async def email_log(investor_id: str | None = None, limit: int = Query(200, le=1000), offset: int = 0,
+                    db: AsyncSession = Depends(get_db)):
+    from backend.investor.models import EmailLog
+    q = select(EmailLog)
+    if investor_id:
+        q = q.where(EmailLog.investor_id == investor_id)
+    rows = (await db.execute(q.order_by(desc(EmailLog.created_at), desc(EmailLog.id))
+                             .limit(limit).offset(offset))).scalars().all()
+    return [{"id": str(r.id), "kind": r.kind, "to": r.to_address, "subject": r.subject,
+             "investor_id": r.investor_id, "state": r.state, "provider_id": r.provider_id,
+             "error": r.error, "attachments": r.attachments, "created_at": _iso(r.created_at),
+             "sent_at": _iso(r.sent_at)} for r in rows]
 
 
 # ── fund terms ───────────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jose import jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
@@ -131,7 +131,7 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Authenticate user and return JWT tokens."""
 
     result = await db.execute(select(User).where(User.email == req.email.lower().strip()))
@@ -159,6 +159,9 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     access_token = create_token(user.id, "access")
     refresh_token = create_token(user.id, "refresh")
 
+    if user.is_admin:
+        await _note_admin_device(db, user, request)
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -166,8 +169,43 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
             "id": user.id,
             "email": user.email,
             "name": user.name,
+            # lets the console show admin-only sections; the server still
+            # enforces require_admin on every such route
+            "is_admin": bool(user.is_admin),
         },
     )
+
+
+async def _note_admin_device(db: AsyncSession, user: User, request: Request) -> None:
+    """Email the admin when their account signs in from a browser not seen before.
+
+    Keyed on the browser (user agent), not the IP: an IP changes every time a
+    phone moves between networks, and an alert that fires daily gets ignored.
+    The very first sign-in only records the device — there is nothing to
+    compare it with. Never blocks the login: a failure here is logged.
+    """
+    import hashlib
+    from datetime import datetime, timezone
+
+    try:
+        from backend.investor.models import AdminDevice
+        from backend.notify import outbox
+        from backend.notify import templates as mail
+
+        ua = (request.headers.get("user-agent") or "")[:300]
+        ip = request.client.host if request.client else None
+        fp = hashlib.sha256(ua.encode()).hexdigest()
+        known = (await db.execute(select(AdminDevice).where(AdminDevice.user_id == user.id))).scalars().all()
+        now = datetime.now(timezone.utc)
+        match = next((d for d in known if d.fingerprint == fp), None)
+        if match:
+            match.last_seen, match.ip = now, ip
+            return
+        db.add(AdminDevice(user_id=user.id, fingerprint=fp, ip=ip, user_agent=ua))
+        if known:
+            outbox.queue(db, mail.admin_new_device(user, ip, ua, now))
+    except Exception as exc:  # never let the alert stop a login
+        logger.error(f"[AUTH] new-device check failed: {exc}")
 
 
 @router.post("/refresh")

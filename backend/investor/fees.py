@@ -176,7 +176,47 @@ async def already_closed(session, period_start: date, period_end: date) -> bool:
     )).scalar_one() > 0
 
 
+async def charged_lines(session, period_start: date, period_end: date) -> list[dict]:
+    """What WAS charged for a closed period, from the accrual rows.
+
+    Never a recalculation: after charging, the units are fewer and the mark has
+    moved, so computing again gives different — wrong — figures for a month
+    whose fees are already on the ledger. Caught in the browser.
+    """
+    rows = (await session.execute(
+        select(FeeAccrual, Investor.name).join(Investor, Investor.id == FeeAccrual.investor_id)
+        .where(FeeAccrual.period_start == period_start, FeeAccrual.period_end == period_end)
+        .order_by(Investor.name, FeeAccrual.kind))).all()
+    by: dict[str, dict] = {}
+    for acc, name in rows:
+        line = by.setdefault(acc.investor_id, {
+            "investor_id": acc.investor_id, "name": name, "value": None, "days": None,
+            "management_pct": None, "management": "0.00", "profit": None,
+            "high_water_mark": None, "performance_pct": None, "performance": "0.00",
+            "state": acc.state})
+        if acc.kind == FEE_MANAGEMENT:
+            line.update(value=navmod.text(acc.basis_amount), days=acc.days,
+                        management_pct=navmod.text(D(str(acc.rate_pct)).normalize()),
+                        management=navmod.text(acc.fee_amount))
+        else:
+            line.update(new_high_water_mark=navmod.text(acc.high_water_mark),
+                        high_water_mark=None, above_mark=navmod.text(acc.basis_amount),
+                        performance_pct=navmod.text(D(str(acc.rate_pct)).normalize()),
+                        performance=navmod.text(acc.fee_amount))
+        if acc.state == "waived":
+            line["state"] = "waived"
+    for line in by.values():
+        line["total"] = navmod.text(navmod.money(D(line["management"]) + D(line["performance"])))
+    return list(by.values())
+
+
 async def preview(session, period_start: date, period_end: date) -> dict:
+    if await already_closed(session, period_start, period_end):
+        lines = await charged_lines(session, period_start, period_end)
+        return {"period_start": period_start.isoformat(), "period_end": period_end.isoformat(),
+                "priced_on": None, "nav_per_unit": None, "already_closed": True, "lines": lines,
+                "total": navmod.text(navmod.money(sum((D(ln["total"]) for ln in lines
+                                                       if ln["state"] != "waived"), D("0"))))}
     snap = await _check_price(session, period_end)
     ids = (await session.execute(select(UnitTransaction.investor_id).distinct())).scalars().all()
     lines = [ln for ln in [await compute(session, i, period_start, period_end,

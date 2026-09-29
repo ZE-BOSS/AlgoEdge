@@ -66,6 +66,14 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
+    # Investor platform scheduled jobs: nightly ledger check, daily digest.
+    investor_jobs = None
+    try:
+        from backend.investor import jobs as investor_jobs_mod
+        investor_jobs = investor_jobs_mod.start()
+    except Exception as e:
+        logger.warning(f"Investor jobs not started: {e}")
+
     # Clean up ghost manual trades on boot
     try:
         from sqlalchemy import select
@@ -173,6 +181,14 @@ async def lifespan(app: FastAPI):
     )
 
     yield
+
+    if investor_jobs is not None:
+        investor_jobs.cancel()
+    try:  # let committed emails finish sending rather than drop them
+        from backend.notify import outbox as _outbox
+        await asyncio.wait_for(_outbox.drain(), timeout=15)
+    except Exception:
+        pass
 
     # Shutdown
     logger.info("Shutting down AlgoEdge Backend...")

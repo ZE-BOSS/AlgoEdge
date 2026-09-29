@@ -30,6 +30,7 @@ from sqlalchemy.pool import StaticPool
 from backend.api.deps import get_current_user
 from backend.api.routes import admin_investors
 from backend.data.database import get_db
+from backend.notify import outbox
 from backend.data.models import Base, Trade
 from backend.investor import disclosure as discmod
 from backend.investor import fund as fundmod
@@ -64,6 +65,7 @@ class Harness:
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
+        outbox.use_session_factory(self.Session)
 
         async def _db():
             async with self.Session() as s:
@@ -83,6 +85,8 @@ class Harness:
         return self
 
     async def __aexit__(self, *exc):
+        await outbox.drain()
+        outbox.use_session_factory(None)
         await self.client.aclose()
         await self.engine.dispose()
 
@@ -537,6 +541,10 @@ def test_fees_preview_close_once_and_mark_paid():
             r = await h.post("/fees/close", {"year": 2026, "month": 6})
             assert r.status_code == 201 and r.json()["charged"] == pv["total"]
             assert (await h.post("/fees/close", {"year": 2026, "month": 6})).status_code == 400
+            # once charged, the preview shows what WAS charged, not a recalculation
+            after = (await h.get("/fees/preview", params={"year": 2026, "month": 6})).json()
+            assert after["already_closed"] and after["total"] == pv["total"]
+            assert after["lines"][0]["total"] == pv["lines"][0]["total"]
             # a month that has not ended cannot be closed
             assert (await h.post("/fees/close", {"year": 2099, "month": 1})).status_code == 400
             periods = (await h.get("/fees/periods")).json()

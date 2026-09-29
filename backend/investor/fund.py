@@ -392,10 +392,32 @@ async def withdrawal_cap(session, investor_id: str, on: date | None = None) -> C
     return CapCheck(cap=cap, month_profit=profit, cap_pct=pct, within=cap > 0)
 
 
+PAYOUT_COOLING_HOURS = 48
+
+
+async def payout_changed_recently(session, investor_id: str,
+                                  hours: int = PAYOUT_COOLING_HOURS) -> bool:
+    """Was the account we pay this investor changed in the last `hours`?
+
+    Changing the payout account and then withdrawing is the classic takeover:
+    whoever controls the change controls the money. For a cooling-off period
+    after a change, every withdrawal goes to review, however small.
+    """
+    from datetime import timedelta as _td
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - _td(hours=hours)
+    return (await session.execute(
+        select(func.count(Adjustment.id)).where(
+            Adjustment.entity_type == "investor", Adjustment.entity_id == investor_id,
+            Adjustment.field.in_(PAYOUT_FIELDS), Adjustment.created_at >= since,
+            # entering details for the first time redirects nothing
+            Adjustment.old_value.is_not(None), Adjustment.old_value != ""))).scalar_one() > 0
+
+
 async def request_withdrawal(session, *, investor_id: str, amount,
                              destination: dict | None = None,
                              justification: str | None = None,
-                             on: date | None = None) -> Withdrawal:
+                             on: date | None = None,
+                             force_review: str | None = None) -> Withdrawal:
     """An investor asks for money.
 
     Over the cap this is NOT refused — it becomes an exception needing a written
@@ -417,7 +439,10 @@ async def request_withdrawal(session, *, investor_id: str, amount,
     check = await withdrawal_cap(session, investor_id, day)
     until = await lockup_until(session, investor_id)
     locked = until is not None and day < until
-    over = cash > check.cap or locked
+    over = cash > check.cap or locked or bool(force_review)
+    if force_review:
+        # a security review, not the investor's choice: it needs no reason from them
+        justification = f"{force_review}" + (f" — investor: {justification}" if justification else "")
     if over and not (justification or "").strip():
         if locked:
             raise FundError(

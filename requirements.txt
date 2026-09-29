@@ -14,6 +14,7 @@ fastapi
 uvicorn[standard]
 websockets
 httpx
+fpdf2>=2.7          # PDF statements (backend/investor/statements.py) and generate_pdf.py
 python-multipart
 
 # ── Data & Analysis ──────────────────────────────────────────

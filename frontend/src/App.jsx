@@ -65,7 +65,9 @@ function Sidebar({ isCollapsed, setIsCollapsed, isNavOpen, closeNav }) {
     { to: '/strategy-lab', icon: FlaskConical, label: 'Strategy Lab' },
     { to: '/fundamentals', icon: Activity, label: 'Fundamentals' },
     { to: '/analysis', icon: Sparkles, label: 'Analysis' },
-    { to: '/investors', icon: Users, label: 'Investors' },
+    // admin-only on the server; hidden here for operators who are not admins.
+    // An older stored login has no flag, so it shows until the next sign-in.
+    ...(user?.is_admin === false ? [] : [{ to: '/investors', icon: Users, label: 'Investors' }]),
     { to: '/logs', icon: Terminal, label: 'Logs' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ];

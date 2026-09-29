@@ -30,6 +30,7 @@ from sqlalchemy.pool import StaticPool
 from backend.api.routes import admin_investors, investor_portal
 from backend.api.routes.auth import create_token
 from backend.data.database import get_db
+from backend.notify import outbox
 from backend.data.models import Base, Trade, User
 from backend.investor import auth as authmod
 from backend.investor import nav as navmod
@@ -53,6 +54,7 @@ class App:
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
+        outbox.use_session_factory(self.Session)
 
         async def _db():
             async with self.Session() as s:
@@ -78,6 +80,8 @@ class App:
         return self
 
     async def __aexit__(self, *exc):
+        await outbox.drain()
+        outbox.use_session_factory(None)
         await self.http.aclose()
         await self.engine.dispose()
 

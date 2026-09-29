@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
@@ -32,6 +32,8 @@ from backend.investor import fund as fundmod
 from backend.investor import nav as navmod
 from backend.investor import reconcile as recmod
 from backend.investor import units as unitsmod
+from backend.notify import outbox
+from backend.notify import templates as mail
 from backend.investor.models import (
     Deposit,
     Investor,
@@ -90,6 +92,10 @@ class AcceptLink(BaseModel):
     password: str = Field(max_length=200)
 
 
+class Forgot(BaseModel):
+    email: str = Field(max_length=255)
+
+
 class ChangePassword(BaseModel):
     current_password: str = Field(max_length=200)
     new_password: str = Field(max_length=200)
@@ -130,6 +136,24 @@ async def accept_link(body: AcceptLink, db: AsyncSession = Depends(get_db)):
     return _session(inv)
 
 
+@router.post("/auth/forgot")
+async def forgot_password(body: Forgot, request: Request, db: AsyncSession = Depends(get_db)):
+    """Email a reset link. Always answers the same way, so the form cannot be
+    used to find out who is a client; braked per address so it cannot be used
+    to flood someone's inbox."""
+    import os
+    try:
+        found = await authmod.request_reset(db, email=body.email, ip=_ip(request))
+    except authmod.AuthError:
+        found = None                       # rate-limited: same answer, nothing sent
+    if found:
+        inv, raw = found
+        base = os.getenv("INVESTOR_APP_URL", "http://localhost:5174").rstrip("/")
+        outbox.queue(db, mail.reset(inv, f"{base}/accept?token={raw}"))
+    return {"ok": True, "message": "If that address has an account, a reset link is on its way. "
+                                   "It works once, for 30 minutes."}
+
+
 @router.post("/auth/password")
 async def change_password(body: ChangePassword, inv: Investor = Depends(current_investor),
                           db: AsyncSession = Depends(get_db)):
@@ -139,6 +163,7 @@ async def change_password(body: ChangePassword, inv: Investor = Depends(current_
                                       new=body.new_password)
     except authmod.AuthError as exc:
         _refuse(exc)
+    outbox.queue(db, mail.password_changed(inv))
     return _session(inv)
 
 
@@ -297,6 +322,8 @@ async def withdrawal_quote(amount: Decimal | None = Query(None, gt=0),
         "month_profit": _s(cap.month_profit),
         "lockup_until": _iso(until), "in_lockup": locked,
         "payout_on_file": bool(inv.payout_account_number),
+        # a recent change of payout account sends every request to review
+        "cooling_off": await fundmod.payout_changed_recently(db, inv.id),
     }
     if amount is not None:
         cash = navmod.money(amount)
@@ -323,14 +350,21 @@ async def request_withdrawal(body: WithdrawalRequest, inv: Investor = Depends(cu
     if not inv.payout_account_number:
         raise HTTPException(status_code=400,
                             detail="we have no payout account for you yet — contact us to add one")
+    review = None
+    if await fundmod.payout_changed_recently(db, inv.id):
+        review = (f"automatic review: payout account changed in the last "
+                  f"{fundmod.PAYOUT_COOLING_HOURS} hours")
     try:
         w = await fundmod.request_withdrawal(
             db, investor_id=inv.id, amount=body.amount, justification=body.justification,
             destination={"bank_name": inv.payout_bank_name,
                          "account_number": inv.payout_account_number,
-                         "account_name": inv.payout_account_name})
+                         "account_name": inv.payout_account_name},
+            force_review=review)
     except (fundmod.FundError, unitsmod.LedgerError) as exc:
         _refuse(exc)
+    terms = await fundmod.terms_for(db, inv.id)
+    outbox.queue(db, mail.withdrawal_received(inv, w, terms.notice_days))
     return {"id": str(w.id), "state": w.state, "amount_requested": _s(w.amount_requested),
             "is_exception": w.is_exception}
 
@@ -351,4 +385,40 @@ async def request_closure(body: Closure, request: Request, inv: Investor = Depen
                                       actor_kind="investor", reason=body.reason)
     except fundmod.FundError as exc:
         _refuse(exc)
-    return {"status": "closing", "quote": await fundmod.closure_quote(db, inv.id)}
+    quote = await fundmod.closure_quote(db, inv.id)
+    outbox.queue(db, mail.closure_requested(inv, quote))
+    return {"status": "closing", "quote": quote}
+
+
+# ── statements ──────────────────────────────────────────────────────────────
+
+@router.get("/statements")
+async def statements_list(inv: Investor = Depends(current_investor), db: AsyncSession = Depends(get_db)):
+    """Every complete month the investor held units in, newest first."""
+    from sqlalchemy import func as sfunc
+    first = (await db.execute(select(sfunc.min(UnitTransaction.effective_date))
+                              .where(UnitTransaction.investor_id == inv.id))).scalar_one()
+    if first is None:
+        return []
+    today = navmod.accounting_date()
+    out, y, m = [], first.year, first.month
+    while (y, m) < (today.year, today.month):
+        out.append({"year": y, "month": m, "label": f"{y}-{m:02d}"})
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return list(reversed(out))
+
+
+@router.get("/statements/{year}-{month}.pdf")
+async def statement_pdf(year: int, month: int, inv: Investor = Depends(current_investor),
+                        db: AsyncSession = Depends(get_db)):
+    from backend.investor import fees as feesmod
+    from backend.investor import statements as stmtmod
+    if not (2020 <= year <= 2100 and 1 <= month <= 12):
+        raise HTTPException(status_code=404, detail="no such month")
+    start, end = feesmod.month_period(year, month)
+    if end >= navmod.accounting_date():
+        raise HTTPException(status_code=400, detail="a month's statement is ready once the month has ended")
+    _, pdf = await stmtmod.pdf_for(db, inv.id, start, end)
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="alphavantiq-statement-{year}-{month:02d}.pdf"',
+        "Cache-Control": "private, no-store"})

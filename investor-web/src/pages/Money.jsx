@@ -109,6 +109,7 @@ function Withdraw() {
                     ({money(qq.month_profit)}). {qq.explanation.startsWith('no profit') &&
                       'Nothing has been earned yet this month, so any withdrawal is reviewed by us first.'}
                     {qq.in_lockup && ` Your money is in its lock-up period until ${day(qq.lockup_until)}, so a withdrawal before then is reviewed by us first.`}
+                    {qq.cooling_off && ' The account we pay you was changed in the last 48 hours, so for your protection every withdrawal is reviewed by us first.'}
                   </p>
                 </>
               )}

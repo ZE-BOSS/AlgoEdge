@@ -74,6 +74,34 @@ function Adjustments() {
   );
 }
 
+function Emails() {
+  const q = useQuery({ queryKey: ['inv', 'emails'], queryFn: () => inv.emails() });
+  const tone = { sent: 'green', logged: 'blue', failed: 'red', queued: 'yellow' };
+  return (
+    <QueryState q={q}>
+      {(rows) => rows.length === 0 ? <Empty>No emails yet.</Empty> : (
+        <div className="table-wrapper">
+          <table>
+            <thead><tr><th>When</th><th>To</th><th>Subject</th><th>Kind</th><th>State</th><th>Provider id / error</th></tr></thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id}>
+                  <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(r.created_at)}</td>
+                  <td>{r.to}</td>
+                  <td style={{ maxWidth: 280 }}>{r.subject}{r.attachments && <div className="inv-hint">{r.attachments.join(', ')}</div>}</td>
+                  <td><code>{r.kind}</code></td>
+                  <td><span className={`badge badge-${tone[r.state] || 'blue'}`}>{r.state}</span></td>
+                  <td className="inv-hint" style={{ maxWidth: 260 }}>{r.error || r.provider_id || ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </QueryState>
+  );
+}
+
 export default function Audit() {
   const [tab, setTab] = useState('log');
   return (
@@ -83,13 +111,15 @@ export default function Audit() {
           Audit log</button>
         <button className={`btn btn-sm ${tab === 'adj' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('adj')}>
           Adjustments</button>
+        <button className={`btn btn-sm ${tab === 'mail' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('mail')}>
+          Emails</button>
       </div>
       <p className="inv-hint" style={{ marginTop: 0 }}>
-        {tab === 'log'
-          ? 'Every state change on the investor side, by whom. Immutable.'
-          : 'Every override of a figure an investor can see: the old value, the new one, and why.'}
+        {tab === 'log' ? 'Every state change on the investor side, by whom. Immutable.'
+          : tab === 'adj' ? 'Every override of a figure an investor can see: the old value, the new one, and why.'
+            : 'Every email sent: "logged" means EMAIL_MODE=log (nothing was sent); a failure shows the provider\u2019s error.'}
       </p>
-      {tab === 'log' ? <Log /> : <Adjustments />}
+      {tab === 'log' ? <Log /> : tab === 'adj' ? <Adjustments /> : <Emails />}
     </div>
   );
 }

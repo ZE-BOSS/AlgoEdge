@@ -470,3 +470,56 @@ class InvestorToken(Base):
     used_at = Column(DateTime)
     created_by = Column(String(36))
     created_at = Column(DateTime, server_default=func.now())
+
+
+# ── email, jobs, admin devices (Phase 4) ─────────────────────────────────────
+
+class EmailLog(Base):
+    """Every message the platform sends, and what became of it.
+
+    Written for every message, including in log mode, so "did they get the
+    email?" is answered from a row: when, to whom, which template, the
+    provider's id (to trace a bounce), and the error if it failed.
+    """
+    __tablename__ = "email_log"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    kind = Column(String(40), nullable=False, index=True)       # template name
+    to_address = Column(String(255), nullable=False)
+    subject = Column(String(255), nullable=False)
+    investor_id = Column(String(36), index=True)
+    state = Column(String(16), nullable=False, default="queued")  # queued | sent | logged | failed
+    provider_id = Column(String(120))
+    error = Column(Text)
+    attachments = Column(JSON)                                    # filenames only
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    sent_at = Column(DateTime)
+
+
+class JobRun(Base):
+    """One row per scheduled job per day, so a job runs once however many
+    worker processes are up: the second insert hits the unique constraint."""
+    __tablename__ = "investor_job_runs"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    job = Column(String(40), nullable=False)
+    run_key = Column(String(40), nullable=False)                  # e.g. the WAT date
+    result = Column(JSON)
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("job", "run_key", name="uq_job_run"),)
+
+
+class AdminDevice(Base):
+    """A browser an admin has signed in from, for the new-device alert."""
+    __tablename__ = "admin_devices"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    user_id = Column(String(36), nullable=False, index=True)
+    fingerprint = Column(String(64), nullable=False)
+    ip = Column(String(64))
+    user_agent = Column(String(300))
+    first_seen = Column(DateTime, server_default=func.now())
+    last_seen = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("user_id", "fingerprint", name="uq_admin_device"),)

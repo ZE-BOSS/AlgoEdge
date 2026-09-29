@@ -154,6 +154,7 @@ def _recent_failures(key: str) -> deque:
 def reset_rate_limit() -> None:
     """For tests."""
     _failures.clear()
+    _resets.clear()
 
 
 async def login(session, *, email: str, password: str, ip: str | None = None) -> Investor:
@@ -207,6 +208,32 @@ async def create_link(session, *, investor_id: str, purpose: str,
     return raw, expires
 
 
+_RESET_LIMIT = 3
+_RESET_WINDOW = 60 * 60
+_resets: dict[str, deque] = defaultdict(deque)
+
+
+async def request_reset(session, *, email: str, ip: str | None = None):
+    """(investor, raw token) for an open account, else None. At most three per
+    address per hour — the reset form must not be a way to spam someone."""
+    key = (email or "").strip().lower()
+    q = _resets[key]
+    cutoff = time.monotonic() - _RESET_WINDOW
+    while q and q[0] < cutoff:
+        q.popleft()
+    if len(q) >= _RESET_LIMIT:
+        raise AuthError("too many reset requests")
+    q.append(time.monotonic())
+    investor = (await session.execute(
+        select(Investor).where(Investor.email == key))).scalar_one_or_none()
+    if investor is None or investor.status == "closed":
+        return None
+    raw, _ = await create_link(session, investor_id=investor.id, purpose=TOKEN_RESET, actor_id=None)
+    await audit(session, actor_id=investor.id, actor_kind="investor", action="auth.reset_requested",
+                entity_type="investor", entity_id=investor.id, ip=ip)
+    return investor, raw
+
+
 async def use_link(session, *, token: str, password: str) -> Investor:
     """Set a password from an invite or reset link. Works once."""
     check_password_rules(password)
@@ -238,4 +265,4 @@ async def change_password(session, *, investor: Investor, current: str, new: str
 
 
 __all__ = ["AUDIENCE", "AuthError", "TOKEN_INVITE", "TOKEN_RESET", "change_password",
-           "create_link", "issue", "login", "resolve", "use_link"]
+           "create_link", "issue", "login", "request_reset", "resolve", "use_link"]

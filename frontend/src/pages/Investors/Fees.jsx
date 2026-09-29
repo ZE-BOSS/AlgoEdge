@@ -16,13 +16,15 @@ function Preview({ year, month }) {
   const [waive, setWaive] = useState(() => new Set());
   const q = useQuery({ queryKey: ['inv', 'fees', 'preview', year, month], queryFn: () => inv.feePreview(year, month) });
   const close = useInvAction(() => inv.closeFees({ year, month, waive: [...waive] }));
+  const send = useInvAction(() => inv.sendStatements({ year, month }));
   const toggle = (id) => setWaive((w) => { const n = new Set(w); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   return (
     <QueryState q={q}>
       {(p) => (
         <>
           <p className="inv-hint" style={{ marginTop: 0 }}>
-            Priced at the NAV of {p.priced_on} ({fmtUnits(p.nav_per_unit)}). Management = value × rate × days ÷ 365.
+            {p.already_closed ? 'Charged — these are the recorded charges. ' : `Priced at the NAV of ${p.priced_on} (${fmtUnits(p.nav_per_unit)}). `}
+            Management = value × rate × days ÷ 365.
             Performance = rate × lifetime profit above the investor's high-water mark, which is set net of the fee.
             Rates are each investor's committed terms.
           </p>
@@ -40,10 +42,10 @@ function Preview({ year, month }) {
                       <td className="num">{fmtMoney(l.value)}</td>
                       <td className="num">{l.days}</td>
                       <td className="num">{fmtMoney(l.management)}<div className="inv-hint">{l.management_pct}%/yr</div></td>
-                      <td className="num">{fmtMoney(l.profit)}</td>
-                      <td className="num">{fmtMoney(l.high_water_mark)}</td>
+                      <td className="num">{l.profit ? fmtMoney(l.profit) : <span className="inv-hint">{l.above_mark ? `${fmtMoney(l.above_mark)} above mark` : '—'}</span>}</td>
+                      <td className="num">{fmtMoney(l.high_water_mark ?? l.new_high_water_mark)}</td>
                       <td className="num">{fmtMoney(l.performance)}<div className="inv-hint">{l.performance_pct}%</div></td>
-                      <td className="num"><strong>{fmtMoney(l.total)}</strong></td>
+                      <td className="num"><strong>{fmtMoney(l.total)}</strong>{l.state === 'waived' && <div className="inv-hint">waived</div>}</td>
                       {!p.already_closed && (
                         <td><input type="checkbox" checked={waive.has(l.investor_id)}
                                    onChange={() => toggle(l.investor_id)} aria-label={`Waive ${l.name}`} /></td>
@@ -56,6 +58,12 @@ function Preview({ year, month }) {
           )}
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
             <strong>Total {fmtMoney(p.total)}</strong>
+            {p.already_closed && (
+              <button className="btn btn-secondary btn-sm" disabled={send.isPending || send.isSuccess}
+                      onClick={() => send.mutate()}>
+                {send.isSuccess ? `Statements queued for ${send.data.data.queued} investor(s)` : 'Email this month\u2019s statements'}
+              </button>
+            )}
             {p.already_closed ? <span className="badge badge-green">charged</span> : (
               <button className="btn btn-primary btn-sm" disabled={close.isPending || !p.lines.length}
                       onClick={() => close.mutate()}>
@@ -63,7 +71,7 @@ function Preview({ year, month }) {
               </button>
             )}
           </div>
-          <ErrorLine error={close.error} />
+          <ErrorLine error={close.error || send.error} />
           {!p.already_closed && (
             <p className="inv-hint">Charging cancels units at this price and cannot be repeated for the month.
               A waived fee is recorded but not charged; the high-water mark still moves.
