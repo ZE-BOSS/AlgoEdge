@@ -19,8 +19,10 @@ from sqlalchemy import desc, func, select
 from backend.investor import nav as navmod
 from backend.investor import units as unitsmod
 from backend.investor.models import (
+    DEPOSIT_CLAIMED,
     DEPOSIT_CONFIRMED,
     DEPOSIT_REJECTED,
+    DEPOSIT_REQUESTED,
     KIND_SUBSCRIBE,
     METHOD_OFF_PLATFORM,
     WITHDRAWAL_APPROVED,
@@ -28,6 +30,7 @@ from backend.investor.models import (
     WITHDRAWAL_EXCEPTION,
     WITHDRAWAL_PAID,
     WITHDRAWAL_REQUESTED,
+    Adjustment,
     Deposit,
     FundSettings,
     Investor,
@@ -169,6 +172,7 @@ async def record_admin_deposit(session, *, investor_id: str, amount, actor_id: s
     entered this way, with the effective date they actually paid, so their units
     are issued at the NAV that applied then rather than today's.
     """
+    await _open_investor(session, investor_id)
     settings = await current_settings(session)
     cash = navmod.money(amount)
     if cash < navmod.money(settings.min_investment):
@@ -428,3 +432,214 @@ async def decline_withdrawal(session, *, withdrawal_id: int, reason: str,
                 entity_type="withdrawal", entity_id=str(row.id),
                 detail={"reason": reason})
     return row
+
+
+# ── the investor record ──────────────────────────────────────────────────────
+
+PROFILE_FIELDS = ("name", "phone", "country", "kyc_status")
+PAYOUT_FIELDS = ("payout_bank_name", "payout_account_number", "payout_account_name")
+
+
+async def update_investor(session, *, investor_id: str, actor_id: str,
+                          changes: dict, reason: str | None = None) -> Investor:
+    """Change an investor's details.
+
+    Payout details are where a withdrawal goes, which makes changing them the
+    single most-abused flow on any investment platform. So a payout change needs
+    a reason and writes an `adjustments` row per field with the old value — the
+    record that answers "who pointed my money at that account?".
+    """
+    investor = await _open_investor(session, investor_id)
+    unknown = set(changes) - set(PROFILE_FIELDS) - set(PAYOUT_FIELDS)
+    if unknown:
+        raise FundError(f"not editable: {sorted(unknown)}")
+
+    changed = {f: v for f, v in changes.items() if getattr(investor, f) != v}
+    payout = [f for f in changed if f in PAYOUT_FIELDS]
+    if payout and not (reason or "").strip():
+        raise FundError("changing where withdrawals are paid needs a reason")
+    if "name" in changed and not (changed["name"] or "").strip():
+        raise FundError("an investor must have a name")
+
+    for f in payout:
+        session.add(Adjustment(entity_type="investor", entity_id=investor_id, field=f,
+                               old_value=getattr(investor, f), new_value=changed[f],
+                               reason=reason, actor_id=actor_id))
+    old = {f: getattr(investor, f) for f in changed}
+    for f, v in changed.items():
+        setattr(investor, f, v)
+    if changed:
+        await audit(session, actor_id=actor_id, action="investor.updated",
+                    entity_type="investor", entity_id=investor_id,
+                    detail={"fields": sorted(changed), "reason": reason,
+                            # payout values are kept in `adjustments`, not here:
+                            # the audit log is broader-read than the adjustment trail
+                            "old": {f: v for f, v in old.items() if f not in PAYOUT_FIELDS}})
+    return investor
+
+
+async def _open_investor(session, investor_id: str) -> Investor:
+    investor = await session.get(Investor, investor_id)
+    if investor is None:
+        raise FundError(f"no investor {investor_id}")
+    if investor.status == "closed":
+        raise FundError("this investor's account is closed")
+    return investor
+
+
+# ── closure (full exit) ──────────────────────────────────────────────────────
+
+OPEN_DEPOSIT_STATES = (DEPOSIT_REQUESTED, DEPOSIT_CLAIMED)
+OPEN_WITHDRAWAL_STATES = (WITHDRAWAL_REQUESTED, WITHDRAWAL_EXCEPTION, WITHDRAWAL_APPROVED)
+
+
+async def request_closure(session, *, investor_id: str, actor_id: str,
+                          actor_kind: str = "admin", reason: str | None = None) -> Investor:
+    investor = await _open_investor(session, investor_id)
+    if investor.status == "closing":
+        raise FundError("closure is already requested")
+    investor.status = "closing"
+    await audit(session, actor_id=actor_id, actor_kind=actor_kind,
+                action="closure.requested", entity_type="investor",
+                entity_id=investor_id, detail={"reason": reason})
+    return investor
+
+
+async def cancel_closure(session, *, investor_id: str, actor_id: str) -> Investor:
+    investor = await _open_investor(session, investor_id)
+    if investor.status != "closing":
+        raise FundError("no closure is pending")
+    held = await unitsmod.ledger_units(session, investor_id)
+    investor.status = "active" if held > 0 else "pending"
+    await audit(session, actor_id=actor_id, action="closure.cancelled",
+                entity_type="investor", entity_id=investor_id)
+    return investor
+
+
+async def closure_blockers(session, investor_id: str) -> list[str]:
+    """Anything that must be settled before an account can be closed.
+
+    An open deposit would arrive after the account is gone; an open withdrawal
+    would either pay twice (once itself, once in the closing payout) or cancel
+    units that the closure has already cancelled.
+    """
+    out = []
+    deposits = (await session.execute(
+        select(func.count(Deposit.id)).where(Deposit.investor_id == investor_id,
+                                             Deposit.state.in_(OPEN_DEPOSIT_STATES))
+    )).scalar_one()
+    if deposits:
+        out.append(f"{deposits} deposit(s) still open — confirm or reject them first")
+    withdrawals = (await session.execute(
+        select(Withdrawal.state, func.count(Withdrawal.id))
+        .where(Withdrawal.investor_id == investor_id,
+               Withdrawal.state.in_(OPEN_WITHDRAWAL_STATES))
+        .group_by(Withdrawal.state)
+    )).all()
+    for state, n in withdrawals:
+        if state == WITHDRAWAL_APPROVED:
+            out.append(f"{n} approved withdrawal(s) not yet marked paid")
+        else:
+            out.append(f"{n} withdrawal request(s) still {state} — decide them first")
+    return out
+
+
+async def closure_quote(session, investor_id: str, on: date | None = None) -> dict:
+    """What the investor is owed if the account closed today."""
+    day = on or navmod.accounting_date()
+    price = await latest_nav(session, day)
+    held = await unitsmod.ledger_units(session, investor_id)
+    value = navmod.amount_for_units(held, price)
+    return {
+        "investor_id": investor_id,
+        "as_of": day.isoformat(),
+        "units": str(held),
+        "nav_per_unit": str(price),
+        "gross_value": str(value),
+        # Fee accrual is not built yet (see PHASE-2 doc); when it is, accrued
+        # but uncharged fees come off here.
+        "fees_owed": "0.00",
+        "net_payable": str(value),
+        "blockers": await closure_blockers(session, investor_id),
+    }
+
+
+def _anonymised_email(investor_id: str) -> str:
+    # `.invalid` is reserved (RFC 2606): it can never route to a real inbox.
+    return f"closed-{investor_id}@anonymised.invalid"
+
+
+async def approve_closure(session, *, investor_id: str, actor_id: str,
+                          payment_reference: str, on: date | None = None) -> dict:
+    """Pay out everything, cancel every unit, then erase the person.
+
+    The order is what was specified: the admin pays, then approves, and approval
+    is what closes the account. `payment_reference` is required because this is
+    the step that says the money has left.
+
+    The ledger and audit rows SURVIVE, keyed by the same investor id, because a
+    fund must be able to reconstruct its own history. What goes is everything
+    that identifies the person: name, email, phone, country, bank details,
+    credentials, and the bank details on their past withdrawals.
+    """
+    investor = await _open_investor(session, investor_id)
+    if investor.status != "closing":
+        raise FundError("closure has not been requested for this investor")
+    if not (payment_reference or "").strip():
+        raise FundError("record the payment reference of the closing payout")
+    blockers = await closure_blockers(session, investor_id)
+    if blockers:
+        raise FundError("cannot close yet: " + "; ".join(blockers))
+
+    day = on or navmod.accounting_date()
+    price = await latest_nav(session, day)
+    held = await unitsmod.ledger_units(session, investor_id)
+    paid = D("0.00")
+    if held > 0:
+        # Recorded as a withdrawal so the payout appears in the investor's
+        # statement and in every "money out" total like any other.
+        payout = Withdrawal(
+            investor_id=investor_id,
+            amount_requested=navmod.amount_for_units(held, price),
+            state=WITHDRAWAL_PAID, is_exception=False,
+            justification="account closure", effective_date=day,
+            approved_by=actor_id, approved_at=datetime.now(timezone.utc),
+            paid_at=datetime.now(timezone.utc), payment_reference=payment_reference)
+        session.add(payout)
+        await session.flush()
+        move = await unitsmod.redeem_all(session, investor_id=investor_id, price=price,
+                                         effective=day, created_by=actor_id,
+                                         note=f"account closure, withdrawal {payout.id}")
+        payout.amount_requested = move.amount
+        payout.amount_paid = move.amount
+        paid = move.amount
+
+    # erase the person, keep the history
+    investor.name = "Closed investor"
+    investor.email = _anonymised_email(investor_id)
+    investor.phone = None
+    investor.country = None
+    investor.password_hash = None
+    for f in PAYOUT_FIELDS:
+        setattr(investor, f, None)
+    past = (await session.execute(
+        select(Withdrawal).where(Withdrawal.investor_id == investor_id))).scalars().all()
+    for w in past:
+        w.destination_bank_name = None
+        w.destination_account_number = None
+        w.destination_account_name = None
+    proofs = (await session.execute(
+        select(Deposit).where(Deposit.investor_id == investor_id))).scalars().all()
+    for d in proofs:
+        d.proof_path = None
+    investor.status = "closed"
+    investor.closed_at = datetime.now(timezone.utc)
+
+    await audit(session, actor_id=actor_id, action="closure.approved",
+                entity_type="investor", entity_id=investor_id,
+                detail={"units": str(held), "nav": str(price), "paid": str(paid),
+                        "reference": payment_reference})
+    logger.info(f"[FUND] closed {investor_id}: {held} units, ${paid} paid ({payment_reference})")
+    return {"investor_id": investor_id, "units_redeemed": str(held),
+            "nav_per_unit": str(price), "amount_paid": str(paid),
+            "payment_reference": payment_reference}

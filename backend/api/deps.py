@@ -90,3 +90,12 @@ async def get_optional_user(
         return await get_current_user(token, db)
     except HTTPException:
         return None
+
+
+async def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Admin-only routes. Enforced here, at the dependency, not by hiding a
+    button: a route that trusts the UI to keep non-admins out is open to anyone
+    who can send a request."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    return current_user

@@ -398,3 +398,45 @@ class InvestorAuditLog(Base):
     detail = Column(JSON)
     ip = Column(String(64))
     created_at = Column(DateTime, server_default=func.now(), index=True)
+
+
+# ── what investors are shown of the trading ──────────────────────────────────
+
+DISCLOSURE_PUBLISHED = "published"
+DISCLOSURE_HIDDEN = "hidden"
+# A closed trade with no row here is "undisclosed" — it is in the admin's queue.
+# There is deliberately no stored "undisclosed" state: a new trade must not need
+# a write on the trading side to appear in the queue, because the investor side
+# never writes to the trading side.
+
+
+class TradeDisclosure(Base):
+    """One closed trade as investors see it — or the decision not to show it.
+
+    Holds its OWN copy of the published fields rather than a view onto `trades`.
+    What an investor was shown is a statement the fund made; a later change to
+    the trade row (a re-sync, a corrected fill) must not silently change what
+    they were told. An admin edit to a published field writes an `adjustments`
+    row, like every other change to an investor-facing number.
+
+    There is no strategy, parameter, entry-logic, ticket or volume column, on
+    purpose. Strategy identity is stripped HERE, at storage, so it cannot leak
+    through an API response someone inspects — see disclosure.PUBLIC_FIELDS.
+    """
+    __tablename__ = "trade_disclosures"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    trade_id = Column(BigInteger, nullable=False, unique=True, index=True)
+
+    state = Column(String(16), nullable=False)          # published | hidden
+
+    symbol = Column(String(20))
+    direction = Column(String(10))                      # BUY / SELL
+    closed_on = Column(Date)
+    result_amount = Column(MONEY)                       # pool P&L on the trade, USD
+    result_pct = Column(Numeric(9, 4))                  # of pool equity, when known
+    note = Column(Text)                                 # optional investor-facing comment
+
+    edited = Column(Boolean, nullable=False, default=False)
+    decided_by = Column(String(36), nullable=False)
+    decided_at = Column(DateTime, server_default=func.now())

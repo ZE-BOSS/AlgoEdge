@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Import API route modules
 from backend.api.routes import (
     admin,
+    admin_investors,
     analysis,
     auth,
     backtest,
@@ -241,6 +242,7 @@ app.include_router(auth.router)
 app.include_router(trades.router)
 app.include_router(stats.router)
 app.include_router(admin.router)
+app.include_router(admin_investors.router)  # Investor platform, Phase 2
 app.include_router(backtest.router)
 app.include_router(config.router)
 app.include_router(charts.router)
