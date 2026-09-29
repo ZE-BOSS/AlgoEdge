@@ -339,9 +339,43 @@ def test_registration_is_open_for_the_first_account_only(monkeypatch):
             def body(n):
                 return {"email": f"op{n}@x.com", "password": "long enough", "name": f"Op {n}"}
             assert (await a.http.post("/api/auth/register", json=body(1))).status_code == 201
+            async with a.Session() as s:
+                first = (await s.execute(select(User).where(User.email == "op1@x.com"))).scalar_one()
+                assert first.is_admin is True
             r = await a.http.post("/api/auth/register", json=body(2))
             assert r.status_code == 403 and "closed" in r.json()["detail"]
 
             monkeypatch.setenv("ALLOW_REGISTRATION", "1")
             assert (await a.http.post("/api/auth/register", json=body(3))).status_code == 201
+            async with a.Session() as s:
+                third = (await s.execute(select(User).where(User.email == "op3@x.com"))).scalar_one()
+                assert not third.is_admin
+    run(go())
+
+
+def test_the_oldest_account_becomes_admin_when_nobody_is(monkeypatch):
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from backend.data import database
+    from backend.data.models import Base, User
+
+    async def go():
+        engine = create_async_engine("sqlite+aiosqlite://")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(User.__table__.insert(), [
+                {"id": "a", "email": "owner@x.com", "name": "O", "password_hash": "h",
+                 "created_at": datetime(2025, 1, 1)},
+                {"id": "b", "email": "later@x.com", "name": "L", "password_hash": "h",
+                 "created_at": datetime(2026, 1, 1)},
+            ])
+            monkeypatch.delenv("ADMIN_EMAILS", raising=False)
+            await database._ensure_an_admin(conn)
+            rows = dict((await conn.execute(select(User.email, User.is_admin))).all())
+            assert rows == {"owner@x.com": True, "later@x.com": False}
+
+            monkeypatch.setenv("ADMIN_EMAILS", "Later@x.com")
+            await database._ensure_an_admin(conn)
+            rows = dict((await conn.execute(select(User.email, User.is_admin))).all())
+            assert rows == {"owner@x.com": True, "later@x.com": True}
+        await engine.dispose()
     run(go())

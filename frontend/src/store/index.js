@@ -9,6 +9,12 @@ export const useAuthStore = create((set) => ({
     storeAuth(accessToken, refreshToken, user);
     set({ user, token: accessToken, isAuthenticated: true });
   },
+  // Re-read the account from the server, so a change such as being made an
+  // admin shows without signing out and back in.
+  setUser: (user) => {
+    localStorage.setItem('algoedge_user', JSON.stringify(user));
+    set({ user });
+  },
   logout: () => {
     clearAuth();
     set({ user: null, token: null, isAuthenticated: false });

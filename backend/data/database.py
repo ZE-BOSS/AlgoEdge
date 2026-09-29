@@ -160,7 +160,42 @@ async def init_db():
                 if not already_applied:
                     logger.warning(f"Migration failed: {query!r} — {e}")
 
+        await _ensure_an_admin(conn)
+
     logger.info("Database tables initialized")
+
+
+async def _ensure_an_admin(conn):
+    """Make sure someone can open the admin-only sections (Investors, Users).
+
+    Nothing else ever sets `users.is_admin`, so on an existing install every
+    account was a plain operator and the Investors section stayed hidden.
+
+    * ADMIN_EMAILS (comma-separated) in .env: those accounts are admins.
+    * Otherwise, if nobody is an admin yet, the oldest account becomes one:
+      that is the owner, who created it before anyone else.
+    """
+    from sqlalchemy import text
+
+    emails = [e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()]
+    try:
+        for email in emails:
+            res = await conn.execute(
+                text("UPDATE users SET is_admin = :t WHERE lower(email) = :e AND (is_admin IS NULL OR is_admin = :f)"),
+                {"t": True, "f": False, "e": email},
+            )
+            if res.rowcount:
+                logger.info(f"Admin rights granted to {email} (ADMIN_EMAILS)")
+        if (await conn.execute(text("SELECT 1 FROM users WHERE is_admin = :t LIMIT 1"), {"t": True})).first():
+            return
+        first = (await conn.execute(
+            text("SELECT id, email FROM users ORDER BY created_at ASC, email ASC LIMIT 1")
+        )).first()
+        if first:
+            await conn.execute(text("UPDATE users SET is_admin = :t WHERE id = :i"), {"t": True, "i": first[0]})
+            logger.info(f"No admin existed: admin rights granted to the first account, {first[1]}")
+    except Exception as e:  # never block startup over this
+        logger.warning(f"Could not check admin accounts: {e}")
 
 
 async def close_db():

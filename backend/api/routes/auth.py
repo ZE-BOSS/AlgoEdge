@@ -61,6 +61,7 @@ class UserResponse(BaseModel):
     email: str
     name: str
     is_active: bool
+    is_admin: bool = False
 
 
 # ── Token Generation ─────────────────────────────────────────────────────────
@@ -91,9 +92,9 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     Every operator account can drive the bot and the broker, and the admin site
     is reachable from any network, so a stranger must not be able to sign up.
     """
+    anyone = (await db.execute(select(User.id).limit(1))).scalar_one_or_none()
     if os.getenv("ALLOW_REGISTRATION", "").strip() != "1":
-        anyone = await db.execute(select(User.id).limit(1))
-        if anyone.scalar_one_or_none() is not None:
+        if anyone is not None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Registration is closed. Ask an administrator for an account.",
@@ -115,6 +116,7 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
         password_hash=pwd_context.hash(req.password),
         name=req.name.strip(),
         is_active=True,
+        is_admin=anyone is None,   # the very first account is the owner
     )
     db.add(user)
     await db.commit()
@@ -260,4 +262,5 @@ async def get_me(current_user: User = Depends(get_current_user)):
         email=current_user.email,
         name=current_user.name,
         is_active=current_user.is_active,
+        is_admin=bool(current_user.is_admin),
     )

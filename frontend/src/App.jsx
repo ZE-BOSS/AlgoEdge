@@ -6,7 +6,8 @@ import {
   Zap, Settings, Wifi, WifiOff, Loader2, LogOut, ChevronLeft, ChevronRight,
   Sparkles, Activity, Terminal, Menu, X, Users
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { getMe } from './services/api';
 import { useBackendConnection, useWebSocket } from './hooks/useBackendConnection';
 import { useConnectionStore, useAuthStore, useLoadingStore } from './store';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -54,7 +55,14 @@ function AuthGuard({ children }) {
 function Sidebar({ isCollapsed, setIsCollapsed, isNavOpen, closeNav }) {
   const { status } = useConnectionStore();
   const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
   const logout = useAuthStore((s) => s.logout);
+
+  useEffect(() => {
+    getMe().then(({ data }) => setUser({ ...user, ...data })).catch(() => {});
+    // once per page load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const links = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -66,7 +74,7 @@ function Sidebar({ isCollapsed, setIsCollapsed, isNavOpen, closeNav }) {
     { to: '/fundamentals', icon: Activity, label: 'Fundamentals' },
     { to: '/analysis', icon: Sparkles, label: 'Analysis' },
     // admin-only on the server; hidden here for operators who are not admins.
-    // An older stored login has no flag, so it shows until the next sign-in.
+    // The flag is refreshed from /auth/me on every page load.
     ...(user?.is_admin === false ? [] : [{ to: '/investors', icon: Users, label: 'Investors' }]),
     { to: '/logs', icon: Terminal, label: 'Logs' },
     { to: '/settings', icon: Settings, label: 'Settings' },
