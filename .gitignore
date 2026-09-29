@@ -121,3 +121,6 @@ data/vix_regime/
 data/opex/
 data/spike_resumption/
 data/strike_levels/
+
+# investor app builds uploaded through the admin console (Phase 6)
+data/releases/

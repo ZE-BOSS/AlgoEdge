@@ -18,6 +18,7 @@ from collections import defaultdict, deque
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -157,3 +158,32 @@ async def apply(body: Apply, request: Request, db: AsyncSession = Depends(get_db
     await db.flush()
     outbox.queue(db, mail.admin_application(row))
     return thanks
+
+
+# ── the Android app ─────────────────────────────────────────────────────────
+
+@router.get("/app")
+async def current_app(request: Request, db: AsyncSession = Depends(get_db)):
+    """The build the website's download button and the app's update check use."""
+    from backend.investor.models import AppRelease
+    row = (await db.execute(select(AppRelease).where(AppRelease.platform == "android",
+                                                     AppRelease.is_current.is_(True)))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="no release published yet")
+    base = str(request.base_url).rstrip("/")
+    return {"platform": "android", "version": row.version_name, "version_code": row.version_code,
+            "size_bytes": row.size_bytes, "sha256": row.sha256, "notes": row.notes,
+            "released": row.created_at.isoformat() if row.created_at else None,
+            "url": f"{base}/api/public/app/download/{row.id}"}
+
+
+@router.get("/app/download/{release_id}")
+async def download_app(release_id: int, db: AsyncSession = Depends(get_db)):
+    from backend.api.routes.admin_investors import release_dir
+    from backend.investor.models import AppRelease
+    row = await db.get(AppRelease, release_id)
+    path = release_dir() / row.filename if row else None
+    if row is None or not path.exists():
+        raise HTTPException(status_code=404, detail="no such release")
+    return FileResponse(path, media_type="application/vnd.android.package-archive",
+                        filename=row.filename, headers={"X-Content-SHA256": row.sha256})

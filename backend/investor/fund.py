@@ -772,6 +772,10 @@ async def approve_closure(session, *, investor_id: str, actor_id: str,
         select(Deposit).where(Deposit.investor_id == investor_id))).scalars().all()
     for d in proofs:
         d.proof_path = None
+    # the phones the app was installed on identify the person too
+    from sqlalchemy import delete as _delete
+    from backend.investor.models import InvestorDevice
+    await session.execute(_delete(InvestorDevice).where(InvestorDevice.investor_id == investor_id))
     investor.status = "closed"
     investor.closed_at = datetime.now(timezone.utc)
 

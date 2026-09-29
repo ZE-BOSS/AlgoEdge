@@ -373,6 +373,13 @@ export const inv = {
   applications: (status) => api.get(`${INV}/applications/list`, { params: status ? { status } : {} }),
   applicationStatus: (id, status) => api.post(`${INV}/applications/${id}/status`, { status }),
   acceptApplication: (id) => api.post(`${INV}/applications/${id}/accept`),
+  releases: () => api.get(`${INV}/releases/list`),
+  // an APK can be tens of MB: no JSON content type, a long timeout, progress reported
+  uploadRelease: (form, onProgress) => api.post(`${INV}/releases`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' }, timeout: 15 * 60 * 1000,
+    onUploadProgress: (e) => onProgress?.(e.total ? Math.round((e.loaded / e.total) * 100) : null),
+  }),
+  setCurrentRelease: (id) => api.post(`${INV}/releases/${id}/current`),
 };
 
 export default api;

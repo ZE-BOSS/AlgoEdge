@@ -422,3 +422,41 @@ async def statement_pdf(year: int, month: int, inv: Investor = Depends(current_i
     return Response(pdf, media_type="application/pdf", headers={
         "Content-Disposition": f'attachment; filename="alphavantiq-statement-{year}-{month:02d}.pdf"',
         "Cache-Control": "private, no-store"})
+
+
+# ── phones (push notifications) ─────────────────────────────────────────────
+
+class Device(BaseModel):
+    push_token: str = Field(min_length=10, max_length=200, pattern=r"^ExponentPushToken\[[^\]]+\]$")
+    platform: str | None = Field(default=None, max_length=16)
+    app_version: str | None = Field(default=None, max_length=32)
+
+
+@router.post("/devices", status_code=201)
+async def register_device(body: Device, inv: Investor = Depends(current_investor),
+                          db: AsyncSession = Depends(get_db)):
+    """Remember this phone for notifications. A token moves with the phone: if
+    someone else signs in on it, it is theirs now, not the previous person's."""
+    from datetime import datetime, timezone
+
+    from backend.investor.models import InvestorDevice
+    row = (await db.execute(select(InvestorDevice)
+                            .where(InvestorDevice.push_token == body.push_token))).scalar_one_or_none()
+    if row is None:
+        row = InvestorDevice(push_token=body.push_token, investor_id=inv.id)
+        db.add(row)
+    row.investor_id, row.platform, row.app_version = inv.id, body.platform, body.app_version
+    row.last_seen = datetime.now(timezone.utc)
+    return {"ok": True}
+
+
+@router.delete("/devices")
+async def forget_device(push_token: str = Query(..., max_length=200),
+                        inv: Investor = Depends(current_investor), db: AsyncSession = Depends(get_db)):
+    """On sign-out: stop notifying this phone."""
+    from sqlalchemy import delete
+
+    from backend.investor.models import InvestorDevice
+    await db.execute(delete(InvestorDevice).where(InvestorDevice.push_token == push_token,
+                                                  InvestorDevice.investor_id == inv.id))
+    return {"ok": True}

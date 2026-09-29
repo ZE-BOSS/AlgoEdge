@@ -544,3 +544,44 @@ class Application(Base):
     ip = Column(String(64))
     created_at = Column(DateTime, server_default=func.now(), index=True)
     decided_by = Column(String(36))
+
+
+# ── the Android app (Phase 6) ────────────────────────────────────────────────
+
+class AppRelease(Base):
+    """One uploaded build of the investor app.
+
+    `version_code` is the integer Android compares to decide whether an install
+    is an upgrade; it must rise with every release. The app checks the current
+    release on launch and offers the download when it is behind, because a
+    sideloaded app gets no store updates. `sha256` is shown next to the download
+    so a careful investor can confirm the file is the one we published.
+    """
+    __tablename__ = "app_releases"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    platform = Column(String(16), nullable=False, default="android")
+    version_name = Column(String(32), nullable=False)
+    version_code = Column(Integer, nullable=False)
+    filename = Column(String(200), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    notes = Column(Text)
+    is_current = Column(Boolean, nullable=False, default=False)
+    uploaded_by = Column(String(36))
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("platform", "version_code", name="uq_release_code"),)
+
+
+class InvestorDevice(Base):
+    """A phone with the app installed, for push notifications."""
+    __tablename__ = "investor_devices"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    investor_id = Column(String(36), ForeignKey("investors.id"), nullable=False, index=True)
+    push_token = Column(String(200), nullable=False, unique=True)
+    platform = Column(String(16))
+    app_version = Column(String(32))
+    last_seen = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, server_default=func.now())

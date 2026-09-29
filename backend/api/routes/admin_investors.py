@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
@@ -866,6 +866,116 @@ async def application_accept(application_id: int, admin: User = Depends(require_
     await fundmod.audit(db, actor_id=admin.id, action="application.accepted",
                         entity_type="application", entity_id=str(a.id), detail={"investor_id": inv.id})
     return {"investor_id": inv.id, "application": _application_row(a)}
+
+
+# ── app releases (the Android APK) ──────────────────────────────────────────
+
+MAX_APK_BYTES = 200 * 1024 * 1024
+
+
+def release_dir():
+    import os
+    from pathlib import Path
+    d = Path(os.getenv("APP_RELEASE_DIR", Path(__file__).resolve().parents[3] / "data" / "releases"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _release_row(r) -> dict:
+    return {"id": str(r.id), "platform": r.platform, "version_name": r.version_name,
+            "version_code": r.version_code, "filename": r.filename, "size_bytes": r.size_bytes,
+            "sha256": r.sha256, "notes": r.notes, "is_current": r.is_current,
+            "created_at": _iso(r.created_at)}
+
+
+@router.get("/releases/list")
+async def releases(db: AsyncSession = Depends(get_db)):
+    from backend.investor.models import AppRelease
+    rows = (await db.execute(select(AppRelease).order_by(desc(AppRelease.version_code)))).scalars().all()
+    return [_release_row(r) for r in rows]
+
+
+@router.post("/releases", status_code=201)
+async def upload_release(file: UploadFile = File(...), version_name: str = Form(..., max_length=32),
+                         version_code: int = Form(..., ge=1), notes: str | None = Form(None),
+                         make_current: bool = Form(True), admin: User = Depends(require_admin),
+                         db: AsyncSession = Depends(get_db)):
+    """Upload a signed APK. Its version code must be higher than every earlier
+    release: Android refuses to install a lower one over a higher one, so a
+    mistake here would strand every investor who already updated.
+
+    Streamed to disk with its SHA-256; the hash is published next to the
+    download. The file is checked to be a zip (every APK is one) — not a proof
+    of a valid signed build, which is EAS's job, but it stops the wrong file.
+    """
+    import hashlib
+    import re
+
+    from sqlalchemy import func as sfunc
+
+    from backend.investor.models import AppRelease
+    if not (file.filename or "").lower().endswith(".apk"):
+        raise HTTPException(status_code=400, detail="upload the .apk file from the EAS build")
+    if not re.fullmatch(r"\d+(\.\d+){0,3}", version_name):
+        raise HTTPException(status_code=400, detail="version name looks like 1.0.0")
+    highest = (await db.execute(select(sfunc.max(AppRelease.version_code))
+                                .where(AppRelease.platform == "android"))).scalar_one()
+    if highest is not None and version_code <= highest:
+        raise HTTPException(status_code=400,
+                            detail=f"version code must be higher than {highest} (the latest release)")
+
+    name = f"alphavantiq-{version_name}-{version_code}.apk"
+    path = release_dir() / name
+    digest, size, first = hashlib.sha256(), 0, b""
+    try:
+        with open(path, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                if not first:
+                    first = chunk[:4]
+                size += len(chunk)
+                if size > MAX_APK_BYTES:
+                    raise HTTPException(status_code=413, detail="larger than 200 MB — is this the right file?")
+                digest.update(chunk)
+                out.write(chunk)
+        if first != b"PK\x03\x04":
+            raise HTTPException(status_code=400, detail="that file is not an APK")
+    except HTTPException:
+        path.unlink(missing_ok=True)
+        raise
+
+    row = AppRelease(platform="android", version_name=version_name, version_code=version_code,
+                     filename=name, size_bytes=size, sha256=digest.hexdigest(), notes=notes,
+                     uploaded_by=admin.id, is_current=False)
+    db.add(row)
+    await db.flush()
+    if make_current:
+        await _make_current(db, row)
+    await fundmod.audit(db, actor_id=admin.id, action="release.uploaded", entity_type="app_release",
+                        entity_id=str(row.id), detail={"version": version_name, "code": version_code,
+                                                       "sha256": row.sha256, "current": make_current})
+    return _release_row(row)
+
+
+async def _make_current(db, row) -> None:
+    from sqlalchemy import update as supdate
+
+    from backend.investor.models import AppRelease
+    await db.execute(supdate(AppRelease).where(AppRelease.platform == row.platform).values(is_current=False))
+    row.is_current = True
+
+
+@router.post("/releases/{release_id}/current")
+async def set_current_release(release_id: int, admin: User = Depends(require_admin),
+                              db: AsyncSession = Depends(get_db)):
+    """Point the download button at an earlier build (e.g. to roll back)."""
+    from backend.investor.models import AppRelease
+    row = await db.get(AppRelease, release_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="release not found")
+    await _make_current(db, row)
+    await fundmod.audit(db, actor_id=admin.id, action="release.current", entity_type="app_release",
+                        entity_id=str(row.id), detail={"version": row.version_name})
+    return _release_row(row)
 
 
 # ── fund terms ───────────────────────────────────────────────────────────────

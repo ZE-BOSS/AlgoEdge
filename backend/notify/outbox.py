@@ -29,6 +29,13 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 
 RESEND_URL = "https://api.resend.com/emails"
+EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+
+# Investor emails that are also worth a phone notification. The push carries the
+# subject line only — never an amount's detail beyond it, since a notification
+# shows on a lock screen.
+PUSH_KINDS = {"deposit_confirmed", "deposit_rejected", "withdrawal_approved",
+              "withdrawal_paid", "withdrawal_declined", "statement", "closure_approved"}
 _pending: set[asyncio.Task] = set()
 _warned = False
 
@@ -123,6 +130,51 @@ async def _deliver_all(messages: list[Message]) -> None:
             await deliver(m)
         except Exception as exc:          # one bad message must not stop the rest
             logger.error(f"[EMAIL] {m.kind} to {m.to} crashed: {exc}")
+        if m.kind in PUSH_KINDS and m.investor_id and m.kind != "closure_approved":
+            try:
+                await push(m.investor_id, m.subject, "Open the app for details.", {"kind": m.kind})
+            except Exception as exc:
+                logger.error(f"[PUSH] {m.kind} to {m.investor_id} crashed: {exc}")
+
+
+def push_mode() -> str:
+    return "log" if os.getenv("PUSH_MODE", "live").strip().lower() == "log" else "live"
+
+
+async def push(investor_id: str, title: str, body: str, data: dict | None = None) -> int:
+    """Send a notification to every phone this investor has the app on.
+
+    Tokens Expo reports as DeviceNotRegistered (app uninstalled) are deleted, so
+    a dead phone is not retried forever. Returns how many were sent.
+    """
+    from sqlalchemy import delete, select
+
+    from backend.investor.models import InvestorDevice
+    factory = _session_factory
+    if factory is None:
+        from backend.data.database import async_session as factory
+    async with factory() as s:
+        tokens = (await s.execute(select(InvestorDevice.push_token)
+                                  .where(InvestorDevice.investor_id == investor_id))).scalars().all()
+        if not tokens:
+            return 0
+        if push_mode() == "log":
+            logger.info(f"[PUSH] (log mode) {len(tokens)} device(s) of {investor_id}: {title}")
+            return len(tokens)
+        payload = [{"to": t, "title": title, "body": body, "data": data or {}, "sound": "default",
+                    "channelId": "account"} for t in tokens]
+        async with httpx.AsyncClient(timeout=15, transport=_transport) as client:
+            r = await client.post(EXPO_PUSH_URL, json=payload, headers={"Accept": "application/json"})
+        if r.status_code >= 300:
+            raise RuntimeError(f"Expo push {r.status_code}: {r.text[:300]}")
+        dead = [t for t, ticket in zip(tokens, r.json().get("data", []))
+                if ticket.get("status") == "error"
+                and (ticket.get("details") or {}).get("error") == "DeviceNotRegistered"]
+        if dead:
+            await s.execute(delete(InvestorDevice).where(InvestorDevice.push_token.in_(dead)))
+            await s.commit()
+            logger.info(f"[PUSH] removed {len(dead)} uninstalled device(s)")
+        return len(tokens) - len(dead)
 
 
 async def deliver(m: Message) -> str:
