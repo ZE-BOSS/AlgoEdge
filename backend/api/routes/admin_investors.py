@@ -45,6 +45,7 @@ from backend.investor.models import (
     WITHDRAWAL_PAID,
     WITHDRAWAL_REQUESTED,
     Adjustment,
+    Application,
     Deposit,
     FundSettings,
     Investor,
@@ -218,6 +219,7 @@ async def overview(db: AsyncSession = Depends(get_db)):
             "exceptions": await _count(db, Withdrawal, Withdrawal.state == WITHDRAWAL_EXCEPTION),
             "to_pay": await _count(db, Withdrawal, Withdrawal.state == WITHDRAWAL_APPROVED),
             "closures": by_status.get("closing", 0),
+            "applications": await _count(db, Application, Application.status == "new"),
             "disclosures": await discmod.undisclosed_count(db),
         },
     }
@@ -808,6 +810,62 @@ async def email_log(investor_id: str | None = None, limit: int = Query(200, le=1
              "investor_id": r.investor_id, "state": r.state, "provider_id": r.provider_id,
              "error": r.error, "attachments": r.attachments, "created_at": _iso(r.created_at),
              "sent_at": _iso(r.sent_at)} for r in rows]
+
+
+# ── website applications ────────────────────────────────────────────────────
+
+class ApplicationStatus(BaseModel):
+    status: str = Field(pattern="^(new|contacted|declined)$")
+
+
+def _application_row(a) -> dict:
+    return {"id": str(a.id), "name": a.name, "email": a.email, "phone": a.phone, "country": a.country,
+            "amount_band": a.amount_band, "message": a.message, "status": a.status,
+            "investor_id": a.investor_id, "created_at": _iso(a.created_at)}
+
+
+@router.get("/applications/list")
+async def applications(status: str | None = None, db: AsyncSession = Depends(get_db)):
+    q = select(Application).order_by(desc(Application.created_at), desc(Application.id))
+    if status:
+        q = q.where(Application.status == status)
+    return [_application_row(a) for a in (await db.execute(q.limit(500))).scalars().all()]
+
+
+@router.post("/applications/{application_id}/status")
+async def application_status(application_id: int, body: ApplicationStatus,
+                             admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    a = await db.get(Application, application_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    if a.status == "accepted":
+        raise HTTPException(status_code=400, detail="this application already became an investor")
+    a.status, a.decided_by = body.status, admin.id
+    await fundmod.audit(db, actor_id=admin.id, action=f"application.{body.status}",
+                        entity_type="application", entity_id=str(a.id))
+    return _application_row(a)
+
+
+@router.post("/applications/{application_id}/accept", status_code=201)
+async def application_accept(application_id: int, admin: User = Depends(require_admin),
+                             db: AsyncSession = Depends(get_db)):
+    """Create the investor record from an application. No money moves and no
+    login is sent — that is the next step, from the investor's page."""
+    a = await db.get(Application, application_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    if a.status == "accepted":
+        raise HTTPException(status_code=400, detail="already accepted")
+    if (await db.execute(select(Investor.id).where(Investor.email == a.email))).first():
+        raise HTTPException(status_code=409, detail="an investor with that email already exists")
+    inv = Investor(id=str(uuid.uuid4()), name=a.name, email=a.email, phone=a.phone,
+                   country=a.country, status="pending")
+    db.add(inv)
+    a.status, a.investor_id, a.decided_by = "accepted", inv.id, admin.id
+    await db.flush()
+    await fundmod.audit(db, actor_id=admin.id, action="application.accepted",
+                        entity_type="application", entity_id=str(a.id), detail={"investor_id": inv.id})
+    return {"investor_id": inv.id, "application": _application_row(a)}
 
 
 # ── fund terms ───────────────────────────────────────────────────────────────

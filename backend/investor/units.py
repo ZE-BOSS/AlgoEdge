@@ -166,8 +166,12 @@ async def redeem(session, *, investor_id: str, amount, price, effective: date,
     if cash <= 0:
         raise LedgerError(f"a redemption must be positive, got {cash}")
 
-    wanted = navmod.units_for_amount(cash, price)
+    wanted = navmod.units_to_cancel(cash, price)
     held = await ledger_units(session, investor_id)
+    if held < wanted <= held + navmod.UNITS_Q:
+        # Paying out the whole holding's value: rounding up can ask for one
+        # quantum more than exists. Cancel what is there.
+        wanted = held
     if wanted > held:
         raise LedgerError(
             f"{investor_id} holds {held} units ({navmod.amount_for_units(held, price)}) "

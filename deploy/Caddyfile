@@ -1,0 +1,103 @@
+# Alphavantiq Capital — Caddy, in front of everything on the VPS.
+#
+# Four sites, each with an automatic Let's Encrypt certificate (issued the
+# first time a request arrives, renewed by Caddy — nothing to schedule):
+#
+#   alphavantiqcapital.com   landing/            the public website
+#   app.…                    investor-web/dist   the investor app (and the iPhone "app")
+#   admin.…                  frontend/dist       the admin console
+#   api.…                    127.0.0.1:8000      the FastAPI backend, NOT reachable any other way
+#
+# Settings come from the environment (set in ecosystem.config.js):
+#   ALGOEDGE_ROOT     repo path with FORWARD slashes, e.g. C:/Users/Administrator/Documents/AlgoEdge
+#   ACME_EMAIL        where Let's Encrypt sends expiry warnings
+#   ADMIN_ALLOW_IPS   space-separated IPs/CIDRs allowed to reach the admin console
+#                     and every non-investor API route. Default: everyone (set it!)
+#
+# Validate before (re)starting:   caddy validate --config deploy/Caddyfile
+# See docs/DEPLOY-INVESTOR-PLATFORM.md.
+
+{
+	email {$ACME_EMAIL}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+}
+
+(spa) {
+	encode zstd gzip
+	# hashed build assets never change: cache for a year; index.html never cached,
+	# so a new build is picked up on the next visit
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	@html path / /index.html
+	header @html Cache-Control "no-cache"
+	try_files {path} /index.html
+	file_server
+}
+
+www.alphavantiqcapital.com {
+	redir https://alphavantiqcapital.com{uri} permanent
+}
+
+alphavantiqcapital.com {
+	import security_headers
+	root * {$ALGOEDGE_ROOT}/landing
+	encode zstd gzip
+	header Content-Security-Policy "default-src 'self'; connect-src 'self' https://api.alphavantiqcapital.com; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+	file_server
+}
+
+app.alphavantiqcapital.com {
+	import security_headers
+	root * {$ALGOEDGE_ROOT}/investor-web/dist
+	header Content-Security-Policy "default-src 'self'; connect-src 'self' https://api.alphavantiqcapital.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+	# the service worker must never be cached, or an old one outlives a deploy
+	@sw path /sw.js
+	header @sw Cache-Control "no-cache"
+	import spa
+}
+
+admin.alphavantiqcapital.com {
+	import security_headers
+	@outside not remote_ip {$ADMIN_ALLOW_IPS:0.0.0.0/0 ::/0}
+	respond @outside "Not available from this network" 403
+	root * {$ALGOEDGE_ROOT}/frontend/dist
+	import spa
+}
+
+api.alphavantiqcapital.com {
+	import security_headers
+
+	# Everything except the investor app, the public website and the health check
+	# is the operators' API — trading, bot control, admin. Only the allow-list
+	# reaches it; the rest of the internet gets a 403 before FastAPI is involved.
+	@operator_outside {
+		not path /api/investor/* /api/public/* /api/health
+		not remote_ip {$ADMIN_ALLOW_IPS:0.0.0.0/0 ::/0}
+	}
+	respond @operator_outside "Not available from this network" 403
+
+	# APK uploads from the release manager can be large; everything else is small
+	@upload path /api/admin/investors/releases*
+	request_body @upload {
+		max_size 200MB
+	}
+	@not_upload not path /api/admin/investors/releases*
+	request_body @not_upload {
+		max_size 10MB
+	}
+
+	reverse_proxy 127.0.0.1:8000 {
+		# the real client address, for rate limits and the audit log
+		header_up X-Real-IP {remote_host}
+	}
+}

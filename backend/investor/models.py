@@ -523,3 +523,24 @@ class AdminDevice(Base):
     last_seen = Column(DateTime, server_default=func.now())
 
     __table_args__ = (UniqueConstraint("user_id", "fingerprint", name="uq_admin_device"),)
+
+
+# ── the public website (Phase 5) ─────────────────────────────────────────────
+
+class Application(Base):
+    """Someone applying through the website. Not an investor until the admin
+    creates one — an application moves no money and grants no access."""
+    __tablename__ = "investor_applications"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    name = Column(String(120), nullable=False)
+    email = Column(String(255), nullable=False, index=True)
+    phone = Column(String(40))
+    country = Column(String(80))
+    amount_band = Column(String(40))
+    message = Column(Text)
+    status = Column(String(16), nullable=False, default="new", index=True)  # new | contacted | accepted | declined
+    investor_id = Column(String(36))                                         # once accepted
+    ip = Column(String(64))
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    decided_by = Column(String(36))

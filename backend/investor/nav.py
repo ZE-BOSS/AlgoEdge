@@ -124,6 +124,21 @@ def units_for_amount(amount, nav_per_unit_value) -> Decimal:
     return units(money(amount) / price)
 
 
+def units_to_cancel(amount, nav_per_unit_value) -> Decimal:
+    """How many units must be cancelled to pay `amount` out — rounded UP.
+
+    The mirror of units_for_amount rounding DOWN on the way in. Either way the
+    sub-unit residue stays with the pool: rounding a cancellation down would pay
+    the leaver cash worth more than the units they give up, a hair at the
+    expense of everyone who stays, on every withdrawal and every fee.
+    """
+    from decimal import ROUND_CEILING
+    price = nav(nav_per_unit_value)
+    if price <= 0:
+        raise ValueError("cannot cancel units at a NAV of zero or less")
+    return (money(amount) / price).quantize(UNITS_Q, rounding=ROUND_CEILING)
+
+
 def amount_for_units(unit_count, nav_per_unit_value) -> Decimal:
     """What `unit_count` units are worth at this NAV."""
     return money(units(unit_count) * nav(nav_per_unit_value))

@@ -7,6 +7,7 @@ const STATE_TONE = {
   pending: 'yellow', requested: 'yellow', claimed_sent: 'yellow', approved: 'blue',
   exception_pending: 'yellow', closing: 'yellow', undisclosed: 'blue',
   rejected: 'red', declined: 'red', closed: 'red', hidden: 'red',
+  new: 'yellow', contacted: 'blue', accepted: 'green',
 };
 
 export function StateBadge({ state }) {

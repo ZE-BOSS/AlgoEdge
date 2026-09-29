@@ -410,7 +410,7 @@ Each phase ends with something usable, because a nine-week big-bang is how this 
 | **2. Admin console** | Investors section, all queues, disclosure, adjustments, audit log | 1–1.5 wk **Done** — `PHASE-2-ADMIN-CONSOLE-2026-09-29.md` |
 | **3. Investor web** | auth, dashboard, statements, deposit/withdrawal requests, trade list | 1.5–2 wk **Done** (PDF statements move to Phase 4) — `PHASE-3-INVESTOR-WEB-2026-09-29.md` |
 | **4. Email** | Resend, all templates, statements as PDF | 0.5 wk **Done**, with fees — `PHASE-4-FEES-EMAIL-STATEMENTS-2026-09-29.md` |
-| **5. Landing + domain** | public site, DNS, TLS, CORS, hardening | 1 wk |
+| **5. Landing + domain** | public site, DNS, TLS, CORS, hardening | 1 wk **Done** (DNS/firewall steps are yours: `docs/DEPLOY-INVESTOR-PLATFORM.md`) — `PHASE-5-LANDING-DOMAIN-2026-09-29.md` |
 | **6. Mobile** | Expo Android, EAS build, release manager, push | 1.5–2 wk |
 | **7. Hardening** | 2FA, rate limits, backups, integrity job, pen-test pass | 1 wk |
 

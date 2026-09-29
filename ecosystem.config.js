@@ -59,12 +59,26 @@ function resolvePython() {
 
 const PYTHON = resolvePython();
 
+// ── Behind Caddy (investor platform, Phase 5) ──────────────────────────────
+// ALGOEDGE_CADDY=1 switches to the production layout in
+// docs/DEPLOY-INVESTOR-PLATFORM.md:
+//   * the backend listens on 127.0.0.1 only — reachable through Caddy, never
+//     directly — and trusts Caddy's X-Forwarded-For, so rate limits and the
+//     audit log see the visitor's address rather than 127.0.0.1 for everyone
+//   * Caddy serves the sites on 80/443, so `vite preview` on :80 is not started
+// Without it, nothing changes from the layout this file always had.
+const BEHIND_CADDY = process.env.ALGOEDGE_CADDY === "1";
+const CADDY = process.env.CADDY_BIN || (isWindows ? "C:/caddy/caddy.exe" : "/usr/bin/caddy");
+const BACKEND_ARGS = BEHIND_CADDY
+  ? "-m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1"
+  : "-m uvicorn backend.main:app --host 0.0.0.0 --port 8000";
+
 module.exports = {
   apps: [
     {
       name: "algoedge-backend",
       script: PYTHON,
-      args: "-m uvicorn backend.main:app --host 0.0.0.0 --port 8000",
+      args: BACKEND_ARGS,
       cwd: __dirname,
       interpreter: "none",
       autorestart: true,
@@ -76,7 +90,7 @@ module.exports = {
         NODE_ENV: "production",
       },
     },
-    {
+    ...(BEHIND_CADDY ? [] : [{
       name: "algoedge-frontend",
       // `vite preview` serves frontend/dist — run `npm run build` first.
       script: path.resolve(__dirname, "frontend/node_modules/vite/bin/vite.js"),
@@ -88,6 +102,22 @@ module.exports = {
       env: {
         NODE_ENV: "production",
       },
-    },
+    }]),
+    ...(BEHIND_CADDY ? [{
+      name: "algoedge-caddy",
+      script: CADDY,
+      args: `run --config ${path.resolve(__dirname, "deploy/Caddyfile").replace(/\\/g, "/")} --adapter caddyfile`,
+      cwd: __dirname,
+      interpreter: "none",
+      autorestart: true,
+      watch: false,
+      env: {
+        // forward slashes, even on Windows: Caddy reads them fine and a
+        // backslash in a Caddyfile placeholder is an escape
+        ALGOEDGE_ROOT: __dirname.replace(/\\/g, "/"),
+        ACME_EMAIL: process.env.ACME_EMAIL || "",
+        ADMIN_ALLOW_IPS: process.env.ADMIN_ALLOW_IPS || "0.0.0.0/0 ::/0",
+      },
+    }] : []),
   ],
 };

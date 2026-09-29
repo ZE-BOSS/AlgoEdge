@@ -29,6 +29,7 @@ from backend.api.routes import (
     logs,
     fundamentals,
     investor_portal,
+    public,
     mt5_test,
     push,
     signals,
@@ -239,13 +240,23 @@ app = FastAPI(
 )
 
 # CORS — allow any frontend (Vercel, Netlify, etc.) to reach the local backend
+# CORS_STRICT=1 (production, behind Caddy) allows ONLY the configured sites.
+# Without it the development origins below are also allowed.
+_SITE_ORIGINS = [os.getenv(k, "").rstrip("/") for k in
+                 ("FRONTEND_URL", "ADMIN_APP_URL", "INVESTOR_APP_URL", "PUBLIC_SITE_URL")]
+if os.getenv("PUBLIC_SITE_URL"):
+    # the landing page is also reachable on www.
+    _SITE_ORIGINS.append(os.getenv("PUBLIC_SITE_URL").rstrip("/").replace("https://", "https://www.", 1))
+_STRICT = os.getenv("CORS_STRICT", "").lower() in ("1", "true", "yes")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o for o in [
-        os.getenv("FRONTEND_URL", ""),
-        os.getenv("INVESTOR_APP_URL", ""),
+    allow_origins=[o for o in _SITE_ORIGINS if o] if _STRICT else [o for o in [
+        *_SITE_ORIGINS,
         "http://localhost:5174",           # investor-web dev server
         "http://127.0.0.1:5174",
+        "http://localhost:5175",           # landing page, served locally
+        "http://127.0.0.1:5175",
         "http://52.201.102.37",
         "http://localhost:5173",
         "http://localhost:3000",
@@ -264,6 +275,7 @@ app.include_router(stats.router)
 app.include_router(admin.router)
 app.include_router(admin_investors.router)  # Investor platform, Phase 2
 app.include_router(investor_portal.router)   # Investor platform, Phase 3 (investor audience)
+app.include_router(public.router)            # Investor platform, Phase 5 (the public website)
 app.include_router(backtest.router)
 app.include_router(config.router)
 app.include_router(charts.router)

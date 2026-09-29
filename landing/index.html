@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Alphavantiq Capital — systematic trading, run like a fund</title>
+  <meta name="description" content="A systematic, risk-managed trading programme with unit pricing, monthly statements and a live, published track record." />
+  <meta name="theme-color" content="#0b1017" />
+  <meta property="og:title" content="Alphavantiq Capital" />
+  <meta property="og:description" content="Systematic trading, run like a fund: unit pricing, monthly statements, a live track record." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/config.js"></script>
+  <script src="/site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <a class="brand" href="#top" aria-label="Alphavantiq Capital home">
+    <img src="/mark.svg" alt="" width="28" height="28" />
+    <span>ALPHAVANTIQ<em>CAPITAL</em></span>
+  </a>
+  <nav aria-label="Sections">
+    <a href="#approach">Approach</a>
+    <a href="#performance">Performance</a>
+    <a href="#terms">Terms</a>
+    <a href="#faq">FAQ</a>
+  </nav>
+  <div class="nav-actions">
+    <a class="link" data-app-link href="#">Investor sign in</a>
+    <a class="btn btn-gold" href="#apply">Apply</a>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" id="top">
+    <p class="eyebrow">Systematic trading · Pooled capital</p>
+    <h1>A trading programme,<br />run like a fund.</h1>
+    <p class="lede">Your money buys units in a pooled, algorithmically traded portfolio. The unit price
+      moves with the results; you see every movement, a statement every month, and the same live
+      track record we show here.</p>
+    <div class="hero-cta">
+      <a class="btn btn-gold btn-lg" href="#apply">Apply to invest</a>
+      <a class="btn btn-ghost btn-lg" href="#performance">See the live record</a>
+    </div>
+    <dl class="hero-facts" id="hero-facts" aria-live="polite">
+      <div><dt>Minimum</dt><dd data-term="min">—</dd></div>
+      <div><dt>Lock-up</dt><dd data-term="lockup">—</dd></div>
+      <div><dt>Statements</dt><dd>Monthly</dd></div>
+    </dl>
+  </section>
+
+  <section class="band" id="how">
+    <h2 class="section-title">How it works</h2>
+    <ol class="steps">
+      <li><span class="step-n">1</span><h3>Apply</h3>
+        <p>Tell us about yourself. We reply within two working days and open your account.</p></li>
+      <li><span class="step-n">2</span><h3>Fund by bank transfer</h3>
+        <p>Send a transfer with your personal reference. When it lands we buy your units at that day's
+          price — the amount that arrived, on the day it arrived.</p></li>
+      <li><span class="step-n">3</span><h3>Follow it</h3>
+        <p>Your holding is units × the price. See it any time in the app, with every transaction, the
+          trades we publish, and a PDF statement each month.</p></li>
+      <li><span class="step-n">4</span><h3>Withdraw</h3>
+        <p>Request from the app; money is paid only to the bank account on file. Larger or earlier
+          requests are reviewed first — the rules are set out plainly below.</p></li>
+    </ol>
+  </section>
+
+  <section class="band split" id="approach">
+    <div>
+      <h2 class="section-title">Approach</h2>
+      <p class="big-copy">Systematic, multi-strategy and volatility-aware. Decisions are made by tested
+        rules, executed by software, and bounded by hard risk limits.</p>
+    </div>
+    <ul class="points">
+      <li><h3>Rules, not moods</h3><p>Every entry and exit comes from a strategy that was researched and
+        tested before it traded real money. Nothing is discretionary on the day.</p></li>
+      <li><h3>Risk first</h3><p>Position sizing, per-strategy risk caps and daily loss limits are enforced in
+        the trading system itself, not left to judgement.</p></li>
+      <li><h3>Several engines</h3><p>More than one strategy, across more than one market, so the programme
+        does not depend on a single idea working.</p></li>
+      <li><h3>Kept private</h3><p>We describe the approach, not the parameters. Publishing the rules would
+        be the fastest way to stop them working.</p></li>
+    </ul>
+  </section>
+
+  <section class="band" id="performance">
+    <div class="section-head">
+      <h2 class="section-title">Live performance</h2>
+      <p class="muted" id="perf-asof">Loading the latest figures…</p>
+    </div>
+    <div id="perf" class="perf" aria-live="polite">
+      <div class="stats">
+        <div class="stat"><span>Return since start</span><strong data-perf="return">—</strong></div>
+        <div class="stat"><span>Worst fall from a peak</span><strong data-perf="dd">—</strong></div>
+        <div class="stat"><span>Track record</span><strong data-perf="since">—</strong></div>
+      </div>
+      <figure class="chart-card">
+        <figcaption>Price per unit</figcaption>
+        <div class="chart" id="nav-chart"></div>
+      </figure>
+      <figure class="chart-card">
+        <figcaption>Monthly return</figcaption>
+        <div class="months" id="months"></div>
+      </figure>
+      <p class="fine" id="perf-note">Figures are the change in the fund's price per unit from live trading,
+        <strong>before fees</strong>; an investor's own return is lower by the fees they pay. These are not
+        backtests or simulations. Past performance does not guarantee future results.</p>
+    </div>
+  </section>
+
+  <section class="band" id="transparency">
+    <h2 class="section-title">What you will see</h2>
+    <div class="cards">
+      <article><h3>Your number, explained</h3><p>Units × price = your holding. The app shows the inputs,
+        not just the answer.</p></article>
+      <article><h3>Every movement</h3><p>Each deposit, withdrawal and fee is a line on your ledger, with
+        the price it happened at.</p></article>
+      <article><h3>Monthly statements</h3><p>A PDF every month that adds up on the page: opening value,
+        money in and out, result, fees, closing value.</p></article>
+      <article><h3>Published trades</h3><p>Closed trades with market, side, date and result — without the
+        strategy details that would give the edge away.</p></article>
+    </div>
+  </section>
+
+  <section class="band" id="terms">
+    <h2 class="section-title">Terms</h2>
+    <div class="terms">
+      <div><span>Minimum investment</span><strong data-term="min">—</strong></div>
+      <div><span>Management fee</span><strong data-term="mgmt">—</strong></div>
+      <div><span>Performance fee</span><strong data-term="perf">—</strong>
+        <em>only on profit above your own previous high point</em></div>
+      <div><span>Lock-up</span><strong data-term="lockup">—</strong><em>from your first deposit</em></div>
+      <div><span>Standard withdrawal limit</span><strong data-term="cap">—</strong>
+        <em>larger requests are reviewed, not refused</em></div>
+      <div><span>Notice</span><strong data-term="notice">—</strong><em>to pay a standard withdrawal</em></div>
+    </div>
+    <p class="fine">Terms apply to money from the day it is committed; a later change to the terms does not
+      alter money already invested. Amounts in US dollars.</p>
+  </section>
+
+  <section class="band" id="faq">
+    <h2 class="section-title">Questions</h2>
+    <div class="faq">
+      <details><summary>What exactly do I own?</summary>
+        <p>Units in the pool. Everyone's units are priced the same, so when the pool gains or loses, every
+          holding moves by the same percentage. Someone who joins later buys at the later price, so they
+          never share in profit made before their money arrived — and you never share in theirs.</p></details>
+      <details><summary>How do I get my money out?</summary>
+        <p>Request a withdrawal in the app. It is paid to the bank account we hold for you — never to an
+          account typed into the request. Requests within the standard limit are paid within the notice
+          period; larger or earlier ones are reviewed with you first.</p></details>
+      <details><summary>What if the fund loses money?</summary>
+        <p>Your holding falls with the unit price. The performance fee is charged only on profit above your
+          own previous high point, so after a loss nothing is charged until that loss has been earned back.
+          You can lose money investing; only invest what you can leave invested through a bad period.</p></details>
+      <details><summary>How are fees taken?</summary>
+        <p>Monthly, by cancelling a small number of your units at the month-end price. Each fee is a line on
+          your statement, split into management and performance.</p></details>
+      <details><summary>Is there an app?</summary>
+        <p>Yes. On Android, install it from the download link below. On iPhone, open the investor site in
+          Safari and choose Share → Add to Home Screen.</p></details>
+      <details><summary>Can I close my account?</summary>
+        <p>Yes, from the app. We sell your units, pay the proceeds to your account on file, send a final
+          statement, and delete your personal details.</p></details>
+    </div>
+  </section>
+
+  <section class="band app-band" id="app">
+    <div>
+      <h2 class="section-title">The investor app</h2>
+      <p>Your holding, statements and requests, on your phone.</p>
+    </div>
+    <div class="app-actions">
+      <a class="btn btn-gold" id="apk-link" href="#" hidden>Download for Android <span id="apk-version"></span></a>
+      <p class="muted small" id="apk-missing">Android download coming soon.</p>
+      <p class="muted small">iPhone: open <a data-app-link href="#">the investor site</a> in Safari, then Share → Add to Home Screen.</p>
+    </div>
+  </section>
+
+  <section class="band apply" id="apply">
+    <div>
+      <h2 class="section-title">Apply to invest</h2>
+      <p>We read every application and reply within two working days. Applying commits you to nothing.</p>
+    </div>
+    <form id="apply-form" novalidate>
+      <label>Full name<input name="name" autocomplete="name" required minlength="2" maxlength="120" /></label>
+      <label>Email<input name="email" type="email" autocomplete="email" required maxlength="255" /></label>
+      <div class="two">
+        <label>Phone <span class="opt">(optional)</span><input name="phone" type="tel" autocomplete="tel" maxlength="40" /></label>
+        <label>Country<input name="country" autocomplete="country-name" maxlength="80" /></label>
+      </div>
+      <label>How much are you thinking of investing?
+        <select name="amount_band">
+          <option value="">Choose…</option>
+          <option>Under $1,000</option><option>$1,000 – $5,000</option>
+          <option>$5,000 – $25,000</option><option>$25,000 – $100,000</option><option>Over $100,000</option>
+        </select></label>
+      <label>Anything you'd like us to know <span class="opt">(optional)</span>
+        <textarea name="message" rows="3" maxlength="2000"></textarea></label>
+      <label class="hp" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off" /></label>
+      <label class="check"><input type="checkbox" name="consent" required />
+        <span>I understand that investing involves risk, that I can lose money, and that past performance
+          does not guarantee future results.</span></label>
+      <button class="btn btn-gold btn-lg" type="submit">Send application</button>
+      <p class="form-msg" role="status" id="apply-msg"></p>
+    </form>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="brand"><img src="/mark.svg" alt="" width="22" height="22" /><span>ALPHAVANTIQ<em>CAPITAL</em></span></div>
+  <p class="fine"><strong>Risk warning.</strong> Trading leveraged and volatile instruments carries a high
+    level of risk. The value of your investment can fall as well as rise, and you may get back less than you
+    put in. Past performance does not guarantee future results. Nothing on this site is personal financial
+    advice.</p>
+  <p class="fine" id="regulatory" hidden></p>
+  <p class="fine">© <span id="year"></span> Alphavantiq Capital · <a id="contact" href="#">Contact</a> ·
+    <a data-app-link href="#">Investor sign in</a></p>
+</footer>
+</body>
+</html>

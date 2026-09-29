@@ -421,3 +421,10 @@ def test_a_correction_cannot_take_an_investor_negative():
                                        reason="too big", created_by="admin")
         await engine.dispose()
     run(go())
+
+
+def test_units_in_round_down_and_units_out_round_up():
+    """Both directions leave the sub-unit residue with the pool: a deposit
+    never buys a sliver nobody paid for, and a payout never takes one."""
+    assert navmod.units_for_amount(D("1.00"), D("3")) == D("0.33333333")
+    assert navmod.units_to_cancel(D("1.00"), D("3")) == D("0.33333334")

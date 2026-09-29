@@ -370,6 +370,9 @@ export const inv = {
   closeFees: (data) => api.post(`${INV}/fees/close`, data),
   feesPaid: (data) => api.post(`${INV}/fees/paid`, data),
   feePeriods: () => api.get(`${INV}/fees/periods`),
+  applications: (status) => api.get(`${INV}/applications/list`, { params: status ? { status } : {} }),
+  applicationStatus: (id, status) => api.post(`${INV}/applications/${id}/status`, { status }),
+  acceptApplication: (id) => api.post(`${INV}/applications/${id}/accept`),
 };
 
 export default api;
