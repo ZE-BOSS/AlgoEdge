@@ -39,7 +39,11 @@ CB_STATE_FILE = "backend/data/cb_state.json"
 # user's geography.
 #
 # This shifts the BOUNDARY, not the clock: timestamps are still stored in UTC.
-DEFAULT_ACCOUNTING_UTC_OFFSET_HOURS = 1.0     # West Africa Time (WAT)
+# REVERTED 2026-09-29 to 0.0 (UTC), the boundary the bot always used before
+# that morning. The user's West Africa Time is for what they SEE (dashboards,
+# statements); the trading bot's limits keep the UTC day they were tuned on.
+# An account can still opt in with accounting_utc_offset_hours.
+DEFAULT_ACCOUNTING_UTC_OFFSET_HOURS = 0.0     # UTC
 
 
 def _utc_now_str() -> str:
@@ -994,7 +998,7 @@ class CircuitBreaker:
         return now + timedelta(hours=self.accounting_utc_offset_hours)
 
     def _check_daily_reset(self, current_time: datetime | None = None):
-        """Reset daily counters at the start of the accounting day (WAT by default)."""
+        """Reset daily counters at the start of the accounting day (UTC by default)."""
         now = self._accounting_time(current_time)
         if hasattr(now, "date"):
             today = now.date()

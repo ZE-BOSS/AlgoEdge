@@ -27,6 +27,18 @@ logger = get_logger(__name__)
 
 # Cached broker UTC offset in hours (None = not yet measured).
 _SERVER_OFFSET_CACHE: float | None = None
+_OVERRIDE_CHECKED = False
+_PINNED_CHECK: dict = {}
+
+
+def server_offset_status() -> dict:
+    """What the bot is using to turn broker bar times into UTC, for /api/health.
+    Never calls MT5: it reports what has already been decided."""
+    override = os.environ.get("ALGOEDGE_MT5_SERVER_UTC_OFFSET")
+    if override is not None and override.strip() != "":
+        return {"source": "env", "hours": _PINNED_CHECK.get("pinned", override),
+                "bars_say": _PINNED_CHECK.get("measured")}
+    return {"source": "detected", "hours": _SERVER_OFFSET_CACHE}
 
 # Executor for blocking MT5 calls — single worker to serialize MT5 access
 # Aliased to the process-wide single MT5 thread. This module used to own a
@@ -169,14 +181,37 @@ def detect_server_utc_offset_hours() -> float:
       2. Live measurement: the gap between the server's clock and true UTC
       3. 0.0 — assume already-UTC, and warn
     """
+    global _SERVER_OFFSET_CACHE, _OVERRIDE_CHECKED
     override = os.environ.get("ALGOEDGE_MT5_SERVER_UTC_OFFSET")
-    if override is not None:
+    if override is not None and override.strip() != "":
         try:
-            return float(override)
+            pinned = float(override)
         except ValueError:
             logger.warning(f"[DATA] Invalid ALGOEDGE_MT5_SERVER_UTC_OFFSET={override!r}; ignoring.")
+        else:
+            # A pinned offset is right for ONE broker. +3 is FundedNext's clock;
+            # left in .env after switching the terminal to Deriv (UTC+0) it made
+            # every session strategy trade three hours late (2026-09-29). So once
+            # per process, compare it with what the bars say and shout if they
+            # disagree -- the pin still wins, because it is an explicit choice.
+            if not _OVERRIDE_CHECKED:
+                _OVERRIDE_CHECKED = True
+                try:
+                    measured = _offset_from_volume_profile()
+                except Exception:
+                    measured = None
+                if measured is not None and measured != pinned:
+                    logger.warning(
+                        f"[DATA] ALGOEDGE_MT5_SERVER_UTC_OFFSET is pinned to {pinned:+.1f}h but this "
+                        f"broker's bars put the New York open at {measured:+.1f}h. Every session "
+                        f"strategy is trading {pinned - measured:+.1f}h off. Remove the line from "
+                        f".env (or set it to {measured:g}) and restart.")
+                else:
+                    logger.info(f"[DATA] MT5 server UTC offset pinned by .env: {pinned:+.1f}h"
+                                + (" (matches the bars)" if measured is not None else ""))
+                _PINNED_CHECK["pinned"], _PINNED_CHECK["measured"] = pinned, measured
+            return pinned
 
-    global _SERVER_OFFSET_CACHE
     if _SERVER_OFFSET_CACHE is not None:
         return _SERVER_OFFSET_CACHE
 

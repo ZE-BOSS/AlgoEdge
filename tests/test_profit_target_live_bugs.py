@@ -171,12 +171,22 @@ def test_a_per_trade_target_never_pauses_whatever_the_action_says():
         assert ok and not cb.is_paused, f"{action}: TRADE scope must not pause"
 
 
-# ── 4. the accounting day is West African, not UTC ──────────────────────────
-def test_the_day_rolls_over_at_midnight_wat_not_midnight_utc():
-    """23:30 UTC is 00:30 the NEXT day in WAT, so the day must already have
-    turned. Under the old UTC boundary it had not, and the last half hour of
-    the WAT day was counted against the previous day's limits."""
+# ── 4. the accounting day: UTC by default, WAT on request ──────────────────
+def test_the_default_trading_day_is_utc_as_it_always_was():
+    """Restored 2026-09-29: the bot's limits roll at midnight UTC unless an
+    account opts in to another offset."""
     cb = _breaker()
+    cb.daily_pnl = 99.0
+    cb._check_daily_reset(datetime(2026, 9, 29, 23, 30, tzinfo=timezone.utc))
+    assert cb.daily_pnl == 99.0, "the UTC day has not turned yet"
+    cb._check_daily_reset(datetime(2026, 9, 30, 0, 5, tzinfo=timezone.utc))
+    assert cb.daily_pnl == 0.0
+
+
+def test_the_day_rolls_over_at_midnight_wat_when_an_account_asks_for_it():
+    """23:30 UTC is 00:30 the NEXT day in WAT, so with offset 1 the day must
+    already have turned."""
+    cb = _breaker(accounting_utc_offset_hours=1.0)
     cb.daily_pnl = 250.0
     cb._check_daily_reset(datetime(2026, 9, 29, 22, 0, tzinfo=timezone.utc))   # 23:00 WAT
     assert cb.daily_pnl == 250.0, "still the same WAT day"
@@ -195,13 +205,13 @@ def test_the_offset_is_configurable_and_utc_is_still_available():
 def test_a_naive_backtest_bar_time_is_treated_as_utc():
     """Backtest bar times arrive without a tzinfo. Attaching UTC is what makes a
     backtest day and a live day the same day."""
-    cb = _breaker()
+    cb = _breaker(accounting_utc_offset_hours=1.0)
     shifted = cb._accounting_time(datetime(2026, 9, 29, 23, 30))
     assert shifted.hour == 0 and shifted.day == 30
 
 
 def test_week_and_month_use_the_same_boundary():
-    cb = _breaker()
+    cb = _breaker(accounting_utc_offset_hours=1.0)
     # 30 Sep 23:30 UTC is 1 Oct 00:30 WAT — a new month, and a new ISO week.
     cb.monthly_pnl, cb.weekly_pnl = 400.0, 400.0
     when = datetime(2026, 9, 30, 23, 30, tzinfo=timezone.utc)

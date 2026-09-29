@@ -159,3 +159,53 @@ def test_bars_shift_to_true_utc_by_the_detected_offset(monkeypatch):
     assert int(out["time"].iloc[0]) == server - 3 * 3600
     got = datetime.fromtimestamp(int(out["time"].iloc[0]), timezone.utc).astimezone(NY)
     assert got.strftime("%H:%M") == "09:30", f"the cash open landed at {got:%H:%M} New York"
+
+
+# ── a pin left over from another broker ─────────────────────────────────────
+#
+# 2026-09-29: ALGOEDGE_MT5_SERVER_UTC_OFFSET=3 was FundedNext's clock. After the
+# terminal was switched to Deriv (UTC+0) it stayed in .env and every session
+# strategy traded three hours late, with nothing in the log to say why.
+
+class _Log:
+    def __init__(self):
+        self.warnings, self.infos = [], []
+
+    def warning(self, m, *a, **k):
+        self.warnings.append(m)
+
+    def info(self, m, *a, **k):
+        self.infos.append(m)
+
+    def debug(self, *a, **k):
+        pass
+
+
+def test_a_pin_that_contradicts_the_bars_is_used_but_shouted_about(monkeypatch):
+    log = _Log()
+    monkeypatch.setattr(df_mod, "logger", log)
+    monkeypatch.setattr(df_mod, "mt5", FakeMT5(0.0))            # a UTC+0 broker
+    monkeypatch.setenv("ALGOEDGE_MT5_SERVER_UTC_OFFSET", "3")    # FundedNext's value
+    monkeypatch.setattr(df_mod, "_OVERRIDE_CHECKED", False)
+    monkeypatch.setattr(df_mod, "_PINNED_CHECK", {})
+    assert df_mod.detect_server_utc_offset_hours() == 3.0       # the explicit pin still wins
+    assert any("pinned to +3.0h" in m and "+0.0h" in m and "+3.0h off" in m for m in log.warnings)
+    status = df_mod.server_offset_status()
+    assert status["source"] == "env" and status["hours"] == 3.0 and status["bars_say"] == 0.0
+
+
+def test_a_pin_that_matches_the_bars_is_quiet(monkeypatch):
+    log = _Log()
+    monkeypatch.setattr(df_mod, "logger", log)
+    monkeypatch.setattr(df_mod, "mt5", FakeMT5(3.0))
+    monkeypatch.setenv("ALGOEDGE_MT5_SERVER_UTC_OFFSET", "3")
+    monkeypatch.setattr(df_mod, "_OVERRIDE_CHECKED", False)
+    monkeypatch.setattr(df_mod, "_PINNED_CHECK", {})
+    assert df_mod.detect_server_utc_offset_hours() == 3.0
+    assert not log.warnings and any("matches the bars" in m for m in log.infos)
+
+
+def test_with_no_pin_the_status_reports_the_detected_value(monkeypatch):
+    monkeypatch.setattr(df_mod, "mt5", FakeMT5(0.0))
+    assert df_mod.detect_server_utc_offset_hours() == 0.0
+    assert df_mod.server_offset_status() == {"source": "detected", "hours": 0.0}

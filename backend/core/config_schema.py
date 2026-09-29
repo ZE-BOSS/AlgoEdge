@@ -650,15 +650,14 @@ class RiskParams:
     target that did not close the trade would mean nothing, and one that paused
     the slot would end the day on the first winner."""
 
-    accounting_utc_offset_hours: float = 1.0
+    accounting_utc_offset_hours: float = 0.0
     """The hour offset from UTC at which this account's DAY, WEEK and MONTH roll
     over, for every daily/weekly/monthly limit and profit target.
 
-    1.0 is West Africa Time, which has no daylight saving, so a fixed offset is
-    exact. Before 2026-09-29 every counter rolled at midnight UTC — 1am WAT —
-    so "today's profit" reset an hour into the trading day. Deriv's synthetics
-    trade 24/7, so there is no session close to anchor to and the boundary has
-    to be chosen deliberately.
+    0.0 (UTC) is the default: the boundary the bot has always used, restored on
+    2026-09-29 after a brief change to West Africa Time. It is a bot setting
+    only; what the dashboards SHOW is not affected by it. Set 1.0 to roll this
+    account's limits at midnight WAT instead.
 
     This moves the BOUNDARY only. Timestamps are still stored in UTC."""
 

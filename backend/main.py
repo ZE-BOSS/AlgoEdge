@@ -337,10 +337,23 @@ def _running_commit() -> str | None:
 _COMMIT = _running_commit()
 
 
+def _server_clock_status():
+    """How broker bar times are turned into UTC. Reads only what the data
+    fetcher has already decided; never calls the terminal."""
+    try:
+        from backend.mt5.data_fetcher import server_offset_status
+        return server_offset_status()
+    except Exception:
+        return None
+
+
 @app.get("/api/health")
 async def health_check():
-    """Basic health check endpoint. `commit` is the code version running."""
-    return {"status": "ok", "service": "AlgoEdge Backend", "version": "1.0.0", "commit": _COMMIT}
+    """Basic health check endpoint. `commit` is the code version running;
+    `server_clock` is how bar times become UTC. Two bots that should trade
+    together must run the same commit, each with its own server's clock."""
+    return {"status": "ok", "service": "AlgoEdge Backend", "version": "1.0.0", "commit": _COMMIT,
+            "server_clock": _server_clock_status()}
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
