@@ -359,9 +359,9 @@ everything in the Vercel dashboard → the domain → DNS:
 
 | Type | Name | Value |
 |---|---|---|
-| A | `admin` | `16.60.51.87` |
-| A | `app` | `16.60.51.87` |
-| A | `api` | `16.60.51.87` |
+| A | `admin` | `18.135.178.117` |
+| A | `app` | `18.135.178.117` |
+| A | `api` | `18.135.178.117` |
 | A | `@` | landing page host |
 
 **Option B — move DNS to Hostinger.** In Hostinger → DNS/Nameservers → change

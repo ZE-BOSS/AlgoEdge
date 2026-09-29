@@ -21,7 +21,7 @@ chain commands with `;`.
 
 ## 0. Before you start: check the server's address
 
-The records below point at **`16.60.51.87`**. That address must never change.
+The records below point at **`18.135.178.117`**. That address must never change.
 
 1. Open **AWS Console → EC2 → Elastic IPs**.
 2. Check that this address is an **Elastic IP** associated with the instance.
@@ -46,11 +46,11 @@ Hostinger have no effect. You chose Hostinger, so move the nameservers there.
 
 | Type | Name | Points to | TTL |
 |---|---|---|---|
-| A | `@` | `16.60.51.87` | 300 |
-| A | `www` | `16.60.51.87` | 300 |
-| A | `app` | `16.60.51.87` | 300 |
-| A | `admin` | `16.60.51.87` | 300 |
-| A | `api` | `16.60.51.87` | 300 |
+| A | `@` | `18.135.178.117` | 300 |
+| A | `www` | `18.135.178.117` | 300 |
+| A | `app` | `18.135.178.117` | 300 |
+| A | `admin` | `18.135.178.117` | 300 |
+| A | `api` | `18.135.178.117` | 300 |
 | CAA | `@` | `0 issue "letsencrypt.org"` | 3600 |
 
 These are plain **A records**. Do *not* use the "Subdomains" tab; that is for
@@ -195,7 +195,7 @@ their browser. On the new console, go to **Settings → Connection** and set it 
 | the same from your phone on mobile data | **403 Not available from this network** |
 | `https://api.alphavantiqcapital.com/api/health` | `{"status":"ok",…}` |
 | `https://api.alphavantiqcapital.com/api/bot/status` from phone data | **403** |
-| `http://16.60.51.87:8000` from outside | times out |
+| `http://18.135.178.117:8000` from outside | times out |
 | Admin → Investors → an investor → **Email invitation** | Audit → Emails shows **sent** with a Resend id |
 | https://www.ssllabs.com/ssltest/ on each host | A or A+ |
 
