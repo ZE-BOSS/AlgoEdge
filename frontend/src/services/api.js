@@ -362,6 +362,10 @@ export const inv = {
     { params: poolEquity ? { pool_equity: poolEquity } : {} }),
   auditLog: (params) => api.get(`${INV}/audit/log`, { params }),
   adjustments: (params) => api.get(`${INV}/audit/adjustments`, { params }),
+  feePreview: (year, month) => api.get(`${INV}/fees/preview`, { params: { year, month } }),
+  closeFees: (data) => api.post(`${INV}/fees/close`, data),
+  feesPaid: (data) => api.post(`${INV}/fees/paid`, data),
+  feePeriods: () => api.get(`${INV}/fees/periods`),
 };
 
 export default api;

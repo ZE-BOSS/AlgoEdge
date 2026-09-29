@@ -309,8 +309,14 @@ class FeeAccrual(Base):
     fee_amount = Column(MONEY, nullable=False)
     high_water_mark = Column(NAV)                    # performance fees only
 
-    state = Column(String(20), nullable=False, default="accrued")   # accrued | charged | waived
+    # charged: units cancelled, money still in the broker account (a liability)
+    # paid:    the manager has taken it out of the broker account
+    # waived:  calculated and recorded, deliberately not charged
+    state = Column(String(20), nullable=False, default="accrued")
     charged_at = Column(DateTime)
+    paid_at = Column(DateTime)
+    days = Column(Integer)                           # days the fee covers (management)
+    decided_by = Column(String(36))
     created_at = Column(DateTime, server_default=func.now())
 
     __table_args__ = (

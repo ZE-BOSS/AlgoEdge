@@ -362,7 +362,14 @@ def test_requesting_closure_stops_new_withdrawals_and_reaches_the_admin():
         async with App() as a:
             iid, ada = await _funded_long_ago_with_profit(a)
             r = await a.inv("POST", "/closure", ada, {"reason": "moving abroad"})
-            assert r.status_code == 200 and r.json()["quote"]["net_payable"] == "1100.00"
+            quote = r.json()["quote"]
+            assert r.status_code == 200 and quote["gross_value"] == "1100.00"
+            # this month's fees come off, and last month's must be charged first
+            assert D(quote["fees_owed"]) > 0 and D(quote["net_payable"]) < D("1100")
+            assert any("have not been charged" in b for b in quote["blockers"])
+            last = navmod.accounting_date().replace(day=1) - timedelta(days=1)
+            closed = await a.admin("POST", "/fees/close", {"year": last.year, "month": last.month})
+            assert closed.status_code == 201, closed.text
             assert (await a.inv("POST", "/closure", ada, {})).status_code == 400
             assert (await a.inv("POST", "/withdrawals", ada, {"amount": "10"})).status_code == 400
             assert len((await a.admin("GET", "/queues/closures")).json()) == 1

@@ -148,6 +148,7 @@ class ApproveWithdrawal(BaseModel):
 
 class PayWithdrawal(BaseModel):
     reference: str = Field(min_length=1)
+    on: date | None = None           # the day the transfer went out; default today
 
 
 class Snapshot(BaseModel):
@@ -568,7 +569,8 @@ async def pay_withdrawal(withdrawal_id: int, body: PayWithdrawal,
                          db: AsyncSession = Depends(get_db)):
     with refusals():
         w = await fundmod.mark_withdrawal_paid(db, withdrawal_id=withdrawal_id,
-                                               actor_id=admin.id, reference=body.reference)
+                                               actor_id=admin.id, reference=body.reference,
+                                               on=body.on)
     return _withdrawal_row(w)
 
 
@@ -643,6 +645,62 @@ async def take_snapshot(body: Snapshot, admin: User = Depends(require_admin),
                                     "nav": _s(snap.nav_per_unit), "replaced": old_nav,
                                     "reason": body.reason})
     return _snapshot_row(snap)
+
+
+# ── fees ─────────────────────────────────────────────────────────────────────
+
+class FeePeriod(BaseModel):
+    year: int = Field(ge=2020, le=2100)
+    month: int = Field(ge=1, le=12)
+    waive: list[str] = Field(default_factory=list)   # investor ids: recorded, not charged
+
+
+class FeesPaid(BaseModel):
+    # the exact period, as listed by /fees/periods: a month, or the part-month
+    # charged when an account closed
+    period_start: date
+    period_end: date
+    reference: str | None = None
+    on: date | None = None           # the day the fees were withdrawn; default today
+
+
+@router.get("/fees/preview")
+async def fee_preview(year: int = Query(..., ge=2020, le=2100), month: int = Query(..., ge=1, le=12),
+                      db: AsyncSession = Depends(get_db)):
+    """Every investor's fees for a month, calculated and not charged."""
+    from backend.investor import fees as feesmod
+    start, end = feesmod.month_period(year, month)
+    with refusals():
+        return await feesmod.preview(db, start, end)
+
+
+@router.post("/fees/close", status_code=201)
+async def fee_close(body: FeePeriod, admin: User = Depends(require_admin),
+                    db: AsyncSession = Depends(get_db)):
+    """Charge a month's fees. Once per month; refused if already done."""
+    from backend.investor import fees as feesmod
+    start, end = feesmod.month_period(body.year, body.month)
+    if end >= navmod.accounting_date():
+        raise HTTPException(status_code=400, detail="a month can be closed once it has ended")
+    with refusals():
+        return await feesmod.close_period(db, start, end, actor_id=admin.id, waive=set(body.waive))
+
+
+@router.post("/fees/paid")
+async def fee_paid(body: FeesPaid, admin: User = Depends(require_admin),
+                   db: AsyncSession = Depends(get_db)):
+    """The manager has withdrawn the month's fees from the broker account."""
+    from backend.investor import fees as feesmod
+    with refusals():
+        n = await feesmod.mark_paid(db, body.period_start, body.period_end, actor_id=admin.id, reference=body.reference,
+                                     on=body.on)
+    return {"rows": n}
+
+
+@router.get("/fees/periods")
+async def fee_periods(db: AsyncSession = Depends(get_db)):
+    from backend.investor import fees as feesmod
+    return await feesmod.periods(db)
 
 
 # ── fund terms ───────────────────────────────────────────────────────────────

@@ -100,7 +100,8 @@ function Withdrawals({ state, empty }) {
                     <div className="inv-actions">
                       {toPay ? (
                         <ActionForm label="Mark paid" icon={Banknote} tone="primary" compact
-                                    fields={[{ name: 'reference', label: 'Transfer reference', required: true }]}
+                                    fields={[{ name: 'reference', label: 'Transfer reference', required: true },
+                                              { name: 'on', label: 'Day it went out', type: 'date', hint: 'Blank = today.' }]}
                                     onSubmit={(b) => pay.mutateAsync({ id: r.id, ...b })} />
                       ) : (
                         <>

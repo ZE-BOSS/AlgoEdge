@@ -428,14 +428,17 @@ def test_closure_pays_out_zeroes_units_and_erases_the_person_not_the_history():
 
             wid = await _withdrawal(h, iid, D("50"), justification="x")
             quote = (await h.get(f"/{iid}/closure")).json()
-            assert quote["net_payable"] == "1100.00" and quote["blockers"]
+            # $1,100 less this month's fees: management 1100 x 2% x 1/365 = 0.06,
+            # performance 20% x (100.00 - 0.06) = 19.99
+            assert quote["fees_owed"] == "20.05" and quote["net_payable"] == "1079.95"
+            assert quote["blockers"]
             blocked = await h.post(f"/{iid}/closure/approve", {"payment_reference": "TX9"})
             assert blocked.status_code == 400 and "decide them first" in blocked.json()["detail"]
 
             await h.post(f"/withdrawals/{wid}/decline", {"reason": "closing instead"})
             r = await h.post(f"/{iid}/closure/approve", {"payment_reference": "TX9"})
             assert r.status_code == 200, r.text
-            assert r.json()["amount_paid"] == "1100.00"
+            assert r.json()["amount_paid"] == "1079.95"
 
             detail = (await h.get(f"/{iid}")).json()
             inv = detail["investor"]
@@ -444,7 +447,7 @@ def test_closure_pays_out_zeroes_units_and_erases_the_person_not_the_history():
             assert inv["phone"] is None and inv["payout_account_number"] is None
             assert D(detail["statement"]["units"]) == 0
             # history survives: subscribe + redeem still in the ledger
-            assert [t["kind"] for t in detail["ledger"]] == ["SUBSCRIBE", "REDEEM"]
+            assert [t["kind"] for t in detail["ledger"]] == ["SUBSCRIBE", "FEE", "FEE", "REDEEM"]
             paid = [w for w in detail["withdrawals"] if w["state"] == "paid"]
             assert paid[0]["payment_reference"] == "TX9"
             assert all(w["destination_account_number"] is None for w in detail["withdrawals"])
@@ -455,7 +458,9 @@ def test_closure_pays_out_zeroes_units_and_erases_the_person_not_the_history():
 
             # the remaining investor is untouched and the books still balance
             assert (await h.get(f"/{other}")).json()["statement"]["current_value"] == "1100.00"
-            rec = (await h.get("/reconciliation", params={"pool_equity": "1100"})).json()
+            # the broker still holds Ada's $20.05 of fees until the manager takes
+            # them out: 2200 - 1079.95 paid = 1120.05, of which 20.05 is owed
+            rec = (await h.get("/reconciliation", params={"pool_equity": "1120.05"})).json()
             assert rec["healthy"] is True, rec
     run(go())
 
@@ -517,4 +522,27 @@ def test_a_zero_balance_is_0_not_scientific_notation():
             assert all("E" not in r["units"] for r in rows)
             rec = (await h.get("/reconciliation", params={"pool_equity": "0"})).json()
             assert "E" not in rec["units_in_issue"], rec["units_in_issue"]
+    run(go())
+
+
+def test_fees_preview_close_once_and_mark_paid():
+    async def go():
+        async with Harness() as h:
+            await h.investor("Ada", deposit=D("1000"), on=date(2026, 5, 31))
+            assert (await h.get("/fees/preview", params={"year": 2026, "month": 6})).status_code == 400
+            await h.post("/nav/snapshot", {"pool_equity": "1100", "on": "2026-06-30"})
+            pv = (await h.get("/fees/preview", params={"year": 2026, "month": 6})).json()
+            assert pv["lines"][0]["name"] == "Ada" and D(pv["total"]) > 0 and not pv["already_closed"]
+            assert await h.count(Adjustment) == 0
+            r = await h.post("/fees/close", {"year": 2026, "month": 6})
+            assert r.status_code == 201 and r.json()["charged"] == pv["total"]
+            assert (await h.post("/fees/close", {"year": 2026, "month": 6})).status_code == 400
+            # a month that has not ended cannot be closed
+            assert (await h.post("/fees/close", {"year": 2099, "month": 1})).status_code == 400
+            periods = (await h.get("/fees/periods")).json()
+            assert periods[0]["charged"] == pv["total"] and periods[0]["paid"] == "0.00"
+            assert (await h.post("/fees/paid", {"period_start": "2026-06-01", "period_end": "2026-06-30",
+                                                "on": "2026-07-03",
+                                                "reference": "MGR"})).status_code == 200
+            assert (await h.get("/fees/periods")).json()[0]["paid"] == pv["total"]
     run(go())

@@ -114,8 +114,8 @@ async def build(session, *, pool_equity, on: date | None = None) -> Report:
         D("0")))
 
     # approved but not yet paid — real money already promised out
-    owed = await _sum(session, Withdrawal.amount_requested,
-                      Withdrawal.state == WITHDRAWAL_APPROVED)
+    # approved-but-unpaid withdrawals and charged-but-unpaid fees
+    owed = await fundmod.owed_on(session, day)
 
     confirmed_in = await _sum(session, Deposit.amount_confirmed,
                               Deposit.state == DEPOSIT_CONFIRMED)
@@ -126,7 +126,8 @@ async def build(session, *, pool_equity, on: date | None = None) -> Report:
         label="Equity vs allocated",
         pool=navmod.money(equity - owed),
         investor_facing=allocated,
-        note=("Broker equity less withdrawals already approved, against the sum of "
+        note=("Broker equity less what is owed out (approved withdrawals and fees not yet "
+              "paid), against the sum of "
               "every holding at today's NAV. A gap here means money in the account "
               "belongs to nobody, or the fund owes more than it holds."),
     ))

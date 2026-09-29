@@ -21,8 +21,8 @@ export default function Nav() {
         <ActionForm label="Take snapshot" icon={Camera} tone="primary" submitLabel="Save NAV"
                     fields={[
                       { name: 'pool_equity', label: 'Pool equity (USD, all broker accounts)', type: 'number', required: true },
-                      { name: 'liabilities', label: 'Liabilities (USD)', type: 'number',
-                        hint: 'Approved-but-unpaid withdrawals and accrued fees. Blank = 0.' },
+                      { name: 'liabilities', label: 'Other liabilities (USD)', type: 'number',
+                        hint: 'Approved-but-unpaid withdrawals and unpaid fees are added automatically. Only enter anything else owed. Blank = 0.' },
                       { name: 'on', label: 'Day', type: 'date', hint: 'Blank = today (WAT).' },
                       { name: 'reason', label: 'Reason (required when replacing a day)', type: 'textarea' },
                     ]}

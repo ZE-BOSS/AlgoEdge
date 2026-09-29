@@ -71,6 +71,10 @@ async def init_db():
         # style message rather than by clause syntax.
         add_column_migrations = [
             "ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE;",
+            # investor platform, Phase 4 — fee lifecycle
+            "ALTER TABLE fee_accruals ADD COLUMN paid_at TIMESTAMP;",
+            "ALTER TABLE fee_accruals ADD COLUMN days INTEGER;",
+            "ALTER TABLE fee_accruals ADD COLUMN decided_by VARCHAR(36);",
             "ALTER TABLE backtest_runs ADD COLUMN sl_hit_rate FLOAT;",
             "ALTER TABLE backtest_runs ADD COLUMN trail_hit_rate FLOAT;",
             "ALTER TABLE backtest_runs ADD COLUMN run_logs TEXT;",

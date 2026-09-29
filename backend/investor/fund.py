@@ -130,6 +130,37 @@ async def latest_nav(session, on: date | None = None) -> Decimal:
     return navmod.nav(row.nav_per_unit) if row else navmod.INITIAL_NAV
 
 
+async def owed_on(session, day: date) -> Decimal:
+    """Money still in the broker account that no longer belongs to investors.
+
+    Two kinds: withdrawals approved but not yet paid (their units are already
+    cancelled), and fees charged but not yet taken out (likewise). Both must be
+    subtracted before pricing a unit — otherwise the money is shared out among
+    everyone who is left, and one investor's pending withdrawal shows up as
+    everybody else's profit until the transfer goes out.
+
+    As of `day`, so a back-dated snapshot counts what was owed on that day: an
+    item approved/charged on or before it, and not yet paid by the end of it.
+    """
+    from backend.investor.models import FeeAccrual  # local: the table is Phase 4's
+
+    total = D("0")
+    rows = (await session.execute(
+        select(Withdrawal.amount_requested, Withdrawal.state, Withdrawal.paid_at)
+        .where(Withdrawal.effective_date <= day,
+               Withdrawal.state.in_((WITHDRAWAL_APPROVED, WITHDRAWAL_PAID))))).all()
+    for amount, state, paid_at in rows:
+        if state == WITHDRAWAL_APPROVED or (paid_at and navmod.accounting_date(paid_at) > day):
+            total += D(str(amount))
+    fees = (await session.execute(
+        select(FeeAccrual.fee_amount, FeeAccrual.state, FeeAccrual.paid_at)
+        .where(FeeAccrual.period_end <= day, FeeAccrual.state.in_(("charged", "paid"))))).all()
+    for amount, state, paid_at in fees:
+        if state == "charged" or (paid_at and navmod.accounting_date(paid_at) > day):
+            total += D(str(amount))
+    return navmod.money(total)
+
+
 async def take_snapshot(session, *, pool_equity, liabilities=0,
                         on: date | None = None, source: str = "MT5") -> NavSnapshot:
     """Price the fund for one accounting day.
@@ -142,6 +173,9 @@ async def take_snapshot(session, *, pool_equity, liabilities=0,
     """
     day = on or navmod.accounting_date()
     outstanding = await unitsmod.units_in_issue(session)
+    # `liabilities` is anything ELSE owed; what the ledger already knows is owed
+    # is added here so it cannot be forgotten.
+    liabilities = navmod.money(liabilities) + await owed_on(session, day)
     price = navmod.nav_per_unit(pool_equity, liabilities, outstanding)
 
     row = (await session.execute(
@@ -447,8 +481,17 @@ async def approve_withdrawal(session, *, withdrawal_id: int, actor_id: str,
     return row
 
 
+def paid_moment(on: date | None) -> datetime:
+    """When money left, from the day it left. A back-dated payment is stamped at
+    noon WAT of that day so owed_on() treats it as gone by the end of it."""
+    if on is None:
+        return datetime.now(timezone.utc)
+    return datetime(on.year, on.month, on.day, 11, 0, tzinfo=timezone.utc)   # 12:00 WAT
+
+
 async def mark_withdrawal_paid(session, *, withdrawal_id: int, actor_id: str,
-                               reference: str | None = None) -> Withdrawal:
+                               reference: str | None = None,
+                               on: date | None = None) -> Withdrawal:
     row = await session.get(Withdrawal, withdrawal_id)
     if row is None:
         raise FundError(f"no withdrawal {withdrawal_id}")
@@ -456,7 +499,7 @@ async def mark_withdrawal_paid(session, *, withdrawal_id: int, actor_id: str,
         raise FundError(f"only an approved withdrawal can be paid, not {row.state}")
     row.state = WITHDRAWAL_PAID
     row.amount_paid = row.amount_requested
-    row.paid_at = datetime.now(timezone.utc)
+    row.paid_at = paid_moment(on)
     row.payment_reference = reference
     await audit(session, actor_id=actor_id, action="withdrawal.paid",
                 entity_type="withdrawal", entity_id=str(row.id),
@@ -588,7 +631,24 @@ async def closure_blockers(session, investor_id: str) -> list[str]:
             out.append(f"{n} approved withdrawal(s) not yet marked paid")
         else:
             out.append(f"{n} withdrawal request(s) still {state} — decide them first")
+
+    # Last month's fees must be charged before the account empties, or they are
+    # never charged at all: a month close skips holders of zero units.
+    from backend.investor import fees as feesmod
+    start, end = feesmod.previous_month()
+    held_then = await feesmod._units_at(session, investor_id, end)
+    if held_then > 0 and not await feesmod.already_closed(session, start, end):
+        out.append(f"fees for {start:%B %Y} have not been charged yet — close that month first")
     return out
+
+
+async def _closure_fees(session, investor_id: str, day: date):
+    """Fees for the part of this month before the account closes."""
+    from backend.investor import fees as feesmod
+    start = day.replace(day=1)
+    if await feesmod.already_closed(session, start, day):
+        return None, start
+    return await feesmod.compute(session, investor_id, start, day), start
 
 
 async def closure_quote(session, investor_id: str, on: date | None = None) -> dict:
@@ -597,16 +657,19 @@ async def closure_quote(session, investor_id: str, on: date | None = None) -> di
     price = await latest_nav(session, day)
     held = await unitsmod.ledger_units(session, investor_id)
     value = navmod.amount_for_units(held, price)
+    line, _ = await _closure_fees(session, investor_id, day)
+    owed = line.total if line else D("0.00")
     return {
         "investor_id": investor_id,
         "as_of": day.isoformat(),
         "units": navmod.text(held),
         "nav_per_unit": navmod.text(price),
         "gross_value": navmod.text(value),
-        # Fee accrual is not built yet (see PHASE-2 doc); when it is, accrued
-        # but uncharged fees come off here.
-        "fees_owed": "0.00",
-        "net_payable": navmod.text(value),
+        # this month's management and performance fees up to today, charged
+        # at approval
+        "fees_owed": navmod.text(owed),
+        "fee_detail": line.as_dict() if line else None,
+        "net_payable": navmod.text(navmod.money(value - owed)),
         "blockers": await closure_blockers(session, investor_id),
     }
 
@@ -640,6 +703,11 @@ async def approve_closure(session, *, investor_id: str, actor_id: str,
 
     day = on or navmod.accounting_date()
     price = await latest_nav(session, day)
+    line, fee_start = await _closure_fees(session, investor_id, day)
+    if line is not None and line.total > 0:
+        from backend.investor import fees as feesmod
+        await feesmod.charge(session, line, period_start=fee_start, period_end=day,
+                             actor_id=actor_id)
     held = await unitsmod.ledger_units(session, investor_id)
     paid = D("0.00")
     if held > 0:

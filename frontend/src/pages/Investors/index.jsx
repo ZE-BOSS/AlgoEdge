@@ -1,7 +1,7 @@
 import { NavLink, Routes, Route } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Users, Gauge, Inbox, Eye, LineChart, Scale, FileText, History,
+  Users, Gauge, Inbox, Eye, LineChart, Scale, FileText, History, Percent,
 } from 'lucide-react';
 import { inv } from '../../services/api';
 import Overview from './Overview';
@@ -13,6 +13,7 @@ import Nav from './Nav';
 import Reconciliation from './Reconciliation';
 import Terms from './Terms';
 import Audit from './Audit';
+import Fees from './Fees';
 
 function SectionNav() {
   const { data } = useQuery({ queryKey: ['inv', 'overview'], queryFn: inv.overview });
@@ -26,6 +27,7 @@ function SectionNav() {
     { to: '/investors/queues', label: 'Queues', icon: Inbox, badge: queueCount },
     { to: '/investors/disclosure', label: 'Disclosure', icon: Eye, badge: q.disclosures },
     { to: '/investors/nav', label: 'NAV', icon: LineChart },
+    { to: '/investors/fees', label: 'Fees', icon: Percent },
     { to: '/investors/reconciliation', label: 'Reconciliation', icon: Scale },
     { to: '/investors/terms', label: 'Fund terms', icon: FileText },
     { to: '/investors/audit', label: 'Audit', icon: History },
@@ -61,6 +63,7 @@ export default function InvestorsPage() {
         <Route path="queues/*" element={<Queues />} />
         <Route path="disclosure" element={<Disclosure />} />
         <Route path="nav" element={<Nav />} />
+        <Route path="fees" element={<Fees />} />
         <Route path="reconciliation" element={<Reconciliation />} />
         <Route path="terms" element={<Terms />} />
         <Route path="audit" element={<Audit />} />
