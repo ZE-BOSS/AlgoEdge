@@ -19,6 +19,32 @@ export type Session = {
   investor: { id: string; name: string; email: string };
 };
 
+export type NavPoint = { date: string; nav_per_unit: string; value: string | null; net_invested: string | null };
+
+export type Trade = {
+  id: string; symbol: string; direction: string; closed_on: string | null; result_pct: string | null;
+  note: string | null; your_amount: string | null; your_share_pct: string | null;
+};
+export type TradesResponse = {
+  trades: Trade[];
+  summary: { your_total: string; wins: number; losses: number; win_rate_pct: string | null;
+    by_symbol: { symbol: string; amount: string }[] };
+};
+
+export type Month = { month: string; start_value: string; money_in_out: string; end_value: string;
+  profit: string; fund_return_pct: string | null };
+export type Performance = {
+  months: Month[];
+  stats: null | { days_invested: number; first_deposit: string; best_month: Month; worst_month: Month;
+    months_up: number; months_down: number; largest_fall_pct: string };
+};
+
+export type Prefs = {
+  hide_balances: boolean; chart_range: '1M' | '3M' | '6M' | '1Y' | 'ALL'; compact_numbers: boolean;
+  email: { statements: boolean };
+  push: { money: boolean; withdrawals: boolean; statements: boolean; trades: boolean };
+};
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) { super(message); this.status = status; }
@@ -124,9 +150,12 @@ export const api = {
   changePassword: (current_password: string, new_password: string) =>
     call<Session>('/auth/password', { method: 'POST', body: { current_password, new_password } }),
   me: () => call('/me'),
-  nav: () => call<{ date: string; nav_per_unit: string; value: string | null }[]>('/nav'),
+  nav: () => call<NavPoint[]>('/nav'),
   activity: () => call('/activity'),
-  trades: () => call<any[]>('/trades'),
+  trades: () => call<TradesResponse>('/trades'),
+  performance: () => call<Performance>('/performance'),
+  preferences: () => call<Prefs>('/preferences'),
+  savePreferences: (changes: Partial<Prefs>) => call<Prefs>('/preferences', { method: 'PUT', body: changes }),
   statements: () => call<{ year: number; month: number; label: string }[]>('/statements'),
   instructions: () => call('/deposits/instructions'),
   claimDeposit: (amount: string, note?: string) => call('/deposits', { method: 'POST', body: { amount, note: note || null } }),

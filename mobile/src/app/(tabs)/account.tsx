@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Switch, View } from 'react-native';
+import { router } from 'expo-router';
 import * as Application from 'expo-application';
-import { api } from '../../lib/api';
+import { api, type Prefs } from '../../lib/api';
 import { day, money } from '../../lib/format';
 import { useLoad, useSubmit } from '../../lib/hooks';
+import { usePrefs } from '../../lib/prefs';
 import { unregisterPush } from '../../lib/push';
 import { useSession } from '../../lib/session';
 import { color } from '../../lib/theme';
-import { Button, Card, Field, Loaded, PasswordField, Pairs, Problem, Screen, T } from '../../components/ui';
+import { RangeTabs } from '../../components/Charts';
+import { Badge, Button, Card, Field, Icon, Loaded, PasswordField, Pairs, Problem, Screen, T } from '../../components/ui';
 
 function ChangePassword() {
   const { signIn } = useSession();
@@ -49,26 +52,119 @@ function Close({ status, onDone }: { status: string; onDone: () => void }) {
   );
 }
 
+function Toggle({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingVertical: 4 }}>
+      <View style={{ flex: 1, gap: 2 }}>
+        <T size={15}>{label}</T>
+        {hint ? <T tone="muted" size={12}>{hint}</T> : null}
+      </View>
+      <Switch value={value} onValueChange={onChange} trackColor={{ true: color.gold, false: color.line }} />
+    </View>
+  );
+}
+
+function Section({ icon, title, children }: { icon: string; title: string; children: ReactNode }) {
+  return (
+    <Card title={title} right={<Icon name={icon} size={18} tint={color.gold} />}>{children}</Card>
+  );
+}
+
+/** Saves each change straight away; a failed save is shown and the switch goes back. */
+function useSave() {
+  const { update } = usePrefs();
+  const [error, setError] = useState<Error | null>(null);
+  const save = (c: Partial<Prefs>) => { setError(null); update(c).catch(setError); };
+  return { save, error };
+}
+
+function Display() {
+  const { prefs } = usePrefs();
+  const { save, error } = useSave();
+  return (
+    <Section icon="eye" title="Display">
+      <Toggle label="Hide my balances" hint="Amounts show as dots until you tap the eye at the top." value={prefs.hide_balances}
+        onChange={(v) => save({ hide_balances: v })} />
+      <Toggle label="Short numbers" hint="$12.5k instead of $12,480.00 in tiles and lists." value={prefs.compact_numbers}
+        onChange={(v) => save({ compact_numbers: v })} />
+      <View style={{ gap: 8 }}>
+        <T size={15}>Chart opens on</T>
+        <RangeTabs value={prefs.chart_range} onChange={(v) => save({ chart_range: v as Prefs['chart_range'] })} />
+      </View>
+      <T tone="muted" size={12}>Saved to your account, so the website shows the same.</T>
+      <Problem error={error} />
+    </Section>
+  );
+}
+
+function Notifications() {
+  const { prefs } = usePrefs();
+  const { save, error } = useSave();
+  const push = (k: keyof Prefs['push']) => (v: boolean) => save({ push: { ...prefs.push, [k]: v } });
+  return (
+    <Section icon="bell" title="Notifications">
+      <Toggle label="Monthly statement by email" value={prefs.email.statements}
+        onChange={(v) => save({ email: { ...prefs.email, statements: v } })} />
+      <T tone="muted" size={12} style={{ marginTop: 6 }}>ON THIS PHONE</T>
+      <Toggle label="Money received" value={prefs.push.money} onChange={push('money')} />
+      <Toggle label="Withdrawals" hint="Approved, paid or declined." value={prefs.push.withdrawals} onChange={push('withdrawals')} />
+      <Toggle label="Statements ready" value={prefs.push.statements} onChange={push('statements')} />
+      <Toggle label="Trades closed" hint="When a trade is published, with your share in the app." value={prefs.push.trades}
+        onChange={push('trades')} />
+      <T tone="muted" size={12}>Emails about your money and security, such as a withdrawal or a password change, are always sent.</T>
+      <Problem error={error} />
+    </Section>
+  );
+}
+
+const initials = (name: string) => String(name || '?').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+
 export default function Account() {
   const me = useLoad(api.me);
   const { signOut, biometricAvailable, biometricOn, setBiometric } = useSession();
   return (
     <Screen onRefresh={me.reload}>
       <Loaded q={me}>
-        {({ investor: i }: any) => (
+        {({ investor: i, terms: t }: any) => (
           <>
-            <Card title="Your details">
-              <Pairs rows={[['Name', i.name], ['Email', i.email], ['Phone', i.phone || '—'], ['Member since', day(i.joined)]]} />
-            </Card>
-            <Card title="Where we pay you">
+            <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center', backgroundColor: color.surface, borderColor: color.line,
+              borderWidth: 1, borderRadius: 20, padding: 16 }}>
+              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: color.gold, alignItems: 'center', justifyContent: 'center' }}>
+                <T bold size={20} style={{ color: color.goldInk }}>{initials(i.name)}</T>
+              </View>
+              <View style={{ flex: 1, gap: 2 }}>
+                <T bold size={18}>{i.name}</T>
+                <T tone="muted" size={13}>{i.email}</T>
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                  <T tone="muted" size={12}>Member since {day(i.joined)}</T>
+                  <Badge label={i.status} tone={i.status === 'active' ? 'good' : 'neutral'} />
+                </View>
+              </View>
+            </View>
+            <Section icon="user" title="Your details">
+              <Pairs rows={[['Name', i.name], ['Email', i.email], ['Phone', i.phone || '—'], ['Country', i.country || '—']]} />
+              <T tone="muted" size={12}>To change these, email us from the address above.</T>
+            </Section>
+            <Display />
+            <Notifications />
+            <Card title="Where we pay you" right={<Icon name="bank" size={18} tint={color.gold} />}>
               {i.payout.account_number ? (
                 <Pairs rows={[['Bank', i.payout.bank_name], ['Account', `····${i.payout.account_number.slice(-4)}`], ['Name', i.payout.account_name]]} />
               ) : <T tone="text2">No account on file yet.</T>}
               <T tone="muted" size={13}>To protect you, this can only be changed by contacting us — never from the app.
                 If someone got into your account, they still could not redirect your money.</T>
             </Card>
+            {t && (
+              <Section icon="doc" title="Your terms">
+                <Pairs rows={[['Performance fee', `${t.performance_fee_pct}% of new profit`],
+                  ['Management fee', `${t.management_fee_pct}% of each two-month period's profit`],
+                  ['Minimum first deposit', money(t.min_investment)], ['Lock-up', `${t.lockup_days} days`],
+                  ['Withdrawal notice', `${t.notice_days} days`]]} />
+                <Button label="How it works" kind="link" onPress={() => router.push('/how')} />
+              </Section>
+            )}
             {biometricAvailable && (
-              <Card title="Unlock">
+              <Card title="Unlock" right={<Icon name="shield" size={18} tint={color.gold} />}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                   <T style={{ flex: 1 }}>Ask for fingerprint or face when the app opens</T>
                   <Switch value={biometricOn} onValueChange={setBiometric} trackColor={{ true: color.gold, false: color.line }} />

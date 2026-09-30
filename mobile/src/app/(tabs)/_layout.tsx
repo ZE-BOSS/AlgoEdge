@@ -1,41 +1,73 @@
 import { Tabs } from 'expo-router';
-import type { ColorValue } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import { Pressable, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PrefsProvider, usePrefs } from '../../lib/prefs';
 import { color } from '../../lib/theme';
+import { Icon } from '../../components/ui';
 
-const ICON: Record<string, string> = {
-  index: 'M3 12l9-8 9 8M5 10v10h14V10',
-  money: 'M12 3v18M17 7H9.5a3 3 0 000 6h5a3 3 0 010 6H6',
-  activity: 'M4 6h16M4 12h16M4 18h10',
-  trades: 'M3 17l6-6 4 4 8-8M15 7h6v6',
-  account: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0',
+const TABS: Record<string, { title: string; icon: string }> = {
+  index: { title: 'Overview', icon: 'home' },
+  money: { title: 'Money', icon: 'money' },
+  trades: { title: 'Trades', icon: 'trades' },
+  activity: { title: 'Activity', icon: 'activity' },
+  account: { title: 'Settings', icon: 'settings' },
 };
 
-function TabIcon({ name, color: c }: { name: string; color: ColorValue }) {
+/** A floating bar: the open tab becomes a gold pill with its name; the rest are icons. */
+// The navigator's props, typed loosely: @react-navigation/bottom-tabs is not a direct dependency.
+function TabBar({ state, navigation }: { state: any; navigation: any }) {
+  const insets = useSafeAreaInsets();
   return (
-    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={1.8}
-      strokeLinecap="round" strokeLinejoin="round"><Path d={ICON[name]} /></Svg>
+    <View style={{ backgroundColor: color.bg, paddingHorizontal: 12, paddingTop: 6, paddingBottom: Math.max(insets.bottom, 10) }}>
+      <View style={{ flexDirection: 'row', backgroundColor: color.surface, borderColor: color.line, borderWidth: 1,
+        borderRadius: 22, padding: 6, gap: 4 }}>
+        {state.routes.map((route: { key: string; name: string }, i: number) => {
+          const tab = TABS[route.name];
+          if (!tab) return null;
+          const on = state.index === i;
+          const press = () => {
+            const e = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+            if (!on && !e.defaultPrevented) navigation.navigate(route.name);
+          };
+          return (
+            <Pressable key={route.key} onPress={press} accessibilityRole="tab" accessibilityLabel={tab.title}
+              accessibilityState={{ selected: on }}
+              style={({ pressed }) => ({
+                flex: on ? 1.9 : 1, height: 46, borderRadius: 16, flexDirection: 'row', alignItems: 'center',
+                justifyContent: 'center', gap: 6, backgroundColor: on ? color.gold : pressed ? color.surface2 : 'transparent',
+              })}>
+              <Icon name={tab.icon} size={20} tint={on ? color.goldInk : color.text2} />
+              {on && <Text numberOfLines={1} style={{ color: color.goldInk, fontWeight: '700', fontSize: 13 }}>{tab.title}</Text>}
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 
-function icon(name: string) {
-  function Icon({ color: c }: { color: ColorValue }) { return <TabIcon name={name} color={c} />; }
-  return Icon;
+/** Eye in the header: hides every balance on the screen, or shows them for now. */
+function PrivacyButton() {
+  const { hidden, reveal, prefs, update } = usePrefs();
+  const toggle = () => (prefs.hide_balances ? reveal() : update({ hide_balances: true }).catch(() => {}));
+  return (
+    <Pressable onPress={toggle} hitSlop={10} style={{ paddingHorizontal: 16 }} accessibilityRole="button"
+      accessibilityLabel={hidden ? 'Show balances' : 'Hide balances'}>
+      <Icon name={hidden ? 'eyeOff' : 'eye'} size={22} tint={hidden ? color.gold : color.text2} />
+    </Pressable>
+  );
 }
 
 export default function TabsLayout() {
   return (
-    <Tabs screenOptions={{
-      headerStyle: { backgroundColor: color.bg }, headerTintColor: color.text, headerShadowVisible: false,
-      tabBarStyle: { backgroundColor: color.surface, borderTopColor: color.line },
-      tabBarActiveTintColor: color.gold, tabBarInactiveTintColor: color.muted,
-      sceneStyle: { backgroundColor: color.bg },
-    }}>
-      <Tabs.Screen name="index" options={{ title: 'Overview', tabBarIcon: icon('index') }} />
-      <Tabs.Screen name="money" options={{ title: 'Money', tabBarIcon: icon('money') }} />
-      <Tabs.Screen name="activity" options={{ title: 'Activity', tabBarIcon: icon('activity') }} />
-      <Tabs.Screen name="trades" options={{ title: 'Trades', tabBarIcon: icon('trades') }} />
-      <Tabs.Screen name="account" options={{ title: 'Account', tabBarIcon: icon('account') }} />
-    </Tabs>
+    <PrefsProvider>
+      <Tabs tabBar={(props) => <TabBar state={props.state} navigation={props.navigation} />} screenOptions={{
+        headerStyle: { backgroundColor: color.bg }, headerTintColor: color.text, headerShadowVisible: false,
+        headerTitleStyle: { fontWeight: '700' }, headerRight: () => <PrivacyButton />,
+        sceneStyle: { backgroundColor: color.bg },
+      }}>
+        {Object.entries(TABS).map(([name, t]) => <Tabs.Screen key={name} name={name} options={{ title: t.title }} />)}
+      </Tabs>
+    </PrefsProvider>
   );
 }
