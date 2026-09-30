@@ -8,8 +8,8 @@ import { api, type Prefs } from './api';
  */
 export const DEFAULT_PREFS: Prefs = {
   hide_balances: false, chart_range: 'ALL', compact_numbers: false,
-  email: { statements: true },
-  push: { money: true, withdrawals: true, statements: true, trades: true },
+  email: { statements: true, trades: true, live_trades: true, fees: true },
+  push: { money: true, withdrawals: true, statements: true, trades: true, live_trades: true, fees: true },
 };
 
 type Ctx = { prefs: Prefs; hidden: boolean; update: (c: Partial<Prefs>) => Promise<Prefs>; reveal: () => void };

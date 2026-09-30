@@ -21,8 +21,8 @@ export async function registerForPush(): Promise<void> {
   if (Platform.OS === 'web' || !Device.isDevice) return;
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('account', {
-      name: 'Your account', importance: Notifications.AndroidImportance.DEFAULT,
-      description: 'Money received, withdrawals and statements',
+      name: 'Your account', importance: Notifications.AndroidImportance.HIGH,
+      description: 'Trades opening and closing, money in and out, fees and statements',
     });
   }
   let { status } = await Notifications.getPermissionsAsync();

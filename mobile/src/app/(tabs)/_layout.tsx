@@ -1,6 +1,9 @@
-import { Tabs } from 'expo-router';
+import { useEffect } from 'react';
+import { router, Tabs, type Href } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { NoticeProvider, useNotices } from '../../lib/notices';
 import { PrefsProvider, usePrefs } from '../../lib/prefs';
 import { color } from '../../lib/theme';
 import { Icon } from '../../components/ui';
@@ -58,16 +61,54 @@ function PrivacyButton() {
   );
 }
 
+/** Bell in the header, with the unread count. */
+function BellButton() {
+  const { feed } = useNotices();
+  const n = feed.unread;
+  return (
+    <Pressable onPress={() => router.navigate('/notifications')} hitSlop={10} style={{ paddingHorizontal: 8 }}
+      accessibilityRole="button" accessibilityLabel={`Notifications${n ? `, ${n} unread` : ''}`}>
+      <Icon name="bell" size={22} tint={n ? color.gold : color.text2} />
+      {n > 0 && (
+        <View style={{ position: 'absolute', top: -4, right: 2, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4,
+          backgroundColor: color.bad, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: color.bg }}>
+          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{n > 9 ? '9+' : n}</Text>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+/** Tapping a notification (even one that started the app) opens the screen it is about. */
+function OpenTappedNotification() {
+  const last = Notifications.useLastNotificationResponse();
+  const { reload } = useNotices();
+  useEffect(() => {
+    const link = last?.notification.request.content.data?.link;
+    if (typeof link === 'string' && link.startsWith('/')) {
+      reload();
+      router.navigate(link as Href);
+    }
+  }, [last, reload]);
+  return null;
+}
+
 export default function TabsLayout() {
   return (
     <PrefsProvider>
-      <Tabs tabBar={(props) => <TabBar state={props.state} navigation={props.navigation} />} screenOptions={{
-        headerStyle: { backgroundColor: color.bg }, headerTintColor: color.text, headerShadowVisible: false,
-        headerTitleStyle: { fontWeight: '700' }, headerRight: () => <PrivacyButton />,
-        sceneStyle: { backgroundColor: color.bg },
-      }}>
-        {Object.entries(TABS).map(([name, t]) => <Tabs.Screen key={name} name={name} options={{ title: t.title }} />)}
-      </Tabs>
+      <NoticeProvider>
+        <OpenTappedNotification />
+        <Tabs tabBar={(props) => <TabBar state={props.state} navigation={props.navigation} />} screenOptions={{
+          headerStyle: { backgroundColor: color.bg }, headerTintColor: color.text, headerShadowVisible: false,
+          headerTitleStyle: { fontWeight: '700' },
+          headerRight: () => <View style={{ flexDirection: 'row', alignItems: 'center' }}><BellButton /><PrivacyButton /></View>,
+          sceneStyle: { backgroundColor: color.bg },
+        }}>
+          {Object.entries(TABS).map(([name, t]) => <Tabs.Screen key={name} name={name} options={{ title: t.title }} />)}
+          {/* reached from the bell, not the bar */}
+          <Tabs.Screen name="notifications" options={{ title: 'Notifications' }} />
+        </Tabs>
+      </NoticeProvider>
     </PrefsProvider>
   );
 }

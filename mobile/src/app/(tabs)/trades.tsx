@@ -5,6 +5,7 @@ import { day, isNeg, pct } from '../../lib/format';
 import { useLoad } from '../../lib/hooks';
 import { color } from '../../lib/theme';
 import { SymbolBars } from '../../components/Charts';
+import LiveTrades from '../../components/Live';
 import { Amount, Card, Chips, Direction, Loaded, Screen, Stat, T, s } from '../../components/ui';
 
 type Filter = 'all' | 'mine' | 'wins' | 'losses';
@@ -30,6 +31,7 @@ export default function Trades() {
           const rows = trades.filter((t) => keep(t, filter, market));
           return (
             <>
+              <LiveTrades />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                 <Stat label="Your total from trades" icon="chart">
                   <Amount v={sm.your_total} sign bold size={17} tone={isNeg(sm.your_total) ? 'bad' : 'good'} /></Stat>
@@ -40,7 +42,8 @@ export default function Trades() {
               <Card title="How your share is worked out">
                 <T tone="text2" size={13}>When a trade is published, its result is split between investors by the units each
                   held at the end of the day before it closed. You see only your own share; a trade that closed before your
-                  money arrived shows as before you joined.</T>
+                  money arrived shows as before you joined. Your share is added to or taken from your balance the moment
+                  the trade is published.</T>
               </Card>
 
               {sm.by_symbol.length > 0 && (

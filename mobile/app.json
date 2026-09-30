@@ -3,7 +3,7 @@
     "name": "Alphavantiq",
     "slug": "alphavantiq-investor",
     "scheme": "alphavantiq",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -14,7 +14,7 @@
     },
     "android": {
       "package": "com.alphavantiqcapital.investor",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#0b1017",
         "foregroundImage": "./assets/android-icon-foreground.png",

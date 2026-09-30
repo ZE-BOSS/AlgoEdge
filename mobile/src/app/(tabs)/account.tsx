@@ -97,21 +97,53 @@ function Display() {
   );
 }
 
+// [key, label, hint]: one row per kind of event, with a push and an email switch
+const EVENTS: [keyof Prefs['push'], string, string][] = [
+  ['live_trades', 'A trade opens', 'Market and side, the moment the fund opens a position.'],
+  ['trades', 'A trade result', 'Profit or loss when a trade is published; your share is in the app.'],
+  ['money', 'Money in', 'Your transfer noted and received.'],
+  ['withdrawals', 'Withdrawals', 'Requested, approved, paid or declined.'],
+  ['fees', 'Fees charged', 'Every two months, what came off your balance.'],
+  ['statements', 'Statements ready', 'Your monthly PDF.'],
+];
+
 function Notifications() {
   const { prefs } = usePrefs();
   const { save, error } = useSave();
-  const push = (k: keyof Prefs['push']) => (v: boolean) => save({ push: { ...prefs.push, [k]: v } });
   return (
     <Section icon="bell" title="Notifications">
-      <Toggle label="Monthly statement by email" value={prefs.email.statements}
-        onChange={(v) => save({ email: { ...prefs.email, statements: v } })} />
-      <T tone="muted" size={12} style={{ marginTop: 6 }}>ON THIS PHONE</T>
-      <Toggle label="Money received" value={prefs.push.money} onChange={push('money')} />
-      <Toggle label="Withdrawals" hint="Approved, paid or declined." value={prefs.push.withdrawals} onChange={push('withdrawals')} />
-      <Toggle label="Statements ready" value={prefs.push.statements} onChange={push('statements')} />
-      <Toggle label="Trades closed" hint="When a trade is published, with your share in the app." value={prefs.push.trades}
-        onChange={push('trades')} />
-      <T tone="muted" size={12}>Emails about your money and security, such as a withdrawal or a password change, are always sent.</T>
+      <T tone="muted" size={12}>Everything also lands under the bell at the top. Password and payout-account changes
+        are always sent, for your safety.</T>
+      <View style={{ flexDirection: 'row', paddingTop: 4 }}>
+        <T tone="muted" size={11} style={{ flex: 1 }}>TELL ME WHEN</T>
+        <T tone="muted" size={11} style={{ width: 60, textAlign: 'center' }}>PUSH</T>
+        <T tone="muted" size={11} style={{ width: 60, textAlign: 'center' }}>EMAIL</T>
+      </View>
+      {EVENTS.map(([k, label, hint]) => {
+        const emailKey = k as keyof Prefs['email'];
+        const emailSwitchable = k in prefs.email;
+        return (
+          <View key={k} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6,
+            borderTopColor: color.line, borderTopWidth: 1 }}>
+            <View style={{ flex: 1, gap: 2, paddingRight: 8 }}>
+              <T size={14}>{label}</T>
+              <T tone="muted" size={11}>{hint}</T>
+            </View>
+            <View style={{ width: 60, alignItems: 'center' }}>
+              <Switch value={!!prefs.push[k]} accessibilityLabel={`${label}: push`}
+                onValueChange={(v) => save({ push: { ...prefs.push, [k]: v } })}
+                trackColor={{ true: color.gold, false: color.line }} />
+            </View>
+            <View style={{ width: 60, alignItems: 'center' }}>
+              {emailSwitchable ? (
+                <Switch value={!!prefs.email[emailKey]} accessibilityLabel={`${label}: email`}
+                  onValueChange={(v) => save({ email: { ...prefs.email, [emailKey]: v } })}
+                  trackColor={{ true: color.gold, false: color.line }} />
+              ) : <T tone="muted" size={11}>always</T>}
+            </View>
+          </View>
+        );
+      })}
       <Problem error={error} />
     </Section>
   );

@@ -97,3 +97,14 @@ export const STATE_LABEL: Record<string, string> = {
   rejected: 'Not received', exception_pending: 'Under review', approved: 'Approved — payment on its way',
   paid: 'Paid', declined: 'Declined',
 };
+
+/** "just now", "5 min ago", "3 h ago", else the day. */
+export function ago(iso?: string | null): string {
+  if (!iso) return '';
+  const t = Date.parse(/Z|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return day(iso);
+}

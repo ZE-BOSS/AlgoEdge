@@ -41,9 +41,15 @@ export type Performance = {
 
 export type Prefs = {
   hide_balances: boolean; chart_range: '1M' | '3M' | '6M' | '1Y' | 'ALL'; compact_numbers: boolean;
-  email: { statements: boolean };
-  push: { money: boolean; withdrawals: boolean; statements: boolean; trades: boolean };
+  email: { statements: boolean; trades: boolean; live_trades: boolean; fees: boolean };
+  push: { money: boolean; withdrawals: boolean; statements: boolean; trades: boolean; live_trades: boolean; fees: boolean };
 };
+
+export type Notice = { id: string; kind: string; title: string; body: string | null; link: string | null;
+  created_at: string | null; read: boolean };
+export type NoticeFeed = { unread: number; items: Notice[] };
+export type LiveTrade = { id: string; symbol: string; direction: string; side: string; opened_at: string | null };
+export type Live = { invested: boolean; trades: LiveTrade[] };
 
 export class ApiError extends Error {
   status: number;
@@ -155,6 +161,9 @@ export const api = {
   trades: () => call<TradesResponse>('/trades'),
   performance: () => call<Performance>('/performance'),
   preferences: () => call<Prefs>('/preferences'),
+  notifications: () => call<NoticeFeed>('/notifications'),
+  readNotifications: (ids?: string[]) => call('/notifications/read', { method: 'POST', body: { ids: ids ?? null } }),
+  live: () => call<Live>('/live'),
   savePreferences: (changes: Partial<Prefs>) => call<Prefs>('/preferences', { method: 'PUT', body: changes }),
   statements: () => call<{ year: number; month: number; label: string }[]>('/statements'),
   instructions: () => call('/deposits/instructions'),

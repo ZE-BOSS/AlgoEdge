@@ -7,6 +7,7 @@ import { useLoad } from '../../lib/hooks';
 import { usePrefs } from '../../lib/prefs';
 import { color } from '../../lib/theme';
 import { BalanceChart, CapitalBar, MonthBars } from '../../components/Charts';
+import LiveTrades from '../../components/Live';
 import { Amount, Button, Card, Direction, Icon, Loaded, Screen, Stat, T, s as ui } from '../../components/ui';
 
 function Row({ label, op, children, total, tone }: {
@@ -121,6 +122,7 @@ export default function Overview() {
                 <Card><T tone="gold">You have asked to close your account. We will pay out your balance and confirm by email.</T></Card>
               )}
               <CapitalMessage c={c} />
+              <LiveTrades compact />
 
               {c.state !== 'not_invested' && <Card title="What your balance is made of"><CapitalBar c={c} /></Card>}
 
