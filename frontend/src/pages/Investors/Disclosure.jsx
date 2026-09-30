@@ -1,19 +1,56 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Eye, EyeOff, Pencil } from 'lucide-react';
+import { Eye, EyeOff, Pencil, Users } from 'lucide-react';
 import { inv } from '../../services/api';
 import { ActionForm, Empty, QueryState, StateBadge } from './shared';
 import { fmtMoney, isNeg, useInvAction } from './format';
 
 const STATES = ['undisclosed', 'published', 'hidden'];
 
+/** How one published trade's result divides between the investors who held
+ *  the fund when it closed. The lines add up to the published result exactly;
+ *  each investor sees only their own line. */
+function Split({ tradeId }) {
+  const q = useQuery({ queryKey: ['inv', 'disclosure-split', tradeId], queryFn: () => inv.disclosureSplit(tradeId) });
+  return (
+    <QueryState q={q}>
+      {(s) => s.lines.length === 0 ? (
+        <div className="inv-hint">Nobody was invested at the start of {s.closed_on}, so nothing is allocated.</div>
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <div className="inv-hint">
+            {s.symbol} {s.direction} closed {s.closed_on}: {fmtMoney(s.result_amount, { sign: true })}
+            {s.result_pct ? ` (${s.result_pct}% of the pool)` : ''}, split between {s.investors} investor(s) by
+            the fund they held at the end of the previous day. Allocated {fmtMoney(s.allocated, { sign: true })}.
+          </div>
+          <div className="inv-split">
+            {s.lines.map((l) => (
+              <div key={l.investor_id} className="inv-split-row">
+                <Link to={`/investors/p/${l.investor_id}`}>{l.name || l.investor_id.slice(0, 8)}</Link>
+                <span className="inv-split-track">
+                  <span style={{ width: `${Math.min(100, Number(l.share_pct))}%`,
+                                 background: isNeg(l.amount) ? 'var(--red)' : 'var(--green)' }} />
+                </span>
+                <span className="num">{Number(l.share_pct).toFixed(2)}%</span>
+                <span className="num" style={{ color: isNeg(l.amount) ? 'var(--red)' : 'var(--green)' }}>
+                  {fmtMoney(l.amount, { sign: true })}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </QueryState>
+  );
+}
+
 function Preview() {
   const q = useQuery({ queryKey: ['inv', 'disclosure-preview'], queryFn: inv.disclosurePreview });
   return (
     <div className="card">
       <div className="card-header">
-        <span className="card-title">What investors see</span>
-        <span className="inv-hint">The exact response their trade list will receive</span>
+        <span className="card-title">Published trades, fund totals</span>
+        <span className="inv-hint">Admin only. Each investor sees their own share of these, never the totals.</span>
       </div>
       <QueryState q={q}>
         {(rows) => rows.length === 0 ? <div className="inv-hint">Nothing published yet.</div> : (
@@ -42,6 +79,7 @@ function Preview() {
 
 export default function Disclosure() {
   const [state, setState] = useState('undisclosed');
+  const [open, setOpen] = useState(null);
   const q = useQuery({ queryKey: ['inv', 'disclosures', state], queryFn: () => inv.disclosures(state) });
   const publish = useInvAction(({ id, ...b }) => inv.publishTrade(id, b));
   const hide = useInvAction(({ id, ...b }) => inv.hideTrade(id, b));
@@ -52,7 +90,9 @@ export default function Disclosure() {
         Published trades carry symbol, side, date and result only. Strategy, parameters, entry logic,
         ticket and size are never stored on the published record, so they cannot leak through the
         investor API. Changing a figure before publishing needs a reason and is recorded as an
-        adjustment beside the raw value.
+        adjustment beside the raw value. Each investor sees only their own share of a published result,
+        split by the fund they held when it closed; open "Investor split" on a published trade to see
+        every line. Publishing sends invested investors a phone alert (market and % only).
       </div>
 
       <div className="card">
@@ -70,7 +110,8 @@ export default function Disclosure() {
                   <th className="num">P&amp;L</th><th>Published as</th><th>Decide</th></tr></thead>
                 <tbody>
                   {rows.map(r => (
-                    <tr key={r.trade_id}>
+                    <Fragment key={r.trade_id}>
+                    <tr>
                       <td style={{ whiteSpace: 'nowrap' }}>{r.raw.closed_on || '—'}</td>
                       <td>{r.raw.symbol}</td>
                       <td>{r.raw.direction}</td>
@@ -85,6 +126,12 @@ export default function Disclosure() {
                       </td>
                       <td>
                         <div className="inv-actions">
+                          {r.state === 'published' && (
+                            <button className="btn btn-sm btn-secondary"
+                                    onClick={() => setOpen(open === r.trade_id ? null : r.trade_id)}>
+                              <Users size={12} /> {open === r.trade_id ? 'Hide split' : 'Investor split'}
+                            </button>
+                          )}
                           {r.state !== 'published' && (
                             <ActionForm label="Publish" icon={Eye} tone="primary" compact
                                         onSubmit={() => publish.mutateAsync({ id: r.trade_id })} />
@@ -115,6 +162,10 @@ export default function Disclosure() {
                         </div>
                       </td>
                     </tr>
+                    {open === r.trade_id && (
+                      <tr><td colSpan={7} style={{ background: 'var(--bg-tertiary)' }}><Split tradeId={r.trade_id} /></td></tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

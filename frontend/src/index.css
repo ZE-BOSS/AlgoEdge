@@ -1600,6 +1600,13 @@ html, body {
 
 /* ── Investors section (investor platform Phase 2) ───────────── */
 .inv-hint { font-size: 0.74rem; color: var(--text-muted); line-height: 1.5; }
+/* a published trade split between investors: name, share bar, share %, dollars */
+.inv-split { display: grid; gap: 6px; }
+.inv-split-row { display: grid; grid-template-columns: minmax(120px, 1.2fr) 2fr 70px 100px; gap: 10px;
+  align-items: center; font-size: 0.82rem; }
+.inv-split-track { height: 8px; border-radius: 4px; background: var(--bg-primary); overflow: hidden; }
+.inv-split-track span { display: block; height: 100%; border-radius: 4px; }
+.inv-split-row .num { text-align: right; }
 .inv-count {
   margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 0.66rem; font-weight: 700;
   background: var(--gold); color: var(--bg-primary); font-variant-numeric: tabular-nums;

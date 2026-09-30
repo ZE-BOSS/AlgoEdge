@@ -99,6 +99,7 @@ export const api = {
   nav: () => call('/nav'),
   activity: () => call('/activity'),
   trades: () => call('/trades'),
+  performance: () => call('/performance'),
   instructions: () => call('/deposits/instructions'),
   claimDeposit: (amount, note) => call('/deposits', { method: 'POST', body: { amount, note: note || null } }),
   quote: (amount) => call('/withdrawals/quote', { params: { amount } }),

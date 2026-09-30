@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { compact, money } from '../format';
+import { usePrefs } from '../usePrefs';
+import Icon from './Icons';
 
 export function Card({ title, aside, children, className = '' }) {
   return (
@@ -75,5 +78,25 @@ export function PasswordInput({ value, onChange, ...rest }) {
         </svg>
       </button>
     </span>
+  );
+}
+
+/** A dollar amount that honours "hide balances" and "compact numbers". */
+export function Amount({ v, sign = false, className = '', forceFull = false }) {
+  const { hidden, prefs } = usePrefs();
+  if (hidden) return <span className={`num masked ${className}`} aria-label="hidden">••••••</span>;
+  const text = prefs.compact_numbers && !forceFull ? compact(v) : money(v, { sign });
+  const signed = sign && prefs.compact_numbers && !forceFull && Number(v) > 0 ? `+${text}` : text;
+  return <span className={`num ${className}`}>{signed}</span>;
+}
+
+/** A stat: small label, big figure, optional note underneath. */
+export function Stat({ label, children, note, tone, icon }) {
+  return (
+    <div className={`stat ${tone ? `stat-${tone}` : ''}`}>
+      <span className="stat-label">{icon && <Icon name={icon} size={15} />}{label}</span>
+      <strong>{children}</strong>
+      {note && <span className="stat-note">{note}</span>}
+    </div>
   );
 }

@@ -55,3 +55,38 @@ export const STATE_LABEL = {
   rejected: 'Not received', exception_pending: 'Under review', approved: 'Approved — payment on its way',
   paid: 'Paid', declined: 'Declined',
 };
+
+/** A short dollar figure for tiles and chart labels: $12.5k, $1.2m, $950.
+ *  Display only. */
+export function compact(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = Number(v);
+  const a = Math.abs(n);
+  const sign = n < 0 ? '−' : '';
+  if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(a >= 1e7 ? 0 : 1)}m`;
+  if (a >= 1e4) return `${sign}$${(a / 1e3).toFixed(0)}k`;
+  if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(1)}k`;
+  return `${sign}$${a.toFixed(a < 10 ? 2 : 0)}`;
+}
+
+/** "+4.20%" / "−1.05%" from a decimal string. */
+export function pct(v, { sign = true } = {}) {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = Number(v);
+  const body = `${Math.abs(n).toFixed(2)}%`;
+  if (n < 0) return `−${body}`;
+  return sign && n > 0 ? `+${body}` : body;
+}
+
+export function monthName(key, { short = false } = {}) {
+  const [y, m] = String(key).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString(undefined,
+    { month: short ? 'short' : 'long', year: short ? '2-digit' : 'numeric', timeZone: 'UTC' });
+}
+
+export function greeting(name) {
+  const h = new Date().getHours();
+  const part = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  const first = String(name || '').split(' ')[0];
+  return first ? `${part}, ${first}` : part;
+}

@@ -224,6 +224,60 @@ function Money({ investor }) {
 
 /** Gross (no fees ever charged) against net (what the investor sees). Both are
  *  real ledger figures; the difference is exactly what fees have cost them. */
+/** The capital-vs-profit view this investor sees on their dashboard. */
+function CapitalView({ c }) {
+  const bad = c.state === 'capital_loss';
+  return (
+    <div className="card">
+      <div className="card-header"><span className="card-title">Capital and profit (as the investor sees it)</span></div>
+      <div className="detail-pairs inv-pairs">
+        <span>Paid in</span><span className="num">{fmtMoney(c.paid_in)}</span>
+        <span>Paid out</span><span className="num">{fmtMoney(c.paid_out)}</span>
+        <span>Net invested</span><span className="num">{fmtMoney(c.net_invested)}</span>
+        <span>Balance now</span><span className="num">{fmtMoney(c.value)}</span>
+        <span><strong>{bad ? 'Capital lost' : 'Profit on top'}</strong></span>
+        <span className="num" style={{ color: bad ? 'var(--red)' : 'var(--green)' }}>
+          <strong>{fmtMoney(bad ? `-${c.capital_eroded}` : c.profit_on_top, { sign: true })}</strong>
+          {c.profit_pct_of_capital && ` (${c.profit_pct_of_capital}% of capital)`}</span>
+        <span>Fees paid</span><span className="num">{fmtMoney(c.fees_paid)}</span>
+      </div>
+      <p className="inv-hint">{c.state === 'not_invested' ? 'No money in yet.'
+        : bad ? 'Their dashboard tells them losses are eating into their capital.'
+          : 'Their dashboard tells them their capital is intact with profit on top.'}</p>
+    </div>
+  );
+}
+
+/** Their share of each published trade, exactly as their Trades tab shows it. */
+function TradeShares({ t }) {
+  const rows = t.trades.filter((r) => r.your_amount !== null).slice(0, 12);
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">Their share of published trades</span>
+        <span className="inv-hint">{t.summary.wins} gains · {t.summary.losses} losses · total {fmtMoney(t.summary.your_total, { sign: true })}</span>
+      </div>
+      {rows.length === 0 ? <div className="inv-hint">Not invested when any published trade closed.</div> : (
+        <div className="table-wrapper">
+          <table>
+            <thead><tr><th>Closed</th><th>Trade</th><th className="num">Their share of fund</th><th className="num">Their result</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.closed_on}</td><td>{r.symbol} {r.direction}</td>
+                  <td className="num">{r.your_share_pct}%</td>
+                  <td className="num" style={{ color: isNeg(r.your_amount) ? 'var(--red)' : 'var(--green)' }}>
+                    {fmtMoney(r.your_amount, { sign: true })}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GrossNet({ g }) {
   return (
     <div className="card">
@@ -326,6 +380,11 @@ export default function InvestorDetail() {
             <div className="grid-2">
               <GrossNet g={d.gross_net} />
               <Terms investor={d.investor} terms={d.terms} />
+            </div>
+
+            <div className="grid-2">
+              <CapitalView c={d.capital} />
+              <TradeShares t={d.trades} />
             </div>
 
             <div className="grid-2">

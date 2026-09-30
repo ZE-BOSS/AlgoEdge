@@ -1,7 +1,11 @@
 import { useState } from 'react';
 import { api, setSession } from '../api';
 import { useLoad, useSubmit } from '../hooks';
-import { Card, Field, Loaded, Problem, PasswordInput } from '../components/ui';
+import { Link } from 'react-router-dom';
+import { Badge, Field, Loaded, Problem, PasswordInput } from '../components/ui';
+import { RangeTabs } from '../components/Charts';
+import Icon from '../components/Icons';
+import { usePrefs } from '../usePrefs';
 import { day, money } from '../format';
 
 function ChangePassword() {
@@ -47,7 +51,7 @@ function CloseAccount({ status, onDone }) {
   if (!open) return <button className="btn danger-outline" onClick={() => setOpen(true)}>Close my account</button>;
   return (
     <form className="form" onSubmit={submit}>
-      <p>We will sell all your units at the price on the day we process it, pay the money to your account
+      <p>We will pay out your balance as valued on the day we process it, to your account
         on file, and then delete your personal details. Your transaction history is kept by the fund
         in anonymous form, as the law requires.</p>
       <Field label="Anything you would like to tell us (optional)">
@@ -62,34 +66,131 @@ function CloseAccount({ status, onDone }) {
   );
 }
 
+function Toggle({ label, hint, checked, onChange, disabled }) {
+  return (
+    <label className="toggle-row">
+      <span><strong>{label}</strong>{hint && <span className="muted small">{hint}</span>}</span>
+      <input type="checkbox" role="switch" className="switch" checked={!!checked} disabled={disabled}
+             onChange={(e) => onChange(e.target.checked)} />
+    </label>
+  );
+}
+
+function Section({ icon, title, children, aside }) {
+  return (
+    <section className="card settings-card">
+      <header className="card-head">
+        <h2 className="with-icon"><Icon name={icon} size={16} />{title}</h2>
+        {aside}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function Display() {
+  const { prefs, update } = usePrefs();
+  const [error, setError] = useState(null);
+  const save = (c) => update(c).catch(setError);
+  return (
+    <Section icon="eye" title="Display">
+      <Toggle label="Hide my balances" checked={prefs.hide_balances} onChange={(v) => save({ hide_balances: v })}
+              hint="Amounts show as dots until you tap the eye at the top. Handy in public." />
+      <Toggle label="Short numbers" checked={prefs.compact_numbers} onChange={(v) => save({ compact_numbers: v })}
+              hint="$12.5k instead of $12,480.00 in tiles and lists." />
+      <div className="toggle-row">
+        <span><strong>Default chart range</strong><span className="muted small">What the balance chart opens on.</span></span>
+        <RangeTabs value={prefs.chart_range} onChange={(v) => save({ chart_range: v })} />
+      </div>
+      <Problem error={error} />
+    </Section>
+  );
+}
+
+function Notifications() {
+  const { prefs, update } = usePrefs();
+  const [error, setError] = useState(null);
+  const save = (c) => update(c).catch(setError);
+  const push = (k) => (v) => save({ push: { [k]: v } });
+  return (
+    <Section icon="bell" title="Notifications">
+      <p className="muted small">Emails about your money (a transfer received, a withdrawal decided, a password
+        change) always go to you: they are your record of what happened.</p>
+      <Toggle label="Monthly statement by email" checked={prefs.email.statements}
+              onChange={(v) => save({ email: { statements: v } })}
+              hint="The PDF stays available under Activity either way." />
+      <h3 className="sub">On your phone (Android app)</h3>
+      <Toggle label="Money received" checked={prefs.push.money} onChange={push('money')} />
+      <Toggle label="Withdrawals" checked={prefs.push.withdrawals} onChange={push('withdrawals')}
+              hint="Approved, paid or declined." />
+      <Toggle label="Statements ready" checked={prefs.push.statements} onChange={push('statements')} />
+      <Toggle label="Trades closed" checked={prefs.push.trades} onChange={push('trades')}
+              hint="The market and result; your share is in the app." />
+      <Problem error={error} />
+    </Section>
+  );
+}
+
 export default function Account() {
   const me = useLoad(api.me);
   return (
     <Loaded q={me}>
-      {({ investor: i }) => (
-        <div className="stack">
-          <Card title="Your details">
-            <dl className="pairs">
-              <dt>Name</dt><dd>{i.name}</dd>
-              <dt>Email</dt><dd>{i.email}</dd>
-              <dt>Phone</dt><dd>{i.phone || '—'}</dd>
-              <dt>Member since</dt><dd>{day(i.joined)}</dd>
-            </dl>
-          </Card>
-          <Card title="Where we pay you">
-            {i.payout.account_number ? (
+      {({ investor: i, terms: t }) => (
+        <div className="settings">
+          <section className="card profile-card">
+            <div className="avatar big-avatar" aria-hidden="true">
+              {String(i.name || '?').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')}
+            </div>
+            <div>
+              <h2>{i.name}</h2>
+              <span className="muted">{i.email}</span>
+              <div className="row small muted">
+                <span>Member since {day(i.joined)}</span>
+                <Badge tone={i.status === 'active' ? 'good' : 'neutral'}>{i.status}</Badge>
+              </div>
+            </div>
+          </section>
+
+          <div className="settings-grid">
+            <Section icon="user" title="Your details">
               <dl className="pairs">
-                <dt>Bank</dt><dd>{i.payout.bank_name}</dd>
-                <dt>Account</dt><dd className="num">····{i.payout.account_number.slice(-4)}</dd>
-                <dt>Name</dt><dd>{i.payout.account_name}</dd>
+                <dt>Name</dt><dd>{i.name}</dd>
+                <dt>Email</dt><dd>{i.email}</dd>
+                <dt>Phone</dt><dd>{i.phone || '-'}</dd>
+                <dt>Country</dt><dd>{i.country || '-'}</dd>
               </dl>
-            ) : <p className="muted">No account on file yet.</p>}
-            <p className="muted small">To protect you, the account we pay can only be changed by
-              contacting us directly — never from the app. If someone got into your account, they still
-              could not redirect your money.</p>
-          </Card>
-          <Card title="Password"><ChangePassword /></Card>
-          <Card title="Close your account"><CloseAccount status={i.status} onDone={me.reload} /></Card>
+              <p className="muted small">To change these, email us from the address above.</p>
+            </Section>
+
+            <Display />
+            <Notifications />
+
+            <Section icon="bank" title="Where we pay you">
+              {i.payout.account_number ? (
+                <dl className="pairs">
+                  <dt>Bank</dt><dd>{i.payout.bank_name}</dd>
+                  <dt>Account</dt><dd className="num">****{i.payout.account_number.slice(-4)}</dd>
+                  <dt>Name</dt><dd>{i.payout.account_name}</dd>
+                </dl>
+              ) : <p className="muted">No account on file yet.</p>}
+              <p className="muted small">To protect you, the account we pay can only be changed by contacting us
+                directly, never from the app. If someone got into your account, they still could not redirect
+                your money.</p>
+            </Section>
+
+            <Section icon="doc" title="Your terms" aside={<Link to="/how" className="small">How it works</Link>}>
+              <dl className="pairs">
+                <dt>Performance fee</dt><dd>{t.performance_fee_pct}% of new profit</dd>
+                <dt>Management fee</dt><dd>{t.management_fee_pct}% of each two-month period&rsquo;s profit</dd>
+                <dt>Minimum first deposit</dt><dd>{money(t.min_investment)}</dd>
+                <dt>Lock-up</dt><dd>{t.lockup_days} days</dd>
+                <dt>Withdrawal notice</dt><dd>{t.notice_days} days</dd>
+              </dl>
+            </Section>
+
+            <Section icon="shield" title="Password"><ChangePassword /></Section>
+            <Section icon="close" title="Close your account"><CloseAccount status={i.status} onDone={me.reload} /></Section>
+          </div>
         </div>
       )}
     </Loaded>

@@ -363,6 +363,7 @@ export const inv = {
   publishTrade: (tradeId, data) => api.post(`${INV}/disclosures/${tradeId}/publish`, data || {}),
   hideTrade: (tradeId, data) => api.post(`${INV}/disclosures/${tradeId}/hide`, data || {}),
   disclosurePreview: () => api.get(`${INV}/disclosures/preview`),
+  disclosureSplit: (id) => api.get(`${INV}/disclosures/${id}/split`),
   reconciliation: (poolEquity) => api.get(`${INV}/reconciliation`,
     { params: poolEquity ? { pool_equity: poolEquity } : {} }),
   auditLog: (params) => api.get(`${INV}/audit/log`, { params }),
