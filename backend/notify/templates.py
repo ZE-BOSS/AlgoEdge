@@ -106,7 +106,8 @@ def _msg(kind, inv, subject, title, lines, *, pairs=None, button=None, attachmen
     return Message(kind=kind, to=to or inv.email, subject=subject,
                    html=_layout(title, blocks, button=button, footer=footer),
                    text=_text(title, lines, pairs, button[1] if button else None),
-                   investor_id=getattr(inv, "id", None), attachments=attachments or [])
+                   investor_id=getattr(inv, "id", None), attachments=attachments or [],
+                   preferences=getattr(inv, "preferences", None))
 
 
 def _first(inv) -> str:

@@ -103,6 +103,8 @@ class Investor(Base):
     performance_fee_pct = Column(Numeric(9, 4))
     management_fee_pct = Column(Numeric(9, 4))
     min_investment = Column(MONEY)
+    # the investor's own dashboard and notification settings (investor/prefs.py)
+    preferences = Column(Text)
 
     created_at = Column(DateTime, server_default=func.now())
     activated_at = Column(DateTime)

@@ -35,7 +35,8 @@ EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 # subject line only — never an amount's detail beyond it, since a notification
 # shows on a lock screen.
 PUSH_KINDS = {"deposit_confirmed", "deposit_rejected", "withdrawal_approved",
-              "withdrawal_paid", "withdrawal_declined", "statement", "closure_approved"}
+              "withdrawal_paid", "withdrawal_declined", "statement", "closure_approved",
+              "trade_published"}
 _pending: set[asyncio.Task] = set()
 _warned = False
 
@@ -50,11 +51,17 @@ class Message:
     investor_id: str | None = None
     attachments: list[tuple[str, bytes]] = field(default_factory=list)   # (filename, bytes)
     reply_to: str | None = None
+    # a phone notification with no email (e.g. "a trade closed"); `to` may be empty
+    push_only: bool = False
+    push_body: str | None = None
+    # the investor's saved settings JSON, captured when the message is made (the
+    # investor row is already loaded then); None = defaults
+    preferences: str | None = None
 
 
 def queue(session, message: Message | None) -> None:
     """Send `message` if, and only if, this session's transaction commits."""
-    if message is None or not message.to:
+    if message is None or (not message.to and not message.push_only):
         return
     sync = getattr(session, "sync_session", session)
     # Open the transaction now if it is not already. With no open transaction,
@@ -125,14 +132,22 @@ def use_transport(transport: httpx.AsyncBaseTransport | None) -> None:
 
 
 async def _deliver_all(messages: list[Message]) -> None:
+    from backend.investor import prefs as prefsmod
     for m in messages:
-        try:
-            await deliver(m)
-        except Exception as exc:          # one bad message must not stop the rest
-            logger.error(f"[EMAIL] {m.kind} to {m.to} crashed: {exc}")
-        if m.kind in PUSH_KINDS and m.investor_id and m.kind != "closure_approved":
+        raw = m.preferences
+        if not m.push_only:
+            if prefsmod.wants_email(raw, m.kind):
+                try:
+                    await deliver(m)
+                except Exception as exc:          # one bad message must not stop the rest
+                    logger.error(f"[EMAIL] {m.kind} to {m.to} crashed: {exc}")
+            else:
+                logger.info(f"[EMAIL] {m.kind} to {m.to} skipped: switched off in their settings")
+        if (m.kind in PUSH_KINDS and m.investor_id and m.kind != "closure_approved"
+                and prefsmod.wants_push(raw, m.kind)):
             try:
-                await push(m.investor_id, m.subject, "Open the app for details.", {"kind": m.kind})
+                await push(m.investor_id, m.subject, m.push_body or "Open the app for details.",
+                           {"kind": m.kind})
             except Exception as exc:
                 logger.error(f"[PUSH] {m.kind} to {m.investor_id} crashed: {exc}")
 

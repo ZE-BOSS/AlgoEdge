@@ -261,8 +261,9 @@ def test_the_trade_list_is_published_trades_only_and_stripped():
                 await s.commit()
             await a.admin("POST", "/disclosures/100/publish", {})
             await a.admin("POST", "/disclosures/101/hide", {})
-            rows = (await a.inv("GET", "/trades", ada)).json()
+            rows = (await a.inv("GET", "/trades", ada)).json()["trades"]
             assert [r["id"] for r in rows] != [] and len(rows) == 1
+            assert "result_amount" not in rows[0], "the fund-wide dollar result is not shown"
             assert "SECRET" not in str(rows) and "strategy" not in str(rows)
     run(go())
 

@@ -368,6 +368,9 @@ async def get_investor(investor_id: str, db: AsyncSession = Depends(get_db)):
         "investor": _investor_row(inv),
         "statement": await recmod.investor_statement(db, investor_id),
         "gross_net": await recmod.gross_net(db, investor_id),
+        # the same capital/profit view and trade shares the investor sees
+        "capital": await _capital(db, investor_id),
+        "trades": await _investor_trades(db, investor_id),
         # the terms in force for this investor: exactly what they are shown and charged
         "terms": {"performance_fee_pct": _pct_or_none(terms.performance_fee_pct),
                   "management_fee_pct": _pct_or_none(terms.management_fee_pct),
@@ -378,6 +381,17 @@ async def get_investor(investor_id: str, db: AsyncSession = Depends(get_db)):
         "withdrawals": [_withdrawal_row(w) for w in withdrawals],
         "adjustments": [_adjustment_row(a) for a in adjustments],
     }
+
+
+async def _capital(db, investor_id):
+    from backend.investor import split as splitmod
+    st = await recmod.investor_statement(db, investor_id)
+    return await splitmod.capital_position(db, investor_id, D(st["current_value"]))
+
+
+async def _investor_trades(db, investor_id):
+    from backend.investor import split as splitmod
+    return await splitmod.my_trades(db, investor_id, limit=50)
 
 
 @router.patch("/{investor_id}")
@@ -1091,10 +1105,51 @@ async def publish_trade(trade_id: int, body: Publish, admin: User = Depends(requ
                         db: AsyncSession = Depends(get_db)):
     edits = body.model_dump(exclude_unset=True)
     reason = edits.pop("reason", None)
+    from backend.investor.models import TradeDisclosure
+    was_published = (await db.execute(select(TradeDisclosure.state)
+                                      .where(TradeDisclosure.trade_id == trade_id))).scalar_one_or_none()
     with refusals():
         row = await discmod.publish(db, trade_id=trade_id, actor_id=admin.id,
                                     edits=edits, reason=reason)
+    if was_published != "published":
+        await _alert_trade(db, row)
     return discmod.public_view(row)
+
+
+async def _alert_trade(db, row) -> None:
+    """A phone notification to every investor who held a share of the trade.
+
+    The lock screen shows the market and the percentage only; their own dollar
+    share is in the app, behind their sign-in.
+    """
+    from backend.investor import split as splitmod
+    from backend.notify.outbox import Message
+    if row.closed_on is None:
+        return
+    held = await splitmod.holdings_before(db, row.closed_on)
+    if not held:
+        return
+    pct = "" if row.result_pct is None else f" {D(str(row.result_pct)):+.2f}%"
+    title = f"{row.symbol} {(row.direction or '').lower()} closed{pct}"
+    prefs = dict((await db.execute(select(Investor.id, Investor.preferences)
+                                   .where(Investor.id.in_(list(held))))).all())
+    for iid in held:
+        outbox.queue(db, Message(kind="trade_published", to="", subject=title, html="", text="",
+                                 investor_id=iid, push_only=True, preferences=prefs.get(iid),
+                                 push_body="Open the app to see your share of it."))
+
+
+@router.get("/disclosures/{trade_id}/split")
+async def disclosure_split(trade_id: int, db: AsyncSession = Depends(get_db)):
+    """How a published trade's result divides between the investors who held
+    the fund when it closed. The lines add up to the published result exactly."""
+    from backend.investor import split as splitmod
+    from backend.investor.models import TradeDisclosure
+    row = (await db.execute(select(TradeDisclosure).where(
+        TradeDisclosure.trade_id == trade_id, TradeDisclosure.state == "published"))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="that trade is not published")
+    return await splitmod.split_trade(db, row)
 
 
 @router.post("/disclosures/{trade_id}/hide")

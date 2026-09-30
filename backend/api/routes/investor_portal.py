@@ -234,11 +234,16 @@ async def change_password(body: ChangePassword, inv: Investor = Depends(current_
 
 @router.get("/me")
 async def me(inv: Investor = Depends(current_investor), db: AsyncSession = Depends(get_db)):
+    from backend.investor import prefs as prefsmod
+    from backend.investor import split as splitmod
     statement = await recmod.investor_statement(db, inv.id)
     terms = await fundmod.terms_for(db, inv.id)
     live = await fundmod.current_settings(db)
     until = await fundmod.lockup_until(db, inv.id)
     return {
+        # capital against profit: is money being added on top, or eating in?
+        "capital": await splitmod.capital_position(db, inv.id, Decimal(statement["current_value"])),
+        "preferences": prefsmod.load(inv.preferences),
         "investor": {
             "id": inv.id, "name": inv.name, "email": inv.email, "status": inv.status,
             "phone": inv.phone, "country": inv.country,
@@ -283,17 +288,119 @@ async def nav_history(limit: int = Query(730, le=5000), db: AsyncSession = Depen
         select(NavSnapshot.as_of_date, NavSnapshot.nav_per_unit)
         .order_by(desc(NavSnapshot.as_of_date)).limit(limit))).all()))
     moves = (await db.execute(
-        select(UnitTransaction.effective_date, UnitTransaction.units)
+        select(UnitTransaction.effective_date, UnitTransaction.units, UnitTransaction.kind,
+               UnitTransaction.amount)
         .where(UnitTransaction.investor_id == inv.id)
         .order_by(UnitTransaction.effective_date, UnitTransaction.id))).all()
-    out, held, i = [], Decimal("0"), 0
+    out, held, net, i = [], Decimal("0"), Decimal("0"), 0
+    for d, n in rows:
+        while i < len(moves) and moves[i][0] <= d:
+            held += Decimal(str(moves[i][1]))
+            if moves[i][2] == "SUBSCRIBE":
+                net += Decimal(str(moves[i][3]))
+            elif moves[i][2] == "REDEEM":
+                net -= Decimal(str(moves[i][3]))
+            i += 1
+        value = navmod.amount_for_units(held, n) if held > 0 else None
+        out.append({"date": d.isoformat(), "nav_per_unit": _s(n), "value": _s(value),
+                    # money paid in less money paid out, to that day: the line the
+                    # balance is above (profit) or below (capital being lost)
+                    "net_invested": _s(navmod.money(net)) if value is not None else None})
+    return out
+
+
+@router.get("/performance")
+async def performance(inv: Investor = Depends(current_investor), db: AsyncSession = Depends(get_db)):
+    """This investor's own month-by-month result and the numbers behind it.
+
+    A month's profit = value at its end - value at the previous month's end -
+    money paid in during it + money paid out during it. The percentage is the
+    fund's own change that month (the same for every investor's money, before
+    fees). Only months they were invested in.
+    """
+    rows = (await db.execute(select(NavSnapshot.as_of_date, NavSnapshot.nav_per_unit)
+                             .order_by(NavSnapshot.as_of_date))).all()
+    moves = (await db.execute(
+        select(UnitTransaction.effective_date, UnitTransaction.units, UnitTransaction.kind,
+               UnitTransaction.amount)
+        .where(UnitTransaction.investor_id == inv.id)
+        .order_by(UnitTransaction.effective_date, UnitTransaction.id))).all()
+    if not moves:
+        return {"months": [], "stats": None}
+    first = moves[0][0]
+    # month-end value, flows and price for every month from the first deposit
+    month_end: dict[str, dict] = {}
+    held, i = Decimal("0"), 0
+    flows: dict[str, Decimal] = {}
+    for d, u, kind, amount in moves:
+        key = d.strftime("%Y-%m")
+        if kind == "SUBSCRIBE":
+            flows[key] = flows.get(key, Decimal("0")) + Decimal(str(amount))
+        elif kind == "REDEEM":
+            flows[key] = flows.get(key, Decimal("0")) - Decimal(str(amount))
+    peak_nav, worst_dd, before_nav = None, Decimal("0"), None
     for d, n in rows:
         while i < len(moves) and moves[i][0] <= d:
             held += Decimal(str(moves[i][1]))
             i += 1
-        value = navmod.amount_for_units(held, n) if held > 0 else None
-        out.append({"date": d.isoformat(), "nav_per_unit": _s(n), "value": _s(value)})
-    return out
+        if d < first:
+            before_nav = Decimal(str(n))        # the price they bought in near
+            continue
+        n = Decimal(str(n))
+        peak_nav = n if peak_nav is None else max(peak_nav, n)
+        worst_dd = min(worst_dd, n / peak_nav - 1)
+        month_end[d.strftime("%Y-%m")] = {"value": navmod.amount_for_units(held, n), "nav": n}
+    months, prev_value = [], Decimal("0")
+    prev_nav = before_nav or navmod.INITIAL_NAV
+    for key in sorted(set(month_end) | set(flows)):
+        end = month_end.get(key)
+        if end is None:
+            continue
+        flow = flows.get(key, Decimal("0"))
+        profit = navmod.money(end["value"] - prev_value - flow)
+        ret = (end["nav"] / prev_nav - 1) * 100 if prev_nav else None
+        months.append({"month": key, "start_value": _s(navmod.money(prev_value)),
+                       "money_in_out": _s(navmod.money(flow)), "end_value": _s(navmod.money(end["value"])),
+                       "profit": _s(profit),
+                       "fund_return_pct": None if ret is None else _s(ret.quantize(Decimal("0.01")))})
+        prev_value, prev_nav = end["value"], end["nav"]
+    stats = None
+    if months:
+        best = max(months, key=lambda m: Decimal(m["profit"]))
+        worst = min(months, key=lambda m: Decimal(m["profit"]))
+        stats = {"days_invested": (navmod.accounting_date() - first).days,
+                 "first_deposit": first.isoformat(),
+                 "best_month": best, "worst_month": worst,
+                 "months_up": sum(1 for m in months if Decimal(m["profit"]) > 0),
+                 "months_down": sum(1 for m in months if Decimal(m["profit"]) < 0),
+                 "largest_fall_pct": _s((worst_dd * 100).quantize(Decimal("0.01")))}
+    return {"months": months, "stats": stats}
+
+
+class Preferences(BaseModel):
+    hide_balances: bool | None = None
+    chart_range: str | None = None
+    compact_numbers: bool | None = None
+    email: dict | None = None
+    push: dict | None = None
+
+
+@router.get("/preferences")
+async def get_preferences(inv: Investor = Depends(current_investor)):
+    from backend.investor import prefs as prefsmod
+    return prefsmod.load(inv.preferences)
+
+
+@router.put("/preferences")
+async def set_preferences(body: Preferences, inv: Investor = Depends(current_investor),
+                          db: AsyncSession = Depends(get_db)):
+    from backend.investor import prefs as prefsmod
+    try:
+        inv.preferences = prefsmod.merge(inv.preferences, body.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await db.flush()
+    return prefsmod.load(inv.preferences)
 
 
 KIND_LABEL = {"SUBSCRIBE": "Units bought", "REDEEM": "Units sold",
@@ -341,8 +448,13 @@ async def activity(inv: Investor = Depends(current_investor), db: AsyncSession =
 @router.get("/trades")
 async def trades(limit: int = Query(100, le=500), offset: int = 0,
                  inv: Investor = Depends(current_investor), db: AsyncSession = Depends(get_db)):
-    """Published trades only, in the stripped public shape."""
-    return await discmod.published(db, limit=limit, offset=offset)
+    """Published trades, each with THIS investor's share of its result.
+
+    The fund-wide dollar result is not returned: an investor sees their own
+    money, never the size of the book. See investor/split.py.
+    """
+    from backend.investor import split as splitmod
+    return await splitmod.my_trades(db, inv.id, limit=limit + offset)
 
 
 # ── money in ────────────────────────────────────────────────────────────────
