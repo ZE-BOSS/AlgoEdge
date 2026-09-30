@@ -6,6 +6,7 @@ import { usePrefs } from '../usePrefs';
 import { Amount, Card, Loaded, Stat } from '../components/ui';
 import { BalanceChart, CapitalBar, MonthBars } from '../components/Charts';
 import Icon from '../components/Icons';
+import LiveTrades from '../components/LiveTrades';
 import { day, isNeg, monthName, pct, sinceLaunch } from '../format';
 
 function CapitalMessage({ c }) {
@@ -124,6 +125,7 @@ export default function Home() {
                 confirm by email; nothing else is needed from you.</div>
             )}
             <CapitalMessage c={c} />
+            <LiveTrades compact />
 
             {c.state !== 'not_invested' && (
               <Card title="What your balance is made of"><CapitalBar c={c} /></Card>

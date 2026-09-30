@@ -382,3 +382,43 @@ input[aria-invalid] { border-color: var(--bad); }
 .switch:checked::after { transform: translateX(18px); }
 .switch:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .switch, .switch::after, .tab-ic, .stat { transition: none; } }
+
+/* ── notifications: bell, live trades, settings matrix ─────────────────── */
+.bell { position: relative; }
+.bell-dot { position: absolute; top: 2px; right: 2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px;
+  background: var(--bad); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+  box-shadow: 0 0 0 2px var(--bg); }
+.bell-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 50; width: min(380px, calc(100vw - 32px));
+  max-height: min(70vh, 560px); overflow: auto; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 16px; box-shadow: 0 18px 50px rgba(0, 0, 0, .45); }
+.bell-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px;
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); }
+.linkish { background: none; border: 0; color: var(--gold); cursor: pointer; padding: 0; font: inherit; }
+.bell-list { list-style: none; margin: 0; padding: 6px; }
+.bell-list button { display: flex; gap: 12px; width: 100%; text-align: left; background: none; border: 0; color: inherit;
+  padding: 10px; border-radius: 12px; cursor: pointer; font: inherit; }
+.bell-list button:hover, .bell-list button:focus-visible { background: var(--surface-2); }
+.bell-list button.unread { background: color-mix(in srgb, var(--gold) 8%, transparent); }
+.bell-list button.unread strong::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--gold); margin-right: 6px; vertical-align: middle; }
+.bell-ic { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface-2); color: var(--text-2); }
+.bell-ic.k-trade { color: var(--gold); } .bell-ic.k-deposit { color: var(--good); } .bell-ic.k-withdrawal { color: var(--info); }
+.bell-txt { display: grid; gap: 2px; min-width: 0; }
+.empty.small { padding: 24px 16px; text-align: center; display: grid; justify-items: center; gap: 6px; color: var(--muted); }
+
+.live-title { display: inline-flex; align-items: center; gap: 8px; }
+.live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 0 var(--good);
+  animation: live-pulse 1.8s infinite; }
+@keyframes live-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 60%, transparent); }
+  100% { box-shadow: 0 0 0 10px transparent; } }
+.live-pill { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--good);
+  border: 1px solid color-mix(in srgb, var(--good) 45%, transparent); border-radius: 99px; padding: 2px 8px; }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+.notif-grid { display: grid; margin-top: 6px; }
+.notif-row { display: grid; grid-template-columns: 1fr 56px 56px; align-items: center; gap: 10px; padding: 10px 0;
+  border-bottom: 1px solid var(--line); }
+.notif-row > span:first-child { display: grid; gap: 2px; }
+.notif-row > span:not(:first-child) { justify-self: center; }
+.notif-row.head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 4px 0; }

@@ -5,7 +5,7 @@
 // "you're offline" state. It never caches API responses: a balance served from
 // a cache is a stale number presented as current, which on a money screen is
 // worse than no number at all.
-const SHELL = 'avq-shell-v1';
+const SHELL = 'avq-shell-v2';
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(['/', '/manifest.webmanifest', '/mark.svg'])));
@@ -34,4 +34,30 @@ self.addEventListener('fetch', (e) => {
     }
     return res;
   })));
+});
+
+// Notifications pushed by the server (Web Push). The payload carries a title,
+// a short line and the in-app page to open; never more than a lock screen may show.
+self.addEventListener('push', (e) => {
+  let msg = {};
+  try { msg = e.data ? e.data.json() : {}; } catch { msg = { title: 'Alphavantiq', body: e.data && e.data.text() }; }
+  const data = msg.data || {};
+  e.waitUntil(self.registration.showNotification(msg.title || 'Alphavantiq', {
+    body: msg.body || '', icon: '/icon-192.png', badge: '/icon-192.png',
+    tag: data.kind ? `${data.kind}-${Date.now()}` : undefined, data,
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const link = (e.notification.data && e.notification.data.link) || '/';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    for (const c of list) {
+      if (c.url.startsWith(self.location.origin)) {
+        c.focus();
+        return c.navigate ? c.navigate(link) : undefined;
+      }
+    }
+    return self.clients.openWindow(link);
+  }));
 });

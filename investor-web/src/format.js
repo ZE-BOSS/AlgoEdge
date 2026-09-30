@@ -90,3 +90,14 @@ export function greeting(name) {
   const first = String(name || '').split(' ')[0];
   return first ? `${part}, ${first}` : part;
 }
+
+/** "just now", "5 min ago", "3 h ago", else the day. */
+export function ago(iso) {
+  if (!iso) return '';
+  const t = Date.parse(/Z|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return day(iso);
+}

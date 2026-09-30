@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useLoad } from '../hooks';
 import { Amount, Card, Loaded, Stat } from '../components/ui';
 import { SymbolBars } from '../components/Charts';
+import LiveTrades from '../components/LiveTrades';
 import { day, isNeg, pct } from '../format';
 
 const FILTERS = [['all', 'All'], ['mine', 'While invested'], ['win', 'Gains'], ['loss', 'Losses']];
@@ -17,6 +18,7 @@ export default function Trades() {
         const symbols = [...new Set(trades.map((t) => t.symbol))].sort();
         return (
           <div className="stack">
+            <LiveTrades />
             <div className="stat-grid">
               <Stat label="Your result from trades" icon="chart" tone={isNeg(summary.your_total) ? 'bad' : 'good'}
                     note="your share, before fees"><Amount v={summary.your_total} sign /></Stat>
@@ -33,7 +35,8 @@ export default function Trades() {
               <p className="muted small">Each result is <strong>your share</strong>: the trade&rsquo;s result
                 multiplied by your share of the fund when it closed. Everyone&rsquo;s shares add up to the
                 trade&rsquo;s result exactly. The percentage is the trade&rsquo;s effect on the fund, the same for
-                every investor. Fees are charged separately, every two months.</p>
+                every investor. Your share is added to (or taken from) your balance the moment the trade is published,
+                so your overview always includes it. Fees are charged separately, every two months.</p>
               <div className="filters">
                 <div className="chips">
                   {FILTERS.map(([k, label]) => (

@@ -7,6 +7,8 @@ import { usePrefs } from './usePrefs';
 import { greeting } from './format';
 import { Mark } from './components/Brand';
 import Icon from './components/Icons';
+import Bell from './components/Bell';
+import { disable as disableWebPush } from './webpush';
 import Login from './pages/Login';
 import Accept from './pages/Accept';
 import Signup from './pages/Signup';
@@ -27,6 +29,9 @@ const TABS = [
 
 const TITLES = { '/': 'Overview', '/money': 'Money', '/trades': 'Trades', '/activity': 'Activity',
   '/account': 'Settings', '/how': 'How it is calculated' };
+
+// this browser stops getting the account's notifications before the session goes
+const signOut = () => disableWebPush().catch(() => {}).finally(clearSession);
 
 function initials(name) {
   return String(name || '?').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
@@ -62,7 +67,7 @@ function Shell({ session, children }) {
         <div className="side-foot">
           <div className="avatar" aria-hidden="true">{initials(name)}</div>
           <div className="who-name"><strong>{name}</strong><span className="muted small">Investor</span></div>
-          <button className="icon-btn" onClick={clearSession} title="Sign out" aria-label="Sign out"><Icon name="logout" /></button>
+          <button className="icon-btn" onClick={signOut} title="Sign out" aria-label="Sign out"><Icon name="logout" /></button>
         </div>
       </aside>
 
@@ -74,6 +79,7 @@ function Shell({ session, children }) {
             <h1>{title}</h1>
           </div>
           <div className="top-actions">
+            <Bell />
             <PrivacyButton />
             <NavLink to="/account" className="avatar small-avatar" aria-label="Settings">{initials(name)}</NavLink>
           </div>

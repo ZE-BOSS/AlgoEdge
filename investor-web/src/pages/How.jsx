@@ -17,6 +17,11 @@ export default function How() {
               with the fund&rsquo;s trading results, so everyone&rsquo;s holding moves by the same percentage.
               The fund started at $100 a unit: a unit price of {money(s.nav_per_unit)} means every $100
               invested at launch is now worth {money(s.nav_per_unit)}.</p>
+            <p>When a closed trade is published, its result moves the unit price straight away: the price
+              changes by the result divided by all units in issue, so your balance changes by exactly your share
+              of it, the same amount the Trades page shows. A profit adds to your balance; a loss comes off it,
+              first from any profit you have made and then from your capital. Valuations of the trading account
+              then keep the price in step with the broker&rsquo;s figures.</p>
             <div className="sum">
               <div><span className="muted">Units you hold</span><strong className="num">{units(s.units)}</strong></div>
               <div className="op">×</div>

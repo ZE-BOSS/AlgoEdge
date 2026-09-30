@@ -2,8 +2,8 @@ import { createContext, useContext } from 'react';
 
 export const DEFAULTS = {
   hide_balances: false, chart_range: 'ALL', compact_numbers: false,
-  email: { statements: true },
-  push: { money: true, withdrawals: true, statements: true, trades: true },
+  email: { statements: true, trades: true, live_trades: true, fees: true },
+  push: { money: true, withdrawals: true, statements: true, trades: true, live_trades: true, fees: true },
 };
 
 export const PrefsContext = createContext({ prefs: DEFAULTS, hidden: false, update: async () => {}, reveal: () => {} });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, setSession } from '../api';
 import { useLoad, useSubmit } from '../hooks';
 import { Link } from 'react-router-dom';
@@ -7,6 +7,7 @@ import { RangeTabs } from '../components/Charts';
 import Icon from '../components/Icons';
 import { usePrefs } from '../usePrefs';
 import { day, money } from '../format';
+import * as webpush from '../webpush';
 
 function ChangePassword() {
   const [cur, setCur] = useState('');
@@ -107,25 +108,70 @@ function Display() {
   );
 }
 
+function ThisBrowser() {
+  const [state, setState] = useState('checking');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  useEffect(() => { webpush.status().then(setState).catch(() => setState('unsupported')); }, []);
+  const flip = async (on) => {
+    setBusy(true); setError(null);
+    try { await (on ? webpush.enable() : webpush.disable()); setState(await webpush.status()); }
+    catch (e) { setError(e); } finally { setBusy(false); }
+  };
+  const note = {
+    unsupported: 'This browser cannot show notifications. On iPhone, add this site to your home screen first.',
+    blocked: 'Notifications are blocked for this site. Allow them in your browser settings, then come back.',
+  }[state];
+  return (
+    <div className="toggle-row">
+      <span><strong>Notifications in this browser</strong>
+        <span className="muted small">{note || 'Pop-ups on this computer or phone browser, even with the tab closed.'}</span></span>
+      {!note && state !== 'checking' && (
+        <input type="checkbox" role="switch" className="switch" checked={state === 'on'} disabled={busy}
+               aria-label="Notifications in this browser" onChange={(e) => flip(e.target.checked)} />
+      )}
+      <Problem error={error} />
+    </div>
+  );
+}
+
+// [key, label, hint] — the same list drives the push and email columns
+const EVENTS = [
+  ['live_trades', 'A trade opens', 'Market and side, the moment the fund opens a position.'],
+  ['trades', 'A trade result', 'Profit or loss when a trade is published; your share is in the app and email.'],
+  ['money', 'Money in', 'Your transfer noted and received.'],
+  ['withdrawals', 'Withdrawals', 'Requested, approved, paid or declined.'],
+  ['fees', 'Fees charged', 'Every two months, what came off your balance.'],
+  ['statements', 'Statements ready', 'Your monthly PDF.'],
+];
+// emails for these always go: they are the record of what happened to your money
+const EMAIL_ALWAYS = new Set(['money', 'withdrawals']);
+
 function Notifications() {
   const { prefs, update } = usePrefs();
   const [error, setError] = useState(null);
   const save = (c) => update(c).catch(setError);
-  const push = (k) => (v) => save({ push: { [k]: v } });
   return (
     <Section icon="bell" title="Notifications">
-      <p className="muted small">Emails about your money (a transfer received, a withdrawal decided, a password
-        change) always go to you: they are your record of what happened.</p>
-      <Toggle label="Monthly statement by email" checked={prefs.email.statements}
-              onChange={(v) => save({ email: { statements: v } })}
-              hint="The PDF stays available under Activity either way." />
-      <h3 className="sub">On your phone (Android app)</h3>
-      <Toggle label="Money received" checked={prefs.push.money} onChange={push('money')} />
-      <Toggle label="Withdrawals" checked={prefs.push.withdrawals} onChange={push('withdrawals')}
-              hint="Approved, paid or declined." />
-      <Toggle label="Statements ready" checked={prefs.push.statements} onChange={push('statements')} />
-      <Toggle label="Trades closed" checked={prefs.push.trades} onChange={push('trades')}
-              hint="The market and result; your share is in the app." />
+      <p className="muted small">Every notification also lands under the bell at the top, whatever you choose
+        here. Password and payout-account changes are always sent, for your safety.</p>
+      <ThisBrowser />
+      <div className="notif-grid" role="table" aria-label="What you are told about, and how">
+        <div className="notif-row head" role="row"><span role="columnheader">Tell me when</span>
+          <span role="columnheader">Push</span><span role="columnheader">Email</span></div>
+        {EVENTS.map(([k, label, hint]) => (
+          <div className="notif-row" role="row" key={k}>
+            <span role="cell"><strong>{label}</strong><span className="muted small">{hint}</span></span>
+            <span role="cell"><input type="checkbox" role="switch" className="switch" aria-label={`${label}: push`}
+              checked={!!prefs.push[k]} onChange={(e) => save({ push: { [k]: e.target.checked } })} /></span>
+            {EMAIL_ALWAYS.has(k) ? <span role="cell" className="muted tiny">always</span> : (
+              <span role="cell"><input type="checkbox" role="switch" className="switch" aria-label={`${label}: email`}
+                checked={!!prefs.email[k]} onChange={(e) => save({ email: { [k]: e.target.checked } })} /></span>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="muted small">Push goes to this browser (if turned on above) and to the Android app.</p>
       <Problem error={error} />
     </Section>
   );
