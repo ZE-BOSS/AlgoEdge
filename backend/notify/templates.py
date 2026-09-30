@@ -107,7 +107,10 @@ def _msg(kind, inv, subject, title, lines, *, pairs=None, button=None, attachmen
                    html=_layout(title, blocks, button=button, footer=footer),
                    text=_text(title, lines, pairs, button[1] if button else None),
                    investor_id=getattr(inv, "id", None), attachments=attachments or [],
-                   preferences=getattr(inv, "preferences", None))
+                   preferences=getattr(inv, "preferences", None),
+                   # the push and feed lines: the email minus its greeting
+                   push_body=lines[1] if len(lines) > 1 else None,
+                   feed_body=" ".join(lines[1:]) or None)
 
 
 def _first(inv) -> str:
@@ -262,6 +265,88 @@ def statement(inv, label: str, pdf: bytes, closing_value) -> Message:
                  f"Holding at the end of the month: {money(closing_value)}."],
                 button=("See your account", _app()),
                 attachments=[(f"alphavantiq-statement-{label.replace(' ', '-').lower()}.pdf", pdf)])
+
+
+# ── account activity: email, feed and push ──────────────────────────────────
+# Each sets its own short push line (a lock screen shows it, so no amounts beyond
+# the subject) and a fuller feed line for the app's bell.
+
+def _with(m: Message, push: str, feed: str | None = None) -> Message:
+    m.push_body, m.feed_body = push, feed or m.feed_body
+    return m
+
+
+def deposit_claimed(inv, dep) -> Message:
+    return _with(_msg(
+        "deposit_claimed", inv, f"Watching for your {money(dep.amount_claimed)} transfer",
+        "We are watching for your transfer",
+        [f"Hello {_first(inv)},",
+         "Thank you for telling us about your transfer. We will let you know the moment it arrives "
+         "and is invested.",
+         f"Please use the reference {dep.reference_code} on the transfer so we can match it quickly."],
+        pairs=[("Amount", money(dep.amount_claimed)), ("Reference", dep.reference_code or "—")],
+        button=("See your account", f"{_app()}/money")),
+        "We will tell you the moment it arrives and is invested.",
+        f"Use reference {dep.reference_code} on the transfer. We will tell you the moment it arrives "
+        f"and is invested.")
+
+
+def deposit_recorded(inv, dep) -> Message:
+    """Money the fund recorded on the investor's behalf (it arrived another way)."""
+    return _with(_msg(
+        "deposit_confirmed", inv, f"We received {money(dep.amount_confirmed)}", "Money added to your account",
+        [f"Hello {_first(inv)},",
+         f"{money(dep.amount_confirmed)} has been added to your account and invested."],
+        pairs=[("Amount invested", money(dep.amount_confirmed)),
+               ("Priced on", dep.effective_date.strftime("%d %b %Y"))],
+        button=("See your account", _app())),
+        "Your money has been invested.")
+
+
+def trade_opened(inv, symbol: str, side: str) -> Message:
+    return _with(_msg(
+        "trade_opened", inv, f"Trade live: {symbol} {side.lower()}", f"A {symbol} trade is live",
+        [f"Hello {_first(inv)},",
+         f"The fund has just opened a {side.lower()} position on {symbol}.",
+         "Your share of the result reaches your balance when the trade is published after it closes. "
+         "We will tell you how it went."],
+        button=("See live trades", f"{_app()}/trades"),
+        footer="You can switch these emails off in Settings, under Notifications."),
+        "The fund has opened a position. You will hear how it went once it closes.",
+        f"The fund opened a {side.lower()} position on {symbol}. Your share of the result reaches your "
+        f"balance when the trade is published after it closes.")
+
+
+def trade_result(inv, *, symbol: str, side: str, won: bool, pct: str, share) -> Message:
+    what = "profit" if won else "loss"
+    lines = [f"Hello {_first(inv)},",
+             f"The fund's {side.lower()} trade on {symbol} closed in {what}"
+             f"{f' ({pct.strip()} on the fund)' if pct else ''}."]
+    pairs = []
+    if share is not None:
+        lines.append("Your share is already in your balance.")
+        pairs = [("Your share", f"{'+' if share >= 0 else ''}{money(share)}")]
+    return _with(_msg(
+        "trade_published", inv, f"{'Profit' if won else 'Loss'} on {symbol} {side.lower()}{pct}",
+        f"{symbol} closed in {what}", lines, pairs=pairs,
+        button=("See your trades", f"{_app()}/trades"),
+        footer="You can switch these emails off in Settings, under Notifications."),
+        "Tap to see your share of it.",
+        (f"Your share: {'+' if share >= 0 else ''}{money(share)}. It is already in your balance."
+         if share is not None else "It is already in your balance."))
+
+
+def fee_charged(inv, total, start, end) -> Message:
+    period = f"{start:%d %b} to {end:%d %b %Y}"
+    return _with(_msg(
+        "fee_charged", inv, f"Fees charged: {money(total)}", "Fees for the period",
+        [f"Hello {_first(inv)},",
+         f"Management and performance fees of {money(total)} for {period} were taken from your "
+         f"balance, as your terms set out.",
+         "Your statement shows how they were worked out."],
+        pairs=[("Fees", money(total)), ("Period", period)],
+        button=("See your activity", f"{_app()}/activity")),
+        f"For {period}, taken from your balance.")
 
 
 # ── to the admin ────────────────────────────────────────────────────────────

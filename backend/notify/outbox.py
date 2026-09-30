@@ -31,12 +31,19 @@ logger = get_logger(__name__)
 RESEND_URL = "https://api.resend.com/emails"
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 
-# Investor emails that are also worth a phone notification. The push carries the
-# subject line only — never an amount's detail beyond it, since a notification
-# shows on a lock screen.
-PUSH_KINDS = {"deposit_confirmed", "deposit_rejected", "withdrawal_approved",
-              "withdrawal_paid", "withdrawal_declined", "statement", "closure_approved",
-              "trade_published"}
+# Investor messages that also go to the notification feed (the bell, web and
+# app) and, if their settings allow, to their phone and browser. The value is
+# the screen a tap opens. A push shows on a lock screen, so it carries the
+# subject line and a short line only; the detail is in the app.
+NOTICE_LINK = {
+    "deposit_claimed": "/money", "deposit_confirmed": "/", "deposit_rejected": "/money",
+    "withdrawal_received": "/activity", "withdrawal_approved": "/activity",
+    "withdrawal_paid": "/activity", "withdrawal_declined": "/activity",
+    "statement": "/activity", "fee_charged": "/activity",
+    "trade_opened": "/trades", "trade_published": "/trades",
+    "password_changed": "/account", "payout_changed": "/account", "closure_requested": "/account",
+}
+PUSH_KINDS = set(NOTICE_LINK)
 _pending: set[asyncio.Task] = set()
 _warned = False
 
@@ -57,12 +64,20 @@ class Message:
     # the investor's saved settings JSON, captured when the message is made (the
     # investor row is already loaded then); None = defaults
     preferences: str | None = None
+    # the fuller line in the in-app feed (behind their sign-in); default push_body
+    feed_body: str | None = None
 
 
 def queue(session, message: Message | None) -> None:
     """Send `message` if, and only if, this session's transaction commits."""
     if message is None or (not message.to and not message.push_only):
         return
+    if message.investor_id and message.kind in NOTICE_LINK:
+        # the feed entry is part of the same transaction as the event itself
+        from backend.investor.models import InvestorNotice
+        session.add(InvestorNotice(
+            investor_id=message.investor_id, kind=message.kind, title=message.subject[:255],
+            body=message.feed_body or message.push_body, link=NOTICE_LINK[message.kind]))
     sync = getattr(session, "sync_session", session)
     # Open the transaction now if it is not already. With no open transaction,
     # a rollback fires no event at all while the next commit does — so the
@@ -143,13 +158,84 @@ async def _deliver_all(messages: list[Message]) -> None:
                     logger.error(f"[EMAIL] {m.kind} to {m.to} crashed: {exc}")
             else:
                 logger.info(f"[EMAIL] {m.kind} to {m.to} skipped: switched off in their settings")
-        if (m.kind in PUSH_KINDS and m.investor_id and m.kind != "closure_approved"
-                and prefsmod.wants_push(raw, m.kind)):
+        if m.kind in NOTICE_LINK and m.investor_id:
+            await notify(m.investor_id, m.kind, m.subject, m.push_body or "Open the app for details.",
+                         feed_body=m.feed_body, preferences=raw)
+
+
+async def notify(investor_id: str, kind: str, title: str, body: str, *,
+                 feed_body: str | None = None, preferences: str | None = None) -> None:
+    """Phone and browser pushes, if their settings allow. (The feed entry was
+    written with the event, in queue().)"""
+    from backend.investor import prefs as prefsmod
+    link = NOTICE_LINK.get(kind, "/")
+    if not prefsmod.wants_push(preferences, kind):
+        logger.info(f"[PUSH] {kind} to {investor_id} skipped: switched off in their settings")
+        return
+    data = {"kind": kind, "link": link}
+    for send in (push, web_push):
+        try:
+            await send(investor_id, title, body, data)
+        except Exception as exc:
+            logger.error(f"[PUSH] {kind} to {investor_id} via {send.__name__} crashed: {exc}")
+
+
+def _factory():
+    if _session_factory is not None:
+        return _session_factory
+    from backend.data.database import async_session
+    return async_session
+
+
+async def web_push(investor_id: str, title: str, body: str, data: dict | None = None) -> int:
+    """Send to every browser this investor turned notifications on in.
+
+    Uses the same VAPID keys as the operator console. Subscriptions the push
+    service says are gone (404/410) are deleted. Returns how many were sent.
+    """
+    import json
+
+    from sqlalchemy import delete, select
+
+    from backend.config import settings
+    from backend.investor.models import InvestorWebPush
+    live = push_mode() != "log"
+    if live and not settings.vapid.private_key:
+        return 0                     # browser notifications are not set up on this server
+    if live:
+        try:
+            from pywebpush import WebPushException, webpush
+        except ImportError:
+            logger.warning("[WEBPUSH] pywebpush is not installed")
+            return 0
+    async with _factory()() as s:
+        subs = (await s.execute(select(InvestorWebPush)
+                                .where(InvestorWebPush.investor_id == investor_id))).scalars().all()
+        if not subs:
+            return 0
+        if not live:
+            logger.info(f"[WEBPUSH] (log mode) {len(subs)} browser(s) of {investor_id}: {title}")
+            return len(subs)
+        payload = json.dumps({"title": title, "body": body, "data": data or {}})
+        claims = {"sub": settings.vapid.claims_email or "mailto:no-reply@alphavantiqcapital.com"}
+        gone, sent = [], 0
+        for sub in subs:
+            info = {"endpoint": sub.endpoint, "keys": {"p256dh": sub.p256dh, "auth": sub.auth}}
             try:
-                await push(m.investor_id, m.subject, m.push_body or "Open the app for details.",
-                           {"kind": m.kind})
-            except Exception as exc:
-                logger.error(f"[PUSH] {m.kind} to {m.investor_id} crashed: {exc}")
+                await asyncio.to_thread(webpush, subscription_info=info, data=payload,
+                                        vapid_private_key=settings.vapid.private_key,
+                                        vapid_claims=dict(claims), ttl=86400)
+                sent += 1
+            except WebPushException as exc:
+                code = getattr(getattr(exc, "response", None), "status_code", None)
+                if code in (404, 410):
+                    gone.append(sub.id)
+                else:
+                    logger.warning(f"[WEBPUSH] {investor_id}: {exc}")
+        if gone:
+            await s.execute(delete(InvestorWebPush).where(InvestorWebPush.id.in_(gone)))
+            await s.commit()
+        return sent
 
 
 def push_mode() -> str:

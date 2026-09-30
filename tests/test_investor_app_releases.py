@@ -100,8 +100,10 @@ def test_push_tokens_move_with_the_phone_and_mirror_the_emails(monkeypatch):
             dep = (await a.admin("GET", "/queues/deposits")).json()[0]["id"]
             await a.admin("POST", f"/deposits/{dep}/confirm", {"amount_confirmed": "1000"})
             await outbox.drain()
-            assert len(sent) == 1 and sent[0][0]["to"] == TOKEN
-            assert "$1,000.00" in sent[0][0]["title"] and sent[0][0]["data"]["kind"] == "deposit_confirmed"
+            # "watching for your transfer", then "we received it"
+            assert [b[0]["data"]["kind"] for b in sent] == ["deposit_claimed", "deposit_confirmed"]
+            assert all(b[0]["to"] == TOKEN for b in sent)
+            assert "$1,000.00" in sent[1][0]["title"]
 
             await a.inv("DELETE", "/devices", bea, params={"push_token": TOKEN})
             async with a.Session() as s:

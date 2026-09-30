@@ -138,11 +138,32 @@ async def tick(now: datetime | None = None) -> None:
             logger.error(f"[JOBS] {job.__name__} failed: {exc}")
 
 
+async def watch_live() -> int:
+    """Announce newly opened trades (live.py). Runs every WATCH_SECONDS."""
+    from backend.data.database import async_session
+    from backend.investor import live as livemod
+    try:
+        async with async_session() as s:
+            n = await livemod.announce_new(s)
+            if n:
+                await s.commit()
+            return n
+    except Exception as exc:
+        logger.error(f"[JOBS] live-trade watch failed: {exc}")
+        return 0
+
+
 async def run_forever() -> None:
+    from backend.investor import live as livemod
     logger.info("[JOBS] investor jobs loop started")
+    last_tick = None
     while True:
-        await tick()
-        await asyncio.sleep(TICK_SECONDS)
+        now = asyncio.get_running_loop().time()
+        if last_tick is None or now - last_tick >= TICK_SECONDS:
+            await tick()
+            last_tick = now
+        await watch_live()
+        await asyncio.sleep(livemod.WATCH_SECONDS)
 
 
 def start() -> asyncio.Task | None:

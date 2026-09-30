@@ -147,11 +147,13 @@ def test_settings_are_validated_and_switch_off_the_trade_alert(monkeypatch):
             assert (await a.inv("PUT", "/preferences", bea, {"push": {"nope": True}})).status_code == 400
             assert (await a.inv("GET", "/me", bea)).json()["preferences"]["chart_range"] == "3M"
 
+            await outbox.drain()
+            sent.clear()                     # the deposits' own notices
             await _publish(a, 600, 50.0, datetime(2026, 9, 10, 15))
             await outbox.drain()
             alerted = {iid for iid, _ in sent}
             assert ada_id in alerted and bea_id not in alerted, "Bea switched trade alerts off"
-            assert all("XAUUSD buy closed" in t and "$" not in t for _, t in sent)
+            assert all(t.startswith("Profit on XAUUSD buy") and "$" not in t for _, t in sent)
             # re-publishing an edit does not alert again
             sent.clear()
             await a.admin("POST", "/disclosures/600/publish", {"note": "clarified"})

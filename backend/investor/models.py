@@ -595,3 +595,45 @@ class InvestorDevice(Base):
     app_version = Column(String(32))
     last_seen = Column(DateTime, server_default=func.now())
     created_at = Column(DateTime, server_default=func.now())
+
+
+# ── notifications ────────────────────────────────────────────────────────────
+
+class InvestorNotice(Base):
+    """One entry in an investor's notification feed (the bell, web and app).
+
+    Written for every notification whether or not a push was allowed by their
+    settings: the feed is the history, settings only decide what buzzes.
+    """
+    __tablename__ = "investor_notices"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    investor_id = Column(String(36), ForeignKey("investors.id"), nullable=False, index=True)
+    kind = Column(String(40), nullable=False)
+    title = Column(String(255), nullable=False)
+    body = Column(Text)
+    link = Column(String(80))                 # an in-app path, e.g. /trades
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    read_at = Column(DateTime)
+
+
+class InvestorWebPush(Base):
+    """A browser the investor turned notifications on in (Web Push, VAPID)."""
+    __tablename__ = "investor_web_push"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    investor_id = Column(String(36), ForeignKey("investors.id"), nullable=False, index=True)
+    endpoint = Column(Text, nullable=False, unique=True)
+    p256dh = Column(Text, nullable=False)
+    auth = Column(String(255), nullable=False)
+    user_agent = Column(String(255))
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class TradeAlert(Base):
+    """Which live trades investors have been told are open, so each is told once."""
+    __tablename__ = "investor_trade_alerts"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    trade_id = Column(BigInteger, nullable=False, unique=True, index=True)
+    opened_sent_at = Column(DateTime, server_default=func.now())

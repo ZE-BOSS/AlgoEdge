@@ -91,16 +91,24 @@ class Harness:
         await self.engine.dispose()
 
     async def get(self, path, **kw):
-        return await self.client.get(BASE + path, **kw)
+        r = await self.client.get(BASE + path, **kw)
+        await outbox.drain()   # one shared test connection: let deliveries finish
+        return r
 
     async def post(self, path, json=None):
-        return await self.client.post(BASE + path, json=json or {})
+        r = await self.client.post(BASE + path, json=json or {})
+        await outbox.drain()   # one shared test connection: let deliveries finish
+        return r
 
     async def patch(self, path, json):
-        return await self.client.patch(BASE + path, json=json)
+        r = await self.client.patch(BASE + path, json=json)
+        await outbox.drain()   # one shared test connection: let deliveries finish
+        return r
 
     async def put(self, path, json):
-        return await self.client.put(BASE + path, json=json)
+        r = await self.client.put(BASE + path, json=json)
+        await outbox.drain()   # one shared test connection: let deliveries finish
+        return r
 
     async def investor(self, name="Ada", email=None, deposit=None, on=None):
         r = await self.post("", {"name": name, "email": email or f"{name.lower()}@x.com"})

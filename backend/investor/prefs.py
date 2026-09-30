@@ -7,8 +7,8 @@ migration; unknown keys are refused, so the store cannot fill with junk.
 
 Transactional emails (money received, withdrawal decided, password changed,
 closure) always go: they are the record of what happened to their money. What
-can be switched off is the monthly statement EMAIL (the PDF stays in the
-dashboard) and each kind of phone notification.
+can be switched off is the monthly statement, trade and fee EMAILS (all of it
+stays in the dashboard and the bell) and each kind of phone/browser push.
 """
 
 from __future__ import annotations
@@ -19,21 +19,27 @@ DEFAULTS: dict = {
     "hide_balances": False,          # blur amounts until tapped (privacy in public)
     "chart_range": "ALL",            # default range on the balance chart
     "compact_numbers": False,        # $12.5k instead of $12,480.00 in charts and tiles
-    "email": {"statements": True},
-    "push": {"money": True, "withdrawals": True, "statements": True, "trades": True},
+    "email": {"statements": True, "trades": True, "live_trades": True, "fees": True},
+    "push": {"money": True, "withdrawals": True, "statements": True, "trades": True,
+             "live_trades": True, "fees": True},
 }
 CHART_RANGES = ("1M", "3M", "6M", "1Y", "ALL")
 
 # outbox message kind -> the push setting that controls it
+# (kinds not listed, such as a password or payout-account change, always push:
+# they are about the account's safety)
 PUSH_CATEGORY = {
-    "deposit_confirmed": "money", "deposit_rejected": "money",
-    "withdrawal_approved": "withdrawals", "withdrawal_paid": "withdrawals",
-    "withdrawal_declined": "withdrawals",
+    "deposit_claimed": "money", "deposit_confirmed": "money", "deposit_rejected": "money",
+    "withdrawal_received": "withdrawals", "withdrawal_approved": "withdrawals",
+    "withdrawal_paid": "withdrawals", "withdrawal_declined": "withdrawals",
     "statement": "statements",
     "trade_published": "trades",
+    "trade_opened": "live_trades",
+    "fee_charged": "fees",
 }
 # outbox message kind -> the email setting that controls it (others always send)
-EMAIL_CATEGORY = {"statement": "statements"}
+EMAIL_CATEGORY = {"statement": "statements", "trade_published": "trades",
+                  "trade_opened": "live_trades", "fee_charged": "fees"}
 
 
 def load(raw: str | None) -> dict:

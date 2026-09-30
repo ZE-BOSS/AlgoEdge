@@ -403,6 +403,95 @@ async def set_preferences(body: Preferences, inv: Investor = Depends(current_inv
     return prefsmod.load(inv.preferences)
 
 
+# ── notifications ───────────────────────────────────────────────────────────
+
+@router.get("/notifications")
+async def notifications(limit: int = Query(50, ge=1, le=200), inv: Investor = Depends(current_investor),
+                        db: AsyncSession = Depends(get_db)):
+    """The bell: their own notifications, newest first, and how many are unread."""
+    from sqlalchemy import func
+
+    from backend.investor.models import InvestorNotice
+    rows = (await db.execute(select(InvestorNotice).where(InvestorNotice.investor_id == inv.id)
+                             .order_by(desc(InvestorNotice.created_at), desc(InvestorNotice.id))
+                             .limit(limit))).scalars().all()
+    unread = (await db.execute(select(func.count(InvestorNotice.id)).where(
+        InvestorNotice.investor_id == inv.id, InvestorNotice.read_at.is_(None)))).scalar_one()
+    return {"unread": unread, "items": [{
+        "id": str(n.id), "kind": n.kind, "title": n.title, "body": n.body, "link": n.link,
+        "created_at": _iso(n.created_at), "read": n.read_at is not None} for n in rows]}
+
+
+class ReadNotices(BaseModel):
+    ids: list[str] | None = None          # none = all
+
+
+@router.post("/notifications/read")
+async def notifications_read(body: ReadNotices, inv: Investor = Depends(current_investor),
+                             db: AsyncSession = Depends(get_db)):
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update
+
+    from backend.investor.models import InvestorNotice
+    q = update(InvestorNotice).where(InvestorNotice.investor_id == inv.id, InvestorNotice.read_at.is_(None))
+    if body.ids:
+        q = q.where(InvestorNotice.id.in_([int(i) for i in body.ids if i.isdigit()]))
+    r = await db.execute(q.values(read_at=datetime.now(timezone.utc)).execution_options(synchronize_session=False))
+    return {"marked": r.rowcount}
+
+
+@router.get("/webpush/key")
+async def webpush_key(_: Investor = Depends(current_investor)):
+    """The public key a browser needs to subscribe; null when not configured."""
+    from backend.config import settings
+    return {"public_key": settings.vapid.public_key or None}
+
+
+class WebPushSub(BaseModel):
+    endpoint: str = Field(min_length=10, max_length=2000)
+    keys: dict
+
+
+@router.post("/webpush", status_code=201)
+async def webpush_subscribe(body: WebPushSub, request: Request, inv: Investor = Depends(current_investor),
+                            db: AsyncSession = Depends(get_db)):
+    """Remember this browser for notifications. Like a phone, a subscription
+    belongs to whoever last signed in on it."""
+    from backend.investor.models import InvestorWebPush
+    p256dh, auth = body.keys.get("p256dh"), body.keys.get("auth")
+    if not p256dh or not auth:
+        raise HTTPException(status_code=400, detail="subscription keys missing")
+    row = (await db.execute(select(InvestorWebPush)
+                            .where(InvestorWebPush.endpoint == body.endpoint))).scalar_one_or_none()
+    if row is None:
+        row = InvestorWebPush(endpoint=body.endpoint, investor_id=inv.id, p256dh=p256dh, auth=auth)
+        db.add(row)
+    row.investor_id, row.p256dh, row.auth = inv.id, p256dh, auth
+    row.user_agent = (request.headers.get("user-agent") or "")[:255]
+    await db.flush()
+    return {"subscribed": True}
+
+
+@router.delete("/webpush")
+async def webpush_unsubscribe(endpoint: str = Query(...), inv: Investor = Depends(current_investor),
+                              db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import delete
+
+    from backend.investor.models import InvestorWebPush
+    await db.execute(delete(InvestorWebPush).where(InvestorWebPush.endpoint == endpoint,
+                                                   InvestorWebPush.investor_id == inv.id))
+    return {"subscribed": False}
+
+
+@router.get("/live")
+async def live_trades(inv: Investor = Depends(current_investor), db: AsyncSession = Depends(get_db)):
+    """Trades open right now: market, side and when it opened, nothing else
+    (no strategy, size or prices). Only for an investor with money in the fund."""
+    from backend.investor import live as livemod
+    return await livemod.open_for(db, inv.id)
+
+
 KIND_LABEL = {"SUBSCRIBE": "Units bought", "REDEEM": "Units sold",
               "FEE": "Fee", "CORRECTION": "Correction"}
 
@@ -485,6 +574,7 @@ async def claim_deposit(body: Claim, request: Request, inv: Investor = Depends(c
                                         note=body.note, ip=_ip(request))
     except fundmod.FundError as exc:
         _refuse(exc)
+    outbox.queue(db, mail.deposit_claimed(inv, d))
     return {"id": str(d.id), "state": d.state, "amount_claimed": _s(d.amount_claimed),
             "reference_code": d.reference_code}
 

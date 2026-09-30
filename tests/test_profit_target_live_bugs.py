@@ -33,7 +33,7 @@ membership of `active_groups` was a redundant second gate, and the fragile one.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -176,6 +176,7 @@ def test_the_default_trading_day_is_utc_as_it_always_was():
     """Restored 2026-09-29: the bot's limits roll at midnight UTC unless an
     account opts in to another offset."""
     cb = _breaker()
+    cb.last_reset_day = date(2026, 9, 29)     # the breaker was started that day
     cb.daily_pnl = 99.0
     cb._check_daily_reset(datetime(2026, 9, 29, 23, 30, tzinfo=timezone.utc))
     assert cb.daily_pnl == 99.0, "the UTC day has not turned yet"
@@ -187,6 +188,7 @@ def test_the_day_rolls_over_at_midnight_wat_when_an_account_asks_for_it():
     """23:30 UTC is 00:30 the NEXT day in WAT, so with offset 1 the day must
     already have turned."""
     cb = _breaker(accounting_utc_offset_hours=1.0)
+    cb.last_reset_day = date(2026, 9, 29)
     cb.daily_pnl = 250.0
     cb._check_daily_reset(datetime(2026, 9, 29, 22, 0, tzinfo=timezone.utc))   # 23:00 WAT
     assert cb.daily_pnl == 250.0, "still the same WAT day"
@@ -197,6 +199,7 @@ def test_the_day_rolls_over_at_midnight_wat_when_an_account_asks_for_it():
 
 def test_the_offset_is_configurable_and_utc_is_still_available():
     cb = _breaker(accounting_utc_offset_hours=0.0)
+    cb.last_reset_day = date(2026, 9, 29)
     cb.daily_pnl = 99.0
     cb._check_daily_reset(datetime(2026, 9, 29, 23, 30, tzinfo=timezone.utc))
     assert cb.daily_pnl == 99.0, "at offset 0 the UTC day has not turned yet"

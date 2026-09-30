@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
@@ -423,6 +423,12 @@ async def record_deposit(investor_id: str, body: AdminDeposit,
         dep = await fundmod.record_admin_deposit(db, investor_id=investor_id, amount=body.amount,
                                                  actor_id=admin.id, on=body.on, note=body.note,
                                                  min_override_reason=body.min_override_reason)
+    # email only when it is recent; a back-dated entry still reaches the feed and phone
+    inv = await db.get(Investor, investor_id)
+    m = mail.deposit_recorded(inv, dep)
+    if dep.effective_date < navmod.accounting_date() - timedelta(days=7):
+        m.push_only = True
+    outbox.queue(db, m)
     return _deposit_row(dep)
 
 
@@ -794,7 +800,16 @@ async def fee_close(body: FeePeriod, admin: User = Depends(require_admin),
     if end >= navmod.accounting_date():
         raise HTTPException(status_code=400, detail="a fee period can be closed once it has ended")
     with refusals():
-        return await feesmod.close_period(db, start, end, actor_id=admin.id, waive=set(body.waive))
+        result = await feesmod.close_period(db, start, end, actor_id=admin.id, waive=set(body.waive))
+    # each investor charged hears what came off their balance
+    for ln in result["lines"]:
+        total = navmod.money(ln["total"])
+        if ln["investor_id"] in result["waived"] or total <= 0:
+            continue
+        inv = await db.get(Investor, ln["investor_id"])
+        if inv is not None:
+            outbox.queue(db, mail.fee_charged(inv, total, start, end))
+    return result
 
 
 @router.post("/fees/paid")
@@ -1120,26 +1135,26 @@ async def publish_trade(trade_id: int, body: Publish, admin: User = Depends(requ
 
 
 async def _alert_trade(db, row) -> None:
-    """A phone notification to every investor who held a share of the trade.
+    """Tell every investor who held a share of the trade how it went.
 
-    The lock screen shows the market and the percentage only; their own dollar
-    share is in the app, behind their sign-in.
+    The lock screen shows the market, profit or loss, and the percentage; each
+    investor's own dollar share is in their feed and the app, behind sign-in.
     """
     from backend.investor import split as splitmod
-    from backend.notify.outbox import Message
     if row.closed_on is None:
         return
     held = await splitmod.holdings_before(db, row.closed_on)
     if not held:
         return
+    amount = None if row.result_amount is None else navmod.money(row.result_amount)
+    shares = splitmod.allocate(amount, held) if amount is not None else {}
+    won = amount is None or amount >= 0
     pct = "" if row.result_pct is None else f" {D(str(row.result_pct)):+.2f}%"
-    title = f"{row.symbol} {(row.direction or '').lower()} closed{pct}"
-    prefs = dict((await db.execute(select(Investor.id, Investor.preferences)
-                                   .where(Investor.id.in_(list(held))))).all())
-    for iid in held:
-        outbox.queue(db, Message(kind="trade_published", to="", subject=title, html="", text="",
-                                 investor_id=iid, push_only=True, preferences=prefs.get(iid),
-                                 push_body="Open the app to see your share of it."))
+    side = "Buy" if (row.direction or "").upper() == "BUY" else "Sell"
+    investors = (await db.execute(select(Investor).where(Investor.id.in_(list(held))))).scalars().all()
+    for inv in investors:
+        outbox.queue(db, mail.trade_result(inv, symbol=row.symbol, side=side, won=won, pct=pct,
+                                           share=shares.get(inv.id)))
 
 
 @router.get("/disclosures/{trade_id}/split")

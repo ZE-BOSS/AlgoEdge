@@ -87,8 +87,10 @@ class App:
 
     # admin side
     async def admin(self, method, path, json=None, **kw):
-        return await self.http.request(method, ADMIN_BASE + path, json=json,
-                                       headers={"Authorization": f"Bearer {self.admin_token}"}, **kw)
+        r = await self.http.request(method, ADMIN_BASE + path, json=json,
+                                    headers={"Authorization": f"Bearer {self.admin_token}"}, **kw)
+        await outbox.drain()   # one shared test connection: let deliveries finish
+        return r
 
     async def new_investor(self, name="Ada", deposit=None, on=None, payout=True):
         r = await self.admin("POST", "", {"name": name, "email": f"{name.lower()}@x.com"})
@@ -118,9 +120,11 @@ class App:
 
     # investor side
     async def inv(self, method, path, session, json=None, **kw):
-        return await self.http.request(method, INV + path, json=json,
-                                       headers={"Authorization": f"Bearer {session['access_token']}"},
-                                       **kw)
+        r = await self.http.request(method, INV + path, json=json,
+                                    headers={"Authorization": f"Bearer {session['access_token']}"},
+                                    **kw)
+        await outbox.drain()
+        return r
 
 
 # ── the audiences are separate ───────────────────────────────────────────────
