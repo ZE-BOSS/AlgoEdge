@@ -1111,6 +1111,9 @@ async def publish_trade(trade_id: int, body: Publish, admin: User = Depends(requ
     with refusals():
         row = await discmod.publish(db, trade_id=trade_id, actor_id=admin.id,
                                     edits=edits, reason=reason)
+        # the result reaches every holder's balance now, not at the next valuation
+        from backend.investor import booking
+        await booking.book(db, row, actor_id=admin.id)
     if was_published != "published":
         await _alert_trade(db, row)
     return discmod.public_view(row)

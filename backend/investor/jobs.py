@@ -118,6 +118,14 @@ async def tick(now: datetime | None = None) -> None:
     """One pass: do whatever is due. Safe to call as often as you like."""
     from backend.data.database import async_session
     now = now or datetime.now(timezone.utc)
+    try:
+        # published trades not yet in balances (e.g. published before booking existed)
+        from backend.investor import booking
+        async with async_session() as s:
+            if await booking.book_all(s):
+                await s.commit()
+    except Exception as exc:
+        logger.error(f"[JOBS] trade booking failed: {exc}")
     wat = now + timedelta(hours=1)
     if wat.hour < RUN_AFTER_WAT_HOUR:
         return

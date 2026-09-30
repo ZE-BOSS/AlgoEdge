@@ -192,7 +192,7 @@ class NavSnapshot(Base):
     units_in_issue = Column(UNITS, nullable=False)
     nav_per_unit = Column(NAV, nullable=False)
 
-    source = Column(String(20), nullable=False, default="MT5")   # MT5 | MANUAL
+    source = Column(String(20), nullable=False, default="MT5")   # MT5 | MANUAL | TRADES (booking.py)
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -450,6 +450,10 @@ class TradeDisclosure(Base):
     note = Column(Text)                                 # optional investor-facing comment
 
     edited = Column(Boolean, nullable=False, default=False)
+    # what has been booked into the NAV for this trade (booking.py); null until
+    # it is. booked_on null with an amount = already inside a broker valuation
+    booked_amount = Column(MONEY)
+    booked_on = Column(Date)
     decided_by = Column(String(36), nullable=False)
     decided_at = Column(DateTime, server_default=func.now())
 

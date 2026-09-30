@@ -78,6 +78,8 @@ async def init_db():
             "ALTER TABLE investors ADD COLUMN management_fee_pct NUMERIC(9, 4);",
             "ALTER TABLE investors ADD COLUMN min_investment NUMERIC(18, 2);",
             "ALTER TABLE investors ADD COLUMN preferences TEXT;",
+            "ALTER TABLE trade_disclosures ADD COLUMN booked_amount NUMERIC(18, 2);",
+            "ALTER TABLE trade_disclosures ADD COLUMN booked_on DATE;",
             "ALTER TABLE fee_accruals ADD COLUMN days INTEGER;",
             "ALTER TABLE fee_accruals ADD COLUMN decided_by VARCHAR(36);",
             "ALTER TABLE backtest_runs ADD COLUMN sl_hit_rate FLOAT;",

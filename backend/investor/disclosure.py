@@ -123,7 +123,14 @@ def admin_view(trade: Trade, row: TradeDisclosure | None) -> dict:
         },
         "published": public_view(row) if row and row.state == DISCLOSURE_PUBLISHED else None,
         "edited": bool(row and row.edited),
+        # whether its result has reached investors' balances (booking.py)
+        "booking": _booking(row),
     }
+
+
+def _booking(row: TradeDisclosure | None) -> dict | None:
+    from backend.investor import booking   # local: booking reads this module's rows
+    return booking.status(row) if row is not None else None
 
 
 async def queue(session, *, state: str = "undisclosed", limit: int = 100,

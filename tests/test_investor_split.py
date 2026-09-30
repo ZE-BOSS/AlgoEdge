@@ -158,3 +158,47 @@ def test_settings_are_validated_and_switch_off_the_trade_alert(monkeypatch):
             await outbox.drain()
             assert sent == []
     run(go())
+
+
+def test_a_published_result_reaches_balances_and_capital(monkeypatch):
+    """Publishing books the result into the price: a loss eats into capital
+    straight away, an edit books only the difference, hiding leaves it, and a
+    trade already inside a broker valuation is not booked twice."""
+    monkeypatch.setenv("EMAIL_MODE", "log")
+    monkeypatch.setenv("PUSH_MODE", "log")
+    from backend.investor import booking
+
+    async def go():
+        async with App() as a:
+            _, ada = await a.onboard("Ada", deposit=D("1000"), on=date(2026, 9, 1))
+            _, bea = await a.onboard("Bea", deposit=D("3000"), on=date(2026, 9, 1))
+            await _publish(a, 600, -80.0, datetime(2026, 9, 20, 15))
+            cap = (await a.inv("GET", "/me", ada)).json()["capital"]
+            assert cap["value"] == "980.00" and cap["state"] == "capital_loss"
+            assert cap["capital_eroded"] == "20.00" and cap["profit_pct_of_capital"] == "-2.00"
+            assert (await a.inv("GET", "/me", bea)).json()["capital"]["value"] == "2940.00"
+            # the Trades tab and the balance agree
+            mine = (await a.inv("GET", "/trades", ada)).json()["trades"][0]["your_amount"]
+            assert mine == "-20.00"
+
+            r = await a.admin("POST", "/disclosures/600/publish", {"result_amount": "-40", "reason": "part hedged"})
+            assert r.status_code == 200, r.text
+            await outbox.drain()
+            assert (await a.inv("GET", "/me", ada)).json()["capital"]["value"] == "990.00"
+
+            r = await a.admin("POST", "/disclosures/600/hide", {"reason": "shown in error"})
+            assert r.status_code == 200, r.text
+            assert (await a.inv("GET", "/me", ada)).json()["capital"]["value"] == "990.00", \
+                "hiding changes what is shown, not what was lost"
+
+            async with a.Session() as s:
+                assert await booking.book_all(s) == 0, "nothing left to book"
+
+            # a valuation taken after the next trade closed already contains it
+            await a.admin("POST", "/nav/snapshot", {"pool_equity": "3900", "reason": "broker equity"})
+            await _publish(a, 601, -100.0, datetime.utcnow() - timedelta(hours=1))
+            assert (await a.inv("GET", "/me", ada)).json()["capital"]["value"] == "975.00"
+            rows = (await a.admin("GET", "/disclosures?state=published")).json()
+            b = {r["trade_id"]: r["booking"] for r in rows}
+            assert b[601]["in_valuation"] is True
+    run(go())

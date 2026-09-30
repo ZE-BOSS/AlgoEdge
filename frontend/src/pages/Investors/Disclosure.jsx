@@ -8,6 +8,13 @@ import { fmtMoney, isNeg, useInvAction } from './format';
 
 const STATES = ['undisclosed', 'published', 'hidden'];
 
+/** Whether a published result has reached investors' balances. */
+function BookingNote({ b }) {
+  if (!b || b.booked === null) return <> <span className="badge badge-yellow">not in balances yet</span></>;
+  if (b.in_valuation) return <> <span className="badge badge-blue" title="Closed before your latest valuation, which already includes it">in valuation</span></>;
+  return <> <span className="badge badge-green" title={`Booked into the unit price on ${b.booked_on}`}>in balances</span></>;
+}
+
 /** How one published trade's result divides between the investors who held
  *  the fund when it closed. The lines add up to the published result exactly;
  *  each investor sees only their own line. */
@@ -93,6 +100,10 @@ export default function Disclosure() {
         adjustment beside the raw value. Each investor sees only their own share of a published result,
         split by the fund they held when it closed; open "Investor split" on a published trade to see
         every line. Publishing sends invested investors a phone alert (market and % only).
+        Publishing also books the result into today&rsquo;s unit price, so every holder&rsquo;s balance moves
+        at once; editing the result books only the difference. A trade that closed before your latest
+        entered valuation is not booked again, since that valuation already contains it. Hiding a
+        published trade does not undo its booking: the money was still made or lost.
       </div>
 
       <div className="card">
@@ -121,7 +132,8 @@ export default function Disclosure() {
                       <td>
                         {r.published ? (
                           <span>{r.published.symbol} {r.published.direction} {fmtMoney(r.published.result_amount, { sign: true })}
-                            {r.edited && <> <span className="badge badge-yellow">edited</span></>}</span>
+                            {r.edited && <> <span className="badge badge-yellow">edited</span></>}
+                            <BookingNote b={r.booking} /></span>
                         ) : <StateBadge state={r.state} />}
                       </td>
                       <td>
