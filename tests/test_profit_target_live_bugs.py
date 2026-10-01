@@ -216,6 +216,15 @@ def test_a_naive_backtest_bar_time_is_treated_as_utc():
 def test_week_and_month_use_the_same_boundary():
     cb = _breaker(accounting_utc_offset_hours=1.0)
     # 30 Sep 23:30 UTC is 1 Oct 00:30 WAT — a new month, and a new ISO week.
+    #
+    # The anchors are pinned to September for the same reason the day-boundary
+    # tests above pin last_reset_day: a fresh breaker anchors itself on TODAY,
+    # so without this the assertion silently stops testing anything the moment
+    # the real calendar reaches the month under test. Written 2026-09-29, it
+    # passed until 2026-10-01 and then failed for a reason that had nothing to
+    # do with the boundary logic.
+    cb.last_reset_month = (2026, 9)
+    cb.last_reset_week = datetime(2026, 9, 28, tzinfo=timezone.utc).isocalendar()[1]
     cb.monthly_pnl, cb.weekly_pnl = 400.0, 400.0
     when = datetime(2026, 9, 30, 23, 30, tzinfo=timezone.utc)
     cb._check_monthly_reset(when)

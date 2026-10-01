@@ -313,6 +313,53 @@ def resolve_cross_rate_point_value(profile, use_live_mt5: bool = True) -> tuple[
     return profile.point_value_per_lot, "STATIC_SNAPSHOT"
 
 
+# symbol -> (tick_value, tick_size) already checked against order_calc_profit.
+# Cached for the process: the answer is a property of the instrument, and
+# order_calc_profit is an IPC round trip we do not want on every bar.
+_VERIFIED_TICK: dict[str, tuple[float, float]] = {}
+
+
+def _verified_tick_value(symbol: str, tick_value: float, tick_size: float) -> tuple[float, float]:
+    """Check a symbol's spec fields against the broker's own money calculation.
+
+    `trade_tick_value` is a hint; `order_calc_profit` is what actually settles a
+    trade. On Deriv's Volatility 75 Index the two disagree by 100x (spec says
+    $0.01 per unit of price, the calculator says $1.00), so P&L computed from
+    the spec was 100x low wherever MT5 was connected.
+
+    Returns the spec values unchanged when they agree, or a corrected
+    (tick_value, tick_size) derived from the calculator when they do not. If the
+    calculator cannot be reached the spec is returned untouched — a hint is
+    better than nothing, and this must never be the thing that breaks sizing.
+    """
+    if symbol in _VERIFIED_TICK:
+        return _VERIFIED_TICK[symbol]
+
+    result = (tick_value, tick_size)
+    try:
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 1)
+        if rates is not None and len(rates):
+            price = float(rates[0]["close"])
+            # profit on one lot for a 1.0 move IS the value per unit of price
+            truth = mt5.order_calc_profit(mt5.ORDER_TYPE_BUY, symbol, 1.0, price, price + 1.0)
+            if truth and truth > 0:
+                claimed = tick_value / tick_size if tick_size else 0.0
+                # 1% tolerance: rounding in the terminal, not a unit error
+                if claimed <= 0 or abs(claimed - truth) > abs(truth) * 0.01:
+                    result = (float(truth) * float(tick_size), float(tick_size))
+                    logger.warning(
+                        f"[SIZER] {symbol}: MT5 spec says {claimed:.6g} per unit of price but "
+                        f"order_calc_profit says {truth:.6g} — trusting the calculator "
+                        f"(tick_value {tick_value:.8g} -> {result[0]:.8g}). "
+                        f"P&L from the spec would have been {claimed / truth:.4g}x out."
+                    )
+    except Exception as exc:
+        logger.debug(f"[SIZER] {symbol}: could not verify tick value ({exc}); using the spec")
+
+    _VERIFIED_TICK[symbol] = result
+    return result
+
+
 def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
     """
     Get lot constraints, tick values and execution constraints for a symbol.
@@ -384,13 +431,29 @@ def get_symbol_info(symbol: str, use_live_mt5: bool = True) -> dict:
             mt5.symbol_select(symbol, True)
             info = mt5.symbol_info(symbol)
             if info and info.trade_tick_value > 0 and info.trade_tick_size > 0:
+                # The spec fields can LIE. On Deriv's Volatility 75 Index MT5
+                # reports trade_tick_value 0.0001 against trade_tick_size 0.01,
+                # implying $0.01 per unit of price — while the terminal's own
+                # order_calc_profit says 1.00 lot over a 1.00 move is $1.00.
+                # The field is 100x low, so every P&L computed from it was 100x
+                # low too, but ONLY where MT5 is connected: offline runs fell
+                # through to InstrumentProfile, which has the right number. That
+                # is why it never showed up in the research corpus and only bit
+                # on the VPS.
+                #
+                # order_calc_profit is the broker's own money calculation — the
+                # same one that settles a real trade — so it is the ground truth
+                # and the spec fields are merely a hint. Verified 2026-10-01
+                # against 19 symbols; only V75 disagreed.
+                tick_value, tick_size = _verified_tick_value(
+                    symbol, info.trade_tick_value, info.trade_tick_size)
                 res = {
                     "volume_min": info.volume_min,
                     "volume_max": info.volume_max,
                     "volume_step": info.volume_step,
                     "contract_size": info.trade_contract_size,
-                    "tick_value": info.trade_tick_value,
-                    "tick_size": info.trade_tick_size,
+                    "tick_value": tick_value,
+                    "tick_size": tick_size,
                     "stops_level_points": int(getattr(info, "trade_stops_level", 0) or 0),
                     "digits": int(getattr(info, "digits", 5) or 5),
                     "point": float(getattr(info, "point", 0.0) or 0.0) or float(info.trade_tick_size),
