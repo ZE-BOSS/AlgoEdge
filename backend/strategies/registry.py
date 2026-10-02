@@ -25,13 +25,9 @@ def _load_strategies():
         import backend.strategies.strategy_two.engine  # noqa: F401
         import backend.strategies.strategy_boom.engine  # noqa: F401
         import backend.strategies.strategy_orb.engine  # noqa: F401
-        import backend.strategies.strategy_ivw.engine  # noqa: F401
         import backend.strategies.strategy_synth.engine  # noqa: F401
-        import backend.strategies.strategy_four_htf_fvg_flip.engine  # noqa: F401
         import backend.strategies.strategy_five_bias_ifvg.engine  # noqa: F401
         import backend.strategies.strategy_trend.engine  # noqa: F401
-        import backend.strategies.strategy_overnight.engine  # noqa: F401
-        import backend.strategies.strategy_opening_drive.engine  # noqa: F401
         import backend.strategies.strategy_spike_resumption.engine  # noqa: F401
         _LOADED = True
 

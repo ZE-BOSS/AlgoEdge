@@ -98,16 +98,6 @@ def _research(cands):
     return [(c.t_signal, c.direction, round(c.detail["entry_signal"], 8), round(c.stop_dist, 8)) for c in cands]
 
 
-def test_htf_fvg_flip_default_variant_matches_engine(frames):
-    engine = _run_engine("HTFFVGFlip_v1", frames)
-    pip = get_pip_size(SYMBOL)
-    out = fr.htf_candidates(fr.from_arrays(_arrays(frames["M5"])), fr.from_arrays(_arrays(frames["H1"])),
-                            pip, [fr.HTFVariant()])
-    research = _research(out[fr.HTFVariant().name])
-    assert engine, "engine produced no HTFFVGFlip signals on the fixture — enlarge or reseed it"
-    assert research == engine
-
-
 def test_bias_ifvg_default_variant_matches_engine(frames, monkeypatch):
     # The research candidates are permissive about the day-stop rule and the daily
     # cap (both are applied at selection); open them on the engine too.
@@ -145,20 +135,6 @@ HTF_CASES = [
 ]
 
 
-@pytest.mark.parametrize("variant,gates,flags", HTF_CASES)
-def test_htf_variants_and_gates_match_engine(frames, variant, gates, flags):
-    cfg = UserConfigV2()
-    for k, v in {**variant.params(), **gates}.items():
-        setattr(cfg.htf_fvg_flip, k, v)
-    engine = _run_engine("HTFFVGFlip_v1", frames, cfg)
-    pip = get_pip_size(SYMBOL)
-    out = fr.htf_candidates(fr.from_arrays(_arrays(frames["M5"])), fr.from_arrays(_arrays(frames["H1"])),
-                            pip, [variant])
-    cands = [c for c in out[variant.name] if all(c.feats[f] for f in flags)]
-    assert out[variant.name], "research produced no candidates for this variant on the fixture"
-    assert _research(cands) == engine
-
-
 BIAS_CASES = [
     (fr.BiasVariant(bias_mode="OFF", key_levels="FVG", leg_mode="REACTION", session="OFF"), {}, ()),
     (fr.BiasVariant(bias_mode="H4", key_levels="CISD_REJ", leg_mode="BOTH", session="0800-1600"), {}, ()),
@@ -167,6 +143,14 @@ BIAS_CASES = [
 ]
 
 
+# HTFFVGFlip_v1 was retired on 2026-10-02. Its two parity tests are gone with
+# it: they existed to prove fvg_research reproduced that ENGINE signal for
+# signal, and with no engine there is nothing to compare against. The
+# BiasIFVG parity tests below are unaffected and still do that job.
+#
+# backend/analytics/fvg_research.py keeps its HTF code, which is now research
+# history with no live counterpart -- it cannot drift against an engine that
+# does not exist, but it is also no longer checked by anything.
 @pytest.mark.parametrize("variant,gates,flags", BIAS_CASES)
 def test_bias_variants_and_gates_match_engine(frames, variant, gates, flags, monkeypatch):
     from backend.strategies.strategy_five_bias_ifvg import engine as be

@@ -191,14 +191,18 @@ def test_a_slots_record_is_its_own():
 
 def test_resolver_layers_account_strategy_and_slot():
     base = {"tp1_rr": 9.9, "risk_per_trade_pct": 1.0, "min_rr": 3.0, "prop_firm": {"x": 1}}
-    cfg = resolve_slot_risk_config(base, "IVW_v1", overrides={"risk_per_trade_pct": 0.4, "prop_firm": {"y": 2}})
-    assert cfg["tp1_rr"] == 2.0                    # the strategy's measured target wins over the account default
+    cfg = resolve_slot_risk_config(base, "ORB_v1", overrides={"risk_per_trade_pct": 0.4, "prop_firm": {"y": 2}})
+    assert cfg["tp1_rr"] == 3.0                    # the strategy's measured target wins over the account default
     assert cfg["risk_per_trade_pct"] == 0.4        # the slot wins over both
-    assert cfg["min_rr_by_strategy"] == {"IVW_v1": 2.0}
+    # IVW_v1 was the ONLY strategy with a measured per-strategy min_rr, and it was
+    # retired on 2026-10-02, so this table is now empty for every survivor. The key
+    # must still be PRESENT — its absence would make the engine fall back to the
+    # global min_rr silently, which is the bug this assertion guards.
+    assert cfg["min_rr_by_strategy"] == {}
     assert cfg["prop_firm"] == {"x": 1}            # account-only: a slot cannot set it
-    kept = resolve_slot_risk_config(base, "IVW_v1", overrides={"tp1_rr": 4.0})
+    kept = resolve_slot_risk_config(base, "ORB_v1", overrides={"tp1_rr": 4.0})
     assert kept["tp1_rr"] == 4.0
-    no_defaults = resolve_slot_risk_config(base, "IVW_v1", use_strategy_exit_defaults=False)
+    no_defaults = resolve_slot_risk_config(base, "ORB_v1", use_strategy_exit_defaults=False)
     assert no_defaults["tp1_rr"] == 9.9
 
 
@@ -210,10 +214,10 @@ def test_both_routes_resolve_one_slot_profile_the_same_way():
     profile = {"risk_per_trade_pct": 0.4, "max_daily_trades": 3, "max_daily_drawdown_pct": 8.0,
                "be_mode": "RR", "be_trigger_rr": 1.0, "slot_brake_r": 30.0}
     single = build_merged_risk_config(
-        BacktestRequest(strategy_id="IVW_v1", symbol="EURUSD", slot_risk=profile))
+        BacktestRequest(strategy_id="ORB_v1", symbol="EURUSD", slot_risk=profile))
     row = resolve_slot_risk_config(
-        build_merged_risk_config(BacktestRequest(strategy_id="IVW_v1", symbol="EURUSD")),
-        "IVW_v1", overrides=profile, use_strategy_exit_defaults=True)
+        build_merged_risk_config(BacktestRequest(strategy_id="ORB_v1", symbol="EURUSD")),
+        "ORB_v1", overrides=profile, use_strategy_exit_defaults=True)
     differing = {k: (single.get(k), row.get(k)) for k in set(single) | set(row)
                  if k != "_strategy_defaults_applied" and single.get(k) != row.get(k)}
     assert not differing, differing
@@ -229,16 +233,16 @@ def test_live_resolves_a_slot_exactly_as_the_backtest_does():
     from backend.risk.slot_book import resolve_slot_risk_config, slot_overrides_from
 
     profile = {"max_daily_drawdown_pct": 7.0, "be_mode": "RR", "be_trigger_rr": 1.0, "slot_brake_r": 30.0}
-    slot = InstrumentSlot(symbol="EURUSD", strategy_id="IVW_v1", risk=dict(profile),
+    slot = InstrumentSlot(symbol="EURUSD", strategy_id="ORB_v1", risk=dict(profile),
                           risk_per_trade_pct=0.4, max_trades_per_day=3)
     cfg = UserConfigV2()
     cfg.instrument_slots = [slot]
 
-    live_base, _ = build_live_risk_config(cfg, "IVW_v1")
-    live = resolve_slot_risk_config(live_base, "IVW_v1", overrides=slot_overrides_from(slot))
+    live_base, _ = build_live_risk_config(cfg, "ORB_v1")
+    live = resolve_slot_risk_config(live_base, "ORB_v1", overrides=slot_overrides_from(slot))
 
     sent = {**profile, "risk_per_trade_pct": 0.4, "max_daily_trades": 3}
-    bt = build_merged_risk_config(BacktestRequest(strategy_id="IVW_v1", symbol="EURUSD", slot_risk=sent))
+    bt = build_merged_risk_config(BacktestRequest(strategy_id="ORB_v1", symbol="EURUSD", slot_risk=sent))
 
     for key in sent:
         assert live[key] == bt[key] == sent[key], (key, live.get(key), bt.get(key))

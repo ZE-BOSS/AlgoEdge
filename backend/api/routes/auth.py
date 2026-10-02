@@ -11,7 +11,6 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jose import jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,8 +23,11 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing. Direct bcrypt, not passlib: passlib 1.7.4 raises on EVERY
+# hash and verify against bcrypt 5.x (see backend/core/passwords.py). The hash
+# format is unchanged, so existing stored hashes still verify.
+from backend.core.passwords import hash_password as _hash_password
+from backend.core.passwords import verify_password as _verify_password
 
 # Token expiry
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_EXPIRE_MINUTES", "15"))
@@ -113,7 +115,7 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     user = User(
         id=user_id,
         email=req.email.lower().strip(),
-        password_hash=pwd_context.hash(req.password),
+        password_hash=_hash_password(req.password),
         name=req.name.strip(),
         is_active=True,
         is_admin=anyone is None,   # the very first account is the owner
@@ -151,7 +153,7 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     result = await db.execute(select(User).where(User.email == req.email.lower().strip()))
     user = result.scalar_one_or_none()
 
-    if not user or not pwd_context.verify(req.password, user.password_hash):
+    if not user or not _verify_password(req.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",

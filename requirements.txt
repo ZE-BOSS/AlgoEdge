@@ -50,8 +50,13 @@ Pillow
 # ── Security & Crypto ────────────────────────────────────────
 cryptography
 python-jose[cryptography]
-bcrypt==3.2.2
-passlib[bcrypt]
+# bcrypt is used DIRECTLY (backend/core/passwords.py), not through passlib.
+# passlib 1.7.4 (its last release, 2020) is broken against bcrypt >= 4.1: it
+# reads bcrypt.__about__.__version__ for backend detection, that attribute is
+# gone, and every hash and verify then raises -- including on a 14-character
+# password. The old `bcrypt==3.2.2` pin existed only to keep passlib working;
+# with passlib dropped the pin can go, and any bcrypt works.
+bcrypt>=4.0
 
 # ── Config & Env ─────────────────────────────────────────────
 python-dotenv

@@ -1,6 +1,6 @@
 """The three strategies shipped on 2026-09-25 must trade what was measured.
 
-TrendBreakout_v1, OvernightSession_v1 and OpeningDrive_v1 were measured by
+TrendBreakout_v1 was measured by
 `scripts/run_app_form_check.py` in the form the engine can actually trade: a
 CLOSE beyond the level rather than a resting order at it, a fill at the next
 bar's open, real stops, and an exit the STRATEGY owns rather than one
@@ -25,8 +25,6 @@ import pytz
 from backend.core.config_schema import UserConfigV2
 from backend.strategies.core.daily_atr import daily_atr
 from backend.strategies.registry import get_strategy
-from backend.strategies.strategy_opening_drive.params import OpeningDriveParams
-from backend.strategies.strategy_overnight.params import OvernightSessionParams
 from backend.strategies.strategy_trend.params import TrendBreakoutParams
 from backend.strategies.windows import window_bars
 
@@ -75,14 +73,6 @@ def _engine(strategy_id, attr, params):
 
 def _trend(**kw):
     return _engine("TrendBreakout_v1", "trend_breakout", TrendBreakoutParams(**kw))
-
-
-def _overnight(**kw):
-    return _engine("OvernightSession_v1", "overnight_session", OvernightSessionParams(**kw))
-
-
-def _drive(**kw):
-    return _engine("OpeningDrive_v1", "opening_drive", OpeningDriveParams(**kw))
 
 
 def _scan(eng, df, timeframe, window, start=0):
@@ -214,165 +204,6 @@ def test_trend_windows_are_big_enough_for_their_own_atr():
     assert window_bars("M15", eng) > eng.params.channel_days * 96, "channel does not fit"
 
 
-# ── OvernightSession_v1 ─────────────────────────────────────────────────────
-NIGHT_KW = dict(atr_days=3)
-NIGHT_WINDOW = window_bars("M5", _engine("OvernightSession_v1", "overnight_session",
-                                         OvernightSessionParams(**NIGHT_KW)))
-
-
-def _ny_session(ts):
-    d = pd.Timestamp(ts, unit="s", tz="UTC").tz_convert(NY)
-    o = NY.localize(pd.Timestamp(d.year, d.month, d.day, 9, 30).to_pydatetime())
-    c = NY.localize(pd.Timestamp(d.year, d.month, d.day, 16, 0).to_pydatetime())
-    return int(o.timestamp()), int(c.timestamp())
-
-
-def test_overnight_fires_once_per_session_on_its_last_bar_and_always_long():
-    df = _bars("5min", "2025-03-03", 20 * 288, seed=21)      # spans the 2025 US DST change
-    sigs = _scan(_overnight(**NIGHT_KW), df, "M5", NIGHT_WINDOW, start=5 * 288)
-    assert len(sigs) >= 8, "fixture covers too few sessions"
-    seen = set()
-    for i, sig in sigs:
-        ts = int(df["time"].iloc[i])
-        open_ts, close_ts = _ny_session(ts)
-        assert open_ts <= ts < close_ts
-        assert ts + 300 >= close_ts, "not the session's final bar"
-        assert sig.direction == "BUY"
-        assert close_ts not in seen, "two signals in one session"
-        seen.add(close_ts)
-
-
-def test_overnight_survives_the_dst_change():
-    """The cash close moves in UTC when New York changes clocks; a fixed
-    minute-of-day would trade an hour out for half of every year.
-
-    US DST began on 2025-03-09, so the fixture holds sessions on both sides of it.
-    Scanned from the first bar: the sessions before the ATR window is full simply
-    produce nothing, and the earliest ones are the pre-change half.
-    """
-    df = _bars("5min", "2025-03-03", 20 * 288, seed=22)
-    sigs = _scan(_overnight(**NIGHT_KW), df, "M5", NIGHT_WINDOW)
-    utc_hours = {pd.Timestamp(int(df["time"].iloc[i]), unit="s", tz="UTC").hour for i, _ in sigs}
-    et_hours = {pd.Timestamp(int(df["time"].iloc[i]), unit="s", tz="UTC").tz_convert(NY).hour
-                for i, _ in sigs}
-    assert len(utc_hours) > 1, "fixture did not span a DST change"
-    assert et_hours == {15}, f"the close drifted in New York time: {et_hours}"
-
-
-def test_overnight_stop_is_half_a_daily_atr_below_the_entry():
-    df = _bars("5min", "2025-03-03", 20 * 288, seed=23)
-    sigs = _scan(_overnight(**NIGHT_KW), df, "M5", NIGHT_WINDOW, start=5 * 288)
-    assert sigs
-    for i, sig in sigs:
-        atr = _ref_daily_atr(df.iloc[max(0, i + 1 - NIGHT_WINDOW):i + 1], NIGHT_KW["atr_days"])
-        assert sig.entry_price - sig.stop_loss == pytest.approx(0.5 * atr, rel=1e-12)
-        assert sig.take_profit > sig.entry_price + 10 * (sig.entry_price - sig.stop_loss)
-
-
-def test_overnight_holds_the_night_and_leaves_before_the_next_open():
-    df = _bars("5min", "2025-03-03", 20 * 288, seed=24)
-    eng = _overnight(**NIGHT_KW)
-    i0, sig = _scan(eng, df, "M5", NIGHT_WINDOW, start=5 * 288)[0]
-    entry_t = pd.Timestamp(df.index[i0 + 1])
-    nxt = None
-    closed_at = None
-    for i in range(i0 + 1, len(df)):
-        sl = df.iloc[max(0, i + 1 - 60):i + 1]
-        act = eng.on_position_bar("TESTSYM", "M5", sl,
-                                  {"ticket": 1, "direction": "BUY", "entry_time": entry_t,
-                                   "stop_loss": sig.stop_loss})
-        ts = int(df["time"].iloc[i])
-        if nxt is None:
-            from backend.strategies.strategy_overnight.engine import next_session_open
-            nxt = next_session_open("ny", int(entry_t.timestamp()))
-        if act is not None:
-            assert act.action == "CLOSE" and act.close_reason == "SESSION_OPEN"
-            closed_at = ts
-            break
-        assert ts + 300 < nxt, "held past the open it was supposed to leave at"
-    assert closed_at is not None, "never closed"
-    assert closed_at + 300 >= nxt
-    assert closed_at > int(entry_t.timestamp()), "closed on its own entry bar"
-
-
-def test_overnight_weekend_exit_is_mondays_open_not_saturdays():
-    from backend.strategies.strategy_overnight.engine import next_session_open
-    friday_close = int(NY.localize(pd.Timestamp(2025, 3, 7, 16, 0).to_pydatetime()).timestamp())
-    nxt = next_session_open("ny", friday_close)
-    assert pd.Timestamp(nxt, unit="s", tz="UTC").tz_convert(NY).strftime("%a %H:%M") == "Mon 09:30"
-
-
-# ── OpeningDrive_v1 ─────────────────────────────────────────────────────────
-DRIVE_KW = dict(atr_days=3, trail_lookback_bars=20)
-DRIVE_WINDOW = window_bars("M5", _engine("OpeningDrive_v1", "opening_drive",
-                                         OpeningDriveParams(**DRIVE_KW)))
-
-
-def _ref_ema(values, span):
-    a = 2.0 / (span + 1.0)
-    out = float(values[0])
-    for v in values[1:]:
-        out = a * float(v) + (1.0 - a) * out
-    return out
-
-
-def test_drive_fires_on_the_opening_bar_with_the_claimed_ema_rule():
-    df = _bars("5min", "2025-03-03", 20 * 288, seed=31)
-    sigs = _scan(_drive(**DRIVE_KW), df, "M5", DRIVE_WINDOW, start=5 * 288)
-    assert len(sigs) >= 8
-    for i, sig in sigs:
-        ts = int(df["time"].iloc[i])
-        open_ts, _ = _ny_session(ts)
-        assert open_ts <= ts < open_ts + 300, "not the session's first bar"
-        sl = df.iloc[max(0, i + 1 - DRIVE_WINDOW):i + 1]
-        ema = _ref_ema(sl["close"].to_numpy(float), 12)
-        assert sig.metadata["ema_val"] == pytest.approx(ema, rel=1e-9)
-        want = "BUY" if float(sl["close"].iloc[-1]) > ema else "SELL"
-        assert sig.direction == want
-        atr = _ref_daily_atr(sl, DRIVE_KW["atr_days"])
-        assert abs(sig.entry_price - sig.stop_loss) == pytest.approx(atr, rel=1e-12)
-
-
-def test_drive_trails_inside_the_session_and_flattens_at_the_close():
-    df = _bars("5min", "2025-03-03", 20 * 288, seed=32)
-    eng = _drive(**DRIVE_KW)
-    i0, sig = _scan(eng, df, "M5", DRIVE_WINDOW, start=5 * 288)[0]
-    entry_t = pd.Timestamp(df.index[i0 + 1])
-    pbw = eng.POSITION_BAR_WINDOW
-    is_buy = sig.direction == "BUY"
-    close = df["close"].to_numpy(float)
-    trailed = 0
-    closed_ts = None
-    for i in range(i0 + 1, min(i0 + 400, len(df))):
-        sl = df.iloc[max(0, i + 1 - pbw):i + 1]
-        act = eng.on_position_bar("TESTSYM", "M5", sl,
-                                  {"ticket": 1, "direction": sig.direction,
-                                   "entry_time": entry_t, "stop_loss": sig.stop_loss})
-        ts = int(df["time"].iloc[i])
-        _, close_ts = _ny_session(ts)
-        assert act is not None
-        if act.action == "CLOSE":
-            assert act.close_reason == "SESSION_END"
-            assert ts + 300 >= close_ts
-            closed_ts = ts
-            break
-        atr = _ref_daily_atr(sl, DRIVE_KW["atr_days"])
-        anchor = max(i0 + 1, i - int(DRIVE_KW["trail_lookback_bars"]) + 1)
-        want = (close[anchor:i + 1].max() - atr) if is_buy else (close[anchor:i + 1].min() + atr)
-        assert act.new_sl == pytest.approx(want, rel=1e-12)
-        trailed += 1
-    assert trailed >= 20 and closed_ts is not None
-
-
-def test_drive_ema_matches_the_reference_recursion():
-    """`adjust=False` IS the recursion the claim was tested with; pandas' default
-    (`adjust=True`) is a different number and would be a different strategy."""
-    from backend.strategies.strategy_opening_drive.engine import ema_last
-    rng = np.random.default_rng(5)
-    values = 100 + np.cumsum(rng.normal(0, 0.3, 400))
-    assert ema_last(values, 12) == pytest.approx(_ref_ema(values, 12), rel=1e-12)
-
-
 # ── wiring: a strategy the UI can pick must be configurable end to end ──────
 def test_every_registered_strategy_is_wired_into_every_list():
     """Coverage by construction. A strategy missing from any one of these is
@@ -408,24 +239,21 @@ def test_the_new_strategies_round_trip_through_from_dict():
     from backend.core.config_schema import UserConfigV2
     cfg = UserConfigV2.from_dict({
         "trend_breakout": {"channel_days": 40, "trail_lookback_bars": 250, "bogus": 1},
-        "overnight_session": {"stop_atr_multiple": 1.25},
-        "opening_drive": {"ema_span": 21, "session": "london"},
+        "orb": {"range_minutes": 45},
     })
     assert cfg.trend_breakout.channel_days == 40
     assert cfg.trend_breakout.trail_lookback_bars == 250
-    assert cfg.overnight_session.stop_atr_multiple == 1.25
-    assert cfg.opening_drive.ema_span == 21 and cfg.opening_drive.session == "london"
+    assert cfg.orb.range_minutes == 45
     # and the engines read the block rather than their own dataclass defaults
     assert get_strategy("TrendBreakout_v1")(cfg).params.channel_days == 40
-    assert get_strategy("OvernightSession_v1")(cfg).params.stop_atr_multiple == 1.25
-    assert get_strategy("OpeningDrive_v1")(cfg).params.ema_span == 21
+    assert get_strategy("ORB_v1")(cfg).params.range_minutes == 45
 
 
 def test_measured_exits_turn_the_generic_trailing_ladder_off():
     """These strategies own their exits. If RiskParams' trailing were left on it
     would fight them with a stop measured on the wrong timeframe."""
     from backend.strategies.strategy_defaults import NO_MEASURED_TARGET, get_strategy_defaults
-    for sid in ("TrendBreakout_v1", "OvernightSession_v1", "OpeningDrive_v1"):
+    for sid in ("TrendBreakout_v1",):
         d = get_strategy_defaults(sid)
         assert d["tp_count"] == 1
         assert d["tp1_rr"] >= 10.0

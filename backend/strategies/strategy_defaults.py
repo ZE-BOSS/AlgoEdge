@@ -69,8 +69,7 @@ OVERRIDABLE: frozenset[str] = frozenset({
 # range from a real measured R:R. Lowering it does not "add a target" — it
 # truncates the right tail the rule lives on.
 NO_MEASURED_TARGET: frozenset[str] = frozenset({
-    "TrendBreakout_v1", "OvernightSession_v1", "OpeningDrive_v1",
-})
+    "TrendBreakout_v1", })
 
 
 STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -175,21 +174,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     # ── IVW — implied-volatility-wall breakout (ivw study, 2026-09-19) ──────
     # Measured with ONE target one wall-width away (stop half a width: 1:2), no
     # break-even and no trailing, plus the day-end exit the engine applies itself.
-    "IVW_v1": {
-        "tp_count": 1,
-        "tp1_rr": 2.0,
-        # the RiskEngine's shipped min_rr of 3.0 would reject every 1:2 signal
-        "min_rr": 2.0,
-        "be_mode": "NONE",
-        "trail_method_tp1": "NONE",
-        "trail_mode": "NONE",
-        "evidence": (
-            "ivw study 2026-09-19, 16 markets M5 2013-2026: fading the walls lost almost everywhere; "
-            "breakout of the 90th-percentile wall from a low cumulative-vol regime on a liquidation-"
-            "bubble bar, chosen on 2013-19, was +0.152R (t 3.3, n 512) on 2020-26 and positive on "
-            "10/10 markets with enough trades."
-        ),
-    },
 
     # ── The 2026-09-25 book: three rules whose exit IS the strategy ──────
     #
@@ -217,33 +201,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
             "Sharpe 1.34, +32.6% on $10k at 0.5% risk, max DD 6.3%; 9/10 markets positive. "
             "Every earlier screen used a FIXED target and measured nothing — that was the "
             "error, not the market. NEGATIVE on FundedNext's own 16 months (-0.092R, t -1.75)."
-        ),
-    },
-    "OvernightSession_v1": {
-        "tp_count": 1,
-        "tp1_rr": 20.0,
-        "be_mode": "NONE",
-        "trail_method_tp1": "NONE",
-        "trail_mode": "NONE",
-        "evidence": (
-            "app-form check 2026-09-25, Deriv M5 2021-10 -> 2026-09, US Tech 100 / US SP 500 / "
-            "Germany 40: 2,006 nights, +0.065R, 52.8% win, t +3.15, Sharpe 1.28, +80.1% at "
-            "0.5% risk, max DD 21.7%. Stop swept 0.5/1/1.5/2/3 x daily ATR — 0.5 best. The "
-            "ONLY strategy in this book still positive on FundedNext's bars (+0.056R, t +1.73)."
-        ),
-    },
-    "OpeningDrive_v1": {
-        "tp_count": 1,
-        "tp1_rr": 20.0,
-        "be_mode": "NONE",
-        "trail_method_tp1": "NONE",
-        "trail_mode": "NONE",
-        "evidence": (
-            "app-form check 2026-09-25: the marketed \"first 5-minute candle vs the 12 EMA\" "
-            "rule. Its claims DO NOT reproduce — 49.8% win and 1.07 profit factor over 5,081 "
-            "sessions against \"57% and 1.29\". What is left is small and index-only: pooled "
-            "+0.012R (t +1.89), US Tech 100 +0.052R (t +2.49), BTCUSD -0.005R, every FX pair "
-            "negative, and NEGATIVE on FundedNext (-0.008R). Run it on US Tech 100 or not at all."
         ),
     },
 
@@ -278,14 +235,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     # ── Restored 2026-09-14 (removed 2026-09-11) ─────────────────────────────
     # Exit settings are the pre-removal measured ones; the 2026-09-14 confluence
     # study re-measures every one of them — see the evidence strings once updated.
-    "HTFFVGFlip_v1": {
-        "tp1_rr": 4.0,
-        "session_filter_enabled": False,
-        "trail_method_tp1": "NONE",
-        "trail_mode": "NONE",
-        "be_mode": "EITHER",
-        "evidence": "research/16: 1:4 the only profitable fixed R:R; session gate ablation -0.170.",
-    },
     "BiasIFVG_v1": {
         "tp1_rr": 3.0,
         "trail_method_tp1": "NONE",

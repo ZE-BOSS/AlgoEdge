@@ -28,7 +28,7 @@ def _book(*slots) -> tuple[SlotBook, UserConfigV2]:
 
 
 def test_each_slot_gets_its_own_engine_and_its_own_numbers():
-    a = InstrumentSlot(symbol="EURUSD", strategy_id="IVW_v1",
+    a = InstrumentSlot(symbol="EURUSD", strategy_id="ORB_v1",
                        risk={"max_daily_drawdown_pct": 2.0}, risk_per_trade_pct=0.35,
                        max_trades_per_day=2)
     b = InstrumentSlot(symbol="GBPJPY", strategy_id="ORB_v1")
@@ -46,7 +46,7 @@ def test_each_slot_gets_its_own_engine_and_its_own_numbers():
 
 def test_changing_a_setting_takes_effect_without_losing_todays_counters():
     """The user edits a slot while the bot runs: new limits, same live counters."""
-    slot = InstrumentSlot(symbol="EURUSD", strategy_id="IVW_v1", risk_per_trade_pct=1.0)
+    slot = InstrumentSlot(symbol="EURUSD", strategy_id="ORB_v1", risk_per_trade_pct=1.0)
     book, cfg = _book(slot)
     engine = book.engine(slot.slot_id)
     engine.circuit.position_opened("g1", 1, symbol="EURUSD", initial_risk_dollars=100.0,
@@ -67,7 +67,7 @@ def test_changing_a_setting_takes_effect_without_losing_todays_counters():
 
 
 def test_a_close_is_booked_on_the_slot_that_opened_it():
-    a = InstrumentSlot(symbol="EURUSD", strategy_id="IVW_v1")
+    a = InstrumentSlot(symbol="EURUSD", strategy_id="ORB_v1")
     b = InstrumentSlot(symbol="GBPJPY", strategy_id="ORB_v1")
     book, _ = _book(a, b)
     ea, eb = book.engine(a.slot_id), book.engine(b.slot_id)
@@ -84,7 +84,7 @@ def test_a_close_is_booked_on_the_slot_that_opened_it():
 
 
 def test_a_close_on_a_symbol_two_slots_share_is_not_guessed():
-    a = InstrumentSlot(symbol="XAUUSD", strategy_id="IVW_v1")
+    a = InstrumentSlot(symbol="XAUUSD", strategy_id="ORB_v1")
     b = InstrumentSlot(symbol="XAUUSD", strategy_id="ORB_v1")
     book, _ = _book(a, b)
     book.engine(a.slot_id), book.engine(b.slot_id)
@@ -93,7 +93,7 @@ def test_a_close_on_a_symbol_two_slots_share_is_not_guessed():
 
 
 def test_mt5_reconcile_gives_each_slot_only_its_own_symbol():
-    a = InstrumentSlot(symbol="EURUSD", strategy_id="IVW_v1")
+    a = InstrumentSlot(symbol="EURUSD", strategy_id="ORB_v1")
     b = InstrumentSlot(symbol="GBPJPY", strategy_id="ORB_v1")
     book, _ = _book(a, b)
     book.engine(b.slot_id)          # build out of order, so engines != config order
@@ -105,7 +105,7 @@ def test_mt5_reconcile_gives_each_slot_only_its_own_symbol():
 
 
 def test_a_balance_change_re_baselines_every_slot():
-    a = InstrumentSlot(symbol="EURUSD", strategy_id="IVW_v1")
+    a = InstrumentSlot(symbol="EURUSD", strategy_id="ORB_v1")
     b = InstrumentSlot(symbol="GBPJPY", strategy_id="ORB_v1")
     book, _ = _book(a, b)
     book.note_account_balance(10_000.0, account_id=123)
@@ -122,14 +122,14 @@ def test_the_live_exit_manager_uses_the_slots_exits_not_the_strategys():
 
     cfg = UserConfigV2()
     cfg.instrument_slots = [
-        InstrumentSlot(symbol="EURUSD", strategy_id="IVW_v1", risk={"be_mode": "RR", "be_trigger_rr": 0.5}),
-        InstrumentSlot(symbol="GBPJPY", strategy_id="IVW_v1", risk={"be_mode": "NONE"}),
+        InstrumentSlot(symbol="EURUSD", strategy_id="ORB_v1", risk={"be_mode": "RR", "be_trigger_rr": 0.5}),
+        InstrumentSlot(symbol="GBPJPY", strategy_id="ORB_v1", risk={"be_mode": "NONE"}),
     ]
     resolved = {}
     for sym in ("EURUSD", "GBPJPY"):
         slot = next(s for s in cfg.instrument_slots if s.symbol == sym)
-        base, _ = build_live_risk_config(cfg, "IVW_v1")
-        resolved[sym] = resolve_slot_risk_config(base, "IVW_v1", overrides=slot_overrides_from(slot))
+        base, _ = build_live_risk_config(cfg, "ORB_v1")
+        resolved[sym] = resolve_slot_risk_config(base, "ORB_v1", overrides=slot_overrides_from(slot))
     assert resolved["EURUSD"]["be_mode"] == "RR" and resolved["EURUSD"]["be_trigger_rr"] == 0.5
     assert resolved["GBPJPY"]["be_mode"] == "NONE"
     # the module really does resolve per slot (guards the lookup being dropped)

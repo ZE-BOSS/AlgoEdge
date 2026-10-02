@@ -13,11 +13,7 @@ from typing import Literal
 
 from backend.strategies.strategy_apa.params import APAParams
 from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
-from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
 from backend.strategies.strategy_orb.params import ORBParams
-from backend.strategies.strategy_ivw.params import IVWParams
-from backend.strategies.strategy_opening_drive.params import OpeningDriveParams
-from backend.strategies.strategy_overnight.params import OvernightSessionParams
 from backend.strategies.strategy_spike_resumption.params import SpikeResumptionParams
 from backend.strategies.strategy_trend.params import TrendBreakoutParams
 from backend.strategies.strategy_vwap.params import VWAPParams
@@ -1211,13 +1207,9 @@ class UserConfigV2(UserConfig):
     apa: APAParams = field(default_factory=APAParams)
     vwap: VWAPParams = field(default_factory=VWAPParams)
     orb: ORBParams = field(default_factory=ORBParams)
-    ivw: IVWParams = field(default_factory=IVWParams)
     trend_breakout: TrendBreakoutParams = field(default_factory=TrendBreakoutParams)
-    overnight_session: OvernightSessionParams = field(default_factory=OvernightSessionParams)
-    opening_drive: OpeningDriveParams = field(default_factory=OpeningDriveParams)
     spike_resumption: SpikeResumptionParams = field(default_factory=SpikeResumptionParams)
     synth: SynthParams = field(default_factory=SynthParams)
-    htf_fvg_flip: HTFFVGFlipParams = field(default_factory=HTFFVGFlipParams)
     bias_ifvg: BiasIFVGParams = field(default_factory=BiasIFVGParams)
     prop_firm: PropFirmParams = field(default_factory=PropFirmParams)
 
@@ -1231,13 +1223,9 @@ class UserConfigV2(UserConfig):
         apa_data = data.pop("apa", {})
         vwap_data = data.pop("vwap", {})
         orb_data = data.pop("orb", {})
-        ivw_data = data.pop("ivw", {})
         trend_breakout_data = data.pop("trend_breakout", {})
-        overnight_session_data = data.pop("overnight_session", {})
-        opening_drive_data = data.pop("opening_drive", {})
         spike_resumption_data = data.pop("spike_resumption", {})
         synth_data = data.pop("synth", {})
-        htf_fvg_flip_data = data.pop("htf_fvg_flip", {})
         bias_ifvg_data = data.pop("bias_ifvg", {})
         prop_firm_data = data.pop("prop_firm", {})
         import dataclasses
@@ -1257,13 +1245,9 @@ class UserConfigV2(UserConfig):
         config.apa = APAParams(**filter_kwargs(APAParams, apa_data))
         config.vwap = VWAPParams(**filter_kwargs(VWAPParams, vwap_data))
         config.orb = ORBParams(**filter_kwargs(ORBParams, orb_data))
-        config.ivw = IVWParams(**filter_kwargs(IVWParams, ivw_data))
         config.trend_breakout = TrendBreakoutParams(**filter_kwargs(TrendBreakoutParams, trend_breakout_data))
-        config.overnight_session = OvernightSessionParams(**filter_kwargs(OvernightSessionParams, overnight_session_data))
-        config.opening_drive = OpeningDriveParams(**filter_kwargs(OpeningDriveParams, opening_drive_data))
         config.spike_resumption = SpikeResumptionParams(**filter_kwargs(SpikeResumptionParams, spike_resumption_data))
         config.synth = SynthParams(**filter_kwargs(SynthParams, synth_data))
-        config.htf_fvg_flip = HTFFVGFlipParams(**filter_kwargs(HTFFVGFlipParams, htf_fvg_flip_data))
         config.bias_ifvg = BiasIFVGParams(**filter_kwargs(BiasIFVGParams, bias_ifvg_data))
         config.prop_firm = PropFirmParams(**filter_kwargs(PropFirmParams, prop_firm_data))
         
@@ -1326,20 +1310,12 @@ class UserConfigV2(UserConfig):
             self.vwap = VWAPParams()
         if self.orb is None:
             self.orb = ORBParams()
-        if self.ivw is None:
-            self.ivw = IVWParams()
         if self.trend_breakout is None:
             self.trend_breakout = TrendBreakoutParams()
-        if self.overnight_session is None:
-            self.overnight_session = OvernightSessionParams()
-        if self.opening_drive is None:
-            self.opening_drive = OpeningDriveParams()
         if self.spike_resumption is None:
             self.spike_resumption = SpikeResumptionParams()
         if self.synth is None:
             self.synth = SynthParams()
-        if self.htf_fvg_flip is None:
-            self.htf_fvg_flip = HTFFVGFlipParams()
         if self.bias_ifvg is None:
             self.bias_ifvg = BiasIFVGParams()
         if self.prop_firm is None:

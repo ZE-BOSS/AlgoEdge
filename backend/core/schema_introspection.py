@@ -142,9 +142,6 @@ def build_full_schema() -> list[dict]:
     from backend.strategies.strategy_apa.params import APAParams
     from backend.strategies.strategy_vwap.params import VWAPParams
     from backend.strategies.strategy_orb.params import ORBParams
-    from backend.strategies.strategy_ivw.params import IVWParams
-    from backend.strategies.strategy_opening_drive.params import OpeningDriveParams
-    from backend.strategies.strategy_overnight.params import OvernightSessionParams
     from backend.strategies.strategy_spike_resumption.params import SpikeResumptionParams
     from backend.strategies.strategy_trend.params import TrendBreakoutParams
     from backend.core.config_schema import DriftJumpAlphaParams
@@ -155,21 +152,19 @@ def build_full_schema() -> list[dict]:
         (APAParams, "apa"),
         (VWAPParams, "vwap"),
         (ORBParams, "orb"),
-        (IVWParams, "ivw"),
         (TrendBreakoutParams, "trend_breakout"),
-        (OvernightSessionParams, "overnight_session"),
-        (OpeningDriveParams, "opening_drive"),
         (SpikeResumptionParams, "spike_resumption"),
         (DriftJumpAlphaParams, "drift_jump_alpha"),
     ]
     from backend.core.config_schema import SynthParams
     from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
-    from backend.strategies.strategy_four_htf_fvg_flip.params import HTFFVGFlipParams
     from backend.core.config_schema import BoomDriftJumpParams
-    groups += [(SynthParams, "synth"), (HTFFVGFlipParams, "htf_fvg_flip"), (BiasIFVGParams, "bias_ifvg"),
-               # Every strategy a slot can run needs a group here: the slot editor
-               # builds its parameter form from this schema, so a missing group
-               # leaves that strategy with no editable parameters at all.
+
+    # Every strategy a slot can run needs a group here: the slot editor builds
+    # its parameter form from this schema, so a missing group leaves that
+    # strategy with no editable parameters at all.
+    groups += [(SynthParams, "synth"),
+               (BiasIFVGParams, "bias_ifvg"),
                (BoomDriftJumpParams, "boom_drift_jump")]
 
     schema: list[dict] = []

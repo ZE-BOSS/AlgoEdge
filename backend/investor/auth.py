@@ -31,7 +31,6 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import select, update
 
 from backend.api.deps import JWT_ALGORITHM, JWT_SECRET_KEY
@@ -54,9 +53,9 @@ RESET_MINUTES = 30
 MIN_PASSWORD = 10
 
 # bcrypt, matching the operators' auth. (The plan named Argon2id; it is not a
-# dependency yet, and bcrypt at passlib's default cost is sound. Moving is a
-# one-line scheme change here, with passlib re-hashing on next login.)
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# dependency yet, and bcrypt at its default cost is sound. Moving is a
+# one-line change in backend/core/passwords.py.)
+from backend.core import passwords as _pw
 
 
 class AuthError(FundError):
@@ -91,16 +90,15 @@ def check_password_rules(password: str) -> None:
 
 def hash_password(password: str) -> str:
     check_password_rules(password)
-    return _pwd.hash(password)
+    return _pw.hash_password(password)
 
 
 def verify_password(password: str, password_hash: str | None) -> bool:
     if not password_hash:
         # Still spend the time, so "no password set" is not distinguishable
         # from "wrong password" by how fast the answer comes back.
-        _pwd.dummy_verify()
         return False
-    return _pwd.verify(password, password_hash)
+    return _pw.verify_password(password, password_hash)
 
 
 # ── tokens ───────────────────────────────────────────────────────────────────
@@ -177,8 +175,8 @@ async def login(session, *, email: str, password: str, ip: str | None = None) ->
         raise AuthError("email or password is not right")
 
     _failures.pop(key, None)
-    if _pwd.needs_update(investor.password_hash):
-        investor.password_hash = _pwd.hash(password)
+    # passlib's needs_update re-hashed when its policy changed. Direct bcrypt
+    # has no such policy, and a hash is only rewritten when the password is.
     await audit(session, actor_id=investor.id, actor_kind="investor", action="auth.login",
                 entity_type="investor", entity_id=investor.id, ip=ip)
     return investor

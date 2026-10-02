@@ -11,7 +11,7 @@ from backend.core.config_schema import UserConfigV2
 from backend.strategies.registry import get_strategy
 
 CASES = [("SpikeFade_v1", "synth"), ("TrendDrift_v1", "synth"),
-         ("HTFFVGFlip_v1", "htf_fvg_flip"), ("BiasIFVG_v1", "bias_ifvg")]
+         ("BiasIFVG_v1", "bias_ifvg")]
 T0 = 1_767_225_600  # 2026-01-01 00:00 UTC
 
 
