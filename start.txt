@@ -2,3 +2,4 @@ cd C:\Users\Administrator\Documents\AlgoEdge
 git pull origin dev
 powershell -ExecutionPolicy Bypass -File scripts\build-sites.ps1
 pm2 restart all
+pm2 logs

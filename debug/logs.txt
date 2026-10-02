@@ -1,0 +1,878 @@
+Index 500 M5
+0|algoedge-backend  | 08:47:13 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Step Index 500 (M5)
+0|algoedge-backend  | 08:47:13 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Step Index 500
+0|algoedge-backend  | 08:47:14 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Boom 900 Index [BoomDriftJump_v1]...
+0|algoedge-backend  | 08:47:14 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Boom 900 Index M5
+0|algoedge-backend  | 08:47:14 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Boom 900 Index (M5)
+0|algoedge-backend  | 08:47:14 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Boom 900 Index
+0|algoedge-backend  | 08:47:14 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Crash 1000 Index [DriftJumpAlpha_v1]...
+0|algoedge-backend  | 08:47:14 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Crash 1000 Index M5
+0|algoedge-backend  | 08:47:15 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Crash 1000 Index (M5)
+0|algoedge-backend  | 08:47:15 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Crash 1000 Index
+0|algoedge-backend  | 08:47:15 | INFO     | backend.services.bot_service:_log_event | [BOT] Scan cycle complete in 4.3s � 6 symbols checked � next scan in 60s
+0|algoedge-backend  | 08:47:19 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 80 candles for GBPJPY M15
+0|algoedge-backend  | 08:47:59 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 80 candles for GBPJPY M15
+0|algoedge-backend  | 08:48:15 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning XAUUSD [VWAP_v1]...
+0|algoedge-backend  | 08:48:15 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for XAUUSD M5
+0|algoedge-backend  | 08:48:15 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for XAUUSD (M5)
+0|algoedge-backend  | 08:48:15 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for XAUUSD
+0|algoedge-backend  | 08:48:16 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning GBPJPY [ORB_v1]...
+0|algoedge-backend  | 08:48:16 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for GBPJPY M5
+0|algoedge-backend  | 08:48:16 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for GBPJPY (M5)
+0|algoedge-backend  | 08:48:16 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for GBPJPY
+0|algoedge-backend  | 08:48:17 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning US Tech 100 [VWAP_v1]...
+0|algoedge-backend  | 08:48:17 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for US Tech 100 M5
+0|algoedge-backend  | 08:48:17 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for US Tech 100 (M5)
+0|algoedge-backend  | 08:48:17 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for US Tech 100
+0|algoedge-backend  | 08:48:17 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Step Index 500 [VWAP_v1]...
+0|algoedge-backend  | 08:48:17 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Step Index 500 M5
+0|algoedge-backend  | 08:48:17 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Step Index 500 (M5)
+0|algoedge-backend  | 08:48:17 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Step Index 500
+0|algoedge-backend  | 08:48:18 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Boom 900 Index [BoomDriftJump_v1]...
+0|algoedge-backend  | 08:48:18 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Boom 900 Index M5
+0|algoedge-backend  | 08:48:18 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Boom 900 Index (M5)
+0|algoedge-backend  | 08:48:18 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Boom 900 Index
+0|algoedge-backend  | 08:48:19 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Crash 1000 Index [DriftJumpAlpha_v1]...
+0|algoedge-backend  | 08:48:19 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Crash 1000 Index M5
+0|algoedge-backend  | 08:48:19 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Crash 1000 Index (M5)
+0|algoedge-backend  | 08:48:19 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Crash 1000 Index
+0|algoedge-backend  | 08:48:19 | INFO     | backend.services.bot_service:_log_event | [BOT] Scan cycle complete in 4.4s � 6 symbols checked � next scan in 60s
+0|algoedge-backend  | 08:48:39 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 80 candles for GBPJPY M15
+0|algoedge-backend  | 08:49:19 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 80 candles for GBPJPY M15
+0|algoedge-backend  | 08:49:19 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning XAUUSD [VWAP_v1]...
+0|algoedge-backend  | 08:49:19 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for XAUUSD M5
+0|algoedge-backend  | 08:49:20 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for XAUUSD (M5)
+0|algoedge-backend  | 08:49:20 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for XAUUSD
+0|algoedge-backend  | 08:49:20 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning GBPJPY [ORB_v1]...
+0|algoedge-backend  | 08:49:20 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for GBPJPY M5
+0|algoedge-backend  | 08:49:20 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for GBPJPY (M5)
+0|algoedge-backend  | 08:49:20 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for GBPJPY
+0|algoedge-backend  | 08:49:21 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning US Tech 100 [VWAP_v1]...
+0|algoedge-backend  | 08:49:21 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for US Tech 100 M5
+0|algoedge-backend  | 08:49:21 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for US Tech 100 (M5)
+0|algoedge-backend  | 08:49:21 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for US Tech 100
+0|algoedge-backend  | 08:49:22 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Step Index 500 [VWAP_v1]...
+0|algoedge-backend  | 08:49:22 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Step Index 500 M5
+0|algoedge-backend  | 08:49:22 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Step Index 500 (M5)
+0|algoedge-backend  | 08:49:22 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Step Index 500
+0|algoedge-backend  | 08:49:22 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Boom 900 Index [BoomDriftJump_v1]...
+0|algoedge-backend  | 08:49:22 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Boom 900 Index M5
+0|algoedge-backend  | 08:49:23 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Boom 900 Index (M5)
+0|algoedge-backend  | 08:49:23 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Boom 900 Index
+0|algoedge-backend  | 08:49:23 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Crash 1000 Index [DriftJumpAlpha_v1]...
+0|algoedge-backend  | 08:49:23 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Crash 1000 Index M5
+0|algoedge-backend  | 08:49:23 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Crash 1000 Index (M5)
+0|algoedge-backend  | 08:49:23 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Crash 1000 Index
+0|algoedge-backend  | 08:49:23 | INFO     | backend.services.bot_service:_log_event | [BOT] Scan cycle complete in 4.3s � 6 symbols checked � next scan in 60s
+0|algoedge-backend  | 08:49:59 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 80 candles for GBPJPY M15
+0|algoedge-backend  | 08:50:02 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning XAUUSD [VWAP_v1]...
+0|algoedge-backend  | 08:50:02 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for XAUUSD M5
+0|algoedge-backend  | 08:50:02 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for XAUUSD (M5)
+0|algoedge-backend  | 08:50:02 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for XAUUSD
+0|algoedge-backend  | 08:50:03 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning GBPJPY [ORB_v1]...
+0|algoedge-backend  | 08:50:03 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for GBPJPY M5
+0|algoedge-backend  | 08:50:03 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for GBPJPY (M5)
+0|algoedge-backend  | 08:50:03 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for GBPJPY
+0|algoedge-backend  | 08:50:03 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning US Tech 100 [VWAP_v1]...
+0|algoedge-backend  | 08:50:03 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for US Tech 100 M5
+0|algoedge-backend  | 08:50:04 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for US Tech 100 (M5)
+0|algoedge-backend  | 08:50:04 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for US Tech 100
+0|algoedge-backend  | 08:50:04 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Step Index 500 [VWAP_v1]...
+0|algoedge-backend  | 08:50:04 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Step Index 500 M5
+0|algoedge-backend  | 08:50:04 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Step Index 500 (M5)
+0|algoedge-backend  | 08:50:04 | WARNING  | backend.strategies.strategy_vwap.engine:on_bar | [VWAP] Step Index 500 appears to be a synthetic index. VWAP is designed for real markets with institutional order flow. Results may be unreliable.
+0|algoedge-backend  | 08:50:04 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Step Index 500
+0|algoedge-backend  | 08:50:05 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Boom 900 Index [BoomDriftJump_v1]...
+0|algoedge-backend  | 08:50:05 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Boom 900 Index M5
+0|algoedge-backend  | 08:50:05 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Boom 900 Index (M5)
+0|algoedge-backend  | 08:50:05 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Boom 900 Index
+0|algoedge-backend  | 08:50:06 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Crash 1000 Index [DriftJumpAlpha_v1]...
+0|algoedge-backend  | 08:50:06 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Crash 1000 Index M5
+0|algoedge-backend  | 08:50:06 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Crash 1000 Index (M5)
+0|algoedge-backend  | 08:50:06 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Crash 1000 Index
+0|algoedge-backend  | 08:50:06 | INFO     | backend.services.bot_service:_log_event | [BOT] Scan cycle complete in 4.3s � 6 symbols checked � next scan in 60s
+0|algoedge-backend  | 08:50:39 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 80 candles for GBPJPY M15
+0|algoedge-backend  | 08:51:06 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning XAUUSD [VWAP_v1]...
+0|algoedge-backend  | 08:51:06 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for XAUUSD M5
+0|algoedge-backend  | 08:51:07 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for XAUUSD (M5)
+0|algoedge-backend  | 08:51:07 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for XAUUSD
+0|algoedge-backend  | 08:51:07 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning GBPJPY [ORB_v1]...
+0|algoedge-backend  | 08:51:07 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for GBPJPY M5
+0|algoedge-backend  | 08:51:07 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for GBPJPY (M5)
+0|algoedge-backend  | 08:51:07 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for GBPJPY
+0|algoedge-backend  | 08:51:08 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning US Tech 100 [VWAP_v1]...
+0|algoedge-backend  | 08:51:08 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for US Tech 100 M5
+0|algoedge-backend  | 08:51:08 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for US Tech 100 (M5)
+0|algoedge-backend  | 08:51:08 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for US Tech 100
+0|algoedge-backend  | 08:51:09 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Step Index 500 [VWAP_v1]...
+0|algoedge-backend  | 08:51:09 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Step Index 500 M5
+0|algoedge-backend  | 08:51:09 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Step Index 500 (M5)
+0|algoedge-backend  | 08:51:09 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Step Index 500
+0|algoedge-backend  | 08:51:09 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Boom 900 Index [BoomDriftJump_v1]...
+0|algoedge-backend  | 08:51:09 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Boom 900 Index M5
+0|algoedge-backend  | 08:51:09 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Boom 900 Index (M5)
+0|algoedge-backend  | 08:51:09 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Boom 900 Index
+0|algoedge-backend  | 08:51:10 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Crash 1000 Index [DriftJumpAlpha_v1]...
+0|algoedge-backend  | 08:51:10 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Crash 1000 Index M5
+0|algoedge-backend  | 08:51:10 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Crash 1000 Index (M5)
+0|algoedge-backend  | 08:51:10 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Crash 1000 Index
+0|algoedge-backend  | 08:51:10 | INFO     | backend.services.bot_service:_log_event | [BOT] Scan cycle complete in 4.4s � 6 symbols checked � next scan in 60s
+0|algoedge-backend  | 08:51:19 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 80 candles for GBPJPY M15
+0|algoedge-backend  | 08:51:59 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 80 candles for GBPJPY M15
+0|algoedge-backend  | 08:52:11 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning XAUUSD [VWAP_v1]...
+0|algoedge-backend  | 08:52:11 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for XAUUSD M5
+0|algoedge-backend  | 08:52:11 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for XAUUSD (M5)
+0|algoedge-backend  | 08:52:11 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for XAUUSD
+0|algoedge-backend  | 08:52:11 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning GBPJPY [ORB_v1]...
+0|algoedge-backend  | 08:52:11 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for GBPJPY M5
+0|algoedge-backend  | 08:52:12 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for GBPJPY (M5)
+0|algoedge-backend  | 08:52:12 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for GBPJPY
+0|algoedge-backend  | 08:52:12 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning US Tech 100 [VWAP_v1]...
+0|algoedge-backend  | 08:52:12 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 7250 candles for US Tech 100 M5
+0|algoedge-backend  | 08:52:12 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for US Tech 100 (M5)
+0|algoedge-backend  | 08:52:12 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for US Tech 100
+0|algoedge-backend  | 08:52:13 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Step Index 500 [VWAP_v1]...
+0|algoedge-backend  | 08:52:13 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Step Index 500 M5
+0|algoedge-backend  | 08:52:13 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Step Index 500 (M5)
+0|algoedge-backend  | 08:52:13 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Step Index 500
+0|algoedge-backend  | 08:52:14 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Boom 900 Index [BoomDriftJump_v1]...
+0|algoedge-backend  | 08:52:14 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Boom 900 Index M5
+0|algoedge-backend  | 08:52:14 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Boom 900 Index (M5)
+0|algoedge-backend  | 08:52:14 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Boom 900 Index
+0|algoedge-backend  | 08:52:14 | INFO     | backend.services.bot_service:_log_event | [SCAN] Scanning Crash 1000 Index [DriftJumpAlpha_v1]...
+0|algoedge-backend  | 08:52:14 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 750 candles for Crash 1000 Index M5
+0|algoedge-backend  | 08:52:15 | INFO     | backend.services.bot_service:_log_event | [DATA] Fetched MTF data for Crash 1000 Index (M5)
+0|algoedge-backend  | 08:52:15 | INFO     | backend.services.bot_service:_log_event | [SCAN] No setup found for Crash 1000 Index
+0|algoedge-backend  | 08:52:15 | INFO     | backend.services.bot_service:_log_event | [BOT] Scan cycle complete in 4.3s � 6 symbols checked � next scan in 60s
+0|algoedge-backend  | 08:52:39 | INFO     | backend.mt5.data_fetcher:get_historical_data | Fetched 80 candles for GBPJPY M15
+(venv) PS C:\Users\Administrator\Documents\AlgoEdge> ^C
+(venv) PS C:\Users\Administrator\Documents\AlgoEdge> ^C
+(venv) PS C:\Users\Administrator\Documents\AlgoEdge> cd C:\Users\Administrator\Documents\AlgoEdge
+(venv) PS C:\Users\Administrator\Documents\AlgoEdge> git pull origin dev
+remote: Enumerating objects: 909, done.
+remote: Counting objects: 100% (30/30), done.
+remote: Total 909 (delta 30), reused 30 (delta 30), pack-reused 879 (from 1)
+Receiving objects: 100% (909/909), 89.77 MiB | 28.35 MiB/s, done.
+Resolving deltas: 100% (536/536), completed with 27 local objects.
+From https://github.com/ZE-BOSS/AlgoEdge
+ * branch              dev        -> FETCH_HEAD
+   6e320d25..d71f96e2  dev        -> origin/dev
+Enumerating objects: 4457, done.
+Counting objects: 100% (4430/4430), done.
+Delta compression using up to 2 threads
+Compressing objects: 100% (2488/2488), done.
+Writing objects: 100% (4430/4430), done.
+Total 4430 (delta 2018), reused 4302 (delta 1893), pack-reused 0 (from 0)
+Updating 6e320d25..d71f96e2
+Updating files: 100% (319/319), done.
+Fast-forward
+ .easignore                                         |    31 +
+ .env.example                                       |    30 +-
+ .gitignore                                         |     3 +
+ backend/api/deps.py                                |     9 +
+ backend/api/routes/admin_investors.py              |  1264 ++
+ backend/api/routes/auth.py                         |    71 +-
+ backend/api/routes/backtest.py                     |     4 -
+ backend/api/routes/investor_portal.py              |   748 ++
+ backend/api/routes/public.py                       |   189 +
+ backend/core/config_schema.py                      |    51 +-
+ backend/core/passwords.py                          |    78 +
+ backend/core/schema_introspection.py               |    17 +-
+ backend/data/database.py                           |    52 +
+ backend/investor/__init__.py                       |     7 +
+ backend/investor/auth.py                           |   266 +
+ backend/investor/booking.py                        |   144 +
+ backend/investor/disclosure.py                     |   270 +
+ backend/investor/fees.py                           |   380 +
+ backend/investor/fund.py                           |   887 ++
+ backend/investor/jobs.py                           |   173 +
+ backend/investor/live.py                           |    97 +
+ backend/investor/models.py                         |   639 +
+ backend/investor/nav.py                            |   144 +
+ backend/investor/prefs.py                          |    89 +
+ backend/investor/reconcile.py                      |   217 +
+ backend/investor/split.py                          |   198 +
+ backend/investor/statements.py                     |   255 +
+ backend/investor/units.py                          |   252 +
+ backend/main.py                                    |    71 +-
+ backend/mt5/data_fetcher.py                        |    41 +-
+ backend/notify/__init__.py                         |    11 +
+ backend/notify/outbox.py                           |   336 +
+ backend/notify/templates.py                        |   402 +
+ backend/risk/circuit_breaker.py                    |   106 +-
+ backend/risk/position_sizer.py                     |    67 +-
+ backend/risk/profit_target.py                      |    64 +-
+ backend/services/bot_service.py                    |    54 +-
+ backend/strategies/registry.py                     |     4 -
+ backend/strategies/strategy_defaults.py            |    53 +-
+ .../strategy_four_htf_fvg_flip/engine.py           |   569 -
+ .../strategy_four_htf_fvg_flip/params.py           |   144 -
+ backend/strategies/strategy_ivw/__init__.py        |     0
+ backend/strategies/strategy_ivw/engine.py          |   363 -
+ backend/strategies/strategy_ivw/params.py          |    57 -
+ .../strategies/strategy_opening_drive/__init__.py  |     0
+ .../strategies/strategy_opening_drive/engine.py    |   195 -
+ .../strategies/strategy_opening_drive/params.py    |    74 -
+ backend/strategies/strategy_overnight/__init__.py  |     0
+ backend/strategies/strategy_overnight/engine.py    |   194 -
+ backend/strategies/strategy_overnight/params.py    |    43 -
+ brand/README.md                                    |    73 +
+ brand/favicon.svg                                  |    28 +
+ brand/loader.svg                                   |    50 +
+ brand/logo-lockup.svg                              |    34 +
+ brand/mark.svg                                     |    32 +
+ brand/preview.html                                 |   180 +
+ brand/seal.svg                                     |    32 +
+ brand/splash.svg                                   |    40 +
+ data/deriv_new/Boom_1000_Index_M5.npz              |   Bin 0 -> 1423709 bytes
+ data/deriv_new/Boom_100_Index_M5.npz               |   Bin 0 -> 695412 bytes
+ data/deriv_new/Boom_150_Index_M5.npz               |   Bin 0 -> 1523882 bytes
+ data/deriv_new/Boom_200_Index_M5.npz               |   Bin 0 -> 697759 bytes
+ data/deriv_new/Boom_300_Index_M5.npz               |   Bin 0 -> 1306678 bytes
+ data/deriv_new/Boom_500_Index_M5.npz               |   Bin 0 -> 1339059 bytes
+ data/deriv_new/Boom_50_Index_M5.npz                |   Bin 0 -> 1407300 bytes
+ data/deriv_new/Boom_600_Index_M5.npz               |   Bin 0 -> 1347493 bytes
+ data/deriv_new/Boom_900_Index_M5.npz               |   Bin 0 -> 1353119 bytes
+ data/deriv_new/Boom_99_Index_M5.npz                |   Bin 0 -> 696717 bytes
+ data/deriv_new/Crash_1000_Index_M5.npz             |   Bin 0 -> 1331828 bytes
+ data/deriv_new/Crash_100_Index_M5.npz              |   Bin 0 -> 696682 bytes
+ data/deriv_new/Crash_150_Index_M5.npz              |   Bin 0 -> 1530747 bytes
+ data/deriv_new/Crash_200_Index_M5.npz              |   Bin 0 -> 707217 bytes
+ data/deriv_new/Crash_300_Index_M5.npz              |   Bin 0 -> 1322955 bytes
+ data/deriv_new/Crash_500_Index_M5.npz              |   Bin 0 -> 1294220 bytes
+ data/deriv_new/Crash_50_Index_M5.npz               |   Bin 0 -> 1399575 bytes
+ data/deriv_new/Crash_600_Index_M5.npz              |   Bin 0 -> 1461802 bytes
+ data/deriv_new/Crash_900_Index_M5.npz              |   Bin 0 -> 1434704 bytes
+ data/deriv_new/Crash_99_Index_M5.npz               |   Bin 0 -> 698029 bytes
+ data/deriv_new/Crash_Boom_Flip_1000_Index_M5.npz   |   Bin 0 -> 443776 bytes
+ data/deriv_new/Crash_Boom_Flip_150_Index_M5.npz    |   Bin 0 -> 429533 bytes
+ data/deriv_new/Crash_Boom_Flip_300_Index_M5.npz    |   Bin 0 -> 479230 bytes
+ data/deriv_new/Crash_Boom_Flip_500_Index_M5.npz    |   Bin 0 -> 454982 bytes
+ data/deriv_new/DEX_1500_DOWN_Index_M5.npz          |   Bin 0 -> 1300671 bytes
+ data/deriv_new/DEX_1500_UP_Index_M5.npz            |   Bin 0 -> 1154593 bytes
+ data/deriv_new/DEX_600_DOWN_Index_M5.npz           |   Bin 0 -> 1144886 bytes
+ data/deriv_new/DEX_600_UP_Index_M5.npz             |   Bin 0 -> 1155734 bytes
+ data/deriv_new/DEX_900_DOWN_Index_M5.npz           |   Bin 0 -> 1336434 bytes
+ data/deriv_new/DEX_900_UP_Index_M5.npz             |   Bin 0 -> 1149207 bytes
+ data/deriv_new/Drift_Switch_Index_10_M5.npz        |   Bin 0 -> 1252109 bytes
+ data/deriv_new/Drift_Switch_Index_20_M5.npz        |   Bin 0 -> 1250070 bytes
+ data/deriv_new/Drift_Switch_Index_30_M5.npz        |   Bin 0 -> 1298333 bytes
+ data/deriv_new/Exponential_Growth_Index_1_M5.npz   |   Bin 0 -> 1787198 bytes
+ data/deriv_new/Exponential_Growth_Index_2_M5.npz   |   Bin 0 -> 1975003 bytes
+ data/deriv_new/High_Frequency_Vol_100_Index_M5.npz |   Bin 0 -> 966269 bytes
+ data/deriv_new/High_Frequency_Vol_10_Index_M5.npz  |   Bin 0 -> 915349 bytes
+ data/deriv_new/High_Frequency_Vol_25_Index_M5.npz  |   Bin 0 -> 946696 bytes
+ data/deriv_new/High_Frequency_Vol_50_Index_M5.npz  |   Bin 0 -> 965301 bytes
+ data/deriv_new/High_Frequency_Vol_75_Index_M5.npz  |   Bin 0 -> 970395 bytes
+ data/deriv_new/Jump_100_Index_M5.npz               |   Bin 0 -> 1071411 bytes
+ data/deriv_new/Jump_10_Index_M5.npz                |   Bin 0 -> 1154057 bytes
+ data/deriv_new/Jump_25_Index_M5.npz                |   Bin 0 -> 1358150 bytes
+ data/deriv_new/Jump_50_Index_M5.npz                |   Bin 0 -> 1360202 bytes
+ data/deriv_new/Jump_75_Index_M5.npz                |   Bin 0 -> 1250371 bytes
+ data/deriv_new/Multi_Step_2_Index_M5.npz           |   Bin 0 -> 834928 bytes
+ data/deriv_new/Multi_Step_3_Index_M5.npz           |   Bin 0 -> 918832 bytes
+ data/deriv_new/Multi_Step_4_Index_M5.npz           |   Bin 0 -> 839545 bytes
+ data/deriv_new/Range_Break_100_Index_M5.npz        |   Bin 0 -> 659713 bytes
+ data/deriv_new/Range_Break_200_Index_M5.npz        |   Bin 0 -> 634602 bytes
+ data/deriv_new/Skew_Step_Index_4_Down_M5.npz       |   Bin 0 -> 922759 bytes
+ data/deriv_new/Skew_Step_Index_4_Up_M5.npz         |   Bin 0 -> 926764 bytes
+ data/deriv_new/Skew_Step_Index_5_Down_M5.npz       |   Bin 0 -> 950684 bytes
+ data/deriv_new/Skew_Step_Index_5_Up_M5.npz         |   Bin 0 -> 947836 bytes
+ .../deriv_new/Spot_Up_-_Volatility_Up_Index_M5.npz |   Bin 0 -> 1181761 bytes
+ data/deriv_new/Step_Index_200_M5.npz               |   Bin 0 -> 780985 bytes
+ data/deriv_new/Step_Index_300_M5.npz               |   Bin 0 -> 841501 bytes
+ data/deriv_new/Step_Index_400_M5.npz               |   Bin 0 -> 790736 bytes
+ data/deriv_new/Step_Index_500_M5.npz               |   Bin 0 -> 659033 bytes
+ data/deriv_new/Step_Index_M5.npz                   |   Bin 0 -> 786100 bytes
+ data/deriv_new/Trek_Down_Index_M5.npz              |   Bin 0 -> 1184780 bytes
+ data/deriv_new/Trek_Up_Index_M5.npz                |   Bin 0 -> 1195930 bytes
+ data/deriv_new/VolSwitch_High_Vol_Index_M5.npz     |   Bin 0 -> 1195696 bytes
+ data/deriv_new/VolSwitch_Low_Vol_Index_M5.npz      |   Bin 0 -> 1251218 bytes
+ data/deriv_new/VolSwitch_Medium_Vol_Index_M5.npz   |   Bin 0 -> 1257394 bytes
+ data/deriv_new/Vol_over_Boom_400_M5.npz            |   Bin 0 -> 1209041 bytes
+ data/deriv_new/Vol_over_Boom_550_M5.npz            |   Bin 0 -> 1169474 bytes
+ data/deriv_new/Vol_over_Boom_750_M5.npz            |   Bin 0 -> 1225778 bytes
+ data/deriv_new/Vol_over_Crash_400_M5.npz           |   Bin 0 -> 1184861 bytes
+ data/deriv_new/Vol_over_Crash_550_M5.npz           |   Bin 0 -> 1156491 bytes
+ data/deriv_new/Vol_over_Crash_750_M5.npz           |   Bin 0 -> 1214921 bytes
+ data/deriv_new/Volatility_100_(1s)_Index_M5.npz    |   Bin 0 -> 1096697 bytes
+ data/deriv_new/Volatility_100_Index_M5.npz         |   Bin 0 -> 1083484 bytes
+ data/deriv_new/Volatility_10_(1s)_Index_M5.npz     |   Bin 0 -> 1168986 bytes
+ data/deriv_new/Volatility_10_Index_M5.npz          |   Bin 0 -> 1174023 bytes
+ data/deriv_new/Volatility_150_(1s)_Index_M5.npz    |   Bin 0 -> 975687 bytes
+ data/deriv_new/Volatility_15_(1s)_Index_M5.npz     |   Bin 0 -> 1331096 bytes
+ data/deriv_new/Volatility_15_Index_M5.npz          |   Bin 0 -> 1196404 bytes
+ data/deriv_new/Volatility_250_(1s)_Index_M5.npz    |   Bin 0 -> 1422652 bytes
+ data/deriv_new/Volatility_25_(1s)_Index_M5.npz     |   Bin 0 -> 1394776 bytes
+ data/deriv_new/Volatility_25_Index_M5.npz          |   Bin 0 -> 1172834 bytes
+ data/deriv_new/Volatility_30_(1s)_Index_M5.npz     |   Bin 0 -> 1318543 bytes
+ data/deriv_new/Volatility_30_Index_M5.npz          |   Bin 0 -> 1222747 bytes
+ data/deriv_new/Volatility_50_(1s)_Index_M5.npz     |   Bin 0 -> 1346696 bytes
+ data/deriv_new/Volatility_50_Index_M5.npz          |   Bin 0 -> 1231031 bytes
+ data/deriv_new/Volatility_5_(1s)_Index_M5.npz      |   Bin 0 -> 1217773 bytes
+ data/deriv_new/Volatility_5_Index_M5.npz           |   Bin 0 -> 1381006 bytes
+ data/deriv_new/Volatility_75_(1s)_Index_M5.npz     |   Bin 0 -> 1049872 bytes
+ data/deriv_new/Volatility_75_Index_M5.npz          |   Bin 0 -> 1290063 bytes
+ data/deriv_new/Volatility_90_(1s)_Index_M5.npz     |   Bin 0 -> 1441658 bytes
+ data/deriv_new/Volatility_90_Index_M5.npz          |   Bin 0 -> 1254585 bytes
+ data/deriv_new/specs.json                          |  1914 +++
+ data/synthetic_study/RESULTS.md                    |    49 +
+ data/synthetic_study/results.json                  |   164 +
+ data/synthetic_study_smoke/RESULTS.md              |    13 +
+ data/synthetic_study_smoke/results.json            |     1 +
+ deploy/Caddyfile                                   |   103 +
+ docs/DEPLOY-INVESTOR-PLATFORM.md                   |   242 +
+ ecosystem.config.js                                |    57 +-
+ frontend/index.html                                |    13 +-
+ frontend/public/favicon.svg                        |    29 +-
+ frontend/public/icon-192.png                       |   Bin 0 -> 23225 bytes
+ frontend/public/icon-512.png                       |   Bin 0 -> 126340 bytes
+ frontend/public/icon-maskable-512.png              |   Bin 0 -> 110390 bytes
+ frontend/public/logo.svg                           |    34 +
+ frontend/public/manifest.webmanifest               |    15 +
+ frontend/public/mark.svg                           |    32 +
+ frontend/src/App.jsx                               |    23 +-
+ frontend/src/components/Brand.jsx                  |    66 +
+ frontend/src/components/slotSpec.js                |     8 +-
+ frontend/src/index.css                             |   193 +-
+ frontend/src/pages/Investors/Applications.jsx      |    60 +
+ frontend/src/pages/Investors/Audit.jsx             |   125 +
+ frontend/src/pages/Investors/Disclosure.jsx        |   192 +
+ frontend/src/pages/Investors/Fees.jsx              |   162 +
+ frontend/src/pages/Investors/InvestorDetail.jsx    |   453 +
+ frontend/src/pages/Investors/InvestorList.jsx      |    99 +
+ frontend/src/pages/Investors/Nav.jsx               |    63 +
+ frontend/src/pages/Investors/Overview.jsx          |    84 +
+ frontend/src/pages/Investors/Queues.jsx            |   186 +
+ frontend/src/pages/Investors/Reconciliation.jsx    |    91 +
+ frontend/src/pages/Investors/Releases.jsx          |   100 +
+ frontend/src/pages/Investors/Terms.jsx             |    91 +
+ frontend/src/pages/Investors/format.js             |    78 +
+ frontend/src/pages/Investors/index.jsx             |    79 +
+ frontend/src/pages/Investors/shared.jsx            |   133 +
+ frontend/src/pages/Journal.jsx                     |     2 +-
+ frontend/src/pages/Login.jsx                       |   104 +-
+ frontend/src/pages/StrategyLab.jsx                 |     4 -
+ frontend/src/services/api.js                       |    60 +
+ frontend/src/store/index.js                        |     6 +
+ implementation/INVESTOR-PLATFORM-2026-09-29.md     |   465 +
+ implementation/PHASE-1-LEDGER-2026-09-29.md        |   175 +
+ implementation/PHASE-2-ADMIN-CONSOLE-2026-09-29.md |   159 +
+ implementation/PHASE-3-INVESTOR-WEB-2026-09-29.md  |   167 +
+ .../PHASE-4-FEES-EMAIL-STATEMENTS-2026-09-29.md    |   187 +
+ .../PHASE-5-LANDING-DOMAIN-2026-09-29.md           |   127 +
+ implementation/PHASE-6-ANDROID-APP-2026-09-29.md   |   105 +
+ implementation/PROFIT-TARGET-FIXES-2026-09-29.md   |   184 +
+ implementation/RESEARCH-FINDINGS-2026-10-02.md     |   636 +
+ implementation/SYNTHETIC-STUDY-2026-10-01.md       |   261 +
+ investor-web/.gitignore                            |     2 +
+ investor-web/eslint.config.js                      |    21 +
+ investor-web/index.html                            |    20 +
+ investor-web/package-lock.json                     |  2460 ++++
+ investor-web/package.json                          |    26 +
+ investor-web/public/favicon.svg                    |    28 +
+ investor-web/public/icon-192.png                   |   Bin 0 -> 23225 bytes
+ investor-web/public/icon-512.png                   |   Bin 0 -> 126340 bytes
+ investor-web/public/icon-maskable-512.png          |   Bin 0 -> 110390 bytes
+ investor-web/public/manifest.webmanifest           |    16 +
+ investor-web/public/mark.svg                       |    32 +
+ investor-web/public/sw.js                          |    63 +
+ investor-web/src/App.jsx                           |   129 +
+ investor-web/src/api.js                            |   115 +
+ investor-web/src/components/Bell.jsx               |    80 +
+ investor-web/src/components/Brand.jsx              |    66 +
+ investor-web/src/components/Charts.jsx             |   268 +
+ investor-web/src/components/Icons.jsx              |    37 +
+ investor-web/src/components/LiveTrades.jsx         |    36 +
+ investor-web/src/components/NavChart.jsx           |   110 +
+ investor-web/src/components/ui.jsx                 |   102 +
+ investor-web/src/format.js                         |   103 +
+ investor-web/src/hooks.js                          |    49 +
+ investor-web/src/main.jsx                          |    12 +
+ investor-web/src/pages/Accept.jsx                  |    49 +
+ investor-web/src/pages/Account.jsx                 |   244 +
+ investor-web/src/pages/Activity.jsx                |   137 +
+ investor-web/src/pages/Home.jsx                    |   179 +
+ investor-web/src/pages/How.jsx                     |    68 +
+ investor-web/src/pages/Login.jsx                   |    62 +
+ investor-web/src/pages/Money.jsx                   |   177 +
+ investor-web/src/pages/Signup.jsx                  |    60 +
+ investor-web/src/pages/Trades.jsx                  |    93 +
+ investor-web/src/prefs.jsx                         |    32 +
+ investor-web/src/styles.css                        |   424 +
+ investor-web/src/usePrefs.js                       |    12 +
+ investor-web/src/webpush.js                        |    48 +
+ investor-web/vite.config.js                        |     9 +
+ landing/apple-touch-icon.png                       |   Bin 0 -> 23225 bytes
+ landing/config.js                                  |    17 +
+ landing/favicon.svg                                |    28 +
+ landing/index.html                                 |   336 +
+ landing/mark.svg                                   |    32 +
+ landing/privacy.html                               |   134 +
+ landing/site.js                                    |   241 +
+ landing/styles.css                                 |   214 +
+ landing/terms.html                                 |   134 +
+ mobile/.gitignore                                  |    41 +
+ mobile/AGENTS.md                                   |    41 +
+ mobile/CLAUDE.md                                   |     1 +
+ mobile/README.md                                   |   120 +
+ mobile/app.json                                    |    85 +
+ mobile/assets/android-icon-background.png          |   Bin 0 -> 1832 bytes
+ mobile/assets/android-icon-foreground.png          |   Bin 0 -> 13496 bytes
+ mobile/assets/android-icon-monochrome.png          |   Bin 0 -> 6070 bytes
+ mobile/assets/favicon.png                          |   Bin 0 -> 1264 bytes
+ mobile/assets/icon.png                             |   Bin 0 -> 353769 bytes
+ mobile/assets/notification-icon.png                |   Bin 0 -> 1581 bytes
+ mobile/assets/splash-icon.png                      |   Bin 0 -> 29393 bytes
+ mobile/eas.json                                    |    18 +
+ mobile/eslint.config.js                            |     8 +
+ mobile/package-lock.json                           | 11822 +++++++++++++++++++
+ mobile/package.json                                |    48 +
+ mobile/src/app/(tabs)/_layout.tsx                  |   114 +
+ mobile/src/app/(tabs)/account.tsx                  |   216 +
+ mobile/src/app/(tabs)/activity.tsx                 |   146 +
+ mobile/src/app/(tabs)/index.tsx                    |   187 +
+ mobile/src/app/(tabs)/money.tsx                    |   142 +
+ mobile/src/app/(tabs)/notifications.tsx            |    50 +
+ mobile/src/app/(tabs)/trades.tsx                   |    90 +
+ mobile/src/app/_layout.tsx                         |    57 +
+ mobile/src/app/forgot.tsx                          |    28 +
+ mobile/src/app/how.tsx                             |    54 +
+ mobile/src/app/login.tsx                           |    43 +
+ mobile/src/app/signup.tsx                          |    58 +
+ mobile/src/components/Charts.tsx                   |   217 +
+ mobile/src/components/Live.tsx                     |    42 +
+ mobile/src/components/LockScreen.tsx               |    30 +
+ mobile/src/components/ui.tsx                       |   255 +
+ mobile/src/lib/api.ts                              |   188 +
+ mobile/src/lib/format.ts                           |   110 +
+ mobile/src/lib/hooks.ts                            |    32 +
+ mobile/src/lib/notices.tsx                         |    30 +
+ mobile/src/lib/prefs.tsx                           |    37 +
+ mobile/src/lib/push.ts                             |    44 +
+ mobile/src/lib/session.tsx                         |   107 +
+ mobile/src/lib/storage.ts                          |    21 +
+ mobile/src/lib/theme.ts                            |    18 +
+ mobile/src/lib/update.ts                           |    21 +
+ mobile/tsconfig.json                               |     6 +
+ requirements.txt                                   |    10 +-
+ scripts/audit_saved_backtest.py                    |   215 +
+ scripts/build-sites.ps1                            |    45 +
+ scripts/export_new_synthetics.py                   |   124 +
+ scripts/run_icc_study.py                           |   192 +
+ scripts/run_pdh_pdl_sweep.py                       |   181 +
+ scripts/run_synthetic_study.py                     |   373 +
+ start.txt                                          |     5 +-
+ tests/conftest.py                                  |    29 +
+ tests/test_engine_settings_rebuild.py              |    64 +
+ tests/test_fvg_research.py                         |    32 +-
+ tests/test_investor_admin_routes.py                |   623 +
+ tests/test_investor_app_releases.py                |   151 +
+ tests/test_investor_email.py                       |   441 +
+ tests/test_investor_fees.py                        |   298 +
+ tests/test_investor_fund.py                        |   554 +
+ tests/test_investor_ledger.py                      |   430 +
+ tests/test_investor_notices.py                     |   170 +
+ tests/test_investor_portal.py                      |   429 +
+ tests/test_investor_public.py                      |   158 +
+ tests/test_investor_split.py                       |   206 +
+ tests/test_ivw_strategy.py                         |   232 -
+ tests/test_live_slot_book.py                       |    20 +-
+ tests/test_max_hold_exit.py                        |     2 +-
+ tests/test_measured_defaults.py                    |     4 +-
+ tests/test_profit_target_live_bugs.py              |   261 +
+ tests/test_server_offset.py                        |    50 +
+ tests/test_shipped_strategies_2026_09_25.py        |   182 +-
+ tests/test_slot_risk_parity.py                     |    28 +-
+ tests/test_tick_value_verification.py              |   131 +
+ 319 files changed, 41757 insertions(+), 2391 deletions(-)
+ create mode 100644 .easignore
+ create mode 100644 backend/api/routes/admin_investors.py
+ create mode 100644 backend/api/routes/investor_portal.py
+ create mode 100644 backend/api/routes/public.py
+ create mode 100644 backend/core/passwords.py
+ create mode 100644 backend/investor/__init__.py
+ create mode 100644 backend/investor/auth.py
+ create mode 100644 backend/investor/booking.py
+ create mode 100644 backend/investor/disclosure.py
+ create mode 100644 backend/investor/fees.py
+ create mode 100644 backend/investor/fund.py
+ create mode 100644 backend/investor/jobs.py
+ create mode 100644 backend/investor/live.py
+ create mode 100644 backend/investor/models.py
+ create mode 100644 backend/investor/nav.py
+ create mode 100644 backend/investor/prefs.py
+ create mode 100644 backend/investor/reconcile.py
+ create mode 100644 backend/investor/split.py
+ create mode 100644 backend/investor/statements.py
+ create mode 100644 backend/investor/units.py
+ create mode 100644 backend/notify/__init__.py
+ create mode 100644 backend/notify/outbox.py
+ create mode 100644 backend/notify/templates.py
+ delete mode 100644 backend/strategies/strategy_four_htf_fvg_flip/engine.py
+ delete mode 100644 backend/strategies/strategy_four_htf_fvg_flip/params.py
+ delete mode 100644 backend/strategies/strategy_ivw/__init__.py
+ delete mode 100644 backend/strategies/strategy_ivw/engine.py
+ delete mode 100644 backend/strategies/strategy_ivw/params.py
+ delete mode 100644 backend/strategies/strategy_opening_drive/__init__.py
+ delete mode 100644 backend/strategies/strategy_opening_drive/engine.py
+ delete mode 100644 backend/strategies/strategy_opening_drive/params.py
+ delete mode 100644 backend/strategies/strategy_overnight/__init__.py
+ delete mode 100644 backend/strategies/strategy_overnight/engine.py
+ delete mode 100644 backend/strategies/strategy_overnight/params.py
+ create mode 100644 brand/README.md
+ create mode 100644 brand/favicon.svg
+ create mode 100644 brand/loader.svg
+ create mode 100644 brand/logo-lockup.svg
+ create mode 100644 brand/mark.svg
+ create mode 100644 brand/preview.html
+ create mode 100644 brand/seal.svg
+ create mode 100644 brand/splash.svg
+ create mode 100644 data/deriv_new/Boom_1000_Index_M5.npz
+ create mode 100644 data/deriv_new/Boom_100_Index_M5.npz
+ create mode 100644 data/deriv_new/Boom_150_Index_M5.npz
+ create mode 100644 data/deriv_new/Boom_200_Index_M5.npz
+ create mode 100644 data/deriv_new/Boom_300_Index_M5.npz
+ create mode 100644 data/deriv_new/Boom_500_Index_M5.npz
+ create mode 100644 data/deriv_new/Boom_50_Index_M5.npz
+ create mode 100644 data/deriv_new/Boom_600_Index_M5.npz
+ create mode 100644 data/deriv_new/Boom_900_Index_M5.npz
+ create mode 100644 data/deriv_new/Boom_99_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_1000_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_100_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_150_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_200_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_300_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_500_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_50_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_600_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_900_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_99_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_Boom_Flip_1000_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_Boom_Flip_150_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_Boom_Flip_300_Index_M5.npz
+ create mode 100644 data/deriv_new/Crash_Boom_Flip_500_Index_M5.npz
+ create mode 100644 data/deriv_new/DEX_1500_DOWN_Index_M5.npz
+ create mode 100644 data/deriv_new/DEX_1500_UP_Index_M5.npz
+ create mode 100644 data/deriv_new/DEX_600_DOWN_Index_M5.npz
+ create mode 100644 data/deriv_new/DEX_600_UP_Index_M5.npz
+ create mode 100644 data/deriv_new/DEX_900_DOWN_Index_M5.npz
+ create mode 100644 data/deriv_new/DEX_900_UP_Index_M5.npz
+ create mode 100644 data/deriv_new/Drift_Switch_Index_10_M5.npz
+ create mode 100644 data/deriv_new/Drift_Switch_Index_20_M5.npz
+ create mode 100644 data/deriv_new/Drift_Switch_Index_30_M5.npz
+ create mode 100644 data/deriv_new/Exponential_Growth_Index_1_M5.npz
+ create mode 100644 data/deriv_new/Exponential_Growth_Index_2_M5.npz
+ create mode 100644 data/deriv_new/High_Frequency_Vol_100_Index_M5.npz
+ create mode 100644 data/deriv_new/High_Frequency_Vol_10_Index_M5.npz
+ create mode 100644 data/deriv_new/High_Frequency_Vol_25_Index_M5.npz
+ create mode 100644 data/deriv_new/High_Frequency_Vol_50_Index_M5.npz
+ create mode 100644 data/deriv_new/High_Frequency_Vol_75_Index_M5.npz
+ create mode 100644 data/deriv_new/Jump_100_Index_M5.npz
+ create mode 100644 data/deriv_new/Jump_10_Index_M5.npz
+ create mode 100644 data/deriv_new/Jump_25_Index_M5.npz
+ create mode 100644 data/deriv_new/Jump_50_Index_M5.npz
+ create mode 100644 data/deriv_new/Jump_75_Index_M5.npz
+ create mode 100644 data/deriv_new/Multi_Step_2_Index_M5.npz
+ create mode 100644 data/deriv_new/Multi_Step_3_Index_M5.npz
+ create mode 100644 data/deriv_new/Multi_Step_4_Index_M5.npz
+ create mode 100644 data/deriv_new/Range_Break_100_Index_M5.npz
+ create mode 100644 data/deriv_new/Range_Break_200_Index_M5.npz
+ create mode 100644 data/deriv_new/Skew_Step_Index_4_Down_M5.npz
+ create mode 100644 data/deriv_new/Skew_Step_Index_4_Up_M5.npz
+ create mode 100644 data/deriv_new/Skew_Step_Index_5_Down_M5.npz
+ create mode 100644 data/deriv_new/Skew_Step_Index_5_Up_M5.npz
+ create mode 100644 data/deriv_new/Spot_Up_-_Volatility_Up_Index_M5.npz
+ create mode 100644 data/deriv_new/Step_Index_200_M5.npz
+ create mode 100644 data/deriv_new/Step_Index_300_M5.npz
+ create mode 100644 data/deriv_new/Step_Index_400_M5.npz
+ create mode 100644 data/deriv_new/Step_Index_500_M5.npz
+ create mode 100644 data/deriv_new/Step_Index_M5.npz
+ create mode 100644 data/deriv_new/Trek_Down_Index_M5.npz
+ create mode 100644 data/deriv_new/Trek_Up_Index_M5.npz
+ create mode 100644 data/deriv_new/VolSwitch_High_Vol_Index_M5.npz
+ create mode 100644 data/deriv_new/VolSwitch_Low_Vol_Index_M5.npz
+ create mode 100644 data/deriv_new/VolSwitch_Medium_Vol_Index_M5.npz
+ create mode 100644 data/deriv_new/Vol_over_Boom_400_M5.npz
+ create mode 100644 data/deriv_new/Vol_over_Boom_550_M5.npz
+ create mode 100644 data/deriv_new/Vol_over_Boom_750_M5.npz
+ create mode 100644 data/deriv_new/Vol_over_Crash_400_M5.npz
+ create mode 100644 data/deriv_new/Vol_over_Crash_550_M5.npz
+ create mode 100644 data/deriv_new/Vol_over_Crash_750_M5.npz
+ create mode 100644 data/deriv_new/Volatility_100_(1s)_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_100_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_10_(1s)_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_10_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_150_(1s)_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_15_(1s)_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_15_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_250_(1s)_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_25_(1s)_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_25_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_30_(1s)_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_30_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_50_(1s)_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_50_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_5_(1s)_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_5_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_75_(1s)_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_75_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_90_(1s)_Index_M5.npz
+ create mode 100644 data/deriv_new/Volatility_90_Index_M5.npz
+ create mode 100644 data/deriv_new/specs.json
+ create mode 100644 data/synthetic_study/RESULTS.md
+ create mode 100644 data/synthetic_study/results.json
+ create mode 100644 data/synthetic_study_smoke/RESULTS.md
+ create mode 100644 data/synthetic_study_smoke/results.json
+ create mode 100644 deploy/Caddyfile
+ create mode 100644 docs/DEPLOY-INVESTOR-PLATFORM.md
+ create mode 100644 frontend/public/icon-192.png
+ create mode 100644 frontend/public/icon-512.png
+ create mode 100644 frontend/public/icon-maskable-512.png
+ create mode 100644 frontend/public/logo.svg
+ create mode 100644 frontend/public/manifest.webmanifest
+ create mode 100644 frontend/public/mark.svg
+ create mode 100644 frontend/src/components/Brand.jsx
+ create mode 100644 frontend/src/pages/Investors/Applications.jsx
+ create mode 100644 frontend/src/pages/Investors/Audit.jsx
+ create mode 100644 frontend/src/pages/Investors/Disclosure.jsx
+ create mode 100644 frontend/src/pages/Investors/Fees.jsx
+ create mode 100644 frontend/src/pages/Investors/InvestorDetail.jsx
+ create mode 100644 frontend/src/pages/Investors/InvestorList.jsx
+ create mode 100644 frontend/src/pages/Investors/Nav.jsx
+ create mode 100644 frontend/src/pages/Investors/Overview.jsx
+ create mode 100644 frontend/src/pages/Investors/Queues.jsx
+ create mode 100644 frontend/src/pages/Investors/Reconciliation.jsx
+ create mode 100644 frontend/src/pages/Investors/Releases.jsx
+ create mode 100644 frontend/src/pages/Investors/Terms.jsx
+ create mode 100644 frontend/src/pages/Investors/format.js
+ create mode 100644 frontend/src/pages/Investors/index.jsx
+ create mode 100644 frontend/src/pages/Investors/shared.jsx
+ create mode 100644 implementation/INVESTOR-PLATFORM-2026-09-29.md
+ create mode 100644 implementation/PHASE-1-LEDGER-2026-09-29.md
+ create mode 100644 implementation/PHASE-2-ADMIN-CONSOLE-2026-09-29.md
+ create mode 100644 implementation/PHASE-3-INVESTOR-WEB-2026-09-29.md
+ create mode 100644 implementation/PHASE-4-FEES-EMAIL-STATEMENTS-2026-09-29.md
+ create mode 100644 implementation/PHASE-5-LANDING-DOMAIN-2026-09-29.md
+ create mode 100644 implementation/PHASE-6-ANDROID-APP-2026-09-29.md
+ create mode 100644 implementation/PROFIT-TARGET-FIXES-2026-09-29.md
+ create mode 100644 implementation/RESEARCH-FINDINGS-2026-10-02.md
+ create mode 100644 implementation/SYNTHETIC-STUDY-2026-10-01.md
+ create mode 100644 investor-web/.gitignore
+ create mode 100644 investor-web/eslint.config.js
+ create mode 100644 investor-web/index.html
+ create mode 100644 investor-web/package-lock.json
+ create mode 100644 investor-web/package.json
+ create mode 100644 investor-web/public/favicon.svg
+ create mode 100644 investor-web/public/icon-192.png
+ create mode 100644 investor-web/public/icon-512.png
+ create mode 100644 investor-web/public/icon-maskable-512.png
+ create mode 100644 investor-web/public/manifest.webmanifest
+ create mode 100644 investor-web/public/mark.svg
+ create mode 100644 investor-web/public/sw.js
+ create mode 100644 investor-web/src/App.jsx
+ create mode 100644 investor-web/src/api.js
+ create mode 100644 investor-web/src/components/Bell.jsx
+ create mode 100644 investor-web/src/components/Brand.jsx
+ create mode 100644 investor-web/src/components/Charts.jsx
+ create mode 100644 investor-web/src/components/Icons.jsx
+ create mode 100644 investor-web/src/components/LiveTrades.jsx
+ create mode 100644 investor-web/src/components/NavChart.jsx
+ create mode 100644 investor-web/src/components/ui.jsx
+ create mode 100644 investor-web/src/format.js
+ create mode 100644 investor-web/src/hooks.js
+ create mode 100644 investor-web/src/main.jsx
+ create mode 100644 investor-web/src/pages/Accept.jsx
+ create mode 100644 investor-web/src/pages/Account.jsx
+ create mode 100644 investor-web/src/pages/Activity.jsx
+ create mode 100644 investor-web/src/pages/Home.jsx
+ create mode 100644 investor-web/src/pages/How.jsx
+ create mode 100644 investor-web/src/pages/Login.jsx
+ create mode 100644 investor-web/src/pages/Money.jsx
+ create mode 100644 investor-web/src/pages/Signup.jsx
+ create mode 100644 investor-web/src/pages/Trades.jsx
+ create mode 100644 investor-web/src/prefs.jsx
+ create mode 100644 investor-web/src/styles.css
+ create mode 100644 investor-web/src/usePrefs.js
+ create mode 100644 investor-web/src/webpush.js
+ create mode 100644 investor-web/vite.config.js
+ create mode 100644 landing/apple-touch-icon.png
+ create mode 100644 landing/config.js
+ create mode 100644 landing/favicon.svg
+ create mode 100644 landing/index.html
+ create mode 100644 landing/mark.svg
+ create mode 100644 landing/privacy.html
+ create mode 100644 landing/site.js
+ create mode 100644 landing/styles.css
+ create mode 100644 landing/terms.html
+ create mode 100644 mobile/.gitignore
+ create mode 100644 mobile/AGENTS.md
+ create mode 100644 mobile/CLAUDE.md
+ create mode 100644 mobile/README.md
+ create mode 100644 mobile/app.json
+ create mode 100644 mobile/assets/android-icon-background.png
+ create mode 100644 mobile/assets/android-icon-foreground.png
+ create mode 100644 mobile/assets/android-icon-monochrome.png
+ create mode 100644 mobile/assets/favicon.png
+ create mode 100644 mobile/assets/icon.png
+ create mode 100644 mobile/assets/notification-icon.png
+ create mode 100644 mobile/assets/splash-icon.png
+ create mode 100644 mobile/eas.json
+ create mode 100644 mobile/eslint.config.js
+ create mode 100644 mobile/package-lock.json
+ create mode 100644 mobile/package.json
+ create mode 100644 mobile/src/app/(tabs)/_layout.tsx
+ create mode 100644 mobile/src/app/(tabs)/account.tsx
+ create mode 100644 mobile/src/app/(tabs)/activity.tsx
+ create mode 100644 mobile/src/app/(tabs)/index.tsx
+ create mode 100644 mobile/src/app/(tabs)/money.tsx
+ create mode 100644 mobile/src/app/(tabs)/notifications.tsx
+ create mode 100644 mobile/src/app/(tabs)/trades.tsx
+ create mode 100644 mobile/src/app/_layout.tsx
+ create mode 100644 mobile/src/app/forgot.tsx
+ create mode 100644 mobile/src/app/how.tsx
+ create mode 100644 mobile/src/app/login.tsx
+ create mode 100644 mobile/src/app/signup.tsx
+ create mode 100644 mobile/src/components/Charts.tsx
+ create mode 100644 mobile/src/components/Live.tsx
+ create mode 100644 mobile/src/components/LockScreen.tsx
+ create mode 100644 mobile/src/components/ui.tsx
+ create mode 100644 mobile/src/lib/api.ts
+ create mode 100644 mobile/src/lib/format.ts
+ create mode 100644 mobile/src/lib/hooks.ts
+ create mode 100644 mobile/src/lib/notices.tsx
+ create mode 100644 mobile/src/lib/prefs.tsx
+ create mode 100644 mobile/src/lib/push.ts
+ create mode 100644 mobile/src/lib/session.tsx
+ create mode 100644 mobile/src/lib/storage.ts
+ create mode 100644 mobile/src/lib/theme.ts
+ create mode 100644 mobile/src/lib/update.ts
+ create mode 100644 mobile/tsconfig.json
+ create mode 100644 scripts/audit_saved_backtest.py
+ create mode 100644 scripts/build-sites.ps1
+ create mode 100644 scripts/export_new_synthetics.py
+ create mode 100644 scripts/run_icc_study.py
+ create mode 100644 scripts/run_pdh_pdl_sweep.py
+ create mode 100644 scripts/run_synthetic_study.py
+ create mode 100644 tests/conftest.py
+ create mode 100644 tests/test_engine_settings_rebuild.py
+ create mode 100644 tests/test_investor_admin_routes.py
+ create mode 100644 tests/test_investor_app_releases.py
+ create mode 100644 tests/test_investor_email.py
+ create mode 100644 tests/test_investor_fees.py
+ create mode 100644 tests/test_investor_fund.py
+ create mode 100644 tests/test_investor_ledger.py
+ create mode 100644 tests/test_investor_notices.py
+ create mode 100644 tests/test_investor_portal.py
+ create mode 100644 tests/test_investor_public.py
+ create mode 100644 tests/test_investor_split.py
+ delete mode 100644 tests/test_ivw_strategy.py
+ create mode 100644 tests/test_profit_target_live_bugs.py
+ create mode 100644 tests/test_tick_value_verification.py
+(venv) PS C:\Users\Administrator\Documents\AlgoEdge> powershell -ExecutionPolicy Bypass -File scripts\build-sites.ps1
+Building against https://api.alphavantiqcapital.com
+
+added 212 packages, and audited 213 packages in 2m
+
+44 packages are looking for funding
+  run `npm fund` for details
+
+8 vulnerabilities (3 moderate, 5 high)
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+
+> frontend@0.0.0 build
+> vite build
+
+vite v8.0.16 building client environment for production...
+✓ 2498 modules transformed.
+computing gzip size...
+dist/index.html                                          1.10 kB │ gzip:   0.56 kB
+dist/assets/index-D41yUzdc.css                          26.58 kB │ gzip:   6.11 kB
+dist/assets/plus-DKrjWTEI.js                             0.14 kB │ gzip:   0.14 kB
+dist/assets/clock-C-g84Kuf.js                            0.15 kB │ gzip:   0.15 kB
+dist/assets/search-BMGa1JBR.js                           0.16 kB │ gzip:   0.16 kB
+dist/assets/gauge-B1iuI8R4.js                            0.16 kB │ gzip:   0.16 kB
+dist/assets/play-CjaJFOiL.js                             0.17 kB │ gzip:   0.17 kB
+dist/assets/pause-DGIw47bi.js                            0.20 kB │ gzip:   0.15 kB
+dist/assets/dollar-sign-CM3Rl1mj.js                      0.20 kB │ gzip:   0.18 kB
+dist/assets/shield-BH79HciQ.js                           0.26 kB │ gzip:   0.21 kB
+dist/assets/copy-w48JKPox.js                             0.29 kB │ gzip:   0.23 kB
+dist/assets/refresh-cw-Bg7_cQ7k.js                       0.31 kB │ gzip:   0.22 kB
+dist/assets/trash-2-DgSSCCkK.js                          0.31 kB │ gzip:   0.20 kB
+dist/assets/trending-up-CxZYgl1b.js                      0.33 kB │ gzip:   0.22 kB
+dist/assets/layers-CMCcyTLe.js                           0.41 kB │ gzip:   0.23 kB
+dist/assets/cpu-DbEhCaCU.js                              0.70 kB │ gzip:   0.31 kB
+dist/assets/useMutation-D5-_NBwl.js                      2.24 kB │ gzip:   0.93 kB
+dist/assets/AnalyzeButton-CFgByUuk.js                    4.55 kB │ gzip:   1.77 kB
+dist/assets/SchemaForm-BjMPORmP.js                       6.02 kB │ gzip:   2.09 kB
+dist/assets/useModelSelection-DFzzo6ME.js                6.56 kB │ gzip:   2.60 kB
+dist/assets/Logs-9BWFJZ-m.js                             8.72 kB │ gzip:   3.46 kB
+dist/assets/useQuery-B1KCJLaI.js                         8.78 kB │ gzip:   3.21 kB
+dist/assets/Signals-DxuwUpGm.js                         10.93 kB │ gzip:   3.25 kB
+dist/assets/SlotEditor-BgP-K5S7.js                      13.25 kB │ gzip:   5.35 kB
+dist/assets/Analysis-CsgrqWmF.js                        13.80 kB │ gzip:   4.71 kB
+dist/assets/StrategyLab-T8ToYXSA.js                     14.66 kB │ gzip:   5.06 kB
+dist/assets/Journal-CxKNPPHr.js                         18.17 kB │ gzip:   5.23 kB
+dist/assets/Dashboard-BQfFCTM3.js                       20.80 kB │ gzip:   6.55 kB
+dist/assets/BacktestReplay-D8nnkkW_.js                  21.27 kB │ gzip:   7.31 kB
+dist/assets/Analytics-iQrMCuIp.js                       28.57 kB │ gzip:   8.44 kB
+dist/assets/Fundamentals-DEo0VRVQ.js                    34.16 kB │ gzip:  10.34 kB
+dist/assets/Settings-CKiiGfnq.js                        57.00 kB │ gzip:  14.87 kB
+dist/assets/store-CGn3QBBf.js                           64.99 kB │ gzip:  23.84 kB
+dist/assets/Investors-mJ91E_aR.js                       78.34 kB │ gzip:  18.53 kB
+dist/assets/Backtester-3JnxOORK.js                     132.12 kB │ gzip:  37.35 kB
+dist/assets/lightweight-charts.production-gWoZOzLU.js  168.92 kB │ gzip:  54.77 kB
+dist/assets/index-BN-g3Vgh.js                          253.66 kB │ gzip:  80.98 kB
+dist/assets/AreaChart-2Mzl1HB-.js                      352.12 kB │ gzip: 103.66 kB
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugins. Here is a breakdown:
+  - vite:css-post (42%)
+  - vite:css (17%)
+  - rolldown:vite-resolve (11%)
+  - vite:terser (7%)
+  - vite:build-html (6%)
+See https://rolldown.rs/options/checks#plugintimings for more details.
+
+✓ built in 23.43s
+
+added 143 packages, and audited 144 packages in 27s
+
+31 packages are looking for funding
+  run `npm fund` for details
+
+2 moderate severity vulnerabilities
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+> investor-web@0.1.0 build
+> vite build
+
+vite v8.3.1 building client environment for production...
+✓ 40 modules transformed.
+computing gzip size...
+dist/index.html                   1.01 kB │ gzip:  0.48 kB
+dist/assets/index-CGwvzqEk.css   23.37 kB │ gzip:  5.65 kB
+dist/assets/index-BNfwgTZD.js   317.73 kB │ gzip: 97.60 kB
+
+✓ built in 1.37s
+Built frontend\dist and investor-web\dist. Caddy serves them as-is; no restart needed.
+(venv) PS C:\Users\Administrator\Documents\AlgoEdge> pm2 restart all
+Use --update-env to update environment variables
+[PM2] Applying action restartProcessId on app [all](ids: [ 0, 1 ])
+[PM2] [algoedge-backend](0) ✓
+[PM2] [algoedge-frontend](1) ✓
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ algoedge-backend   │ fork     │ 23   │ online    │ 0%       │ 3.9mb    │
+│ 1  │ algoedge-frontend  │ fork     │ 22   │ online    │ -0.8%    │ 58.6mb   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+host metrics | cpu: 97% | ram usage: 49.5% |
+(venv) PS C:\Users\Administrator\Documents\AlgoEdge> pm2 logs

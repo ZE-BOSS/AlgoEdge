@@ -5,8 +5,42 @@
 # The landing page needs no build (landing/config.js picks the API by hostname).
 
 $ErrorActionPreference = "Stop"
-$api = if ($env:API_URL) { $env:API_URL } else { "https://api.alphavantiqcapital.com" }
 $root = Split-Path -Parent $PSScriptRoot
+
+# WHERE THE API ADDRESS COMES FROM, AND WHY IT IS READ FROM .env
+#
+# The address is BAKED INTO THE BUILD. Defaulting it to the live API meant a
+# build on any other machine silently produced a front end that talked to
+# PRODUCTION -- the exact accident a demo server exists to avoid, and one that
+# leaves no trace until someone notices demo showing live trades.
+#
+# So it is read from the repo's .env, which is gitignored and therefore already
+# per-machine, the same way ecosystem.config.js reads ALGOEDGE_CADDY. The
+# environment still wins, so a one-off override is still possible.
+#
+#   live .env:  API_URL=https://api.alphavantiqcapital.com
+#   demo .env:  API_URL=http://<demo-ip>:8000
+#
+# With that set on each box, the SAME deploy command is correct on both.
+function Get-DotenvValue($key) {
+    $file = Join-Path $root ".env"
+    if (-not (Test-Path $file)) { return $null }
+    foreach ($line in Get-Content $file) {
+        if ($line -match "^\s*(?:export\s+)?$key\s*=\s*(.*?)\s*$") {
+            return $matches[1].Trim("'", '"')
+        }
+    }
+    return $null
+}
+
+$api = $env:API_URL
+if (-not $api) { $api = Get-DotenvValue "API_URL" }
+if (-not $api) {
+    throw "API_URL is not set. Add it to .env on this machine -- " +
+          "live: https://api.alphavantiqcapital.com, demo: http://<demo-ip>:8000. " +
+          "Refusing to guess, because guessing the live API on a demo box is the " +
+          "one mistake worth failing loudly over."
+}
 Write-Host "Building against $api"
 
 # Windows will not delete a file a running program has loaded. The old PM2 app

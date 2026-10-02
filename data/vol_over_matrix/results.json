@@ -1,0 +1,2397 @@
+[
+ {
+  "symbol": "Vol over Crash 400",
+  "strategy": "DriftJumpAlpha_v1",
+  "compounded": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Crash 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 5115,
+   "trades": 3037,
+   "final_balance": 15032.78,
+   "net_pnl": 5032.78,
+   "win_rate": 0.2868,
+   "profit_factor": 1.009,
+   "expectancy_usd": 1.66,
+   "expectancy_r": null,
+   "max_dd_pct": 87.9,
+   "rejections": {
+    "Max positions reached for Vol over Crash 400 (15/15)": 1205,
+    "Calculated lot size is below this broker's minimum tradeable volume": 65,
+    "Weekly drawdown limit of 40.0% is fully exhausted.": 799,
+    "Daily drawdown limit of 20.0% is fully exhausted.": 9
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.043322916666667,
+    "swap_short_per_lot_per_day": -3.6519875,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 2166,
+    "gapped_exits": 2166,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0191,
+    "max_overshoot_r": 0.1079,
+    "total_overshoot_r": 41.4231,
+    "by_symbol": {
+     "Vol over Crash 400": {
+      "stop_exits": 2166,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0191,
+      "max_overshoot_r": 0.1079,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 2166,
+    "TP1": 871
+   }
+  },
+  "flat": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Crash 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 5115,
+   "trades": 3231,
+   "final_balance": 36038.27,
+   "net_pnl": 26038.27,
+   "win_rate": 0.2804,
+   "profit_factor": 1.132,
+   "expectancy_usd": 8.06,
+   "expectancy_r": null,
+   "max_dd_pct": 90.53,
+   "rejections": {
+    "Max positions reached for Vol over Crash 400 (15/15)": 1249,
+    "Calculated lot size is below this broker's minimum tradeable volume": 58,
+    "Weekly drawdown limit reached: 46.38% >= 40.0%": 52,
+    "Weekly drawdown limit of 40.0% is fully exhausted.": 40,
+    "Weekly drawdown limit reached: 43.81% >= 40.0%": 40,
+    "Weekly drawdown limit reached: 40.77% >= 40.0%": 42,
+    "Weekly drawdown limit reached: 46.22% >= 40.0%": 80,
+    "Weekly drawdown limit reached: 42.88% >= 40.0%": 80,
+    "Weekly drawdown limit reached: 46.53% >= 40.0%": 60,
+    "Weekly drawdown limit reached: 42.10% >= 40.0%": 40,
+    "Weekly drawdown limit reached: 46.23% >= 40.0%": 21,
+    "Weekly drawdown limit reached: 40.98% >= 40.0%": 80,
+    "Daily drawdown limit of 20.0% is fully exhausted.": 2,
+    "Weekly drawdown limit reached: 44.33% >= 40.0%": 40
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.0371527777777776,
+    "swap_short_per_lot_per_day": -3.6445833333333333,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 2325,
+    "gapped_exits": 2325,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0191,
+    "max_overshoot_r": 0.1079,
+    "total_overshoot_r": 44.3684,
+    "by_symbol": {
+     "Vol over Crash 400": {
+      "stop_exits": 2325,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0191,
+      "max_overshoot_r": 0.1079,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 2325,
+    "TP1": 906
+   }
+  }
+ },
+ {
+  "symbol": "Vol over Crash 400",
+  "strategy": "BoomDriftJump_v1",
+  "compounded": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Crash 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.034534722222222,
+    "swap_short_per_lot_per_day": -3.6414416666666662,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  },
+  "flat": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Crash 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.035381944444445,
+    "swap_short_per_lot_per_day": -3.6424583333333334,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  }
+ },
+ {
+  "symbol": "Vol over Crash 400",
+  "strategy": "TrendDrift_v1",
+  "compounded": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Crash 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 12379.13,
+   "net_pnl": 2379.13,
+   "win_rate": 0.2712,
+   "profit_factor": 1.027,
+   "expectancy_usd": 2.19,
+   "expectancy_r": null,
+   "max_dd_pct": 58.64,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.036590277777778,
+    "swap_short_per_lot_per_day": -3.6439083333333335,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 790,
+    "gapped_exits": 790,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0185,
+    "max_overshoot_r": 0.3677,
+    "total_overshoot_r": 14.6322,
+    "by_symbol": {
+     "Vol over Crash 400": {
+      "stop_exits": 790,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0185,
+      "max_overshoot_r": 0.3677,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "TP1": 294,
+    "SL": 790
+   }
+  },
+  "flat": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Crash 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 15343.27,
+   "net_pnl": 5343.27,
+   "win_rate": 0.2712,
+   "profit_factor": 1.089,
+   "expectancy_usd": 4.93,
+   "expectancy_r": null,
+   "max_dd_pct": 43.74,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.0387118055555553,
+    "swap_short_per_lot_per_day": -3.646454166666666,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 790,
+    "gapped_exits": 790,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0185,
+    "max_overshoot_r": 0.3677,
+    "total_overshoot_r": 14.6322,
+    "by_symbol": {
+     "Vol over Crash 400": {
+      "stop_exits": 790,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0185,
+      "max_overshoot_r": 0.3677,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "TP1": 294,
+    "SL": 790
+   }
+  }
+ },
+ {
+  "symbol": "Vol over Crash 550",
+  "strategy": "DriftJumpAlpha_v1",
+  "compounded": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Crash 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 4972,
+   "trades": 2851,
+   "final_balance": 5049.07,
+   "net_pnl": -4950.93,
+   "win_rate": 0.2778,
+   "profit_factor": 0.996,
+   "expectancy_usd": -1.74,
+   "expectancy_r": null,
+   "max_dd_pct": 97.53,
+   "rejections": {
+    "Max positions reached for Vol over Crash 550 (15/15)": 1114,
+    "Calculated lot size is below this broker's minimum tradeable volume": 55,
+    "Weekly drawdown limit of 40.0% is fully exhausted.": 944,
+    "Daily drawdown limit of 20.0% is fully exhausted.": 7,
+    "Daily drawdown limit reached: 22.66% >= 20.0%": 1
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -0.6706194444444443,
+    "swap_short_per_lot_per_day": -0.8382743055555554,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 2059,
+    "gapped_exits": 2059,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0192,
+    "max_overshoot_r": 0.0613,
+    "total_overshoot_r": 39.4934,
+    "by_symbol": {
+     "Vol over Crash 550": {
+      "stop_exits": 2059,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0192,
+      "max_overshoot_r": 0.0613,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 2059,
+    "TP1": 780,
+    "END_OF_DATA": 12
+   }
+  },
+  "flat": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Crash 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 4972,
+   "trades": 3058,
+   "final_balance": 26614.52,
+   "net_pnl": 16614.52,
+   "win_rate": 0.2704,
+   "profit_factor": 1.088,
+   "expectancy_usd": 5.43,
+   "expectancy_r": null,
+   "max_dd_pct": 57.42,
+   "rejections": {
+    "Max positions reached for Vol over Crash 550 (15/15)": 1188,
+    "Calculated lot size is below this broker's minimum tradeable volume": 77,
+    "Weekly drawdown limit reached: 40.35% >= 40.0%": 35,
+    "Weekly drawdown limit reached: 41.09% >= 40.0%": 13,
+    "Weekly drawdown limit reached: 42.05% >= 40.0%": 40,
+    "Weekly drawdown limit of 40.0% is fully exhausted.": 14,
+    "Weekly drawdown limit reached: 44.56% >= 40.0%": 80,
+    "Weekly drawdown limit reached: 42.71% >= 40.0%": 40,
+    "Weekly drawdown limit reached: 40.43% >= 40.0%": 20,
+    "Weekly drawdown limit reached: 44.35% >= 40.0%": 30,
+    "Weekly drawdown limit reached: 45.32% >= 40.0%": 60,
+    "Weekly drawdown limit reached: 40.11% >= 40.0%": 80,
+    "Weekly drawdown limit reached: 42.84% >= 40.0%": 52,
+    "Daily drawdown limit reached: 23.76% >= 20.0%": 1,
+    "Weekly drawdown limit reached: 42.38% >= 40.0%": 70,
+    "Weekly drawdown limit reached: 41.63% >= 40.0%": 61,
+    "Weekly drawdown limit reached: 42.56% >= 40.0%": 53
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -0.668425,
+    "swap_short_per_lot_per_day": -0.83553125,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 2231,
+    "gapped_exits": 2231,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0193,
+    "max_overshoot_r": 0.133,
+    "total_overshoot_r": 43.0241,
+    "by_symbol": {
+     "Vol over Crash 550": {
+      "stop_exits": 2231,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0193,
+      "max_overshoot_r": 0.133,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 2231,
+    "TP1": 815,
+    "END_OF_DATA": 12
+   }
+  }
+ },
+ {
+  "symbol": "Vol over Crash 550",
+  "strategy": "BoomDriftJump_v1",
+  "compounded": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Crash 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -0.6678194444444443,
+    "swap_short_per_lot_per_day": -0.8347743055555554,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  },
+  "flat": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Crash 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -0.6676694444444444,
+    "swap_short_per_lot_per_day": -0.8345868055555554,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  }
+ },
+ {
+  "symbol": "Vol over Crash 550",
+  "strategy": "TrendDrift_v1",
+  "compounded": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Crash 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 87052.44,
+   "net_pnl": 77052.44,
+   "win_rate": 0.3321,
+   "profit_factor": 1.268,
+   "expectancy_usd": 71.08,
+   "expectancy_r": null,
+   "max_dd_pct": 35.22,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -0.6678083333333332,
+    "swap_short_per_lot_per_day": -0.8347604166666666,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 724,
+    "gapped_exits": 724,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0184,
+    "max_overshoot_r": 0.0202,
+    "total_overshoot_r": 13.2986,
+    "by_symbol": {
+     "Vol over Crash 550": {
+      "stop_exits": 724,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0184,
+      "max_overshoot_r": 0.0202,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 724,
+    "TP1": 360
+   }
+  },
+  "flat": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Crash 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 35247.02,
+   "net_pnl": 25247.02,
+   "win_rate": 0.3321,
+   "profit_factor": 1.458,
+   "expectancy_usd": 23.29,
+   "expectancy_r": null,
+   "max_dd_pct": 12.78,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -0.6665027777777778,
+    "swap_short_per_lot_per_day": -0.8331284722222222,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 724,
+    "gapped_exits": 724,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0184,
+    "max_overshoot_r": 0.0202,
+    "total_overshoot_r": 13.2986,
+    "by_symbol": {
+     "Vol over Crash 550": {
+      "stop_exits": 724,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0184,
+      "max_overshoot_r": 0.0202,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 724,
+    "TP1": 360
+   }
+  }
+ },
+ {
+  "symbol": "Vol over Crash 750",
+  "strategy": "DriftJumpAlpha_v1",
+  "compounded": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Crash 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 5205,
+   "trades": 3269,
+   "final_balance": 993640.1,
+   "net_pnl": 983640.1,
+   "win_rate": 0.3337,
+   "profit_factor": 1.278,
+   "expectancy_usd": 300.9,
+   "expectancy_r": null,
+   "max_dd_pct": 62.37,
+   "rejections": {
+    "Max positions reached for Vol over Crash 750 (15/15)": 1691,
+    "Daily drawdown limit of 20.0% is fully exhausted.": 24,
+    "Calculated lot size is below this broker's minimum tradeable volume": 1,
+    "Weekly drawdown limit of 40.0% is fully exhausted.": 220
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -5.8504354166666666,
+    "swap_short_per_lot_per_day": -7.800580555555556,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 2178,
+    "gapped_exits": 2178,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0225,
+    "max_overshoot_r": 1.0635,
+    "total_overshoot_r": 48.983,
+    "by_symbol": {
+     "Vol over Crash 750": {
+      "stop_exits": 2178,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0225,
+      "max_overshoot_r": 1.0635,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "TP1": 1091,
+    "SL": 2178
+   }
+  },
+  "flat": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Crash 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 5205,
+   "trades": 3248,
+   "final_balance": 99182.83,
+   "net_pnl": 89182.83,
+   "win_rate": 0.3331,
+   "profit_factor": 1.461,
+   "expectancy_usd": 27.46,
+   "expectancy_r": null,
+   "max_dd_pct": 40.45,
+   "rejections": {
+    "Max positions reached for Vol over Crash 750 (15/15)": 1618,
+    "Calculated lot size is below this broker's minimum tradeable volume": 126,
+    "Daily drawdown limit of 20.0% is fully exhausted.": 7,
+    "Weekly drawdown limit of 40.0% is fully exhausted.": 41,
+    "Weekly drawdown limit reached: 41.13% >= 40.0%": 25,
+    "Weekly drawdown limit reached: 45.37% >= 40.0%": 80,
+    "Weekly drawdown limit reached: 46.40% >= 40.0%": 60
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -5.859754166666666,
+    "swap_short_per_lot_per_day": -7.813005555555555,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 2166,
+    "gapped_exits": 2166,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0225,
+    "max_overshoot_r": 1.0635,
+    "total_overshoot_r": 48.7966,
+    "by_symbol": {
+     "Vol over Crash 750": {
+      "stop_exits": 2166,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0225,
+      "max_overshoot_r": 1.0635,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "TP1": 1082,
+    "SL": 2166
+   }
+  }
+ },
+ {
+  "symbol": "Vol over Crash 750",
+  "strategy": "BoomDriftJump_v1",
+  "compounded": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Crash 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -5.843949999999999,
+    "swap_short_per_lot_per_day": -7.791933333333332,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  },
+  "flat": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Crash 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -5.8445937500000005,
+    "swap_short_per_lot_per_day": -7.792791666666667,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  }
+ },
+ {
+  "symbol": "Vol over Crash 750",
+  "strategy": "TrendDrift_v1",
+  "compounded": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Crash 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 3412.14,
+   "net_pnl": -6587.86,
+   "win_rate": 0.2297,
+   "profit_factor": 0.811,
+   "expectancy_usd": -6.08,
+   "expectancy_r": null,
+   "max_dd_pct": 72.57,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -5.845391666666666,
+    "swap_short_per_lot_per_day": -7.793855555555557,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 835,
+    "gapped_exits": 835,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0199,
+    "max_overshoot_r": 0.3957,
+    "total_overshoot_r": 16.6239,
+    "by_symbol": {
+     "Vol over Crash 750": {
+      "stop_exits": 835,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0199,
+      "max_overshoot_r": 0.3957,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 835,
+    "TP1": 249
+   }
+  },
+  "flat": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Crash 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 2067.82,
+   "net_pnl": -7932.18,
+   "win_rate": 0.2297,
+   "profit_factor": 0.875,
+   "expectancy_usd": -7.32,
+   "expectancy_r": null,
+   "max_dd_pct": 112.5,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -5.848614583333333,
+    "swap_short_per_lot_per_day": -7.798152777777778,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Crash 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 835,
+    "gapped_exits": 835,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0199,
+    "max_overshoot_r": 0.3957,
+    "total_overshoot_r": 16.6239,
+    "by_symbol": {
+     "Vol over Crash 750": {
+      "stop_exits": 835,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0199,
+      "max_overshoot_r": 0.3957,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 835,
+    "TP1": 249
+   }
+  }
+ },
+ {
+  "symbol": "Vol over Boom 400",
+  "strategy": "DriftJumpAlpha_v1",
+  "compounded": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Boom 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -7.801322916666667,
+    "swap_short_per_lot_per_day": -9.3615875,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  },
+  "flat": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Boom 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -7.800614583333333,
+    "swap_short_per_lot_per_day": -9.360737499999999,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  }
+ },
+ {
+  "symbol": "Vol over Boom 400",
+  "strategy": "BoomDriftJump_v1",
+  "compounded": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Boom 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 5336,
+   "trades": 4851,
+   "final_balance": 1106543.76,
+   "net_pnl": 1096543.76,
+   "win_rate": 0.3142,
+   "profit_factor": 1.264,
+   "expectancy_usd": 226.04,
+   "expectancy_r": null,
+   "max_dd_pct": 63.44,
+   "rejections": {
+    "Max positions reached for Vol over Boom 400 (15/15)": 368,
+    "Calculated lot size is below this broker's minimum tradeable volume": 6,
+    "stale_at_fill": 3,
+    "Weekly drawdown limit of 40.0% is fully exhausted.": 108
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -7.7752743055555555,
+    "swap_short_per_lot_per_day": -9.330329166666667,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 3327,
+    "gapped_exits": 3327,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0207,
+    "max_overshoot_r": 0.6544,
+    "total_overshoot_r": 68.8182,
+    "by_symbol": {
+     "Vol over Boom 400": {
+      "stop_exits": 3327,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0207,
+      "max_overshoot_r": 0.6544,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 3327,
+    "TP1": 1524
+   }
+  },
+  "flat": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Boom 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 5336,
+   "trades": 4637,
+   "final_balance": 97849.57,
+   "net_pnl": 87849.57,
+   "win_rate": 0.3252,
+   "profit_factor": 1.425,
+   "expectancy_usd": 18.95,
+   "expectancy_r": null,
+   "max_dd_pct": 32.6,
+   "rejections": {
+    "Max positions reached for Vol over Boom 400 (15/15)": 355,
+    "Calculated lot size is below this broker's minimum tradeable volume": 18,
+    "stale_at_fill": 3,
+    "Weekly drawdown limit reached: 41.11% >= 40.0%": 35,
+    "Weekly drawdown limit of 40.0% is fully exhausted.": 1,
+    "Weekly drawdown limit reached: 40.08% >= 40.0%": 9,
+    "Weekly drawdown limit reached: 40.82% >= 40.0%": 67,
+    "Weekly drawdown limit reached: 41.66% >= 40.0%": 69,
+    "Weekly drawdown limit reached: 40.06% >= 40.0%": 61,
+    "Weekly drawdown limit reached: 41.84% >= 40.0%": 81
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -7.75879513888889,
+    "swap_short_per_lot_per_day": -9.310554166666666,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 3129,
+    "gapped_exits": 3129,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0207,
+    "max_overshoot_r": 0.6544,
+    "total_overshoot_r": 64.9119,
+    "by_symbol": {
+     "Vol over Boom 400": {
+      "stop_exits": 3129,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0207,
+      "max_overshoot_r": 0.6544,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 3129,
+    "TP1": 1508
+   }
+  }
+ },
+ {
+  "symbol": "Vol over Boom 400",
+  "strategy": "TrendDrift_v1",
+  "compounded": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Boom 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 12381.02,
+   "net_pnl": 2381.02,
+   "win_rate": 0.2712,
+   "profit_factor": 1.042,
+   "expectancy_usd": 2.2,
+   "expectancy_r": null,
+   "max_dd_pct": 40.76,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -7.752454861111111,
+    "swap_short_per_lot_per_day": -9.302945833333334,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 790,
+    "gapped_exits": 790,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0186,
+    "max_overshoot_r": 0.1128,
+    "total_overshoot_r": 14.658,
+    "by_symbol": {
+     "Vol over Boom 400": {
+      "stop_exits": 790,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0186,
+      "max_overshoot_r": 0.1128,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "TP1": 294,
+    "SL": 790
+   }
+  },
+  "flat": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Boom 400",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 15303.34,
+   "net_pnl": 5303.34,
+   "win_rate": 0.2712,
+   "profit_factor": 1.088,
+   "expectancy_usd": 4.89,
+   "expectancy_r": null,
+   "max_dd_pct": 40.88,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -7.743211805555556,
+    "swap_short_per_lot_per_day": -9.291854166666667,
+    "stops_level_pips": 360.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 400"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 790,
+    "gapped_exits": 790,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0186,
+    "max_overshoot_r": 0.1128,
+    "total_overshoot_r": 14.658,
+    "by_symbol": {
+     "Vol over Boom 400": {
+      "stop_exits": 790,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0186,
+      "max_overshoot_r": 0.1128,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "TP1": 294,
+    "SL": 790
+   }
+  }
+ },
+ {
+  "symbol": "Vol over Boom 550",
+  "strategy": "DriftJumpAlpha_v1",
+  "compounded": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Boom 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.2546361111111115,
+    "swap_short_per_lot_per_day": -4.068295138888889,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  },
+  "flat": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Boom 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.251991666666667,
+    "swap_short_per_lot_per_day": -4.064989583333333,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  }
+ },
+ {
+  "symbol": "Vol over Boom 550",
+  "strategy": "BoomDriftJump_v1",
+  "compounded": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Boom 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 5388,
+   "trades": 4941,
+   "final_balance": 866277.41,
+   "net_pnl": 856277.41,
+   "win_rate": 0.3258,
+   "profit_factor": 1.368,
+   "expectancy_usd": 173.3,
+   "expectancy_r": null,
+   "max_dd_pct": 50.52,
+   "rejections": {
+    "Max positions reached for Vol over Boom 550 (15/15)": 441,
+    "stale_at_fill": 4,
+    "sub_minimum_stop": 1,
+    "Daily max trades limit reached (20/20)": 1
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.2475083333333337,
+    "swap_short_per_lot_per_day": -4.059385416666667,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 3331,
+    "gapped_exits": 3331,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0246,
+    "max_overshoot_r": 2.2754,
+    "total_overshoot_r": 82.0199,
+    "by_symbol": {
+     "Vol over Boom 550": {
+      "stop_exits": 3331,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0246,
+      "max_overshoot_r": 2.2754,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 3331,
+    "TP1": 1610
+   }
+  },
+  "flat": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Boom 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 5388,
+   "trades": 4798,
+   "final_balance": 104734.5,
+   "net_pnl": 94734.5,
+   "win_rate": 0.3312,
+   "profit_factor": 1.435,
+   "expectancy_usd": 19.74,
+   "expectancy_r": null,
+   "max_dd_pct": 22.51,
+   "rejections": {
+    "Max positions reached for Vol over Boom 550 (15/15)": 427,
+    "stale_at_fill": 3,
+    "Calculated lot size is below this broker's minimum tradeable volume": 46,
+    "Weekly drawdown limit reached: 40.28% >= 40.0%": 17,
+    "Weekly drawdown limit reached: 42.08% >= 40.0%": 40,
+    "sub_minimum_stop": 1,
+    "Daily drawdown limit reached: 25.18% >= 20.0%": 1,
+    "Weekly drawdown limit reached: 40.98% >= 40.0%": 54,
+    "Daily max trades limit reached (20/20)": 1
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.245419444444445,
+    "swap_short_per_lot_per_day": -4.056774305555556,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 3209,
+    "gapped_exits": 3209,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0248,
+    "max_overshoot_r": 2.2754,
+    "total_overshoot_r": 79.585,
+    "by_symbol": {
+     "Vol over Boom 550": {
+      "stop_exits": 3209,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0248,
+      "max_overshoot_r": 2.2754,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 3209,
+    "TP1": 1589
+   }
+  }
+ },
+ {
+  "symbol": "Vol over Boom 550",
+  "strategy": "TrendDrift_v1",
+  "compounded": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Boom 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 28213.14,
+   "net_pnl": 18213.14,
+   "win_rate": 0.2989,
+   "profit_factor": 1.176,
+   "expectancy_usd": 16.8,
+   "expectancy_r": null,
+   "max_dd_pct": 58.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.249027777777778,
+    "swap_short_per_lot_per_day": -4.061284722222222,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 760,
+    "gapped_exits": 760,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0224,
+    "max_overshoot_r": 1.2084,
+    "total_overshoot_r": 17.0304,
+    "by_symbol": {
+     "Vol over Boom 550": {
+      "stop_exits": 760,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0224,
+      "max_overshoot_r": 1.2084,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 760,
+    "TP1": 322,
+    "END_OF_DATA": 2
+   }
+  },
+  "flat": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Boom 550",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 23892.78,
+   "net_pnl": 13892.78,
+   "win_rate": 0.2989,
+   "profit_factor": 1.238,
+   "expectancy_usd": 12.82,
+   "expectancy_r": null,
+   "max_dd_pct": 37.33,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.2660222222222224,
+    "swap_short_per_lot_per_day": -4.082527777777778,
+    "stops_level_pips": 320.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 550"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 760,
+    "gapped_exits": 760,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0224,
+    "max_overshoot_r": 1.2084,
+    "total_overshoot_r": 17.0304,
+    "by_symbol": {
+     "Vol over Boom 550": {
+      "stop_exits": 760,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0224,
+      "max_overshoot_r": 1.2084,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 760,
+    "TP1": 322,
+    "END_OF_DATA": 2
+   }
+  }
+ },
+ {
+  "symbol": "Vol over Boom 750",
+  "strategy": "DriftJumpAlpha_v1",
+  "compounded": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Boom 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.9702604166666666,
+    "swap_short_per_lot_per_day": -5.2936805555555555,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  },
+  "flat": {
+   "strategy": "DriftJumpAlpha_v1",
+   "symbol": "Vol over Boom 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 0,
+   "trades": 0,
+   "final_balance": 10000.0,
+   "net_pnl": 0.0,
+   "win_rate": null,
+   "profit_factor": null,
+   "expectancy_usd": null,
+   "expectancy_r": null,
+   "max_dd_pct": 0.0,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.968739583333333,
+    "swap_short_per_lot_per_day": -5.291652777777778,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 0,
+    "gapped_exits": 0,
+    "gapped_pct": 0.0,
+    "mean_overshoot_r": 0.0,
+    "max_overshoot_r": 0.0,
+    "total_overshoot_r": 0.0,
+    "by_symbol": {}
+   },
+   "exit_reasons": {}
+  }
+ },
+ {
+  "symbol": "Vol over Boom 750",
+  "strategy": "BoomDriftJump_v1",
+  "compounded": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Boom 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 5406,
+   "trades": 4719,
+   "final_balance": 957764.37,
+   "net_pnl": 947764.37,
+   "win_rate": 0.3287,
+   "profit_factor": 1.486,
+   "expectancy_usd": 200.84,
+   "expectancy_r": null,
+   "max_dd_pct": 63.91,
+   "rejections": {
+    "Max positions reached for Vol over Boom 750 (15/15)": 376,
+    "Weekly drawdown limit of 40.0% is fully exhausted.": 275,
+    "Calculated lot size is below this broker's minimum tradeable volume": 36
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.9645437499999994,
+    "swap_short_per_lot_per_day": -5.286058333333333,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 3168,
+    "gapped_exits": 3168,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0199,
+    "max_overshoot_r": 0.3014,
+    "total_overshoot_r": 63.1625,
+    "by_symbol": {
+     "Vol over Boom 750": {
+      "stop_exits": 3168,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0199,
+      "max_overshoot_r": 0.3014,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 3168,
+    "TP1": 1551
+   }
+  },
+  "flat": {
+   "strategy": "BoomDriftJump_v1",
+   "symbol": "Vol over Boom 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 5406,
+   "trades": 4839,
+   "final_balance": 121453.93,
+   "net_pnl": 111453.93,
+   "win_rate": 0.334,
+   "profit_factor": 1.501,
+   "expectancy_usd": 23.03,
+   "expectancy_r": null,
+   "max_dd_pct": 54.46,
+   "rejections": {
+    "Max positions reached for Vol over Boom 750 (15/15)": 388,
+    "Calculated lot size is below this broker's minimum tradeable volume": 40,
+    "Weekly drawdown limit of 40.0% is fully exhausted.": 10,
+    "Weekly drawdown limit reached: 40.63% >= 40.0%": 15,
+    "Weekly drawdown limit reached: 40.51% >= 40.0%": 73,
+    "Weekly drawdown limit reached: 40.00% >= 40.0%": 41
+   },
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.954602083333333,
+    "swap_short_per_lot_per_day": -5.272802777777778,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 3223,
+    "gapped_exits": 3223,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0199,
+    "max_overshoot_r": 0.3014,
+    "total_overshoot_r": 64.2186,
+    "by_symbol": {
+     "Vol over Boom 750": {
+      "stop_exits": 3223,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0199,
+      "max_overshoot_r": 0.3014,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 3223,
+    "TP1": 1616
+   }
+  }
+ },
+ {
+  "symbol": "Vol over Boom 750",
+  "strategy": "TrendDrift_v1",
+  "compounded": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Boom 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "BALANCE",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 10366.19,
+   "net_pnl": 366.19,
+   "win_rate": 0.2648,
+   "profit_factor": 1.006,
+   "expectancy_usd": 0.34,
+   "expectancy_r": null,
+   "max_dd_pct": 51.49,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.9612895833333335,
+    "swap_short_per_lot_per_day": -5.2817194444444455,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 797,
+    "gapped_exits": 797,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0183,
+    "max_overshoot_r": 0.1448,
+    "total_overshoot_r": 14.5602,
+    "by_symbol": {
+     "Vol over Boom 750": {
+      "stop_exits": 797,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0183,
+      "max_overshoot_r": 0.1448,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 797,
+    "TP1": 287
+   }
+  },
+  "flat": {
+   "strategy": "TrendDrift_v1",
+   "symbol": "Vol over Boom 750",
+   "window": [
+    "2026-01-01",
+    "2026-09-29"
+   ],
+   "balance": 10000.0,
+   "risk_pct": 1.0,
+   "sizing_basis": "STATIC",
+   "signals": 1084,
+   "trades": 1084,
+   "final_balance": 13493.91,
+   "net_pnl": 3493.91,
+   "win_rate": 0.2648,
+   "profit_factor": 1.058,
+   "expectancy_usd": 3.22,
+   "expectancy_r": null,
+   "max_dd_pct": 49.03,
+   "rejections": {},
+   "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -3.9579020833333334,
+    "swap_short_per_lot_per_day": -5.277202777777778,
+    "stops_level_pips": 250.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+     "slippage_pips": "MT5",
+     "commission_per_lot": "MT5",
+     "spread_pips": "MT5",
+     "swap_long_per_lot_per_day": "MT5",
+     "swap_short_per_lot_per_day": "MT5",
+     "stops_level_pips": "MT5",
+     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Vol over Boom 750"
+   },
+   "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 797,
+    "gapped_exits": 797,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0183,
+    "max_overshoot_r": 0.1448,
+    "total_overshoot_r": 14.5602,
+    "by_symbol": {
+     "Vol over Boom 750": {
+      "stop_exits": 797,
+      "gapped_pct": 100.0,
+      "mean_overshoot_r": 0.0183,
+      "max_overshoot_r": 0.1448,
+      "profile_mean": 0.02,
+      "profile_source": "class default \u2014 no tick study",
+      "profile_calibration": "assumed"
+     }
+    }
+   },
+   "exit_reasons": {
+    "SL": 797,
+    "TP1": 287
+   }
+  }
+ }
+]

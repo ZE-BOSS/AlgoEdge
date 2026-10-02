@@ -71,7 +71,8 @@ const PYTHON = resolvePython();
 // These four settings may be set in the environment or in the repo's .env (the
 // environment wins). Reading .env too means a setting there takes effect on the
 // next `pm2 start`, without reopening PowerShell to see a new Machine variable.
-const CADDY_KEYS = ["ALGOEDGE_CADDY", "CADDY_BIN", "ACME_EMAIL", "ADMIN_ALLOW_IPS"];
+const CADDY_KEYS = ["ALGOEDGE_CADDY", "CADDY_BIN", "ACME_EMAIL", "ADMIN_ALLOW_IPS",
+                    "INVESTOR_PORT"];
 
 function readDotenv(keys) {
   const file = path.resolve(__dirname, ".env");
@@ -117,6 +118,21 @@ module.exports = {
       script: path.resolve(__dirname, "frontend/node_modules/vite/bin/vite.js"),
       args: "preview --host 0.0.0.0 --port 80",
       cwd: path.resolve(__dirname, "frontend"),
+      interpreter: "node",
+      autorestart: true,
+      watch: false,
+      env: {
+        NODE_ENV: "production",
+      },
+    }, {
+      // Without Caddy nothing served investor-web at all, so on a demo box the
+      // investor site was simply unreachable while the admin app worked — which
+      // reads as "the investor portal is broken" rather than "nothing is serving
+      // it". Behind Caddy this is not started, because Caddy serves the dist.
+      name: "algoedge-investor",
+      script: path.resolve(__dirname, "investor-web/node_modules/vite/bin/vite.js"),
+      args: `preview --host 0.0.0.0 --port ${setting("INVESTOR_PORT") || 81}`,
+      cwd: path.resolve(__dirname, "investor-web"),
       interpreter: "node",
       autorestart: true,
       watch: false,

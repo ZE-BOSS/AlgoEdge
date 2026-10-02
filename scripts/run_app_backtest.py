@@ -138,12 +138,33 @@ def summarize(res: dict, req, n_signals: int) -> dict:
     trades = res.get("trades", [])
     pnls = [float(t.get("pnl") or 0.0) for t in trades]
     gw, gl = sum(p for p in pnls if p > 0), -sum(p for p in pnls if p < 0)
+    # Accumulate in EXIT order. Trade order is entry order, and with pyramiding
+    # or concurrent positions a trade that opened early can close late -- booking
+    # its P&L at the wrong point. That produced a "drawdown" above 100%, which is
+    # impossible against a rolling peak and is the tell that the ordering is wrong.
+    by_exit = sorted(trades, key=lambda t: t.get("exit_time") or t.get("entry_time") or 0)
     bal, peak, mdd = req.initial_balance, req.initial_balance, 0.0
-    for p in pnls:
-        bal += p
+    for t in by_exit:
+        bal += float(t.get("pnl") or 0.0)
         peak = max(peak, bal)
         mdd = max(mdd, (peak - bal) / peak if peak > 0 else 0.0)
+
+    # `pnl_r` is not populated on every path, so R is recomputed from entry, the
+    # INITIAL stop and the filled volume through the app's own helper -- the
+    # trailed stop would shrink R as a trade went well and flatter every winner.
     rs = [float(t["pnl_r"]) for t in trades if t.get("pnl_r") is not None]
+    if not rs:
+        from backend.risk.position_sizer import calculate_risk_dollars
+        for t in trades:
+            stop = t.get("initial_stop_loss") or t.get("original_sl") or t.get("stop_loss")
+            try:
+                risk = abs(calculate_risk_dollars(
+                    float(t.get("volume") or 0.0), float(t.get("entry_price") or 0.0),
+                    float(stop or 0.0), t.get("symbol") or req.symbol))
+            except Exception:
+                risk = 0.0
+            if risk > 0:
+                rs.append(float(t.get("pnl") or 0.0) / risk)
     return {
         "strategy": req.strategy_id, "symbol": req.symbol, "window": [req.start_date, req.end_date],
         "balance": req.initial_balance, "risk_pct": req.risk_per_trade_pct, "sizing_basis": req.sizing_basis,
