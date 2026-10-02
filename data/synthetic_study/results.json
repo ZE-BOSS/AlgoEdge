@@ -1,0 +1,164 @@
+[
+ {
+  "symbol": "Vol over Crash 400",
+  "strategy": "DriftJumpAlpha_v1",
+  "signals": 1604,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ },
+ {
+  "symbol": "Vol over Crash 400",
+  "strategy": "BoomDriftJump_v1",
+  "signals": 0
+ },
+ {
+  "symbol": "Vol over Crash 400",
+  "strategy": "TrendDrift_v1",
+  "signals": 1638,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ },
+ {
+  "symbol": "Vol over Crash 550",
+  "strategy": "DriftJumpAlpha_v1",
+  "signals": 1618,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ },
+ {
+  "symbol": "Vol over Crash 550",
+  "strategy": "BoomDriftJump_v1",
+  "signals": 0
+ },
+ {
+  "symbol": "Vol over Crash 550",
+  "strategy": "TrendDrift_v1",
+  "signals": 1639,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ },
+ {
+  "symbol": "Vol over Crash 750",
+  "strategy": "DriftJumpAlpha_v1",
+  "signals": 1615,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ },
+ {
+  "symbol": "Vol over Crash 750",
+  "strategy": "BoomDriftJump_v1",
+  "signals": 0
+ },
+ {
+  "symbol": "Vol over Crash 750",
+  "strategy": "TrendDrift_v1",
+  "signals": 1639,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ },
+ {
+  "symbol": "Vol over Boom 400",
+  "strategy": "DriftJumpAlpha_v1",
+  "signals": 0
+ },
+ {
+  "symbol": "Vol over Boom 400",
+  "strategy": "BoomDriftJump_v1",
+  "signals": 1626,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ },
+ {
+  "symbol": "Vol over Boom 400",
+  "strategy": "TrendDrift_v1",
+  "signals": 1639,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ },
+ {
+  "symbol": "Vol over Boom 550",
+  "strategy": "DriftJumpAlpha_v1",
+  "signals": 0
+ },
+ {
+  "symbol": "Vol over Boom 550",
+  "strategy": "BoomDriftJump_v1",
+  "signals": 1620,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ },
+ {
+  "symbol": "Vol over Boom 550",
+  "strategy": "TrendDrift_v1",
+  "signals": 1639,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ },
+ {
+  "symbol": "Vol over Boom 750",
+  "strategy": "DriftJumpAlpha_v1",
+  "signals": 0
+ },
+ {
+  "symbol": "Vol over Boom 750",
+  "strategy": "BoomDriftJump_v1",
+  "signals": 1629,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ },
+ {
+  "symbol": "Vol over Boom 750",
+  "strategy": "TrendDrift_v1",
+  "signals": 1639,
+  "compounded": {
+   "trades": 0
+  },
+  "flat": {
+   "trades": 0
+  }
+ }
+]

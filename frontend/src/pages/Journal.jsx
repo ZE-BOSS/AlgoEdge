@@ -94,7 +94,7 @@ function JournalSummary() {
         <SummaryCell label="Expectancy" value={money(s.expectancy)} />
         <SummaryCell label="Avg Win" value={money(s.avg_win)} color="var(--green)" />
         <SummaryCell label="Avg Loss" value={money(s.avg_loss)} color="var(--red)" />
-        <SummaryCell label="Max DD" value={`${money(s.max_drawdown)}${s.max_drawdown_pct != null ? ` (${s.max_drawdown_pct}%)` : ''}`} color="var(--red)" />
+        <SummaryCell label="Max DD" value={`${money(s.max_drawdown)}${s.max_drawdown_pct != null ? ` (${(s.max_drawdown_pct * 100).toFixed(1)}%)` : ''}`} color="var(--red)" />
         <SummaryCell label="Avg R:R" value={s.avg_rr != null ? `${s.avg_rr.toFixed(2)}R` : '—'} />
         <SummaryCell label="Total Pips" value={s.total_pips != null ? s.total_pips.toFixed(1) : '—'} />
       </div>

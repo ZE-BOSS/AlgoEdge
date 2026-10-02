@@ -95,7 +95,12 @@ def audit(con: sqlite3.Connection, run: sqlite3.Row) -> None:
     print("=" * 78)
     print(f"{title}  [{run['strategy_id']}]  {run['start_date']} -> {run['end_date']}")
     print(f"  saved: {len(trades)} trades, total P&L ${_f(run['total_pnl']):,.2f}, "
-          f"win rate {_f(run['win_rate']):.1f}%, max DD {_f(run['max_drawdown_pct']):.1f}%")
+          # both are stored as FRACTIONS, not percents. Printing them raw read
+          # "win rate 0.4%, max DD 7.5%" for a run that really won 37% of its
+          # trades and drew down 746% of its opening capital -- which is how a
+          # catastrophic run reads as a calm one.
+          f"win rate {_f(run['win_rate']) * 100:.1f}%, "
+          f"max DD {_f(run['max_drawdown_pct']) * 100:.1f}% of capital")
     if not trades:
         print("  no trades saved")
         return

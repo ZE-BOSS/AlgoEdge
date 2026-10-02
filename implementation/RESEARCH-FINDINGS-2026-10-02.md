@@ -175,6 +175,113 @@ profitable measured on price and lost money in cash.
 
 ---
 
+## 1c. Concurrency — the risk the headline hides
+
+The VPS run's own settings, recovered from `params_snapshot`:
+
+```
+risk_per_trade_pct        5          max_positions_per_symbol  15
+min_rr                    1          max_concurrent_positions  15
+tp1_rr                    3          max_daily_trades          20
+max_risk_hard_cap_pct     5.5        sizing_basis              BALANCE
+strategy_params           {}         (defaults -- nothing was tuned)
+```
+
+`max_positions_per_symbol: 15` is what produced the 175-of-402 "balance chain
+breaks" the audit flagged. They are **concurrent positions interleaving**, not a
+ledger fault — that question is closed.
+
+But measuring what was actually open at once:
+
+| Run | trades | peak concurrent | median | peak risk if all stop together |
+|---|---:|---:|---:|---:|
+| Vol over Crash 750 | 402 | 5 | 2 | **25%** |
+| Vol over Crash 550 | 429 | 6 | 1 | **30%** |
+| Vol over Boom 400 | 301 | 2 | 1 | 10% |
+| Vol over Boom 550 | 299 | 2 | 1 | 10% |
+
+The ceiling of 15 was never reached, so the worst case never arrived — but at the
+observed peak, **a quarter to a third of the account was at risk simultaneously
+on a SINGLE instrument.** Every one of those positions is the same symbol, so
+they are perfectly correlated: one gap against them stops them all at once. The
+7.5% and 10.4% maximum drawdowns in the audit are what good luck looks like, not
+what the configuration permits.
+
+`max_risk_hard_cap_pct: 5.5` caps each trade. Nothing caps the **aggregate**.
+
+---
+
+## 1d. Reproduced — and the reported drawdown does not survive it
+
+### Why the first attempts produced nothing
+
+Neither costs nor risk settings. **The backtest route seeds from the saved
+Settings config; a headless run uses dataclass defaults.** The saved
+`drift_jump_alpha` block differs materially:
+
+| Setting | Saved | Dataclass default |
+|---|---:|---:|
+| `spike_threshold_pips` | **0** | non-zero |
+| `max_trades_per_day` | **20** | 6 |
+| `min_rrr_to_accept_trade` | 1.5 | — |
+| `max_daily_risk_pct` | 20 | — |
+
+`spike_threshold_pips: 0` **disables the spike filter entirely** — every spike
+qualifies. With defaults the strategy emits zero signals on this instrument;
+with the saved block it emits 1,073.
+
+### What reproduced, and what did not
+
+| | Local re-run | VPS saved |
+|---|---:|---:|
+| trades | 1,049 | 402 |
+| net P&L | $871,410 | $306,891 |
+| **win rate** | **37.75%** | **37%** |
+| max drawdown | 80.7% | 7.5% |
+
+**The win rate reproduces almost exactly**, so the signal generation is
+faithfully replicated. The trade count and P&L do not, and `candle_count: 5000`
+in the snapshot is the most likely remaining difference — the route fetches a
+bounded window, this run used the full range.
+
+### The drawdown: I got this wrong first time
+
+I reported that the app understates drawdown 5-10x and called it the most
+dangerous finding in the audit. **That was wrong, and the error was mine.**
+
+`scripts/audit_saved_backtest.py` printed `max_drawdown_pct` straight from the
+database with a `%` sign. That column stores a **fraction**, not a percent. So
+7.4598 -- which is 746% of opening capital -- printed as "7.5%", and a win rate
+of 0.366 printed as "0.4%". I read the script's output as the app's output.
+
+**The engine's own number is correct.** Reconstructing each run's equity curve
+from its saved trades, in exit order, from `balance_after` and from cumulative
+P&L, gives identical answers:
+
+| Run | drawdown $ | of opening capital | of peak equity |
+|---|---:|---:|---:|
+| Vol over Crash 750 | $70,164 | 702% | **39.3%** |
+| Vol over Crash 550 | — | — | **51.1%** |
+| Vol over Boom 400 | — | — | **59.8%** |
+| Vol over Boom 550 | $9,306 | 465% | **50.9%** |
+
+and the Backtester page already shows the **peak-relative** figure on a
+compounding run (`Backtester.jsx:1001` picks `max_drawdown_pct_of_peak` when
+compounding is on), which is the right one. Analytics and Dashboard multiply by
+100 correctly.
+
+**Two display sites were genuinely wrong**, both now fixed:
+- `scripts/audit_saved_backtest.py` -- the one that misled me.
+- `frontend/src/pages/Journal.jsx` -- rendered the fraction with a `%` sign.
+
+### What the drawdown actually says
+
+The runs really did draw down **39-60% of peak equity**. That is the number to
+size on, and it is far worse than comfortable -- but the app was reporting it
+correctly all along, and the alarm was mine to withdraw.
+
+---
+
 ## 2. Two bugs found on the way
 
 ### 2a. Volatility 75 Index was 100x wrong — FIXED
