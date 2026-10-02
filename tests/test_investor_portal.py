@@ -377,7 +377,20 @@ def test_requesting_closure_stops_new_withdrawals_and_reaches_the_admin():
             # this month's fees come off, and last month's must be charged first
             assert D(quote["fees_owed"]) > 0 and D(quote["net_payable"]) < D("1100")
             assert any("have not been charged" in b for b in quote["blockers"])
-            last = navmod.accounting_date().replace(day=1) - timedelta(days=1)
+            # Fee periods are TWO months (Jan-Feb, Mar-Apr, ... Sep-Oct), so "last
+            # month" is only a closable period in odd months -- in an even month it
+            # belongs to the period still running and the route rightly refuses.
+            # This failed every even month; it was October when that was noticed.
+            # Step back to the last day of the PREVIOUS period instead.
+            from backend.investor.fees import fee_period
+            _today = navmod.accounting_date()
+            _cur_start, _ = fee_period(_today.year, _today.month)
+            last = _cur_start - timedelta(days=1)
+            # Fees are charged at the PERIOD-END price, and the route refuses if the
+            # nearest NAV snapshot is more than a week stale -- so price that period
+            # end, which is what an admin closing it would do.
+            await a.admin("POST", "/nav/snapshot",
+                          {"pool_equity": "1100", "on": last.isoformat()})
             closed = await a.admin("POST", "/fees/close", {"year": last.year, "month": last.month})
             assert closed.status_code == 201, closed.text
             assert (await a.inv("POST", "/closure", ada, {})).status_code == 400

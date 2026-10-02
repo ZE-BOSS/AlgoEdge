@@ -201,7 +201,14 @@ def test_closure_emails_the_final_statement_to_the_address_they_had(monkeypatch)
     async def go():
         async with App() as a:
             iid, sess = await _funded_long_ago_with_profit(a)
-            last = navmod.accounting_date().replace(day=1) - timedelta(days=1)
+            # Fee periods are TWO months (Jan-Feb, ... Sep-Oct), so "last month"
+            # is only closable in odd months. Step back to the previous PERIOD and
+            # price its end, which is what closing it actually requires.
+            from backend.investor.fees import fee_period
+            _t = navmod.accounting_date()
+            last = fee_period(_t.year, _t.month)[0] - timedelta(days=1)
+            await a.admin("POST", "/nav/snapshot",
+                          {"pool_equity": "1100", "on": last.isoformat()})
             await a.admin("POST", "/fees/close", {"year": last.year, "month": last.month})
             await a.admin("POST", f"/{iid}/closure/request", {})
             r = await a.admin("POST", f"/{iid}/closure/approve", {"payment_reference": "T9"})
@@ -219,9 +226,19 @@ def test_statements_download_and_send_once_after_fees(monkeypatch):
     async def go():
         async with App() as a:
             iid, sess = await _funded_long_ago_with_profit(a)
-            last = navmod.accounting_date().replace(day=1) - timedelta(days=1)
+            # Fee periods are TWO months (Jan-Feb, ... Sep-Oct), so "last month"
+            # is only closable in odd months. Step back to the previous PERIOD and
+            # price its end, which is what closing it actually requires.
+            from backend.investor.fees import fee_period
+            _t = navmod.accounting_date()
+            last = fee_period(_t.year, _t.month)[0] - timedelta(days=1)
+            await a.admin("POST", "/nav/snapshot",
+                          {"pool_equity": "1100", "on": last.isoformat()})
             listed = (await a.inv("GET", "/statements", sess)).json()
-            assert listed[0]["label"] == f"{last.year}-{last.month:02d}"
+            # the newest STATEMENT is last month; `last` above is the end of the
+            # previous two-month FEE PERIOD, which is a different date
+            _lm = navmod.accounting_date().replace(day=1) - timedelta(days=1)
+            assert listed[0]["label"] == f"{_lm.year}-{_lm.month:02d}"
             pdf = await a.inv("GET", f"/statements/{last.year}-{last.month}.pdf", sess)
             assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
             today = navmod.accounting_date()
@@ -248,7 +265,7 @@ def test_the_admin_hears_about_a_new_browser_but_not_the_first_or_a_known_one(mo
         async with App() as a:
             a.http._transport.app.include_router(authroutes.router)
             async with a.Session() as s:
-                admin = User_(email="boss@x.com", password_hash=authroutes.pwd_context.hash("admin password"))
+                admin = User_(email="boss@x.com", password_hash=authroutes._hash_password("admin password"))
                 s.add(admin)
                 await s.commit()
 
