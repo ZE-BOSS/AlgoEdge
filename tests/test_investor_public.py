@@ -14,8 +14,11 @@ Phase 5 — what the public website reads and writes.
 from __future__ import annotations
 
 import asyncio
+import shutil
+import tempfile
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 from fastapi import FastAPI
 import httpx
@@ -83,8 +86,25 @@ class Site:
 
     async def __aenter__(self):
         public.reset_rate_limit()
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                          connect_args={"check_same_thread": False})
+        # A TEMP FILE, not ":memory:" with a StaticPool, and the distinction is
+        # the whole reason this harness looks heavier than the others.
+        #
+        # StaticPool hands every session the SAME connection. The outbox fires
+        # its delivery as a loop task after the request's commit, so that task's
+        # own `commit()` lands while the NEXT request still has statements in
+        # progress on that one connection -> "cannot commit transaction - SQL
+        # statements in progress", which rolled back the in-flight request and
+        # lost an application row. The failure was order-dependent: this test
+        # passed alone and failed after the rest of the file, because what
+        # changes is only the await timing.
+        #
+        # Production is a file-backed sqlite on the default pool, so each
+        # session holds its own connection and the two commits never share one.
+        # Modelling that here measures the application logic instead of
+        # aiosqlite's single-connection semantics.
+        self._tmp = tempfile.mkdtemp(prefix="algoedge-site-")
+        self.engine = create_async_engine(
+            f"sqlite+aiosqlite:///{Path(self._tmp).as_posix()}/site.db")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
@@ -109,10 +129,15 @@ class Site:
         outbox.use_session_factory(None)
         await self.http.aclose()
         await self.engine.dispose()
+        shutil.rmtree(self._tmp, ignore_errors=True)
 
 
+# `date_of_birth` became required on 2026-10-08: terms.html S2 demands 18+ and
+# the form never asked. The age gate itself is covered by tests/test_age_gate.py;
+# here it is just a valid application.
 FORM = {"name": "Chidi Obi", "email": "chidi@x.com", "country": "Nigeria",
-        "amount_band": "$1,000 – $5,000", "message": "Interested", "consent": True}
+        "amount_band": "$1,000 – $5,000", "message": "Interested", "consent": True,
+        "date_of_birth": "1990-05-04"}
 
 
 def test_an_application_needs_consent_is_braked_and_notifies_the_admin(monkeypatch):

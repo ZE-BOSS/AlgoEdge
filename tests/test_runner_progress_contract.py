@@ -83,7 +83,7 @@ def test_run_backtest_executes(with_phase):
         try:
             return await run_backtest(
                 user_id="test-user",
-                strategy_id="APA_v1",
+                strategy_id="ORB_v1",
                 symbol="XAUUSD",
                 candles=_candles(),
                 signals=[],                 # no signals: exercises the plumbing

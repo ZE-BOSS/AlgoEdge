@@ -41,6 +41,10 @@ import { getParameterSchema, runBacktest, runPortfolioBacktest, getBacktests, de
 import TradeChart from '../components/TradeChart';
 import BacktestReplay from '../components/BacktestReplay';
 import RunReport from '../components/RunReport';
+import {
+  InSampleGuard, SupervisingAgents, SupervisionReport,
+} from '../components/SupervisingAgents';
+import { useAgentIdLookup, useOverlap } from '../hooks/useAgents';
 import AnalyzeButton from '../components/AnalyzeButton';
 import ParamsPanel from '../components/ParamsPanel';
 import SlotEditor from '../components/SlotEditor';
@@ -50,6 +54,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, 
 import * as summaryEngine from '../utils/summaryEngine';
 import { saveCachedResult, loadCachedResult, clearCachedResult, downloadResult } from '../utils/resultCache';
 import { loadResultProgressively, TRADE_PAGE_SIZE } from '../utils/progressiveResult';
+import { activeServerId, listServers } from '../services/servers';
 
 // Below this many trades, win-rate/expectancy stats are not statistically
 // meaningful (e.g. a 1-trade "100% win rate" result). Used to show a
@@ -595,7 +600,15 @@ const BacktestResults = memo(function BacktestResults({ result, onRetryTrades, o
   // [7.12-7.17] The six diagnostic panels, as one component shared with live.
   // Their backing data (rejection_funnel, blocked_signals, sizing_diagnostics)
   // has been in the response since Phase 0 with nothing rendering it.
-  const runReport = <RunReport result={result} backtestId={result.backtest_id || null} />;
+  const runReport = (
+    <>
+      {/* [4.9] Unsupervised / supervised / difference, from ONE bar sequence —
+          two separate runs would drift apart on the fills and the difference
+          between two drifted runs is not the supervisor's effect. */}
+      <SupervisionReport supervision={result.supervision} />
+      <RunReport result={result} backtestId={result.backtest_id || null} />
+    </>
+  );
   // Memoised so the `|| []` fallback cannot mint a fresh array on every render.
   // That identity feeds filteredGrouped -> filteredNormalized -> displayGroups ->
   // summaryData -> the virtualized list, so an unstable `grouped` would defeat the
@@ -1267,7 +1280,7 @@ const VALID_STRATEGIES = STRATEGY_OPTIONS.map(([id]) => id);
 
 // Builds the backend strategy_params payload for one portfolio symbol/strategy
 // pairing. Portfolio backtests previously only forwarded tuned params for
-// APA_v1/DriftJumpAlpha_v1/CRT_v1 — any other strategy silently got
+// ORB_v1/DriftJumpAlpha_v1/CRT_v1 — any other strategy silently got
 // strategy_params: {} (engine hardcoded defaults) regardless of UI
 // configuration. These field mappings mirror what the single-symbol
 // backtest mutation sends for each strategy, so a portfolio run and a
@@ -1417,7 +1430,7 @@ const DEFAULT_FORM = {
   },
   target_profit_enabled: false, max_daily_profit: 500.0, max_weekly_profit: 2000.0,
   manual_bias: 'NONE',
-  strategy_id: 'APA_v1',
+  strategy_id: 'ORB_v1',
   use_strategy_exit_defaults: true,
   // Simulation Costs (BUG-8/BUG-9) — '' means "auto, from broker data".
   slippage_pips: '', commission_per_lot: '', spread_pips: '', simulate_wicks: true,
@@ -1428,6 +1441,22 @@ export default function Backtester() {
   const { status } = useConnectionStore();
   const isAuth = useAuthStore(s => s.isAuthenticated);
   const [activeTab, setActiveTab] = useState('single'); // 'single' | 'portfolio'
+  // Which backend runs the test. Defaults to the one on screen, but is
+  // deliberately its own control: a long run belongs on demo while you
+  // keep watching live.
+  const serverList = listServers();
+  const [runServer, setRunServer] = useState(activeServerId);
+  // [4.9] Approved agents allowed to close or tighten this run's trades early.
+  const [supervisors, setSupervisors] = useState([]);
+  const agentIdForStrategy = useAgentIdLookup();
+  // [4.7] Read twice: once for the banner, once for whether Run is clickable.
+  const overlap = useOverlap({
+    agentId: agentIdForStrategy(form.strategy_id),
+    symbol: form.symbol,
+    timeframe: form.timeframe || 'M5',
+    start: form.start_date ? Math.floor(new Date(form.start_date).getTime() / 1000) : null,
+    end: form.end_date ? Math.floor(new Date(form.end_date).getTime() / 1000) : null,
+  });
 
   const PORTFOLIO_KEY = 'algoedge_portfolio_config';
 
@@ -1437,14 +1466,14 @@ export default function Backtester() {
       const saved = localStorage.getItem(PORTFOLIO_KEY);
       if (saved) return JSON.parse(saved);
     } catch { }
-    return [{ symbol: 'XAUUSD', strategy_id: 'APA_v1' }];
+    return [{ symbol: 'XAUUSD', strategy_id: 'ORB_v1' }];
   });
 
   useEffect(() => {
     try { localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(portfolioSymbols)); } catch { }
   }, [portfolioSymbols]);
 
-  const addPortfolioSymbol = () => setPortfolioSymbols(p => [...p, { symbol: 'EURUSD', strategy_id: 'APA_v1' }]);
+  const addPortfolioSymbol = () => setPortfolioSymbols(p => [...p, { symbol: 'EURUSD', strategy_id: 'ORB_v1' }]);
   const removePortfolioSymbol = (i) => setPortfolioSymbols(p => p.filter((_, idx) => idx !== i));
 
   const portfolioMutation = useMutation({
@@ -2002,7 +2031,7 @@ export default function Backtester() {
       setEvents([]);
       setBtError(null);
       const validStrats = VALID_STRATEGIES;
-      const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'APA_v1';
+      const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'ORB_v1';
       const sp = singleSlot.strategy_params || {};
 
       // Account-level risk defaults come from Settings, not from this page: the
@@ -2015,6 +2044,7 @@ export default function Backtester() {
         min_rr: acct.min_rr ?? form.min_rr,
         tp_count: acct.tp_count ?? form.tp_count,
         strategy_id: payload_strategy,
+        supervising_agents: supervisors,
         start_date: form.start_date || undefined,
         end_date: form.end_date || undefined,
         // BacktestRequest has no top-level field for these three, but it spreads
@@ -2054,7 +2084,8 @@ export default function Backtester() {
       payload.spread_pips = costOrAuto(form.spread_pips);
       payload.simulate_wicks = form.simulate_wicks ?? true;
 
-      return runBacktest(payload);
+      // Aimed at the chosen box, which may not be the active one.
+      return runBacktest(payload, runServer);
     },
     onSuccess: res => {
       // Background task started, result will be pushed via WebSocket or polling
@@ -2171,7 +2202,40 @@ export default function Backtester() {
           {activeTab === 'single' ? (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div><label>Strategy Engine</label><select value={VALID_STRATEGIES.includes(form.strategy_id) ? form.strategy_id : 'APA_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}>{STRATEGY_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></div>
+                <div><label>Strategy Engine</label><select value={VALID_STRATEGIES.includes(form.strategy_id) ? form.strategy_id : 'ORB_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}>{STRATEGY_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></div>
+                {/* Which box runs it. A backtest reads that server's own MT5
+                    terminal, so the broker — and therefore the spread, the
+                    swap and the fills — comes from the server you pick here,
+                    not from the one the rest of the page is showing. In the
+                    measured study 8 of 15 paired cells flipped SIGN between
+                    the two brokers, so this is not a convenience. */}
+                <div>
+                  <label>Run on</label>
+                  <select value={runServer} onChange={e => setRunServer(e.target.value)}>
+                    {serverList.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.label}{s.role ? ` (${s.role})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {runServer !== activeServerId() && (
+                    <div className="hint" style={{ color: 'var(--warn, #d29922)' }}>
+                      This run goes to a different server from the one on screen.
+                    </div>
+                  )}
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <SupervisingAgents
+                    value={supervisors}
+                    onChange={setSupervisors}
+                    symbol={form.symbol}
+                  />
+                  {/* When the strategy being RUN is itself an agent, check the
+                      window against what it trained on. Backtesting a trained
+                      agent on its own training bars is the most convincing
+                      wrong number this system can produce. */}
+                  <InSampleGuard state={overlap} />
+                </div>
                 <div>
                   <label>Symbol</label>
                   <SymbolPicker
@@ -2386,8 +2450,12 @@ export default function Backtester() {
           </details>
 
           <div style={{ display: 'flex', gap: 8 }}>
+            {/* [4.7] Run is DISABLED on a full in-sample overlap, not warned
+                about. A warning you can click past is a warning that gets
+                clicked past, and an in-sample backtest of a trained agent
+                measures nothing at all. */}
             {!isRunning ? (
-              <button className="btn btn-primary" onClick={() => activeTab === 'single' ? mutation.mutate() : portfolioMutation.mutate()} disabled={status !== 'ONLINE'} style={{ flex: 1 }}>
+              <button className="btn btn-primary" onClick={() => activeTab === 'single' ? mutation.mutate() : portfolioMutation.mutate()} disabled={status !== 'ONLINE' || (activeTab === 'single' && overlap && overlap.runnable === false)} title={overlap && overlap.runnable === false ? overlap.message : undefined} style={{ flex: 1 }}>
                 <Play size={16} /> Run {activeTab === 'single' ? 'Backtest' : 'Portfolio Backtest'}
               </button>
             ) : (

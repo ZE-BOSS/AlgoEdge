@@ -4,6 +4,7 @@ import { decimate } from '../utils/decimate';
 import { BarChart3, TrendingUp, Target, Shield, Activity, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, CartesianGrid } from 'recharts';
 import { getStats, getTrades } from '../services/api';
+import MoneyCurves from '../components/MoneyCurves';
 import { useConnectionStore, useAuthStore } from '../store';
 
 const COLORS = ['#3fb68b', '#58a6ff', '#bc8cff', '#f0883e', '#79c0ff', '#f85149', '#d29922', '#8b949e'];
@@ -138,6 +139,11 @@ export default function Analytics() {
           )}
         </div>
       </div>
+
+      {/* Where the money is, before how each trade did. The trade curve above
+          is the bot's record; this is the ACCOUNT's, and the two answer
+          different questions. */}
+      <MoneyCurves />
 
       <div className="card">
         <div className="card-header"><span className="card-title">P&L Per Trade (Last 50)</span></div>

@@ -18,7 +18,7 @@ below is deliberately small (only comparison/index/loop-bound values that
 show up constantly and are never risk-tuning constants); anything else that
 looks like a magic number — a threshold, a multiplier, a cap — should live in
 a Params dataclass instead, per this codebase's own established convention
-(RiskParams, APAParams, VWAPParams, etc.) and be flagged here if it doesn't.
+(RiskParams, VWAPParams, ORBParams, etc.) and be flagged here if it doesn't.
 """
 
 import ast

@@ -228,9 +228,9 @@ def test_portfolio_legs_stay_independent_per_slot():
         s = _make(mgr, batch_size=5, min_interval_s=0.0, mode="portfolio")
         s.init([
             {"slot_id": "GBPJPY::VWAP_v1", "symbol": "GBPJPY", "strategy_id": "VWAP_v1"},
-            {"slot_id": "GBPJPY::APA_v1", "symbol": "GBPJPY", "strategy_id": "APA_v1"},
+            {"slot_id": "GBPJPY::ORB_v1", "symbol": "GBPJPY", "strategy_id": "ORB_v1"},
         ])
-        for slot in ("GBPJPY::VWAP_v1", "GBPJPY::APA_v1"):
+        for slot in ("GBPJPY::VWAP_v1", "GBPJPY::ORB_v1"):
             s.leg_start(slot, total_bars=10)
             for i in range(10):
                 s.bar(slot, _bar(1_700_000_000 + i * 300))
@@ -240,10 +240,10 @@ def test_portfolio_legs_stay_independent_per_slot():
 
     streamer = _run_with_loop(body)
     payload = streamer.series_payload()
-    assert set(payload["series"]) == {"GBPJPY::VWAP_v1", "GBPJPY::APA_v1"}
+    assert set(payload["series"]) == {"GBPJPY::VWAP_v1", "GBPJPY::ORB_v1"}
     assert len(payload["series"]["GBPJPY::VWAP_v1"]) == 10
     assert [m["slot_id"] for m in mgr.of_type("replay_leg_start")] == \
-        ["GBPJPY::VWAP_v1", "GBPJPY::APA_v1"]
+        ["GBPJPY::VWAP_v1", "GBPJPY::ORB_v1"]
 
 
 def test_lifecycle_events_are_emitted_in_order():

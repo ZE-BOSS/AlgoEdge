@@ -424,7 +424,6 @@ def _load_strategy_spec(strategy_id: str) -> str | None:
     from pathlib import Path
     docs = Path(__file__).resolve().parents[3] / "docs"
     stems = {
-        "APA_v1": ["apa_strategy_implementation_plan"],
         "VWAP_v1": ["vwap_strategy_v2", "vwap_strategy_implementation_plan"],
     }.get(strategy_id, [])
     for stem in stems:

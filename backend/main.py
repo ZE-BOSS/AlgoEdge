@@ -22,6 +22,7 @@ from backend.api.routes import (
     backtest,
     bot,
     broker,
+    cash,
     charts,
     config,
     dashboard,
@@ -32,6 +33,7 @@ from backend.api.routes import (
     public,
     mt5_test,
     push,
+    rl,
     signals,
     stats,
     strategy_factory,
@@ -66,6 +68,36 @@ async def lifespan(app: FastAPI):
     # 1. Init Database (PostgreSQL on Railway)
     await init_db()
     logger.info("Database initialized")
+
+    # Approved RL agents, into `strategies.registry`, so they appear in the
+    # Backtester's strategy list and can be assigned to live slots exactly like
+    # any rule-based strategy. Agents with no APPROVED charter are deliberately
+    # ABSENT rather than present-and-refused: a strategy you cannot select is
+    # clearer than one that appears in the list and then errors.
+    try:
+        from backend.data.database import async_session
+        from backend.rl import registry as rl_registry
+
+        async with async_session() as s:
+            await rl_registry.register_approved(s)
+    except Exception as exc:
+        logger.warning(f"[RL] could not register approved agents: {exc}")
+
+    # The legal identity, into the cache the email templates read. They are
+    # synchronous and cannot await a query, so without this the first email
+    # after a restart would carry no postal address — and commercial email
+    # would be refused even once the address had been entered.
+    try:
+        from backend.notify import company as company_profile
+
+        snap = await company_profile.refresh_quietly()
+        if not snap.can_send_commercial_email:
+            logger.warning(
+                "[COMPANY] no legal entity name and postal address on file — "
+                "commercial email is blocked until Settings > Company is filled in"
+            )
+    except Exception as e:
+        logger.warning(f"Legal profile not loaded: {e}")
 
     # Investor platform scheduled jobs: nightly ledger check, daily digest.
     investor_jobs = None
@@ -291,6 +323,10 @@ app.include_router(mt5_test.router)
 app.include_router(dashboard.router)
 app.include_router(strategy_factory.router)  # [Phase 14 Stream 3]
 app.include_router(system.router)  # Telegram status/test, live account, state reset
+# What the ACCOUNT did, as opposed to what the bot did: deposits,
+# withdrawals, costs, and whether the journal adds up to the balance.
+app.include_router(cash.router)
+app.include_router(rl.router)                # [W4] RL agents, charters, proposals
 
 
 # ── Request Logging Middleware ───────────────────────────────────────────────
@@ -354,6 +390,68 @@ async def health_check():
     together must run the same commit, each with its own server's clock."""
     return {"status": "ok", "service": "AlgoEdge Backend", "version": "1.0.0", "commit": _COMMIT,
             "server_clock": _server_clock_status()}
+
+
+@app.get("/api/health/identity")
+async def health_identity():
+    """Who this backend actually is, for a front end talking to several.
+
+    THE FRONT END MUST NOT BE THE SOURCE OF TRUTH FOR THIS. A server registry
+    is a list a person typed, and a row labelled "demo" pointing at the live
+    box is a mislabelling no amount of client-side care prevents — but it is
+    one the SERVER can refuse to go along with. So the server states its own
+    identity and the registry is checked against it; a mismatch is shown next
+    to the server name rather than discovered by placing a trade on the wrong
+    account.
+
+    Deliberately unauthenticated, like `/api/health`: it is polled before
+    sign-in, every server must answer it, and it reveals nothing an operator
+    could not read off the login screen. The MT5 LOGIN NUMBER is the one
+    borderline item — it is an account identifier, not a credential, and
+    without it the whole point (telling two servers apart) is lost.
+    """
+    import os as _os
+
+    role = _os.getenv("ALGOEDGE_SERVER_ROLE", "").strip().lower() or None
+    label = _os.getenv("ALGOEDGE_SERVER_LABEL", "").strip() or None
+
+    account = broker = server_name = None
+    try:
+        import MetaTrader5 as mt5
+
+        from backend.mt5.executor import run_mt5
+
+        info = await run_mt5(mt5.account_info)
+        if info is not None:
+            account = int(info.login)
+            server_name = getattr(info, "server", None)
+        terminal = await run_mt5(mt5.terminal_info)
+        if terminal is not None:
+            broker = getattr(terminal, "company", None)
+    except Exception as exc:                      # a detached terminal is a state, not an error
+        logger.debug(f"[IDENTITY] MT5 not readable: {exc}")
+
+    bot_running = False
+    try:
+        from backend.services.bot_service import bot_service
+
+        bot_running = bool(getattr(bot_service, "running", False))
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        # What the operator called this box, if they set it. None means the
+        # front end has only its own label to go on, and says so.
+        "label": label,
+        "role": role,                             # "live" | "demo" | None
+        "commit": _COMMIT,
+        "mt5_account": account,
+        "broker": broker,
+        "mt5_server": server_name,
+        "bot_running": bot_running,
+        "server_clock": _server_clock_status(),
+    }
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────

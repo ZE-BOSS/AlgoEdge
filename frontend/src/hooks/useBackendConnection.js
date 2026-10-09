@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useConnectionStore, useAuthStore } from '../store';
 import { checkHealth, getBackendUrl } from '../services/api';
+import { activeServer, activeServerId, getServerToken } from '../services/servers';
 
 const BASE_INTERVAL = 5000;
 const MAX_INTERVAL = 30000;
@@ -55,8 +56,13 @@ export function useWebSocket() {
       return;
     }
 
-    const url = getBackendUrl().replace('http', 'ws');
-    const ws = new WebSocket(`${url}/ws/${user.id}?token=${token}`);
+    // The socket belongs to the ACTIVE server, like every request does.
+    // Pointed at a stale URL it would stream one box's trade events into a
+    // page showing another's — worse than no socket, because it looks live.
+    const server = activeServer();
+    const base = (server?.baseUrl || getBackendUrl()).replace(/^http/, 'ws').replace(/\/$/, '');
+    const authToken = getServerToken(activeServerId()) || token;
+    const ws = new WebSocket(`${base}/ws/${user.id}?token=${authToken}`);
     wsRef.current = ws;
 
     ws.onopen = () => {

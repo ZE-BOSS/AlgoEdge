@@ -1,0 +1,70 @@
+# Several backends behind one domain.
+#
+# WHY A PROXY RATHER THAN A SECOND CERTIFICATE
+# ---------------------------------------------
+# The admin site is served over HTTPS. A page on HTTPS CANNOT make requests to
+# http://<demo-vps-ip>:8000 — Chrome blocks it as mixed content, and nothing on
+# the backend can change that. The two ways out are a certificate per VPS, or
+# one origin that proxies to each. This is the second: one certificate, one
+# origin, no CORS change at all (the browser's origin never moves), and
+# WebSockets upgrade through the same path.
+#
+# The cost is honest and worth stating: every demo request takes an extra hop
+# through the live box, and if live is down you lose ADMIN access to demo —
+# though not demo's trading, which keeps running on its own machine.
+#
+# ADDING A SERVER is four lines here and one row in the front end's server
+# list. Nothing else changes.
+#
+# Replace <demo-private-ip> with the demo VPS's address. Prefer a private or
+# VPN address: once this proxy exists, demo's port 8000 should NOT be
+# reachable from the internet at all, which is also a security improvement
+# over exposing it.
+
+api.alphavantiqcapital.com {
+	encode gzip
+
+	# Each server gets a path prefix. `handle_path` STRIPS the prefix before
+	# proxying, so the backend keeps seeing ordinary /api/... paths and needs
+	# no knowledge that it is behind one.
+	handle_path /s/demo/* {
+		reverse_proxy <demo-private-ip>:8000 {
+			# Long-running: a backtest streams progress over a WebSocket and a
+			# large run can take minutes before its first byte.
+			transport http {
+				read_timeout 10m
+				write_timeout 10m
+			}
+		}
+	}
+
+	handle_path /s/live/* {
+		reverse_proxy localhost:8000 {
+			transport http {
+				read_timeout 10m
+				write_timeout 10m
+			}
+		}
+	}
+
+	# Unprefixed traffic keeps going to live, so every existing bookmark, the
+	# investor app and the landing page carry on working unchanged. This line
+	# is what makes the change additive rather than a migration.
+	handle {
+		reverse_proxy localhost:8000 {
+			transport http {
+				read_timeout 10m
+				write_timeout 10m
+			}
+		}
+	}
+}
+
+# The front ends are unchanged — one admin site, one investor site, one
+# landing page, all served from the live box. The investor app deliberately
+# has NO server list: investor money must never be served from a demo backend,
+# and the way to guarantee that is to give it no way to ask one.
+#
+# app.alphavantiqcapital.com    -> investor-web/dist
+# admin.alphavantiqcapital.com  -> frontend/dist
+# alphavantiqcapital.com        -> landing/

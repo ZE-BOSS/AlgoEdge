@@ -37,7 +37,7 @@ def test_the_fingerprint_is_stable_across_reloads_of_the_same_settings():
     saved = UserConfigV2().to_dict() if hasattr(UserConfigV2(), "to_dict") else None
     a = UserConfigV2.from_dict(saved) if saved else UserConfigV2()
     b = UserConfigV2.from_dict(saved) if saved else UserConfigV2()
-    for sid in ("TrendBreakout_v1", "ORB_v1", "APA_v1", "TrendDrift_v1"):
+    for sid in ("TrendBreakout_v1", "ORB_v1", "ORB_v1", "TrendDrift_v1"):
         block = _block(a, sid)
         assert fp(a, Slot(), block) == fp(b, Slot(), block)
 

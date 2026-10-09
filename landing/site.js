@@ -209,17 +209,32 @@
 
   // contact form
   const form = $('#apply-form'), msg = $('#apply-msg');
+
+  // The latest date of birth that is still 18, computed rather than written
+  // down: a hard-coded `max` is correct for a year and then quietly lets a
+  // 17-year-old past the browser check. The server checks the age regardless
+  // (public.py::_check_age), so this only keeps the date picker honest.
+  const dob = $('#dob');
+  if (dob) {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 18);
+    dob.max = d.toISOString().slice(0, 10);
+  }
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     msg.className = 'form-msg';
     if (!form.checkValidity()) {
-      msg.textContent = 'Please fill in your name and email, and tick the box.';
+      msg.textContent = 'Please fill in your name, email and date of birth, and tick the box.';
       msg.classList.add('err');
       form.reportValidity();
       return;
     }
     const data = Object.fromEntries(new FormData(form).entries());
     data.consent = form.consent.checked;
+    // Blank optional fields are dropped rather than sent as "", which the API
+    // rejects for a date. The age itself is checked server-side — this only
+    // decides what gets sent.
+    if (!data.date_of_birth) delete data.date_of_birth;
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true; msg.textContent = 'Sending...';
     try {

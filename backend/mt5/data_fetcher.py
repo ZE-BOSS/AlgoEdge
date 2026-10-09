@@ -461,6 +461,25 @@ class DataFetcher:
             )
 
         if rates is None or len(rates) == 0:
+            # Last resort: POSITION-anchored. Both calls above are DATE-anchored,
+            # and a terminal can serve copy_rates_from_pos perfectly while failing
+            # every dated call with (-1, "Terminal: Call failed") -- observed on
+            # the FundedNext terminal 2026-10-06, where from_pos returned bars for
+            # all five index symbols while range and from returned None for every
+            # one of them. Without this the whole fetch fails on a terminal that
+            # demonstrably holds the data.
+            want = min(int((end_ts - start_ts) / (_TF_MINUTES.get(str(timeframe).upper(), 5) * 60))
+                       + 500, terminal_max_bars())
+            logger.warning(
+                f"{symbol} {timeframe}: dated fetches failed; falling back to "
+                f"copy_rates_from_pos(count={want}) and slicing to the window")
+            got = await loop.run_in_executor(
+                _executor, lambda: mt5.copy_rates_from_pos(symbol, tf_code, 0, want))
+            if got is not None and len(got):
+                keep = (got["time"] >= start_ts) & (got["time"] <= end_ts)
+                rates = got[keep] if keep.any() else None
+
+        if rates is None or len(rates) == 0:
             mt5_error = mt5.last_error()
             error_msg = (
                 f"MT5 returned no data for {symbol} {timeframe} "

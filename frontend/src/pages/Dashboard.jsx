@@ -3,7 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, DollarSign, Target, Shield, Activity, AlertTriangle, Play, Square, Eye, Loader2, Terminal, Trash2 } from 'lucide-react';
 import { useConnectionStore, useRiskStore, useAuthStore } from '../store';
 import { getDashboardData, getChartData, startBot, stopBot, getBotLogs, forceCloseAll, getLiveAccount } from '../services/api';
+import { confirmOnLive } from '../services/servers';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
+import SlotDiagnostics from '../components/SlotDiagnostics';
 
 // ── Category color mapping for activity log ───────────────────────────────
 const CATEGORY_COLORS = {
@@ -293,12 +295,22 @@ function BotControl() {
 
   const startMutation = useMutation({
     // No symbol list: the backend starts on the enabled slots, the same list shown here.
-    mutationFn: () => startBot({ scan_interval: 60 }),
+    //
+    // On a LIVE server this asks first, naming the box. With several backends
+    // behind one page the mistake to guard against is not "I did not mean to
+    // press start" — it is "I did not realise which server I was looking at".
+    mutationFn: () => {
+      if (!confirmOnLive('Start the trading bot')) {
+        return Promise.reject(new Error('cancelled'));
+      }
+      return startBot({ scan_interval: 60 });
+    },
     onSuccess: () => {
       setStartError(null);
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
     onError: (err) => {
+      if (err?.message === 'cancelled') { setStartError(null); return; }
       const detail = err?.response?.data?.detail;
       if (detail?.missing_brokers) {
         setStartError(detail.missing_brokers);
@@ -309,7 +321,12 @@ function BotControl() {
   });
 
   const stopMutation = useMutation({
-    mutationFn: () => stopBot(),
+    mutationFn: () => {
+      if (!confirmOnLive('Stop the trading bot')) {
+        return Promise.reject(new Error('cancelled'));
+      }
+      return stopBot();
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
   });
 
@@ -611,6 +628,10 @@ export default function Dashboard() {
       )}
 
       <LiveAccountPanel />
+      {/* Separates "not running" from "running and finding nothing" from
+          "finding setups that something refuses" — the three cases that were
+          indistinguishable when demo and live disagreed. */}
+      <SlotDiagnostics />
 
       <div className="metrics-grid">
         <MetricCard label="Total P&L" value={`$${(s.total_pnl || 0).toFixed(2)}`} color={s.total_pnl >= 0 ? 'green' : 'red'} icon={DollarSign} subtext={`${s.total_trades || 0} trades`} />

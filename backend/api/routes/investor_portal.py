@@ -563,6 +563,22 @@ async def deposit_instructions(inv: Investor = Depends(current_investor),
         "reference_code": fundmod.reference_code(inv.id),
         "min_investment": _s(s.min_investment), "currency": s.base_currency,
         "configured": bool(s.bank_account_number),
+        # The terms that apply to the money being sent, AT THE POINT OF SENDING.
+        # They are in the Terms too, but a cost disclosed only in a document
+        # behind a link is the complaint that auto-renewal rules exist to stop:
+        # the person committing money should see what it costs on the same
+        # screen as the commitment, not have to go and find it.
+        "terms": {
+            "performance_fee_pct": _s(s.performance_fee_pct),
+            "management_fee_pct": _s(s.management_fee_pct),
+            "withdrawal_cap_pct": _s(s.withdrawal_cap_pct),
+            "lockup_days": s.lockup_days,
+            "notice_days": s.notice_days,
+            # Fees are charged on PROFIT, every two months. Spelled out rather
+            # than left to be inferred from two percentages.
+            "fee_basis": "profit",
+            "fee_period": "every two months",
+        },
     }
 
 

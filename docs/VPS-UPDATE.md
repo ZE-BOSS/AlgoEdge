@@ -394,6 +394,86 @@ choking on oversized request headers, most likely from the bot traffic above.
 For production, serve the static `frontend/dist` instead. Until that changes,
 `npm run build` can be skipped on redeploy — the dev server compiles on demand.
 
+---
+
+## Pushing from the dev machine
+
+The half this document assumed you had already done. Three standing rules for
+this repository, and none of them is a style preference:
+
+- **Never `git add -A`.** The tree holds ~1.2 GB of tick archives and 4,768
+  `skip-worktree` files under `venv_win/`. Stage by explicit path.
+- **Never commit `.env`.** It holds live MT5 credentials.
+- **`dev` is the branch.** The boxes pull `origin dev`.
+
+```powershell
+git add backend/rl backend/risk/giveback.py backend/api/routes/rl.py tests/
+```
+
+```powershell
+git --no-pager diff --cached --stat
+```
+
+Read that list before writing the message — it is the last point at which an
+accidental 300 MB archive is cheap to remove.
+
+```powershell
+git commit -m "RL agents: modes A and B, charter governance, give-back rule"
+git push origin dev
+```
+
+Then **demo first**, always. The two boxes run the same code against different
+money.
+
+---
+
+## What THIS release needs on the box
+
+- **Four new tables** — `rl_agents`, `rl_charters`, `rl_proposals`,
+  `rl_adherence`. There is no migration tool here: `init_db()` runs
+  `create_all` at startup and `backend/data/database.py` imports
+  `backend.rl.models` before it, so **restarting the backend is the
+  migration**. Nothing to run by hand.
+- **New slot fields** (`supervising_agents`, `giveback_*`) live inside the
+  slot's JSON. No DDL.
+- **No new Python dependencies.** The RL work is numpy and pandas, both
+  already installed — so this is **Path A**, not Path B. `torch`,
+  `stable_baselines3` and `scikit-learn` are deliberately NOT required.
+- **Front-end changes** (the Agents page, the slot-diagnostics panel, the
+  Backtester controls). Per the note above, this box serves through the Vite
+  dev server, so a rebuild is optional — but run it anyway if you want the
+  `dist` output to match what is being served when that changes.
+
+### Checking it worked
+
+In this order, because each rules out a different failure:
+
+```powershell
+curl.exe -s localhost:8000/api/health/identity
+```
+
+Confirm `label`, `role` and `mt5_account` are the box you think you are on. A
+picker row labelled "demo" pointing at live is the one mistake the client
+cannot prevent.
+
+```powershell
+pm2 logs --lines 40
+```
+
+Look for `Database initialized`, and `[RL] registered N approved agent(s)` —
+or nothing at all from `[RL]`, which is correct when no charter has been
+approved yet.
+
+Then open the Dashboard and read the new **"Why isn't this slot trading?"**
+panel. Every slot you expect to be working should say `no setup found` or
+`trading`. A slot that says **`not scanned`** is not running at all, and that
+is a configuration answer rather than a market one.
+
+That panel is also how to settle the demo-vs-live question directly: switch
+boxes with the server picker and compare the two lists. If live shows
+`every signal refused` with `below_broker_min_lot` against a slot that trades
+on demo, the cause is the smaller balance, not the code.
+
 ## Quick reference
 
 ```powershell

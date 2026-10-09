@@ -57,6 +57,8 @@ async def init_db():
     # Without this line create_all silently skips them and the first deposit
     # fails against a table that does not exist.
     import backend.investor.models  # noqa: F401 — imported for the side effect
+    import backend.mt5.cash_models  # noqa: F401 — same reason: the cash ledger
+    import backend.rl.models  # noqa: F401 — agents, charters, proposals, adherence
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

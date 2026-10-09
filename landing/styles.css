@@ -212,3 +212,13 @@ input, select, textarea { width: 100%; font: 16px var(--sans); color: var(--text
 .legal .back { display: inline-block; margin-bottom: 24px; }
 .nav .btn { white-space: nowrap; }
 @media (max-width: 420px) { .nav { gap: 12px; } .nav .btn { min-height: 38px; padding: 8px 12px; font-size: 0.85rem; } .brand { letter-spacing: 0.1em; font-size: 0.72rem; } }
+
+/* The retention table in the privacy policy. Plain and readable rather than
+   styled: it is a legal disclosure, and a table is the honest shape for
+   "what, how long, why". */
+.retention { width: 100%; border-collapse: collapse; margin: 14px 0 6px; font-size: 0.92rem; }
+.retention th, .retention td { text-align: left; vertical-align: top; padding: 9px 10px;
+  border-bottom: 1px solid var(--line); }
+.retention th { color: var(--text-2); font-weight: 600; white-space: nowrap; }
+.retention td:first-child { color: var(--text); }
+@media (max-width: 620px) { .retention { font-size: 0.86rem; } .retention th { white-space: normal; } }

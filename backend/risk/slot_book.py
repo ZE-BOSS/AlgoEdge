@@ -146,10 +146,36 @@ class SlotBook:
         self._engines: dict[str, RiskEngine] = {}
         # slot key -> the symbol it trades, for routing a close back to its slot
         self.slot_symbols: dict[str, str] = {}
+        # Keys already reported as falling back to the account config, so the
+        # warning is one line per slot rather than one per scan.
+        self._fallback_warned: set[str] = set()
 
     # ── configs ───────────────────────────────────────────────────────────
     def config_for(self, key: str) -> dict[str, Any]:
-        return self.slot_configs.get(key) or self.base_config
+        """This slot's resolved config, or the account's as a LAST RESORT.
+
+        The fallback is the defect class that produced the profit-target bug:
+        `slot_configs` is only populated by `bot_service._slot_engine`, which
+        runs inside the signal-execution branch of the scan loop - so a slot
+        holding an open position and producing no signal this cycle read the
+        ACCOUNT's `target_profit_enabled` (False) and was skipped, silently.
+
+        The fallback is kept, because the alternative is a crash on a path that
+        has a reasonable default, but it is no longer silent: the first time a
+        key falls through it is logged by name. A log line is what turns "the
+        slot's setting did nothing" from an invisible class of bug into one
+        sentence in the activity feed.
+        """
+        found = self.slot_configs.get(key)
+        if found is not None:
+            return found
+        if key and key not in self._fallback_warned:
+            self._fallback_warned.add(key)
+            logger.warning(
+                f"[SLOT] {key}: no slot config registered - falling back to the ACCOUNT "
+                f"config. Any per-slot setting is not in effect for this call. If this "
+                f"slot holds a position, register it with set_slot_config() first.")
+        return self.base_config
 
     def set_slot_config(self, key: str, config: dict[str, Any], *, symbol: str | None = None,
                         preserve_state: bool = True) -> None:

@@ -427,7 +427,12 @@ def test_a_clean_fund_reconciles():
             await fundmod.take_snapshot(s, pool_equity=2000, on=date(2026, 1, 1))
 
             report = await recmod.build(s, pool_equity=2000, on=date(2026, 1, 1))
-            assert report.healthy, report.as_dict()
+            # `lines_agree`, not `healthy`: these harnesses attach no MT5 account,
+            # so nothing here has been checked against a broker and the report
+            # correctly declines to call itself verified. The arithmetic is what
+            # this test is about. See reconcile.Report for the distinction.
+            assert report.lines_agree, report.as_dict()
+            assert not report.broker_configured
         await engine.dispose()
     run(go())
 

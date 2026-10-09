@@ -20,7 +20,7 @@ import html
 import os
 
 from backend.investor import nav as navmod
-from backend.notify.outbox import Message
+from backend.notify.outbox import COMMERCIAL, TRANSACTIONAL, Message  # noqa: F401 — COMMERCIAL is for callers
 
 GOLD = "#b8912a"
 INK = "#101722"
@@ -51,8 +51,22 @@ def _admin() -> str:
     return os.getenv("ADMIN_APP_URL", "http://localhost:5173").rstrip("/")
 
 
+def _identity_line() -> str:
+    """The legal identity, as a footer line, or "" while it is not on file.
+
+    Rendered from `company_profile` rather than written here: the same fact also
+    has to appear in the privacy policy and the terms, and a legal fact kept in
+    three places drifts. Blank today — see backend/notify/company.py for what
+    happens while it is blank (transactional mail is unaffected, commercial mail
+    is refused rather than sent without an address).
+    """
+    from backend.notify import company
+
+    return company.get().footer_identity
+
+
 def _layout(title: str, blocks: list[str], *, button: tuple[str, str] | None = None,
-            footer: str | None = None) -> str:
+            footer: str | None = None, unsubscribe_url: str | None = None) -> str:
     body = "".join(f'<p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#2b3442">{b}</p>'
                    if not b.startswith("<") else b for b in blocks)
     btn = ""
@@ -64,6 +78,16 @@ def _layout(title: str, blocks: list[str], *, button: tuple[str, str] | None = N
                f'font-size:15px;color:#ffffff;text-decoration:none">{_e(label)}</a></td></tr></table>')
     foot = footer or ("You are receiving this because you have an account with Alphavantiq Capital. "
                       "We will never ask for your password by email.")
+    # Appended rather than folded into `foot`, so every template keeps its own
+    # wording and neither the identity nor the unsubscribe link can be lost by
+    # a template forgetting to mention it.
+    identity = _identity_line()
+    extra = ""
+    if identity:
+        extra += f'<div style="margin-top:10px;color:#9aa3b2">{_e(identity)}</div>'
+    if unsubscribe_url:
+        extra += (f'<div style="margin-top:8px">'
+                  f'<a href="{_e(unsubscribe_url)}" style="color:#7a8494">Unsubscribe</a></div>')
     return f"""<!doctype html><html><body style="margin:0;padding:0;background:#f3f4f6">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6">
 <tr><td align="center" style="padding:24px 12px">
@@ -74,7 +98,7 @@ ALPHAVANTIQ <span style="color:{GOLD};font-weight:500">CAPITAL</span></td></tr>
 <h1 style="margin:0 0 16px;font-size:20px;color:{INK}">{_e(title)}</h1>
 {body}{btn}
 </td></tr>
-<tr><td style="padding:0 28px 24px;font-size:12px;line-height:1.5;color:#7a8494">{_e(foot)}</td></tr>
+<tr><td style="padding:0 28px 24px;font-size:12px;line-height:1.5;color:#7a8494">{_e(foot)}{extra}</td></tr>
 </table></td></tr></table></body></html>"""
 
 
@@ -99,13 +123,28 @@ def _text(title: str, lines: list[str], pairs: list[tuple[str, str]] | None = No
 
 
 def _msg(kind, inv, subject, title, lines, *, pairs=None, button=None, attachments=None,
-         to=None, footer=None) -> Message:
+         to=None, footer=None, category=TRANSACTIONAL, unsubscribe_url=None) -> Message:
+    """One message. `category` defaults to TRANSACTIONAL — see outbox.py.
+
+    A commercial message must be built with `category=COMMERCIAL` AND an
+    `unsubscribe_url`; `outbox.deliver` refuses it otherwise rather than sending
+    something unlawful. The link goes into both the HTML footer and the
+    plain-text part, so the two cannot disagree.
+    """
     blocks = [_e(line) for line in lines]
     if pairs:
         blocks.append(_rows(pairs))
+    text = _text(title, lines, pairs, button[1] if button else None)
+    if unsubscribe_url:
+        text += "\n\nUnsubscribe: " + unsubscribe_url
+    ident = _identity_line()
+    if ident:
+        text += "\n" + ident
     return Message(kind=kind, to=to or inv.email, subject=subject,
-                   html=_layout(title, blocks, button=button, footer=footer),
-                   text=_text(title, lines, pairs, button[1] if button else None),
+                   html=_layout(title, blocks, button=button, footer=footer,
+                                unsubscribe_url=unsubscribe_url),
+                   text=text,
+                   category=category, unsubscribe_url=unsubscribe_url,
                    investor_id=getattr(inv, "id", None), attachments=attachments or [],
                    preferences=getattr(inv, "preferences", None),
                    # the push and feed lines: the email minus its greeting

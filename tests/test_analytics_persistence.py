@@ -316,7 +316,7 @@ def test_trailing_verdicts_match_the_measurement():
     """
     from backend.strategies.strategy_defaults import get_strategy_defaults
     # Flat-to-negative in the sweep; DriftJumpAlpha lost 1,299 on Crash 1000.
-    for sid in ("DriftJumpAlpha_v1", "VWAP_v1", "APA_v1", "BoomDriftJump_v1"):
+    for sid in ("DriftJumpAlpha_v1", "VWAP_v1", "BoomDriftJump_v1"):
         assert get_strategy_defaults(sid)["trail_method_tp1"] == "NONE", (
             f"{sid} had trailing re-enabled — the sweep measured it as flat or harmful"
         )
@@ -337,22 +337,3 @@ def test_live_and_backtest_both_apply_strategy_defaults():
         src = open(path, encoding="utf-8").read()
         assert "strategy_defaults" in src, f"{path} never applies per-strategy exit defaults"
         assert "session_filter_enabled" in src, f"{path} never applies the session verdict"
-
-
-def test_apa_rejection_gate_no_longer_depends_on_retest_state():
-    """
-    APA emitted 0 signals from 78,800 candidates because `retest_rejected` is
-    only set inside the AWAIT_RETEST branch, which `require_retest=False` skips,
-    while `require_rejection_candle=True` tested that flag.
-    """
-    from backend.strategies.strategy_apa.engine import APAEngine
-    assert hasattr(APAEngine, "_zone_rejected_now"), (
-        "the rejection test must be evaluable without the retest state machine"
-    )
-    fn = APAEngine._zone_rejected_now
-    latest = {"high": 1.1050, "low": 1.0950, "close": 1.1040, "open": 1.1000}
-    # Bullish: wick dipped into the zone, body closed back above it -> rejected.
-    assert fn({"direction": "BUY", "invalidation_zone_top": 1.1000,
-               "invalidation_zone_bottom": 1.0900}, latest) is True
-    # No zone -> cannot be evaluated, must not block.
-    assert fn({"direction": "BUY"}, latest) is True

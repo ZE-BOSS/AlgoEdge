@@ -18,10 +18,13 @@ import asyncio
 from datetime import date
 from decimal import Decimal
 
+import shutil
+import tempfile
+from pathlib import Path
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 from backend.data.models import Base
 from backend.investor import fees as feesmod
@@ -39,15 +42,28 @@ def run(coro):
 
 
 def session_test(fn):
+    """One throwaway database per test.
+
+    A temp FILE rather than ":memory:" on a StaticPool. StaticPool shares ONE
+    connection between every session in a test, so two sessions open at the same
+    time are the same transaction - and the outbox's after-commit hook opens a
+    session of its own. The symptom is a write that silently does not land,
+    which is the worst failure mode a ledger test can have: the assertion that
+    would have caught the bug passes.
+    """
     def wrapper():
         async def go():
-            engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                         connect_args={"check_same_thread": False})
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-            async with async_sessionmaker(engine, expire_on_commit=False)() as s:
-                await fn(s)
-            await engine.dispose()
+            tmp = tempfile.mkdtemp(prefix="algoedge-fees-")
+            try:
+                engine = create_async_engine(
+                    f"sqlite+aiosqlite:///{Path(tmp).as_posix()}/fees.db")
+                async with engine.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
+                async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+                    await fn(s)
+                await engine.dispose()
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
         run(go())
     wrapper.__name__ = fn.__name__
     return wrapper
@@ -254,7 +270,9 @@ async def test_a_charged_fee_is_owed_until_paid_and_does_not_move_other_investor
     assert snap.liabilities == charged
     assert await _value(s, "b", date(2026, 7, 1)) == b_before
     rec = await recmod.build(s, pool_equity=2200, on=date(2026, 7, 1))
-    assert rec.healthy, rec.as_dict()
+    # `lines_agree`, not `healthy`: no MT5 account is attached in this harness,
+    # so nothing has been checked against a broker. See reconcile.Report.
+    assert rec.lines_agree, rec.as_dict()
 
     await feesmod.mark_paid(s, date(2026, 6, 1), end, actor_id=ADMIN, reference="MGR-1",
                             on=date(2026, 7, 2))

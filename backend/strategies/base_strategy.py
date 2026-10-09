@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 class TradeSignal(BaseModel):
     """Standardized output from any strategy."""
-    strategy_id: str = "APA_v1"
+    strategy_id: str = "VWAP_v1"
     symbol: str
     direction: str  # "BUY" or "SELL"
     signal_type: str = "OB_ENTRY"  # OB_ENTRY, FVG_ENTRY, BOS, CHOCH
@@ -212,6 +212,54 @@ class BaseStrategy:
         spec explicitly requiring an early exit under this condition.
         """
         return None
+
+    # ── supervision (plan 4.9) ───────────────────────────────────────────
+    #
+    # `on_position_bar` is called for positions this strategy OWNS. A
+    # supervisor has to see positions it does not own, which is the one
+    # addition the mechanism needed.
+    #
+    # Opt-in and default off: a strategy that was never measured as a
+    # supervisor does not become one by being selected somewhere.
+    SUPERVISES_OTHER_STRATEGIES = False
+
+    def on_foreign_position_bar(
+        self,
+        symbol: str,
+        timeframe: str,
+        candles: "pd.DataFrame",
+        position: dict,
+        owner: dict | None = None,
+    ) -> "TradeAction | None":
+        """Called once per closed bar for an open position ANOTHER strategy owns.
+
+        Only called when `SUPERVISES_OTHER_STRATEGIES` is true, and only AFTER
+        the owning strategy has been asked and had nothing to say. The owner's
+        own exit wins: a measured rule is never overridden by a supervisor, which
+        is what bounds a supervisor's damage to exactly one failure mode —
+        cutting a trade early that would have recovered.
+
+        `owner` carries the opening strategy's id and its entry gate vector AS
+        RECORDED AT ENTRY (`GateRecorder` already persists `passed_gates`,
+        `gate_vector` and `confluence_tags` on the trade). It must not be
+        re-derived here: re-deriving it would compute the vector from the
+        features and parameters as they are NOW, which is a lookahead.
+
+        Return a `TradeAction` — `CLOSE` (with `close_pct`) or `MODIFY_SL`,
+        tightening only — or None. There is deliberately no action that opens a
+        position, sizes one, or widens a stop: a supervisor can only ever
+        reduce exposure.
+        """
+        return None
+
+    def supervises(self, strategy_id: str, symbol: str) -> bool:
+        """Whether this strategy may supervise that one, on that symbol.
+
+        Default False even when `SUPERVISES_OTHER_STRATEGIES` is true, so a
+        supervisor that forgets to narrow its scope supervises nothing rather
+        than everything.
+        """
+        return False
 
     def notify_outcome(self, symbol: str, group_id: str, is_win: bool, pnl: float) -> None:
         """

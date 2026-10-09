@@ -7,6 +7,10 @@ process:
   * ledger_check — nightly: every investor's cached units must equal a replay
     of the ledger. A mismatch emails the admin. The ledger is the truth; this
     is how a bug is found that night rather than at withdrawal time.
+  * broker_valuation — the day's NAV taken from the BROKER's books rather
+    than from booked trades. Without it the price is an accumulation that has
+    never been checked against an account, which is how a $2,207 difference
+    stayed invisible. Off with INVESTOR_BROKER_VALUATION=off.
   * daily_digest — after the WAT day rolls: yesterday's money movements and the
     open queues, to ADMIN_ALERT_EMAIL. Off with INVESTOR_DAILY_DIGEST=off.
 
@@ -69,6 +73,74 @@ async def ledger_check(session, day: date) -> dict | None:
     return run.result
 
 
+async def broker_valuation(session, day: date) -> dict | None:
+    """Take the day's NAV from what the BROKER holds, not from bookings.
+
+    THIS IS THE JOB WHOSE ABSENCE HID A $2,207 GAP.
+
+    Every `nav_snapshots` row on the VPS carries `source='TRADES'`, meaning the
+    price investors see had only ever been moved by `booking.py` adding
+    published results to a seeded figure — never once measured against an
+    account. `/reconciliation` then fell back to that same snapshot, so it was
+    comparing the ledger with itself and could not disagree.
+
+    This closes the loop: once a day the pool's value is read from the cash
+    ledger, which is the brokers' own deal history summed, and written as a
+    snapshot whose source is NOT "TRADES". From then on the reconciliation has
+    independent evidence every single day.
+
+    Refuses rather than guesses:
+      * no account marked as holding investor capital -> nothing to value;
+      * an account missing its anchor, or a deal still unclassified -> the
+        figure would be wrong in an unknown direction, so none is written and
+        the admin is told what is blocking it.
+    """
+    from backend.investor import sources as srcmod
+
+    if os.getenv("INVESTOR_BROKER_VALUATION", "on").lower() == "off":
+        return None
+    run = await _claim(session, "broker_valuation", day.isoformat())
+    if run is None:
+        return None
+
+    side = await srcmod.broker_side(session, day)
+    if not side.configured:
+        run.result = {"skipped": "no MT5 account is marked as holding investor capital"}
+        await session.commit()
+        return run.result
+    if not side.complete:
+        # A valuation taken over an incomplete ledger is a confident wrong
+        # number, which is worse than no number: it would overwrite the one
+        # honest signal the admin has.
+        run.result = {"blocked": list(side.missing)}
+        logger.error(f"[JOBS] broker valuation blocked: {'; '.join(side.missing)}")
+        await session.commit()
+        return run.result
+
+    # Cash at the broker PLUS cash confirmed in but not yet transferred there.
+    # Broker equity alone would mark every unit down by the amount in transit,
+    # which tells investors they lost money that is in a bank account.
+    at_broker = side.derived_equity
+    in_transit = await srcmod.unfunded_capital(session)
+    equity = navmod.money(at_broker + in_transit)
+    owed = await fundmod.owed_on(session, day)
+    snap = await fundmod.take_snapshot(session, pool_equity=equity, liabilities=owed,
+                                       on=day, source="MT5")
+    run.result = {
+        "pool_equity": navmod.text(equity),
+        "at_broker": navmod.text(at_broker),
+        "confirmed_not_yet_funded": navmod.text(in_transit),
+        "liabilities": navmod.text(owed),
+        "nav_per_unit": navmod.text(snap.nav_per_unit) if snap else None,
+        "accounts": list(side.logins),
+    }
+    logger.info(f"[JOBS] broker valuation {day}: {equity} "
+                f"({at_broker} at the broker, {in_transit} in transit) "
+                f"across {side.logins}")
+    await session.commit()
+    return run.result
+
+
 async def digest_stats(session, day: date) -> dict:
     start = datetime(day.year, day.month, day.day) - timedelta(hours=1)   # WAT midnight in UTC
     end = start + timedelta(days=1)
@@ -126,11 +198,24 @@ async def tick(now: datetime | None = None) -> None:
                 await s.commit()
     except Exception as exc:
         logger.error(f"[JOBS] trade booking failed: {exc}")
+    try:
+        # An RL agent that drifted off its charter is already suspended
+        # in-process; this is what makes it survive a restart and what tells
+        # the admin. Every tick, not once a day: an agent trading against a
+        # strategy nobody approved should not wait for the overnight pass.
+        from backend.rl import suspension as rl_suspension
+        async with async_session() as s:
+            if await rl_suspension.drain(s):
+                await s.commit()
+    except Exception as exc:
+        logger.error(f"[JOBS] RL suspension drain failed: {exc}")
     wat = now + timedelta(hours=1)
     if wat.hour < RUN_AFTER_WAT_HOUR:
         return
     yesterday = wat.date() - timedelta(days=1)
-    for job in (ledger_check, daily_digest):
+    # Valuation first: the digest quotes the NAV, and the ledger check is
+    # more useful once the day's real figure is in.
+    for job in (broker_valuation, ledger_check, daily_digest):
         try:
             async with async_session() as s:
                 await job(s, yesterday)

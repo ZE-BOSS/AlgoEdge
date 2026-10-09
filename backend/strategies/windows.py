@@ -31,7 +31,7 @@ STRATEGY_WINDOW_BARS: dict[str, int] = {
 DEFAULT_WINDOW_BARS = 500
 
 # M5 bars for engines that rebuild the edge-lab session context on their window
-# (ORB_v1's M5 form, VWAP_v1's session modes, APA_v1's session breakout). Every
+# (ORB_v1's M5 form, VWAP_v1's session modes). Every
 # per-session feature there — daily ATR, the noise band, opening volume — needs
 # 14 completed weekday sessions before the current one. 5,000 bars held ~17 such
 # sessions on FX and indices but only ~12 on 24/7 markets, whose weekends fill the

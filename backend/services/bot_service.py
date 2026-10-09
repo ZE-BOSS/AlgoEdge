@@ -481,6 +481,91 @@ class BotService:
         key = f"{reason}|{slot_id}" if slot_id else reason
         self._suppression_funnel[key] = self._suppression_funnel.get(key, 0) + 1
 
+    def _slot_seen(self, slot, what: str = "scan") -> None:
+        """Count one scan, signal or trade for this slot, today.
+
+        WHY THIS EXISTS
+        ---------------
+        `_suppression_funnel` says why a signal was DROPPED. It is silent about
+        a slot that produced no signal at all - and silent in exactly the same
+        way about a slot that was never scanned. Those two are completely
+        different problems ("the strategy found nothing" against "the slot is
+        not running") and until now the UI could not tell them apart.
+
+        That is the question behind "demo and live take different trades with
+        the same settings": the first thing to establish is whether the slot is
+        being scanned on both boxes at all.
+        """
+        today = datetime.now(timezone.utc).date()
+        if getattr(self, "_slot_seen_day", None) != today:
+            self._slot_seen_day = today
+            self._slot_activity = {}
+        row = self._slot_activity.setdefault(slot.slot_id, {
+            "slot_id": slot.slot_id, "symbol": slot.symbol,
+            "strategy_id": slot.strategy_id,
+            "scans": 0, "signals": 0, "trades": 0, "last_scan": None,
+        })
+        row[{"scan": "scans", "signal": "signals", "trade": "trades"}[what]] += 1
+        if what == "scan":
+            row["last_scan"] = datetime.now(timezone.utc).isoformat()
+
+    def slot_diagnostics(self, config=None) -> list[dict]:
+        """Per configured slot: is it running, and if so what happened to its signals.
+
+        Built to answer one question definitively - "why is this slot not
+        trading?" - with the three possible answers separated:
+
+          `scans == 0`      the slot is not being scanned. A config problem, not
+                            a market one: check `enabled`, and check that the bot
+                            was started after the slot was added.
+          `signals == 0`    it is scanning and the strategy finds no setup. A
+                            market answer, and the honest one most of the time.
+          `signals > 0` and `trades == 0`
+                            it found setups and something refused every one of
+                            them. `dropped` names what, with counts.
+        """
+        config = config or getattr(self, "config", None)
+        slots = list(getattr(config, "instrument_slots", None) or [])
+        activity = dict(getattr(self, "_slot_activity", {}) or {})
+        funnel = dict(getattr(self, "_suppression_funnel", {}) or {})
+        book = getattr(self, "slot_book", None)
+        built = set((book.built() if book else {}).keys())
+
+        out = []
+        for slot in slots:
+            row = activity.get(slot.slot_id) or {
+                "slot_id": slot.slot_id, "symbol": slot.symbol,
+                "strategy_id": slot.strategy_id,
+                "scans": 0, "signals": 0, "trades": 0, "last_scan": None,
+            }
+            dropped = {}
+            for key, count in funnel.items():
+                reason, _, sid = key.partition("|")
+                if sid == slot.slot_id:
+                    dropped[reason] = dropped.get(reason, 0) + count
+            verdict = (
+                "not scanned" if not row["scans"]
+                else "no setup found" if not row["signals"]
+                else "every signal refused" if not row["trades"]
+                else "trading")
+            out.append({
+                **row,
+                "enabled": bool(slot.enabled),
+                "engine_built": slot.slot_id in built,
+                "dropped": dropped,
+                "verdict": verdict,
+                "bot_running": bool(getattr(self, "running", False)),
+            })
+        # Slots that are scanning but are NOT in the saved config at all. A
+        # stale engine from before an edit shows up here rather than nowhere.
+        known = {sl.slot_id for sl in slots}
+        for sid, row in activity.items():
+            if sid not in known:
+                out.append({**row, "enabled": False, "engine_built": sid in built,
+                            "dropped": {}, "verdict": "running but not in the saved config",
+                            "bot_running": bool(getattr(self, "running", False))})
+        return out
+
     def _log_resolved_slot_params(self, slot, config, engine) -> None:
         """Emit the resolved gate parameters once per slot per UTC day."""
         today = datetime.now(timezone.utc).date()
@@ -815,27 +900,41 @@ class BotService:
                 rows = (await session.execute(
                     select(Trade).where(Trade.user_id == self.user_id,
                                         Trade.status == "OPEN"))).scalars().all()
-            # ticket -> (group_id, symbol, strategy_id), for the trades still open
-            owner = {int(t.mt5_ticket): (t.group_id, t.symbol, t.strategy_id)
+            # ticket -> the trade facts a breaker needs to adopt the group it
+            # belongs to. `direction` is here because without it an adopted
+            # group never matches get_net_direction_open_risk().
+            owner = {int(t.mt5_ticket): (t.group_id, t.symbol, t.strategy_id, t.direction)
                      for t in rows if t.mt5_ticket and t.group_id}
 
             for slot in slots:
+                # RESOLVE the slot, do not look it up. `config_for` falls back to
+                # the ACCOUNT config for a slot it has never been told about, and
+                # `slot_configs` is only populated by `_slot_engine`, which runs
+                # deep inside the signal-execution branch of the scan loop. So a
+                # slot holding an open position and producing no new signal this
+                # cycle — exactly when a profit target matters — read the
+                # account's `target_profit_enabled` (False) and was skipped here,
+                # silently, before the breaker was ever consulted. That is why
+                # adopting unknown groups in `note_group_floating` did not fix
+                # this: control never reached it.
+                circuit = self._slot_engine(slot, config).circuit
                 cfg = self.slot_book.config_for(slot.slot_id)
                 if not cfg.get("target_profit_enabled"):
                     continue
-                circuit = self.slot_book.engine(slot.slot_id).circuit
                 # Only THIS slot's positions: same symbol, same strategy.
                 mine = []
                 for ticket, pos in tickets.items():
                     got = owner.get(ticket)
                     if got is None:
                         continue
-                    group_id, symbol, strategy_id = got
+                    group_id, symbol, strategy_id, direction = got
                     if str(symbol).upper() != str(slot.symbol).upper():
                         continue
                     if strategy_id != slot.strategy_id:
                         continue
                     mine.append({"group_id": group_id, "ticket": ticket, "symbol": symbol,
+                                 "direction": direction, "strategy_id": strategy_id,
+                                 "slot_id": slot.slot_id,
                                  "profit": float(pos.profit) + float(getattr(pos, "swap", 0.0) or 0.0)})
                 if not mine:
                     continue
@@ -1024,8 +1123,8 @@ class BotService:
                 else:
                     for _sym in self.symbols:
                         effective_slots.append(_InstrumentSlot(
-                            slot_id=_uuid_mod.uuid5(_uuid_mod.NAMESPACE_OID, f"{_sym}:APA_v1").hex[:12],
-                            symbol=_sym, strategy_id="APA_v1",
+                            slot_id=_uuid_mod.uuid5(_uuid_mod.NAMESPACE_OID, f"{_sym}:VWAP_v1").hex[:12],
+                            symbol=_sym, strategy_id="VWAP_v1",
                         ))
 
                 for slot in effective_slots:
@@ -1037,6 +1136,7 @@ class BotService:
                     await asyncio.sleep(0.5)
 
                     self._log_event(f"Scanning {symbol} [{slot.strategy_id}]...", category="SCAN")
+                    self._slot_seen(slot, "scan")
 
                     try:
                         import pandas as pd
@@ -1053,7 +1153,7 @@ class BotService:
                         # separate instrument_settings lookup keyed by symbol ──
                         strategy_id = slot.strategy_id
                         if strategy_id == "SMC_v1":
-                            strategy_id = "APA_v1"
+                            strategy_id = "VWAP_v1"
 
                         # A saved slot can outlive its strategy — nine were removed
                         # on 2026-09-11. Without this, get_strategy() raises into the
@@ -1163,7 +1263,7 @@ class BotService:
                                 from backend.strategies.strategy_defaults import get_strategy_defaults
                                 _sd_live = get_strategy_defaults(strategy_id)
                                 if "session_filter_enabled" in _sd_live:
-                                    _blk_name = {"APA_v1": "apa", "VWAP_v1": "vwap"}.get(strategy_id)
+                                    _blk_name = {"VWAP_v1": "vwap"}.get(strategy_id)
                                     _blk = getattr(config, _blk_name, None) if _blk_name else None
                                     if _blk is not None and hasattr(_blk, "session_filter_enabled"):
                                         _blk.session_filter_enabled = _sd_live["session_filter_enabled"]
@@ -1250,6 +1350,7 @@ class BotService:
                             
                             if signal:
                                 # We have a signal. Inject strategy ID.
+                                self._slot_seen(slot, "signal")
                                 signal.strategy_id = strategy_id
 
                                 # Cooldown check
@@ -1753,12 +1854,20 @@ class BotService:
                                                         # target can find this trade's group later — the breaker
                                                         # keys floating P&L by group, not by symbol.
                                                         group_id=group_id,
+                                                        # Which account this
+                                                        # belongs to. Read from
+                                                        # the breaker's own
+                                                        # account tag, so a
+                                                        # trade and its risk
+                                                        # state can never
+                                                        # disagree about it.
+                                                        mt5_account=self.account_id,
                                                         # Was missing entirely — Trade.strategy_id defaults to
                                                         # "APA_v1" at the model level, so every live trade was
                                                         # silently mislabeled regardless of which strategy actually
                                                         # generated it. This broke any strategy_id-based logic
                                                         # downstream (e.g. VWAP's live hard-close gate).
-                                                        strategy_id=getattr(signal, 'strategy_id', None) or "APA_v1",
+                                                        strategy_id=getattr(signal, 'strategy_id', None) or "VWAP_v1",
                                                         # Journal completeness: the session the trade was
                                                         # opened in, when that session closes, and the
                                                         # PLANNED reward-to-risk. All three columns existed

@@ -39,7 +39,37 @@ from backend.strategies.registry import get_all_strategies
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/api/strategy-factory", tags=["strategy-factory"])
+
+
+# ── the gate ───────────────────────────────────────────────────────────────
+#
+# These endpoints run `git` and open pull requests on a real repository, from an
+# HTTP request. That is a reasonable developer tool and an unreasonable thing to
+# leave reachable on a box behind a public proxy, so it is OFF unless the
+# machine says otherwise.
+#
+# Opt-in by environment rather than by role: an admin token is exactly what an
+# attacker who has got this far would have, and the deploy that puts this on the
+# internet is not the deploy that wants a code generator.
+
+STRATEGY_FACTORY_ENV = "ENABLE_STRATEGY_FACTORY"
+
+
+def strategy_factory_enabled() -> bool:
+    return str(os.getenv(STRATEGY_FACTORY_ENV, "")).strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+async def require_strategy_factory() -> None:
+    """Refuse every route in this module unless the box has opted in."""
+    if not strategy_factory_enabled():
+        raise HTTPException(
+            status_code=404,
+            detail=(f"The strategy factory is disabled. It runs git and opens pull "
+                    f"requests, so it is off unless {STRATEGY_FACTORY_ENV}=1 is set on "
+                    f"this machine."))
+
+router = APIRouter(prefix="/api/strategy-factory", tags=["strategy-factory"], dependencies=[Depends(require_strategy_factory)])
 
 # ── Repo root (two levels up from this file) ──────────────────────────────────
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent

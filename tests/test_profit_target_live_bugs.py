@@ -259,3 +259,219 @@ def test_basis_decides_whether_an_open_trade_counts(basis, expected):
         cb, [{"group_id": "g1", "ticket": 1, "symbol": "X", "profit": 80.0}],
         lambda p: p["profit"], 3585.44)
     assert to_close == expected
+
+
+# ── The report came back: "profit target still do not work" (2026-10-08) ────
+#
+# The 2026-09-29 fix above was real but it was not the whole cause, and the two
+# defects below each break the target on their own — both BEFORE the breaker is
+# ever consulted, which is why adopting unknown groups did not help.
+#
+# Measured against the user's own saved config (Crash 1000 Index /
+# DriftJumpAlpha_v1, scope TRADE, basis FLOATING, $50):
+#
+#   1. `build_live_risk_config` was a hand-written dict literal and dropped 22
+#      of 93 RiskParams fields. Six were the whole profit-target mechanism —
+#      max_trade_profit, max_monthly_profit, profit_target_scopes/basis/action/
+#      is_pct — so the slot armed the switch and the AMOUNT never arrived.
+#      `_check_trade` then returns None for "no per-trade amount set at all".
+#   2. `_apply_profit_targets` read `slot_book.config_for(slot.slot_id)`, which
+#      falls back to the ACCOUNT config for a slot it was never told about.
+#      Registration only happens in `_slot_engine`, deep inside the signal
+#      branch of the scan loop — so a slot holding an open position and
+#      producing no new signal read the account's `target_profit_enabled`
+#      (False) and was skipped.
+
+def _risk_fields():
+    import dataclasses
+
+    from backend.core.config_schema import RiskParams
+    return {f.name for f in dataclasses.fields(RiskParams)}
+
+
+def test_the_live_risk_config_carries_every_risk_field():
+    """Derived, not curated: a field reaches live by existing.
+
+    Asserted against the dataclass rather than a hand-kept list, because a
+    hand-kept list is the bug.
+    """
+    from backend.core.config_schema import UserConfigV2
+    from backend.risk.live_risk_config import build_live_risk_config
+
+    built, _ = build_live_risk_config(UserConfigV2(), "DriftJumpAlpha_v1")
+    missing = sorted(_risk_fields() - set(built))
+    assert not missing, f"{len(missing)} RiskParams field(s) never reach live: {missing}"
+
+
+def test_the_profit_target_amounts_reach_live():
+    """The six fields whose absence made the target inert, named explicitly.
+
+    The test above would catch these too, but naming them means a failure says
+    which feature just broke instead of only how many keys moved.
+    """
+    from backend.core.config_schema import UserConfigV2
+    from backend.risk.live_risk_config import build_live_risk_config
+
+    built, _ = build_live_risk_config(UserConfigV2(), "DriftJumpAlpha_v1")
+    for key in ("max_trade_profit", "max_daily_profit", "max_weekly_profit",
+                "max_monthly_profit", "profit_target_scopes", "profit_target_basis",
+                "profit_target_action", "profit_target_is_pct",
+                "accounting_utc_offset_hours"):
+        assert key in built, f"{key} is dropped on the way to live"
+
+
+def test_a_slot_arms_its_target_even_when_the_account_has_it_off():
+    """The user's actual shape: off on the account, on for one slot.
+
+    This is the resolution the live pass must perform rather than falling back
+    to the account config.
+    """
+    from backend.core.config_schema import InstrumentSlot, UserConfigV2
+    from backend.risk.live_risk_config import build_live_risk_config
+    from backend.risk.profit_target import ProfitTargetPolicy
+    from backend.risk.slot_book import resolve_slot_risk_config, slot_overrides_from
+
+    cfg = UserConfigV2()
+    cfg.risk.target_profit_enabled = False          # account: off
+    slot = InstrumentSlot(
+        slot_id="s1", symbol="Crash 1000 Index", strategy_id="DriftJumpAlpha_v1",
+        enabled=True,
+        risk={"target_profit_enabled": True, "profit_target_scopes": "TRADE",
+              "profit_target_basis": "FLOATING", "profit_target_action": "CLOSE_AND_PAUSE",
+              "profit_target_is_pct": False},
+    )
+    cfg.instrument_slots = [slot]
+
+    base, _ = build_live_risk_config(cfg, slot.strategy_id)
+    resolved = resolve_slot_risk_config(dict(base), slot.strategy_id,
+                                        overrides=slot_overrides_from(slot))
+    policy = ProfitTargetPolicy.from_config(resolved)
+
+    assert policy.enabled, "the slot's own switch must win over the account's"
+    assert policy.scopes == ("TRADE",)
+    assert policy.amounts.get("TRADE"), (
+        "the per-trade AMOUNT must survive resolution — without it the policy "
+        "returns None and the target is silently inert"
+    )
+
+
+def test_the_live_pass_resolves_the_slot_instead_of_looking_it_up():
+    """Pins the call, because the fallback is invisible at runtime.
+
+    `config_for` returning the account config for an unregistered slot is not an
+    error and logs nothing, so only the source can say which of the two the live
+    pass does.
+    """
+    from pathlib import Path
+
+    src = Path("backend/services/bot_service.py").read_text(encoding="utf-8")
+    body = src.split("async def _apply_profit_targets", 1)[1].split("async def _scan_loop", 1)[0]
+    assert "self._slot_engine(slot, config).circuit" in body, (
+        "_apply_profit_targets must RESOLVE each slot's config; looking it up "
+        "with config_for alone silently reads the account config for any slot "
+        "that has not produced a signal since the bot started"
+    )
+
+
+# ── Group-keyed risk caps must survive a restart (2026-10-08) ───────────────
+#
+# `save_state` persisted `open_positions_by_symbol` but not `active_groups`, and
+# `load_state` restored the former and never the latter. So after a restart the
+# per-symbol POSITION LIMITS still bit (that count was restored) while every
+# group-keyed RISK check read zero:
+#
+#     get_open_risk()                 -> 0
+#     get_cluster_open_risk()         -> 0
+#     get_net_direction_open_risk()   -> 0   (direction was blank too)
+#
+# The next signal therefore sized as though nothing were open. Nothing looked
+# wrong, which is the whole problem.
+
+def _cb(tmp_path, **cfg):
+    from backend.risk.circuit_breaker import CircuitBreaker
+
+    base = {"mt5_account": 123456, "cb_state_file": str(tmp_path / "cb.json")}
+    base.update(cfg)
+    breaker = CircuitBreaker(base)
+    breaker.state_file = str(tmp_path / "cb.json")
+    breaker.account_id = 123456
+    return breaker
+
+
+def test_open_groups_survive_a_restart(tmp_path):
+    first = _cb(tmp_path)
+    first.position_opened("g1", 1, symbol="Crash 1000 Index", initial_risk_dollars=32.50,
+                          strategy_id="DriftJumpAlpha_v1", direction="BUY", slot_id="s1")
+    first.position_opened("g2", 1, symbol="Boom 900 Index", initial_risk_dollars=18.00,
+                          strategy_id="BoomDriftJump_v1", direction="SELL", slot_id="s2")
+    assert first.get_open_risk() == pytest.approx(50.50)
+
+    after = _cb(tmp_path)
+    after.load_state()
+    assert set(after.active_groups) == {"g1", "g2"}, "the groups themselves must come back"
+    assert after.get_open_risk() == pytest.approx(50.50), (
+        "open risk read 0 after a restart, so the next signal sized as though "
+        "nothing were held"
+    )
+    assert after.active_groups["g1"]["direction"] == "BUY"
+    assert after.active_groups["g1"]["symbol"] == "Crash 1000 Index"
+
+
+def test_a_restored_group_still_counts_towards_the_net_direction_cap(tmp_path):
+    first = _cb(tmp_path)
+    first.position_opened("g1", 1, symbol="EURUSD", initial_risk_dollars=40.0,
+                          strategy_id="ORB_v1", direction="BUY", slot_id="s1")
+
+    after = _cb(tmp_path)
+    after.load_state()
+    # the cluster name comes from the governor, not from a guess
+    assert after.get_net_direction_open_risk("USD_MAJORS", "BUY") == pytest.approx(40.0), (
+        "a restored group must be visible to the net-direction cap — before this "
+        "fix it read 0 because the group was gone and its direction was blank"
+    )
+    assert after.get_cluster_open_risk("USD_MAJORS") == pytest.approx(40.0)
+    # and the opposite direction must still be clear
+    assert after.get_net_direction_open_risk("USD_MAJORS", "SELL") == 0.0
+
+
+def test_a_group_closed_while_the_bot_was_off_does_not_come_back(tmp_path):
+    """Restoring groups must not resurrect positions MT5 no longer holds.
+
+    `reconcile_from_mt5` runs on every bot start; this pins that it prunes a
+    restored group whose symbol has nothing open.
+    """
+    first = _cb(tmp_path)
+    first.position_opened("g1", 1, symbol="Crash 1000 Index", initial_risk_dollars=32.50,
+                          strategy_id="DriftJumpAlpha_v1", direction="BUY", slot_id="s1")
+
+    after = _cb(tmp_path)
+    after.load_state()
+    assert "g1" in after.active_groups
+    after.reconcile_from_mt5([])            # MT5 reports nothing open
+    assert after.active_groups == {}, "a stale restored group must be dropped"
+    assert after.get_open_risk() == 0.0
+
+
+def test_an_adopted_group_is_not_blind_to_direction():
+    """Adoption is the fallback for a group with no persisted state.
+
+    It used to write empty strings for direction/strategy/slot, so even an
+    adopted group never matched the net-direction cap. The caller knows these
+    facts — bot_service reads them off the Trade row — so they are passed in.
+    """
+    from backend.risk.circuit_breaker import CircuitBreaker
+    from backend.risk.profit_target import note_and_check
+
+    breaker = CircuitBreaker({"target_profit_enabled": True, "max_trade_profit": 50.0,
+                              "profit_target_scopes": ["TRADE"],
+                              "profit_target_basis": "FLOATING"})
+    positions = [{"group_id": "g9", "ticket": 1, "symbol": "Crash 1000 Index",
+                  "direction": "SELL", "strategy_id": "DriftJumpAlpha_v1",
+                  "slot_id": "s1", "profit": 12.0}]
+    note_and_check(breaker, positions, lambda p: p["profit"], 3000.0)
+
+    g = breaker.active_groups["g9"]
+    assert g["adopted"] is True
+    assert g["direction"] == "SELL", "an adopted group with no direction is invisible to the cap"
+    assert g["strategy_id"] == "DriftJumpAlpha_v1"
+    assert g["slot_id"] == "s1"

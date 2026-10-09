@@ -48,6 +48,29 @@ _pending: set[asyncio.Task] = set()
 _warned = False
 
 
+# ── transactional or commercial, and why the distinction is load-bearing ────
+#
+# A deposit confirmation and a launch announcement are different things in law
+# and must be different things in code:
+#
+#   TRANSACTIONAL  a message about something this person did or holds. It must
+#                  NOT carry an unsubscribe link — switching off a statement or
+#                  a payout confirmation is not a preference anyone should be
+#                  offered — and it sends whether or not a postal address is on
+#                  file.
+#   COMMERCIAL     anything that promotes. It MUST carry a one-click
+#                  unsubscribe (RFC 8058, and effectively required by Gmail and
+#                  Yahoo for bulk senders) and a physical postal address, and
+#                  `deliver` REFUSES to send it until the address is set.
+#
+# Default TRANSACTIONAL, because every message that exists today is one, and
+# because the failure mode of mislabelling is asymmetric: a commercial message
+# sent as transactional is an unlawful send, while a transactional message sent
+# as commercial merely carries a link it did not need.
+TRANSACTIONAL = "TRANSACTIONAL"
+COMMERCIAL = "COMMERCIAL"
+
+
 @dataclass
 class Message:
     kind: str
@@ -66,6 +89,12 @@ class Message:
     preferences: str | None = None
     # the fuller line in the in-app feed (behind their sign-in); default push_body
     feed_body: str | None = None
+    # See TRANSACTIONAL / COMMERCIAL above. Not a free-text field: `deliver`
+    # rejects anything else rather than guessing.
+    category: str = TRANSACTIONAL
+    # Where an unsubscribe link should point for a commercial message. Set by
+    # whoever builds the message, because only they know who it is for.
+    unsubscribe_url: str | None = None
 
 
 def queue(session, message: Message | None) -> None:
@@ -278,9 +307,68 @@ async def push(investor_id: str, title: str, body: str, data: dict | None = None
         return len(tokens) - len(dead)
 
 
+def blocked_reason(m: Message) -> str | None:
+    """Why this message must not go out, or None.
+
+    Separate from `deliver` so a caller can ask before queueing, and so the
+    rule is testable without a database.
+    """
+    if m.category not in (TRANSACTIONAL, COMMERCIAL):
+        return f"unknown category {m.category!r}"
+    if m.category != COMMERCIAL:
+        return None
+    from backend.notify import company
+
+    profile = company.get()
+    if not profile.can_send_commercial_email:
+        # CAN-SPAM requires a physical postal address in commercial email, and
+        # the exposure is per message. Blocking is the cheap failure.
+        return ("no legal entity name and postal address on file — set them in "
+                "Settings > Company before sending commercial email")
+    if not m.unsubscribe_url:
+        return "commercial email must carry an unsubscribe link"
+    return None
+
+
+
+def _record_blocked(m: Message, reason: str) -> None:
+    """Log a blocked message as a row, fire-and-forget.
+
+    A block that leaves no trace is indistinguishable from a message nobody
+    tried to send, and "why did the announcement not go out" has to be
+    answerable.
+    """
+    import asyncio
+
+    async def _write():
+        from backend.investor.models import EmailLog
+        if _session_factory is None:
+            from backend.data.database import async_session as factory
+        else:
+            factory = _session_factory
+        async with factory() as s:
+            s.add(EmailLog(kind=m.kind, to_address=m.to, subject=m.subject[:255],
+                           investor_id=m.investor_id, state="blocked",
+                           error=reason[:2000]))
+            await s.commit()
+
+    try:
+        task = asyncio.get_running_loop().create_task(_write())
+        _pending.add(task)
+        task.add_done_callback(_pending.discard)
+    except RuntimeError:
+        pass
+
 async def deliver(m: Message) -> str:
     """Record the message, then send it. Returns the final state."""
     from backend.investor.models import EmailLog
+
+    stop = blocked_reason(m)
+    if stop is not None:
+        logger.error(f"[EMAIL] {m.kind} to {m.to} BLOCKED: {stop}")
+        _record_blocked(m, stop)
+        return "blocked"
+
     if _session_factory is None:
         from backend.data.database import async_session as factory
     else:
@@ -321,6 +409,15 @@ async def _send_resend(m: Message, *, idempotency_key: str) -> str:
     reply_to = m.reply_to or os.getenv("EMAIL_REPLY_TO")
     if reply_to:
         payload["reply_to"] = reply_to
+    if m.category == COMMERCIAL and m.unsubscribe_url:
+        # RFC 8058 one-click. Gmail and Yahoo require this of bulk senders, so
+        # it is deliverability as much as law: without it commercial mail lands
+        # in spam even when it is lawful.
+        payload["headers"] = {
+            **payload.get("headers", {}),
+            "List-Unsubscribe": f"<{m.unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        }
     if m.attachments:
         payload["attachments"] = [{"filename": name, "content": base64.b64encode(data).decode()}
                                   for name, data in m.attachments]

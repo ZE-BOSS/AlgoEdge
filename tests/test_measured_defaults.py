@@ -19,7 +19,7 @@ from backend.strategies.strategy_defaults import (
     OVERRIDABLE,
 )
 
-STRATEGIES = ["APA_v1", "DriftJumpAlpha_v1", "ORB_v1", "VWAP_v1",
+STRATEGIES = ["DriftJumpAlpha_v1", "ORB_v1", "VWAP_v1",
               "BiasIFVG_v1", "SpikeFade_v1", "RangeRevert_v1", "RangeBreakout_v1", "TrendDrift_v1"]
 
 
@@ -63,7 +63,7 @@ def _manager():
     ("Crash 1000 Index", "DriftJumpAlpha_v1", 5.0),
     ("Crash 300 Index", "DriftJumpAlpha_v1", 3.0),   # differs from its sibling
     ("Volatility 75 Index", "VWAP_v1", 5.0),         # beats its 1:4 strategy default
-    ("XRPUSD", "APA_v1", 5.0),                       # beats its 1:3 strategy default
+    ("US Tech 100", "VWAP_v1", 10.0),                # beats its 1:4 strategy default
 ])
 def test_per_symbol_defaults_resolve(symbol, sid, expected):
     assert _manager().resolve_tp1_rr(symbol, sid) == expected
@@ -72,7 +72,7 @@ def test_per_symbol_defaults_resolve(symbol, sid, expected):
 @pytest.mark.parametrize("symbol,sid", [
     ("EURUSD", "VWAP_v1"),
     ("GBPUSD", "DriftJumpAlpha_v1"),
-    ("SOLUSD", "APA_v1"),
+    ("SOLUSD", "ORB_v1"),
 ])
 def test_unlisted_symbols_fall_back_to_the_strategy_default(symbol, sid):
     assert _manager().resolve_tp1_rr(symbol, sid) == get_strategy_defaults(sid)["tp1_rr"]
@@ -83,7 +83,7 @@ def test_measured_default_reaches_a_real_tp_price():
     m = _manager()
     for symbol, sid in (("Crash 1000 Index", "DriftJumpAlpha_v1"),
                         ("Crash 300 Index", "DriftJumpAlpha_v1"),
-                        ("EURUSD", "APA_v1")):
+                        ("EURUSD", "ORB_v1")):
         rr = m.resolve_tp1_rr(symbol, sid)
         levels = m.calculate_tp_levels(
             entry=100.0, sl=99.0, direction="BUY", total_volume=1.0,

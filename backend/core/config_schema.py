@@ -11,10 +11,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Literal
 
-from backend.strategies.strategy_apa.params import APAParams
 from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
 from backend.strategies.strategy_orb.params import ORBParams
 from backend.strategies.strategy_spike_resumption.params import SpikeResumptionParams
+from backend.strategies.strategy_overnight.params import OvernightSessionParams
 from backend.strategies.strategy_trend.params import TrendBreakoutParams
 from backend.strategies.strategy_vwap.params import VWAPParams
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ class RiskParams:
     """
 
     multi_position_mode: bool = True
-    sl_buffer_pips: float = 5.0  # DEPRECATED: now per-strategy (e.g. APAParams.sl_buffer_atr). Kept for DB compat.
+    sl_buffer_pips: float = 5.0  # DEPRECATED: now per-strategy (e.g. VWAPParams.sl_buffer_atr). Kept for DB compat.
 
     # ── Global stop / exposure floors (added 2026-08) ────────────────────
     # ENGINE WIRING REQUIRED for both: backend/risk/position_sizer.py has NO minimum-SL
@@ -588,7 +588,7 @@ class RiskParams:
     max_daily_trades_by_strategy: dict[str, int] = field(default_factory=dict)
     """
     [2.18/P2-R3] Per-strategy override of max_daily_trades, keyed by strategy_id
-    (e.g. {"APA_v1": 8}). A strategy not listed here falls back to the global
+    (e.g. {"VWAP_v1": 8}). A strategy not listed here falls back to the global
     max_daily_trades. Empty dict = today's global-only behaviour.
     """
     max_concurrent_positions_by_strategy: dict[str, int] = field(default_factory=dict)
@@ -968,7 +968,7 @@ class InstrumentSettings:
     Stored in UserConfigV2. Allows users to customize behaviour per symbol.
     """
     symbol:          str
-    strategy_id:     str   = "APA_v1"       # The registry ID of the strategy to run
+    strategy_id:     str   = "VWAP_v1"      # The registry ID of the strategy to run
     enabled:         bool  = True           # Trade this symbol at all
     max_lot_override: float | None = None # Cap lot size (safety)
     custom_sl_buffer: float | None = None # Override profile's sl_buffer_pips
@@ -981,7 +981,7 @@ class InstrumentSlot:
     [12.1/Part14] One symbol+strategy pairing, with optional per-slot risk
     overrides. Replaces `InstrumentSettings`' "one strategy per symbol" model:
     the SAME symbol may now appear in more than one slot under different
-    `strategy_id` values (e.g. USDCHF running VWAP_v1 and APA_v1
+    `strategy_id` values (e.g. USDCHF running VWAP_v1 and ORB_v1
     concurrently) — something a symbol-keyed structure could never express.
 
     `slot_id` is a real UUID, deliberately NOT derived from `symbol` — the
@@ -992,7 +992,7 @@ class InstrumentSlot:
     """
     slot_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     symbol: str = ""
-    strategy_id: str = "APA_v1"
+    strategy_id: str = "VWAP_v1"
     enabled: bool = True
 
     # [per-slot] THIS slot's own risk settings, as RiskParams field names:
@@ -1048,6 +1048,45 @@ class InstrumentSlot:
     the slot runs the strategy's Settings block as saved (plus its own
     override), which is what the Backtester runs with that box unticked. The
     two paths configure the engine identically either way."""
+
+    # ── the give-back rule (backend/risk/giveback.py) ────────────────────
+    #
+    # "It was 3R up and it gave it all back." A hard, unlearned rule checked on
+    # every price update rather than once a bar, because the thing it protects
+    # against happens inside a bar.
+    #
+    # OFF by default and conservative when on: it arms only once the trade has
+    # PEAKED at `giveback_arm_at_r`, so it can never turn a winner into a
+    # loser - only a big winner into a smaller one. That caution is not
+    # theoretical. Break-even at 1.5R turned 16 of 113 BTCUSD trades into
+    # BE_SL exits the research never took, and trailing measured actively
+    # harmful on several shipped strategies. This is the same class of
+    # intervention, so it is opt-in per slot and meant to be compared.
+    giveback_enabled: bool = False
+    giveback_arm_at_r: float = 2.0
+    giveback_pct: float = 50.0
+    giveback_floor_r: float = 0.0
+
+    supervising_agents: list = field(default_factory=list)
+    """[4.9] RL agents allowed to CLOSE or tighten this slot's trades early.
+
+    Strategy ids as the registry knows them (`RL::<name>@<version>`), and only
+    agents whose charter is APPROVED are ever registered — so an id that is not
+    in the registry is skipped with a warning rather than silently ignored.
+
+    Default EMPTY, and that is the important part: an agent does not start
+    supervising a slot because it exists, or because it was trained on the same
+    symbol. It supervises only the slots named here, and only the strategies and
+    symbols its own frozen `AgentSpec` permits.
+
+    A supervisor never opens a position, never sizes one and cannot widen a
+    stop — there is no action for it. The owning strategy's own exit is asked
+    first and wins. So the whole exposure this setting creates is one failure
+    mode: a trade cut earlier than the measured rule would have cut it. That is
+    exactly what the supervisor gate measures (beats unsupervised, harms no
+    strategy, closed-early mean R at or below let-run mean R, >=100 trades), and
+    it is why this is off until someone turns it on deliberately.
+    """
 
     # Carried over from InstrumentSettings — same meaning, same field names,
     # so the 12.4 migration is a direct 1:1 copy for these two.
@@ -1204,10 +1243,10 @@ class UserConfigV2(UserConfig):
     """[12.1/12.3/Part14] The authoritative symbol+strategy configuration — see InstrumentSlot."""
     drift_jump_alpha: DriftJumpAlphaParams = field(default_factory=DriftJumpAlphaParams)
     boom_drift_jump: BoomDriftJumpParams = field(default_factory=BoomDriftJumpParams)
-    apa: APAParams = field(default_factory=APAParams)
     vwap: VWAPParams = field(default_factory=VWAPParams)
     orb: ORBParams = field(default_factory=ORBParams)
     trend_breakout: TrendBreakoutParams = field(default_factory=TrendBreakoutParams)
+    overnight_session: OvernightSessionParams = field(default_factory=OvernightSessionParams)
     spike_resumption: SpikeResumptionParams = field(default_factory=SpikeResumptionParams)
     synth: SynthParams = field(default_factory=SynthParams)
     bias_ifvg: BiasIFVGParams = field(default_factory=BiasIFVGParams)
@@ -1220,9 +1259,9 @@ class UserConfigV2(UserConfig):
         instrument_slots_data = data.pop("instrument_slots", None)
         drift_jump_alpha_data = data.pop("drift_jump_alpha", {})
         boom_drift_jump_data = data.pop("boom_drift_jump", {})
-        apa_data = data.pop("apa", {})
         vwap_data = data.pop("vwap", {})
         orb_data = data.pop("orb", {})
+        overnight_session_data = data.pop("overnight_session", {})
         trend_breakout_data = data.pop("trend_breakout", {})
         spike_resumption_data = data.pop("spike_resumption", {})
         synth_data = data.pop("synth", {})
@@ -1242,10 +1281,10 @@ class UserConfigV2(UserConfig):
         config.risk = RiskParams(**filter_kwargs(RiskParams, _sync_trail_rr_aliases(risk_data)))
         config.drift_jump_alpha = DriftJumpAlphaParams(**filter_kwargs(DriftJumpAlphaParams, drift_jump_alpha_data))
         config.boom_drift_jump = BoomDriftJumpParams(**filter_kwargs(BoomDriftJumpParams, boom_drift_jump_data))
-        config.apa = APAParams(**filter_kwargs(APAParams, apa_data))
         config.vwap = VWAPParams(**filter_kwargs(VWAPParams, vwap_data))
         config.orb = ORBParams(**filter_kwargs(ORBParams, orb_data))
         config.trend_breakout = TrendBreakoutParams(**filter_kwargs(TrendBreakoutParams, trend_breakout_data))
+        config.overnight_session = OvernightSessionParams(**filter_kwargs(OvernightSessionParams, overnight_session_data))
         config.spike_resumption = SpikeResumptionParams(**filter_kwargs(SpikeResumptionParams, spike_resumption_data))
         config.synth = SynthParams(**filter_kwargs(SynthParams, synth_data))
         config.bias_ifvg = BiasIFVGParams(**filter_kwargs(BiasIFVGParams, bias_ifvg_data))
@@ -1304,14 +1343,14 @@ class UserConfigV2(UserConfig):
         if self.drift_jump_alpha is None:
             self.drift_jump_alpha = DriftJumpAlphaParams()
             self.boom_drift_jump = BoomDriftJumpParams()
-        if self.apa is None:
-            self.apa = APAParams()
         if self.vwap is None:
             self.vwap = VWAPParams()
         if self.orb is None:
             self.orb = ORBParams()
         if self.trend_breakout is None:
             self.trend_breakout = TrendBreakoutParams()
+        if self.overnight_session is None:
+            self.overnight_session = OvernightSessionParams()
         if self.spike_resumption is None:
             self.spike_resumption = SpikeResumptionParams()
         if self.synth is None:

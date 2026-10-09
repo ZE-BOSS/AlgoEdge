@@ -2,12 +2,29 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
-  LayoutDashboard, BookOpen, FlaskConical, BarChart3,
-  Zap, Settings, Wifi, WifiOff, Loader2, LogOut, ChevronLeft, ChevronRight,
-  Sparkles, Activity, Terminal, Menu, X, Users
+  Activity,
+  BarChart3,
+  BookOpen,
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+  FlaskConical,
+  LayoutDashboard,
+  Loader2,
+  LogOut,
+  Menu,
+  Settings,
+  Sparkles,
+  Terminal,
+  Users,
+  Wifi,
+  WifiOff,
+  X,
+  Zap,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useBackendConnection, useWebSocket } from './hooks/useBackendConnection';
+import ServerSwitcher, { useServerColour } from './components/ServerSwitcher';
 import { useConnectionStore, useAuthStore, useLoadingStore } from './store';
 // after ./store: services/api and store import each other, and loading api first breaks that cycle
 import { getMe } from './services/api';
@@ -29,6 +46,7 @@ const Fundamentals = lazy(() => import('./pages/Fundamentals'));
 const Logs = lazy(() => import('./pages/Logs'));
 const SettingsPage = lazy(() => import('./pages/Settings/index'));
 const Investors = lazy(() => import('./pages/Investors/index'));
+const Agents = lazy(() => import('./pages/Agents'));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30000, retry: 1 } },
@@ -72,6 +90,9 @@ function Sidebar({ isCollapsed, setIsCollapsed, isNavOpen, closeNav }) {
     { to: '/analytics', icon: BarChart3, label: 'Analytics' },
     { to: '/signals', icon: Zap, label: 'Signals' },
     { to: '/strategy-lab', icon: FlaskConical, label: 'Strategy Lab' },
+    // Admin-only on the server (`require_admin` on the whole /api/rl router);
+    // hidden here for operators who are not admins, the same way Investors is.
+    ...(user?.is_admin === false ? [] : [{ to: '/agents', icon: Bot, label: 'Agents' }]),
     { to: '/fundamentals', icon: Activity, label: 'Fundamentals' },
     { to: '/analysis', icon: Sparkles, label: 'Analysis' },
     // admin-only on the server; hidden here for operators who are not admins.
@@ -100,6 +121,11 @@ function Sidebar({ isCollapsed, setIsCollapsed, isNavOpen, closeNav }) {
         ))}
       </nav>
       <div className="sidebar-footer">
+        {/* Which backend every screen above is talking to. In the sidebar
+            rather than tucked into Settings, because the one real risk of
+            running several servers is acting on the wrong one, and a control
+            you have to go and find is one you forget to check. */}
+        <div style={{ padding: '0 10px 8px' }}><ServerSwitcher /></div>
         {user && (
           <div className="sidebar-user">
             <span className="user-email">{user.email}</span>
@@ -140,9 +166,18 @@ function AppContent() {
   const closeNav = () => setNavOpenAt(null);
   useBackendConnection();
   useWebSocket();
+  // The active server's colour, as a hairline across the top of every screen.
+  // Amber means live. It is deliberately impossible to miss and impossible to
+  // navigate away from: the one failure this feature can cause is doing
+  // something to the wrong account, and a label in a corner is not enough.
+  const serverColour = useServerColour();
 
   return (
     <div className="app-layout">
+      <div aria-hidden="true" style={{
+        position: 'fixed', top: 0, left: 0, right: 0, height: 3,
+        background: serverColour, zIndex: 100000, pointerEvents: 'none',
+      }} />
       <GlobalLoader />
       <button className="nav-open" aria-label={isNavOpen ? 'Close navigation' : 'Open navigation'}
               aria-expanded={isNavOpen} onClick={() => setNavOpenAt(v => (v === pathname ? null : pathname))}>
@@ -165,6 +200,7 @@ function AppContent() {
               <Route path="/fundamentals" element={<Fundamentals />} />
               <Route path="/analysis" element={<Analysis />} />
               <Route path="/investors/*" element={<Investors />} />
+              <Route path="/agents" element={<Agents />} />
               <Route path="/logs" element={<Logs />} />
               <Route path="/settings/*" element={<SettingsPage />} />
             </Routes>

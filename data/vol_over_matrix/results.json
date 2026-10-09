@@ -14,12 +14,12 @@
    "sizing_basis": "BALANCE",
    "signals": 5115,
    "trades": 3037,
-   "final_balance": 15032.78,
-   "net_pnl": 5032.78,
+   "final_balance": 15033.56,
+   "net_pnl": 5033.56,
    "win_rate": 0.2868,
    "profit_factor": 1.009,
    "expectancy_usd": 1.66,
-   "expectancy_r": null,
+   "expectancy_r": 0.1229,
    "max_dd_pct": 87.9,
    "rejections": {
     "Max positions reached for Vol over Crash 400 (15/15)": 1205,
@@ -31,8 +31,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.043322916666667,
-    "swap_short_per_lot_per_day": -3.6519875,
+    "swap_long_per_lot_per_day": -3.038930555555555,
+    "swap_short_per_lot_per_day": -3.646716666666666,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -85,24 +85,24 @@
    "sizing_basis": "STATIC",
    "signals": 5115,
    "trades": 3231,
-   "final_balance": 36038.27,
-   "net_pnl": 26038.27,
+   "final_balance": 36035.37,
+   "net_pnl": 26035.37,
    "win_rate": 0.2804,
    "profit_factor": 1.132,
    "expectancy_usd": 8.06,
-   "expectancy_r": null,
+   "expectancy_r": 0.097,
    "max_dd_pct": 90.53,
    "rejections": {
     "Max positions reached for Vol over Crash 400 (15/15)": 1249,
     "Calculated lot size is below this broker's minimum tradeable volume": 58,
     "Weekly drawdown limit reached: 46.38% >= 40.0%": 52,
     "Weekly drawdown limit of 40.0% is fully exhausted.": 40,
-    "Weekly drawdown limit reached: 43.81% >= 40.0%": 40,
+    "Weekly drawdown limit reached: 43.80% >= 40.0%": 40,
     "Weekly drawdown limit reached: 40.77% >= 40.0%": 42,
     "Weekly drawdown limit reached: 46.22% >= 40.0%": 80,
     "Weekly drawdown limit reached: 42.88% >= 40.0%": 80,
     "Weekly drawdown limit reached: 46.53% >= 40.0%": 60,
-    "Weekly drawdown limit reached: 42.10% >= 40.0%": 40,
+    "Weekly drawdown limit reached: 42.11% >= 40.0%": 40,
     "Weekly drawdown limit reached: 46.23% >= 40.0%": 21,
     "Weekly drawdown limit reached: 40.98% >= 40.0%": 80,
     "Daily drawdown limit of 20.0% is fully exhausted.": 2,
@@ -112,8 +112,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.0371527777777776,
-    "swap_short_per_lot_per_day": -3.6445833333333333,
+    "swap_long_per_lot_per_day": -3.0415,
+    "swap_short_per_lot_per_day": -3.6498000000000004,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -182,8 +182,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.034534722222222,
-    "swap_short_per_lot_per_day": -3.6414416666666662,
+    "swap_long_per_lot_per_day": -3.0444583333333335,
+    "swap_short_per_lot_per_day": -3.6533500000000005,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -235,8 +235,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.035381944444445,
-    "swap_short_per_lot_per_day": -3.6424583333333334,
+    "swap_long_per_lot_per_day": -3.0451249999999996,
+    "swap_short_per_lot_per_day": -3.6541499999999996,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -280,20 +280,20 @@
    "sizing_basis": "BALANCE",
    "signals": 1084,
    "trades": 1084,
-   "final_balance": 12379.13,
-   "net_pnl": 2379.13,
+   "final_balance": 12377.74,
+   "net_pnl": 2377.74,
    "win_rate": 0.2712,
    "profit_factor": 1.027,
    "expectancy_usd": 2.19,
-   "expectancy_r": null,
+   "expectancy_r": 0.0659,
    "max_dd_pct": 58.64,
    "rejections": {},
    "costs_resolved": {
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.036590277777778,
-    "swap_short_per_lot_per_day": -3.6439083333333335,
+    "swap_long_per_lot_per_day": -3.0460277777777782,
+    "swap_short_per_lot_per_day": -3.6552333333333342,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -346,20 +346,20 @@
    "sizing_basis": "STATIC",
    "signals": 1084,
    "trades": 1084,
-   "final_balance": 15343.27,
-   "net_pnl": 5343.27,
+   "final_balance": 15342.32,
+   "net_pnl": 5342.32,
    "win_rate": 0.2712,
    "profit_factor": 1.089,
    "expectancy_usd": 4.93,
-   "expectancy_r": null,
+   "expectancy_r": 0.0659,
    "max_dd_pct": 43.74,
    "rejections": {},
    "costs_resolved": {
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.0387118055555553,
-    "swap_short_per_lot_per_day": -3.646454166666666,
+    "swap_long_per_lot_per_day": -3.0483958333333336,
+    "swap_short_per_lot_per_day": -3.6580750000000006,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -416,12 +416,12 @@
    "sizing_basis": "BALANCE",
    "signals": 4972,
    "trades": 2851,
-   "final_balance": 5049.07,
-   "net_pnl": -4950.93,
+   "final_balance": 5049.13,
+   "net_pnl": -4950.87,
    "win_rate": 0.2778,
    "profit_factor": 0.996,
    "expectancy_usd": -1.74,
-   "expectancy_r": null,
+   "expectancy_r": 0.0819,
    "max_dd_pct": 97.53,
    "rejections": {
     "Max positions reached for Vol over Crash 550 (15/15)": 1114,
@@ -434,8 +434,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -0.6706194444444443,
-    "swap_short_per_lot_per_day": -0.8382743055555554,
+    "swap_long_per_lot_per_day": -0.670488888888889,
+    "swap_short_per_lot_per_day": -0.8381111111111111,
     "stops_level_pips": 320.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -489,22 +489,22 @@
    "sizing_basis": "STATIC",
    "signals": 4972,
    "trades": 3058,
-   "final_balance": 26614.52,
-   "net_pnl": 16614.52,
+   "final_balance": 26608.81,
+   "net_pnl": 16608.81,
    "win_rate": 0.2704,
    "profit_factor": 1.088,
    "expectancy_usd": 5.43,
-   "expectancy_r": null,
-   "max_dd_pct": 57.42,
+   "expectancy_r": 0.0529,
+   "max_dd_pct": 57.43,
    "rejections": {
     "Max positions reached for Vol over Crash 550 (15/15)": 1188,
     "Calculated lot size is below this broker's minimum tradeable volume": 77,
     "Weekly drawdown limit reached: 40.35% >= 40.0%": 35,
-    "Weekly drawdown limit reached: 41.09% >= 40.0%": 13,
+    "Weekly drawdown limit reached: 41.10% >= 40.0%": 13,
     "Weekly drawdown limit reached: 42.05% >= 40.0%": 40,
     "Weekly drawdown limit of 40.0% is fully exhausted.": 14,
     "Weekly drawdown limit reached: 44.56% >= 40.0%": 80,
-    "Weekly drawdown limit reached: 42.71% >= 40.0%": 40,
+    "Weekly drawdown limit reached: 42.72% >= 40.0%": 40,
     "Weekly drawdown limit reached: 40.43% >= 40.0%": 20,
     "Weekly drawdown limit reached: 44.35% >= 40.0%": 30,
     "Weekly drawdown limit reached: 45.32% >= 40.0%": 60,
@@ -519,8 +519,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -0.668425,
-    "swap_short_per_lot_per_day": -0.83553125,
+    "swap_long_per_lot_per_day": -0.6723361111111111,
+    "swap_short_per_lot_per_day": -0.8404201388888889,
     "stops_level_pips": 320.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -543,7 +543,7 @@
     "gapped_pct": 100.0,
     "mean_overshoot_r": 0.0193,
     "max_overshoot_r": 0.133,
-    "total_overshoot_r": 43.0241,
+    "total_overshoot_r": 43.024,
     "by_symbol": {
      "Vol over Crash 550": {
       "stop_exits": 2231,
@@ -590,8 +590,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -0.6678194444444443,
-    "swap_short_per_lot_per_day": -0.8347743055555554,
+    "swap_long_per_lot_per_day": -0.6681583333333333,
+    "swap_short_per_lot_per_day": -0.8351979166666667,
     "stops_level_pips": 320.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -643,8 +643,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -0.6676694444444444,
-    "swap_short_per_lot_per_day": -0.8345868055555554,
+    "swap_long_per_lot_per_day": -0.6681750000000001,
+    "swap_short_per_lot_per_day": -0.8352187500000001,
     "stops_level_pips": 320.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -688,20 +688,20 @@
    "sizing_basis": "BALANCE",
    "signals": 1084,
    "trades": 1084,
-   "final_balance": 87052.44,
-   "net_pnl": 77052.44,
+   "final_balance": 87051.47,
+   "net_pnl": 77051.47,
    "win_rate": 0.3321,
-   "profit_factor": 1.268,
+   "profit_factor": 1.267,
    "expectancy_usd": 71.08,
-   "expectancy_r": null,
+   "expectancy_r": 0.3122,
    "max_dd_pct": 35.22,
    "rejections": {},
    "costs_resolved": {
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -0.6678083333333332,
-    "swap_short_per_lot_per_day": -0.8347604166666666,
+    "swap_long_per_lot_per_day": -0.6680416666666666,
+    "swap_short_per_lot_per_day": -0.8350520833333333,
     "stops_level_pips": 320.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -754,20 +754,20 @@
    "sizing_basis": "STATIC",
    "signals": 1084,
    "trades": 1084,
-   "final_balance": 35247.02,
-   "net_pnl": 25247.02,
+   "final_balance": 35246.82,
+   "net_pnl": 25246.82,
    "win_rate": 0.3321,
    "profit_factor": 1.458,
    "expectancy_usd": 23.29,
-   "expectancy_r": null,
+   "expectancy_r": 0.3122,
    "max_dd_pct": 12.78,
    "rejections": {},
    "costs_resolved": {
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -0.6665027777777778,
-    "swap_short_per_lot_per_day": -0.8331284722222222,
+    "swap_long_per_lot_per_day": -0.6684972222222223,
+    "swap_short_per_lot_per_day": -0.8356215277777779,
     "stops_level_pips": 320.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -823,26 +823,25 @@
    "risk_pct": 1.0,
    "sizing_basis": "BALANCE",
    "signals": 5205,
-   "trades": 3269,
-   "final_balance": 993640.1,
-   "net_pnl": 983640.1,
-   "win_rate": 0.3337,
-   "profit_factor": 1.278,
-   "expectancy_usd": 300.9,
-   "expectancy_r": null,
-   "max_dd_pct": 62.37,
+   "trades": 3270,
+   "final_balance": 997366.54,
+   "net_pnl": 987366.54,
+   "win_rate": 0.3336,
+   "profit_factor": 1.279,
+   "expectancy_usd": 301.95,
+   "expectancy_r": 0.3047,
+   "max_dd_pct": 62.11,
    "rejections": {
     "Max positions reached for Vol over Crash 750 (15/15)": 1691,
     "Daily drawdown limit of 20.0% is fully exhausted.": 24,
-    "Calculated lot size is below this broker's minimum tradeable volume": 1,
     "Weekly drawdown limit of 40.0% is fully exhausted.": 220
    },
    "costs_resolved": {
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -5.8504354166666666,
-    "swap_short_per_lot_per_day": -7.800580555555556,
+    "swap_long_per_lot_per_day": -5.694849999999999,
+    "swap_short_per_lot_per_day": -7.593133333333334,
     "stops_level_pips": 250.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -860,15 +859,15 @@
    "fill_model": {
     "mode": "CONSERVATIVE",
     "seed": "algoedge",
-    "stop_exits": 2178,
-    "gapped_exits": 2178,
+    "stop_exits": 2179,
+    "gapped_exits": 2179,
     "gapped_pct": 100.0,
     "mean_overshoot_r": 0.0225,
     "max_overshoot_r": 1.0635,
-    "total_overshoot_r": 48.983,
+    "total_overshoot_r": 49.003,
     "by_symbol": {
      "Vol over Crash 750": {
-      "stop_exits": 2178,
+      "stop_exits": 2179,
       "gapped_pct": 100.0,
       "mean_overshoot_r": 0.0225,
       "max_overshoot_r": 1.0635,
@@ -880,7 +879,7 @@
    },
    "exit_reasons": {
     "TP1": 1091,
-    "SL": 2178
+    "SL": 2179
    }
   },
   "flat": {
@@ -895,13 +894,13 @@
    "sizing_basis": "STATIC",
    "signals": 5205,
    "trades": 3248,
-   "final_balance": 99182.83,
-   "net_pnl": 89182.83,
+   "final_balance": 99311.65,
+   "net_pnl": 89311.65,
    "win_rate": 0.3331,
-   "profit_factor": 1.461,
-   "expectancy_usd": 27.46,
-   "expectancy_r": null,
-   "max_dd_pct": 40.45,
+   "profit_factor": 1.462,
+   "expectancy_usd": 27.5,
+   "expectancy_r": 0.3026,
+   "max_dd_pct": 40.39,
    "rejections": {
     "Max positions reached for Vol over Crash 750 (15/15)": 1618,
     "Calculated lot size is below this broker's minimum tradeable volume": 126,
@@ -915,8 +914,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -5.859754166666666,
-    "swap_short_per_lot_per_day": -7.813005555555555,
+    "swap_long_per_lot_per_day": -5.69010625,
+    "swap_short_per_lot_per_day": -7.586808333333334,
     "stops_level_pips": 250.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -985,8 +984,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -5.843949999999999,
-    "swap_short_per_lot_per_day": -7.791933333333332,
+    "swap_long_per_lot_per_day": -5.701220833333334,
+    "swap_short_per_lot_per_day": -7.60162777777778,
     "stops_level_pips": 250.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1038,8 +1037,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -5.8445937500000005,
-    "swap_short_per_lot_per_day": -7.792791666666667,
+    "swap_long_per_lot_per_day": -5.701064583333333,
+    "swap_short_per_lot_per_day": -7.601419444444445,
     "stops_level_pips": 250.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1083,20 +1082,20 @@
    "sizing_basis": "BALANCE",
    "signals": 1084,
    "trades": 1084,
-   "final_balance": 3412.14,
-   "net_pnl": -6587.86,
+   "final_balance": 3412.25,
+   "net_pnl": -6587.75,
    "win_rate": 0.2297,
    "profit_factor": 0.811,
    "expectancy_usd": -6.08,
-   "expectancy_r": null,
-   "max_dd_pct": 72.57,
+   "expectancy_r": -0.0982,
+   "max_dd_pct": 72.58,
    "rejections": {},
    "costs_resolved": {
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -5.845391666666666,
-    "swap_short_per_lot_per_day": -7.793855555555557,
+    "swap_long_per_lot_per_day": -5.703160416666666,
+    "swap_short_per_lot_per_day": -7.604213888888888,
     "stops_level_pips": 250.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1149,20 +1148,20 @@
    "sizing_basis": "STATIC",
    "signals": 1084,
    "trades": 1084,
-   "final_balance": 2067.82,
-   "net_pnl": -7932.18,
+   "final_balance": 2069.92,
+   "net_pnl": -7930.08,
    "win_rate": 0.2297,
    "profit_factor": 0.875,
    "expectancy_usd": -7.32,
-   "expectancy_r": null,
-   "max_dd_pct": 112.5,
+   "expectancy_r": -0.0982,
+   "max_dd_pct": 112.49,
    "rejections": {},
    "costs_resolved": {
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -5.848614583333333,
-    "swap_short_per_lot_per_day": -7.798152777777778,
+    "swap_long_per_lot_per_day": -5.707293750000001,
+    "swap_short_per_lot_per_day": -7.609725000000001,
     "stops_level_pips": 250.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1231,8 +1230,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -7.801322916666667,
-    "swap_short_per_lot_per_day": -9.3615875,
+    "swap_long_per_lot_per_day": -7.830697916666667,
+    "swap_short_per_lot_per_day": -9.3968375,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1284,8 +1283,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -7.800614583333333,
-    "swap_short_per_lot_per_day": -9.360737499999999,
+    "swap_long_per_lot_per_day": -7.831579861111111,
+    "swap_short_per_lot_per_day": -9.397895833333333,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1329,12 +1328,12 @@
    "sizing_basis": "BALANCE",
    "signals": 5336,
    "trades": 4851,
-   "final_balance": 1106543.76,
-   "net_pnl": 1096543.76,
+   "final_balance": 1106544.01,
+   "net_pnl": 1096544.01,
    "win_rate": 0.3142,
    "profit_factor": 1.264,
    "expectancy_usd": 226.04,
-   "expectancy_r": null,
+   "expectancy_r": 0.2397,
    "max_dd_pct": 63.44,
    "rejections": {
     "Max positions reached for Vol over Boom 400 (15/15)": 368,
@@ -1346,8 +1345,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -7.7752743055555555,
-    "swap_short_per_lot_per_day": -9.330329166666667,
+    "swap_long_per_lot_per_day": -7.81790625,
+    "swap_short_per_lot_per_day": -9.381487499999999,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1400,12 +1399,12 @@
    "sizing_basis": "STATIC",
    "signals": 5336,
    "trades": 4637,
-   "final_balance": 97849.57,
-   "net_pnl": 87849.57,
+   "final_balance": 97849.34,
+   "net_pnl": 87849.34,
    "win_rate": 0.3252,
    "profit_factor": 1.425,
    "expectancy_usd": 18.95,
-   "expectancy_r": null,
+   "expectancy_r": 0.2841,
    "max_dd_pct": 32.6,
    "rejections": {
     "Max positions reached for Vol over Boom 400 (15/15)": 355,
@@ -1423,8 +1422,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -7.75879513888889,
-    "swap_short_per_lot_per_day": -9.310554166666666,
+    "swap_long_per_lot_per_day": -7.793913194444444,
+    "swap_short_per_lot_per_day": -9.352695833333334,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1481,20 +1480,20 @@
    "sizing_basis": "BALANCE",
    "signals": 1084,
    "trades": 1084,
-   "final_balance": 12381.02,
-   "net_pnl": 2381.02,
+   "final_balance": 12381.96,
+   "net_pnl": 2381.96,
    "win_rate": 0.2712,
    "profit_factor": 1.042,
    "expectancy_usd": 2.2,
-   "expectancy_r": null,
+   "expectancy_r": 0.0656,
    "max_dd_pct": 40.76,
    "rejections": {},
    "costs_resolved": {
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -7.752454861111111,
-    "swap_short_per_lot_per_day": -9.302945833333334,
+    "swap_long_per_lot_per_day": -7.797052083333334,
+    "swap_short_per_lot_per_day": -9.356462500000001,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1547,20 +1546,20 @@
    "sizing_basis": "STATIC",
    "signals": 1084,
    "trades": 1084,
-   "final_balance": 15303.34,
-   "net_pnl": 5303.34,
+   "final_balance": 15301.1,
+   "net_pnl": 5301.1,
    "win_rate": 0.2712,
    "profit_factor": 1.088,
    "expectancy_usd": 4.89,
-   "expectancy_r": null,
+   "expectancy_r": 0.0656,
    "max_dd_pct": 40.88,
    "rejections": {},
    "costs_resolved": {
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -7.743211805555556,
-    "swap_short_per_lot_per_day": -9.291854166666667,
+    "swap_long_per_lot_per_day": -7.791163194444445,
+    "swap_short_per_lot_per_day": -9.349395833333332,
     "stops_level_pips": 360.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1629,8 +1628,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.2546361111111115,
-    "swap_short_per_lot_per_day": -4.068295138888889,
+    "swap_long_per_lot_per_day": -3.314352777777778,
+    "swap_short_per_lot_per_day": -4.142940972222222,
     "stops_level_pips": 320.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1682,8 +1681,8 @@
     "slippage_pips": 0.2,
     "commission_per_lot": 0.0,
     "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.251991666666667,
-    "swap_short_per_lot_per_day": -4.064989583333333,
+    "swap_long_per_lot_per_day": -3.314252777777778,
+    "swap_short_per_lot_per_day": -4.142815972222222,
     "stops_level_pips": 320.0,
     "exit_slippage_pips": 0.2,
     "sources": {
@@ -1714,684 +1713,22 @@
  },
  {
   "symbol": "Vol over Boom 550",
-  "strategy": "BoomDriftJump_v1",
-  "compounded": {
-   "strategy": "BoomDriftJump_v1",
-   "symbol": "Vol over Boom 550",
-   "window": [
-    "2026-01-01",
-    "2026-09-29"
-   ],
-   "balance": 10000.0,
-   "risk_pct": 1.0,
-   "sizing_basis": "BALANCE",
-   "signals": 5388,
-   "trades": 4941,
-   "final_balance": 866277.41,
-   "net_pnl": 856277.41,
-   "win_rate": 0.3258,
-   "profit_factor": 1.368,
-   "expectancy_usd": 173.3,
-   "expectancy_r": null,
-   "max_dd_pct": 50.52,
-   "rejections": {
-    "Max positions reached for Vol over Boom 550 (15/15)": 441,
-    "stale_at_fill": 4,
-    "sub_minimum_stop": 1,
-    "Daily max trades limit reached (20/20)": 1
-   },
-   "costs_resolved": {
-    "slippage_pips": 0.2,
-    "commission_per_lot": 0.0,
-    "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.2475083333333337,
-    "swap_short_per_lot_per_day": -4.059385416666667,
-    "stops_level_pips": 320.0,
-    "exit_slippage_pips": 0.2,
-    "sources": {
-     "slippage_pips": "MT5",
-     "commission_per_lot": "MT5",
-     "spread_pips": "MT5",
-     "swap_long_per_lot_per_day": "MT5",
-     "swap_short_per_lot_per_day": "MT5",
-     "stops_level_pips": "MT5",
-     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
-    },
-    "broker_source": "MT5",
-    "symbol": "Vol over Boom 550"
-   },
-   "fill_model": {
-    "mode": "CONSERVATIVE",
-    "seed": "algoedge",
-    "stop_exits": 3331,
-    "gapped_exits": 3331,
-    "gapped_pct": 100.0,
-    "mean_overshoot_r": 0.0246,
-    "max_overshoot_r": 2.2754,
-    "total_overshoot_r": 82.0199,
-    "by_symbol": {
-     "Vol over Boom 550": {
-      "stop_exits": 3331,
-      "gapped_pct": 100.0,
-      "mean_overshoot_r": 0.0246,
-      "max_overshoot_r": 2.2754,
-      "profile_mean": 0.02,
-      "profile_source": "class default \u2014 no tick study",
-      "profile_calibration": "assumed"
-     }
-    }
-   },
-   "exit_reasons": {
-    "SL": 3331,
-    "TP1": 1610
-   }
-  },
-  "flat": {
-   "strategy": "BoomDriftJump_v1",
-   "symbol": "Vol over Boom 550",
-   "window": [
-    "2026-01-01",
-    "2026-09-29"
-   ],
-   "balance": 10000.0,
-   "risk_pct": 1.0,
-   "sizing_basis": "STATIC",
-   "signals": 5388,
-   "trades": 4798,
-   "final_balance": 104734.5,
-   "net_pnl": 94734.5,
-   "win_rate": 0.3312,
-   "profit_factor": 1.435,
-   "expectancy_usd": 19.74,
-   "expectancy_r": null,
-   "max_dd_pct": 22.51,
-   "rejections": {
-    "Max positions reached for Vol over Boom 550 (15/15)": 427,
-    "stale_at_fill": 3,
-    "Calculated lot size is below this broker's minimum tradeable volume": 46,
-    "Weekly drawdown limit reached: 40.28% >= 40.0%": 17,
-    "Weekly drawdown limit reached: 42.08% >= 40.0%": 40,
-    "sub_minimum_stop": 1,
-    "Daily drawdown limit reached: 25.18% >= 20.0%": 1,
-    "Weekly drawdown limit reached: 40.98% >= 40.0%": 54,
-    "Daily max trades limit reached (20/20)": 1
-   },
-   "costs_resolved": {
-    "slippage_pips": 0.2,
-    "commission_per_lot": 0.0,
-    "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.245419444444445,
-    "swap_short_per_lot_per_day": -4.056774305555556,
-    "stops_level_pips": 320.0,
-    "exit_slippage_pips": 0.2,
-    "sources": {
-     "slippage_pips": "MT5",
-     "commission_per_lot": "MT5",
-     "spread_pips": "MT5",
-     "swap_long_per_lot_per_day": "MT5",
-     "swap_short_per_lot_per_day": "MT5",
-     "stops_level_pips": "MT5",
-     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
-    },
-    "broker_source": "MT5",
-    "symbol": "Vol over Boom 550"
-   },
-   "fill_model": {
-    "mode": "CONSERVATIVE",
-    "seed": "algoedge",
-    "stop_exits": 3209,
-    "gapped_exits": 3209,
-    "gapped_pct": 100.0,
-    "mean_overshoot_r": 0.0248,
-    "max_overshoot_r": 2.2754,
-    "total_overshoot_r": 79.585,
-    "by_symbol": {
-     "Vol over Boom 550": {
-      "stop_exits": 3209,
-      "gapped_pct": 100.0,
-      "mean_overshoot_r": 0.0248,
-      "max_overshoot_r": 2.2754,
-      "profile_mean": 0.02,
-      "profile_source": "class default \u2014 no tick study",
-      "profile_calibration": "assumed"
-     }
-    }
-   },
-   "exit_reasons": {
-    "SL": 3209,
-    "TP1": 1589
-   }
-  }
+  "strategy": "BoomDriftJump_v1"
  },
  {
   "symbol": "Vol over Boom 550",
-  "strategy": "TrendDrift_v1",
-  "compounded": {
-   "strategy": "TrendDrift_v1",
-   "symbol": "Vol over Boom 550",
-   "window": [
-    "2026-01-01",
-    "2026-09-29"
-   ],
-   "balance": 10000.0,
-   "risk_pct": 1.0,
-   "sizing_basis": "BALANCE",
-   "signals": 1084,
-   "trades": 1084,
-   "final_balance": 28213.14,
-   "net_pnl": 18213.14,
-   "win_rate": 0.2989,
-   "profit_factor": 1.176,
-   "expectancy_usd": 16.8,
-   "expectancy_r": null,
-   "max_dd_pct": 58.0,
-   "rejections": {},
-   "costs_resolved": {
-    "slippage_pips": 0.2,
-    "commission_per_lot": 0.0,
-    "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.249027777777778,
-    "swap_short_per_lot_per_day": -4.061284722222222,
-    "stops_level_pips": 320.0,
-    "exit_slippage_pips": 0.2,
-    "sources": {
-     "slippage_pips": "MT5",
-     "commission_per_lot": "MT5",
-     "spread_pips": "MT5",
-     "swap_long_per_lot_per_day": "MT5",
-     "swap_short_per_lot_per_day": "MT5",
-     "stops_level_pips": "MT5",
-     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
-    },
-    "broker_source": "MT5",
-    "symbol": "Vol over Boom 550"
-   },
-   "fill_model": {
-    "mode": "CONSERVATIVE",
-    "seed": "algoedge",
-    "stop_exits": 760,
-    "gapped_exits": 760,
-    "gapped_pct": 100.0,
-    "mean_overshoot_r": 0.0224,
-    "max_overshoot_r": 1.2084,
-    "total_overshoot_r": 17.0304,
-    "by_symbol": {
-     "Vol over Boom 550": {
-      "stop_exits": 760,
-      "gapped_pct": 100.0,
-      "mean_overshoot_r": 0.0224,
-      "max_overshoot_r": 1.2084,
-      "profile_mean": 0.02,
-      "profile_source": "class default \u2014 no tick study",
-      "profile_calibration": "assumed"
-     }
-    }
-   },
-   "exit_reasons": {
-    "SL": 760,
-    "TP1": 322,
-    "END_OF_DATA": 2
-   }
-  },
-  "flat": {
-   "strategy": "TrendDrift_v1",
-   "symbol": "Vol over Boom 550",
-   "window": [
-    "2026-01-01",
-    "2026-09-29"
-   ],
-   "balance": 10000.0,
-   "risk_pct": 1.0,
-   "sizing_basis": "STATIC",
-   "signals": 1084,
-   "trades": 1084,
-   "final_balance": 23892.78,
-   "net_pnl": 13892.78,
-   "win_rate": 0.2989,
-   "profit_factor": 1.238,
-   "expectancy_usd": 12.82,
-   "expectancy_r": null,
-   "max_dd_pct": 37.33,
-   "rejections": {},
-   "costs_resolved": {
-    "slippage_pips": 0.2,
-    "commission_per_lot": 0.0,
-    "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.2660222222222224,
-    "swap_short_per_lot_per_day": -4.082527777777778,
-    "stops_level_pips": 320.0,
-    "exit_slippage_pips": 0.2,
-    "sources": {
-     "slippage_pips": "MT5",
-     "commission_per_lot": "MT5",
-     "spread_pips": "MT5",
-     "swap_long_per_lot_per_day": "MT5",
-     "swap_short_per_lot_per_day": "MT5",
-     "stops_level_pips": "MT5",
-     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
-    },
-    "broker_source": "MT5",
-    "symbol": "Vol over Boom 550"
-   },
-   "fill_model": {
-    "mode": "CONSERVATIVE",
-    "seed": "algoedge",
-    "stop_exits": 760,
-    "gapped_exits": 760,
-    "gapped_pct": 100.0,
-    "mean_overshoot_r": 0.0224,
-    "max_overshoot_r": 1.2084,
-    "total_overshoot_r": 17.0304,
-    "by_symbol": {
-     "Vol over Boom 550": {
-      "stop_exits": 760,
-      "gapped_pct": 100.0,
-      "mean_overshoot_r": 0.0224,
-      "max_overshoot_r": 1.2084,
-      "profile_mean": 0.02,
-      "profile_source": "class default \u2014 no tick study",
-      "profile_calibration": "assumed"
-     }
-    }
-   },
-   "exit_reasons": {
-    "SL": 760,
-    "TP1": 322,
-    "END_OF_DATA": 2
-   }
-  }
+  "strategy": "TrendDrift_v1"
  },
  {
   "symbol": "Vol over Boom 750",
-  "strategy": "DriftJumpAlpha_v1",
-  "compounded": {
-   "strategy": "DriftJumpAlpha_v1",
-   "symbol": "Vol over Boom 750",
-   "window": [
-    "2026-01-01",
-    "2026-09-29"
-   ],
-   "balance": 10000.0,
-   "risk_pct": 1.0,
-   "sizing_basis": "BALANCE",
-   "signals": 0,
-   "trades": 0,
-   "final_balance": 10000.0,
-   "net_pnl": 0.0,
-   "win_rate": null,
-   "profit_factor": null,
-   "expectancy_usd": null,
-   "expectancy_r": null,
-   "max_dd_pct": 0.0,
-   "rejections": {},
-   "costs_resolved": {
-    "slippage_pips": 0.2,
-    "commission_per_lot": 0.0,
-    "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.9702604166666666,
-    "swap_short_per_lot_per_day": -5.2936805555555555,
-    "stops_level_pips": 250.0,
-    "exit_slippage_pips": 0.2,
-    "sources": {
-     "slippage_pips": "MT5",
-     "commission_per_lot": "MT5",
-     "spread_pips": "MT5",
-     "swap_long_per_lot_per_day": "MT5",
-     "swap_short_per_lot_per_day": "MT5",
-     "stops_level_pips": "MT5",
-     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
-    },
-    "broker_source": "MT5",
-    "symbol": "Vol over Boom 750"
-   },
-   "fill_model": {
-    "mode": "CONSERVATIVE",
-    "seed": "algoedge",
-    "stop_exits": 0,
-    "gapped_exits": 0,
-    "gapped_pct": 0.0,
-    "mean_overshoot_r": 0.0,
-    "max_overshoot_r": 0.0,
-    "total_overshoot_r": 0.0,
-    "by_symbol": {}
-   },
-   "exit_reasons": {}
-  },
-  "flat": {
-   "strategy": "DriftJumpAlpha_v1",
-   "symbol": "Vol over Boom 750",
-   "window": [
-    "2026-01-01",
-    "2026-09-29"
-   ],
-   "balance": 10000.0,
-   "risk_pct": 1.0,
-   "sizing_basis": "STATIC",
-   "signals": 0,
-   "trades": 0,
-   "final_balance": 10000.0,
-   "net_pnl": 0.0,
-   "win_rate": null,
-   "profit_factor": null,
-   "expectancy_usd": null,
-   "expectancy_r": null,
-   "max_dd_pct": 0.0,
-   "rejections": {},
-   "costs_resolved": {
-    "slippage_pips": 0.2,
-    "commission_per_lot": 0.0,
-    "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.968739583333333,
-    "swap_short_per_lot_per_day": -5.291652777777778,
-    "stops_level_pips": 250.0,
-    "exit_slippage_pips": 0.2,
-    "sources": {
-     "slippage_pips": "MT5",
-     "commission_per_lot": "MT5",
-     "spread_pips": "MT5",
-     "swap_long_per_lot_per_day": "MT5",
-     "swap_short_per_lot_per_day": "MT5",
-     "stops_level_pips": "MT5",
-     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
-    },
-    "broker_source": "MT5",
-    "symbol": "Vol over Boom 750"
-   },
-   "fill_model": {
-    "mode": "CONSERVATIVE",
-    "seed": "algoedge",
-    "stop_exits": 0,
-    "gapped_exits": 0,
-    "gapped_pct": 0.0,
-    "mean_overshoot_r": 0.0,
-    "max_overshoot_r": 0.0,
-    "total_overshoot_r": 0.0,
-    "by_symbol": {}
-   },
-   "exit_reasons": {}
-  }
+  "strategy": "DriftJumpAlpha_v1"
  },
  {
   "symbol": "Vol over Boom 750",
-  "strategy": "BoomDriftJump_v1",
-  "compounded": {
-   "strategy": "BoomDriftJump_v1",
-   "symbol": "Vol over Boom 750",
-   "window": [
-    "2026-01-01",
-    "2026-09-29"
-   ],
-   "balance": 10000.0,
-   "risk_pct": 1.0,
-   "sizing_basis": "BALANCE",
-   "signals": 5406,
-   "trades": 4719,
-   "final_balance": 957764.37,
-   "net_pnl": 947764.37,
-   "win_rate": 0.3287,
-   "profit_factor": 1.486,
-   "expectancy_usd": 200.84,
-   "expectancy_r": null,
-   "max_dd_pct": 63.91,
-   "rejections": {
-    "Max positions reached for Vol over Boom 750 (15/15)": 376,
-    "Weekly drawdown limit of 40.0% is fully exhausted.": 275,
-    "Calculated lot size is below this broker's minimum tradeable volume": 36
-   },
-   "costs_resolved": {
-    "slippage_pips": 0.2,
-    "commission_per_lot": 0.0,
-    "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.9645437499999994,
-    "swap_short_per_lot_per_day": -5.286058333333333,
-    "stops_level_pips": 250.0,
-    "exit_slippage_pips": 0.2,
-    "sources": {
-     "slippage_pips": "MT5",
-     "commission_per_lot": "MT5",
-     "spread_pips": "MT5",
-     "swap_long_per_lot_per_day": "MT5",
-     "swap_short_per_lot_per_day": "MT5",
-     "stops_level_pips": "MT5",
-     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
-    },
-    "broker_source": "MT5",
-    "symbol": "Vol over Boom 750"
-   },
-   "fill_model": {
-    "mode": "CONSERVATIVE",
-    "seed": "algoedge",
-    "stop_exits": 3168,
-    "gapped_exits": 3168,
-    "gapped_pct": 100.0,
-    "mean_overshoot_r": 0.0199,
-    "max_overshoot_r": 0.3014,
-    "total_overshoot_r": 63.1625,
-    "by_symbol": {
-     "Vol over Boom 750": {
-      "stop_exits": 3168,
-      "gapped_pct": 100.0,
-      "mean_overshoot_r": 0.0199,
-      "max_overshoot_r": 0.3014,
-      "profile_mean": 0.02,
-      "profile_source": "class default \u2014 no tick study",
-      "profile_calibration": "assumed"
-     }
-    }
-   },
-   "exit_reasons": {
-    "SL": 3168,
-    "TP1": 1551
-   }
-  },
-  "flat": {
-   "strategy": "BoomDriftJump_v1",
-   "symbol": "Vol over Boom 750",
-   "window": [
-    "2026-01-01",
-    "2026-09-29"
-   ],
-   "balance": 10000.0,
-   "risk_pct": 1.0,
-   "sizing_basis": "STATIC",
-   "signals": 5406,
-   "trades": 4839,
-   "final_balance": 121453.93,
-   "net_pnl": 111453.93,
-   "win_rate": 0.334,
-   "profit_factor": 1.501,
-   "expectancy_usd": 23.03,
-   "expectancy_r": null,
-   "max_dd_pct": 54.46,
-   "rejections": {
-    "Max positions reached for Vol over Boom 750 (15/15)": 388,
-    "Calculated lot size is below this broker's minimum tradeable volume": 40,
-    "Weekly drawdown limit of 40.0% is fully exhausted.": 10,
-    "Weekly drawdown limit reached: 40.63% >= 40.0%": 15,
-    "Weekly drawdown limit reached: 40.51% >= 40.0%": 73,
-    "Weekly drawdown limit reached: 40.00% >= 40.0%": 41
-   },
-   "costs_resolved": {
-    "slippage_pips": 0.2,
-    "commission_per_lot": 0.0,
-    "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.954602083333333,
-    "swap_short_per_lot_per_day": -5.272802777777778,
-    "stops_level_pips": 250.0,
-    "exit_slippage_pips": 0.2,
-    "sources": {
-     "slippage_pips": "MT5",
-     "commission_per_lot": "MT5",
-     "spread_pips": "MT5",
-     "swap_long_per_lot_per_day": "MT5",
-     "swap_short_per_lot_per_day": "MT5",
-     "stops_level_pips": "MT5",
-     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
-    },
-    "broker_source": "MT5",
-    "symbol": "Vol over Boom 750"
-   },
-   "fill_model": {
-    "mode": "CONSERVATIVE",
-    "seed": "algoedge",
-    "stop_exits": 3223,
-    "gapped_exits": 3223,
-    "gapped_pct": 100.0,
-    "mean_overshoot_r": 0.0199,
-    "max_overshoot_r": 0.3014,
-    "total_overshoot_r": 64.2186,
-    "by_symbol": {
-     "Vol over Boom 750": {
-      "stop_exits": 3223,
-      "gapped_pct": 100.0,
-      "mean_overshoot_r": 0.0199,
-      "max_overshoot_r": 0.3014,
-      "profile_mean": 0.02,
-      "profile_source": "class default \u2014 no tick study",
-      "profile_calibration": "assumed"
-     }
-    }
-   },
-   "exit_reasons": {
-    "SL": 3223,
-    "TP1": 1616
-   }
-  }
+  "strategy": "BoomDriftJump_v1"
  },
  {
   "symbol": "Vol over Boom 750",
-  "strategy": "TrendDrift_v1",
-  "compounded": {
-   "strategy": "TrendDrift_v1",
-   "symbol": "Vol over Boom 750",
-   "window": [
-    "2026-01-01",
-    "2026-09-29"
-   ],
-   "balance": 10000.0,
-   "risk_pct": 1.0,
-   "sizing_basis": "BALANCE",
-   "signals": 1084,
-   "trades": 1084,
-   "final_balance": 10366.19,
-   "net_pnl": 366.19,
-   "win_rate": 0.2648,
-   "profit_factor": 1.006,
-   "expectancy_usd": 0.34,
-   "expectancy_r": null,
-   "max_dd_pct": 51.49,
-   "rejections": {},
-   "costs_resolved": {
-    "slippage_pips": 0.2,
-    "commission_per_lot": 0.0,
-    "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.9612895833333335,
-    "swap_short_per_lot_per_day": -5.2817194444444455,
-    "stops_level_pips": 250.0,
-    "exit_slippage_pips": 0.2,
-    "sources": {
-     "slippage_pips": "MT5",
-     "commission_per_lot": "MT5",
-     "spread_pips": "MT5",
-     "swap_long_per_lot_per_day": "MT5",
-     "swap_short_per_lot_per_day": "MT5",
-     "stops_level_pips": "MT5",
-     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
-    },
-    "broker_source": "MT5",
-    "symbol": "Vol over Boom 750"
-   },
-   "fill_model": {
-    "mode": "CONSERVATIVE",
-    "seed": "algoedge",
-    "stop_exits": 797,
-    "gapped_exits": 797,
-    "gapped_pct": 100.0,
-    "mean_overshoot_r": 0.0183,
-    "max_overshoot_r": 0.1448,
-    "total_overshoot_r": 14.5602,
-    "by_symbol": {
-     "Vol over Boom 750": {
-      "stop_exits": 797,
-      "gapped_pct": 100.0,
-      "mean_overshoot_r": 0.0183,
-      "max_overshoot_r": 0.1448,
-      "profile_mean": 0.02,
-      "profile_source": "class default \u2014 no tick study",
-      "profile_calibration": "assumed"
-     }
-    }
-   },
-   "exit_reasons": {
-    "SL": 797,
-    "TP1": 287
-   }
-  },
-  "flat": {
-   "strategy": "TrendDrift_v1",
-   "symbol": "Vol over Boom 750",
-   "window": [
-    "2026-01-01",
-    "2026-09-29"
-   ],
-   "balance": 10000.0,
-   "risk_pct": 1.0,
-   "sizing_basis": "STATIC",
-   "signals": 1084,
-   "trades": 1084,
-   "final_balance": 13493.91,
-   "net_pnl": 3493.91,
-   "win_rate": 0.2648,
-   "profit_factor": 1.058,
-   "expectancy_usd": 3.22,
-   "expectancy_r": null,
-   "max_dd_pct": 49.03,
-   "rejections": {},
-   "costs_resolved": {
-    "slippage_pips": 0.2,
-    "commission_per_lot": 0.0,
-    "spread_pips": 10.0,
-    "swap_long_per_lot_per_day": -3.9579020833333334,
-    "swap_short_per_lot_per_day": -5.277202777777778,
-    "stops_level_pips": 250.0,
-    "exit_slippage_pips": 0.2,
-    "sources": {
-     "slippage_pips": "MT5",
-     "commission_per_lot": "MT5",
-     "spread_pips": "MT5",
-     "swap_long_per_lot_per_day": "MT5",
-     "swap_short_per_lot_per_day": "MT5",
-     "stops_level_pips": "MT5",
-     "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
-    },
-    "broker_source": "MT5",
-    "symbol": "Vol over Boom 750"
-   },
-   "fill_model": {
-    "mode": "CONSERVATIVE",
-    "seed": "algoedge",
-    "stop_exits": 797,
-    "gapped_exits": 797,
-    "gapped_pct": 100.0,
-    "mean_overshoot_r": 0.0183,
-    "max_overshoot_r": 0.1448,
-    "total_overshoot_r": 14.5602,
-    "by_symbol": {
-     "Vol over Boom 750": {
-      "stop_exits": 797,
-      "gapped_pct": 100.0,
-      "mean_overshoot_r": 0.0183,
-      "max_overshoot_r": 0.1448,
-      "profile_mean": 0.02,
-      "profile_source": "class default \u2014 no tick study",
-      "profile_calibration": "assumed"
-     }
-    }
-   },
-   "exit_reasons": {
-    "SL": 797,
-    "TP1": 287
-   }
-  }
+  "strategy": "TrendDrift_v1"
  }
 ]

@@ -30,7 +30,7 @@ export default function StrategySettings() {
   const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
   const [newSymbol, setNewSymbol] = useState('XAUUSD');
-  const [newStrategy, setNewStrategy] = useState('APA_v1');
+  const [newStrategy, setNewStrategy] = useState('ORB_v1');
 
   const [config, setConfig] = useState({
     // [per-slot] Read-only here: the account defaults a slot inherits when it
@@ -39,9 +39,9 @@ export default function StrategySettings() {
     risk: {},
     symbols: ['XAUUSD', 'XAGUSD', 'XPTUSD', 'EURUSD', 'GBPUSD'], // legacy support
     instrument_settings: [
-      { symbol: 'XAUUSD', strategy_id: 'APA_v1', enabled: true },
-      { symbol: 'EURUSD', strategy_id: 'APA_v1', enabled: true },
-      { symbol: 'GBPUSD', strategy_id: 'APA_v1', enabled: true }
+      { symbol: 'XAUUSD', strategy_id: 'ORB_v1', enabled: true },
+      { symbol: 'EURUSD', strategy_id: 'ORB_v1', enabled: true },
+      { symbol: 'GBPUSD', strategy_id: 'ORB_v1', enabled: true }
     ],
     // [P2.1] The authoritative symbol x strategy configuration. The backend has
     // supported InstrumentSlot (UUID-keyed, so ONE symbol may appear in several
@@ -58,23 +58,6 @@ export default function StrategySettings() {
     // params.py) — TradingConfig.from_dict() filters every section through a
     // hasattr()-style check and silently drops anything it does not recognise.
     // Defaults mirror the authoritative backend values.
-    apa: {
-      structure_timeframe: 'M15',
-      entry_timeframe: 'M5',
-      minor_fractal_m: 3,
-      major_fractal_m: 8,
-      shoulder_symmetry_tolerance_atr: 0.3,
-      tight_level_threshold_atr: 0.35,
-      sl_buffer_atr: 0.05,
-      sl_buffer_atr_mult: 0.5,
-      min_sl_pips: 12.0,
-      min_sl_atr_mult: 1.0,
-      invalidation_zone_source: 'right_shoulder',
-      session_filter_enabled: true,
-      session_start: '07:00',
-      session_cutoff: '16:00',
-      atr_lookback: 14,
-    },
     vwap: {
       vwap_anchor_minutes: 15,
       entry_timeframe: 'M5',
@@ -221,7 +204,7 @@ export default function StrategySettings() {
           merged.instrument_slots = merged.instrument_settings.map((i, n) => ({
             slot_id: `legacy${String(n).padStart(7, '0')}`,
             symbol: i.symbol,
-            strategy_id: i.strategy_id || 'APA_v1',
+            strategy_id: i.strategy_id || 'ORB_v1',
             enabled: i.enabled !== false,
           }));
         }

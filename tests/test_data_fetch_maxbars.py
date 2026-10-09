@@ -50,6 +50,11 @@ class FakeMT5:
         self.first, self.last, self.step = first_bar, last_bar, step
         self.range_calls: list[tuple[int, int]] = []
         self.from_calls: list[int] = []
+        self.from_pos_calls: list[int] = []
+        # The FundedNext terminal, 2026-10-06: every DATED call returned None
+        # with (-1, "Terminal: Call failed") while copy_rates_from_pos served
+        # every symbol. Set this to reproduce that terminal.
+        self.dated_calls_fail = False
         self._err = (1, "Success")
 
     def terminal_info(self):
@@ -78,6 +83,9 @@ class FakeMT5:
 
     def copy_rates_range(self, symbol, tf, start, end):
         self.range_calls.append((int(start), int(end)))
+        if self.dated_calls_fail:
+            self._err = (-1, "Terminal: Call failed")
+            return None
         # the real limit: periods spanned, not bars returned
         if (int(end) - int(start)) // self.step >= MAXBARS:
             self._err = (-2, "Terminal: Invalid params")
@@ -88,11 +96,29 @@ class FakeMT5:
 
     def copy_rates_from(self, symbol, tf, end, count):
         self.from_calls.append(int(count))
+        if self.dated_calls_fail:
+            self._err = (-1, "Terminal: Call failed")
+            return None
         if int(count) >= MAXBARS:
             self._err = (-2, "Terminal: Invalid params")
             return None
         self._err = (1, "Success")
         got = self._bars(int(end) - int(count) * self.step, int(end))
+        return got if len(got) else None
+
+    def copy_rates_from_pos(self, symbol, tf, start_pos, count):
+        """POSITION-anchored: `count` bars back from the newest one.
+
+        Deliberately NOT gated on `dated_calls_fail` - the whole point of the
+        terminal this models is that this call works when the dated ones do not.
+        """
+        self.from_pos_calls.append(int(count))
+        if int(count) >= MAXBARS:
+            self._err = (-2, "Terminal: Invalid params")
+            return None
+        self._err = (1, "Success")
+        newest = self.last - int(start_pos) * self.step
+        got = self._bars(newest - int(count) * self.step, newest)
         return got if len(got) else None
 
 
@@ -175,6 +201,47 @@ def test_an_empty_slice_does_not_fail_the_whole_fetch(stub):
 
 
 def test_a_range_with_no_history_at_all_still_raises(stub):
+    with pytest.raises(df_mod.DataFetchError):
+        _fetch("SPX500", "M5", datetime(2010, 1, 1, tzinfo=timezone.utc),
+               datetime(2010, 6, 1, tzinfo=timezone.utc))
+
+
+# ── The third fallback: a terminal that refuses every DATED request ─────────
+#
+# Added 2026-10-06. `get_data_range` tried copy_rates_range, then
+# copy_rates_from — both DATE-anchored. The FundedNext terminal returned None
+# with (-1, "Terminal: Call failed") for every dated call on all five index
+# symbols while copy_rates_from_pos served each one, so a whole backtest matrix
+# failed against a terminal that demonstrably held the data.
+
+def test_a_terminal_that_refuses_dated_calls_is_still_read_by_position(stub):
+    stub.dated_calls_fail = True
+    out = _fetch("SPX500", "M5", datetime(2026, 8, 1, tzinfo=timezone.utc),
+                 datetime(2026, 9, 20, tzinfo=timezone.utc))
+
+    assert stub.range_calls and stub.from_calls, "the dated calls must be tried first"
+    assert stub.from_pos_calls, "the position-anchored fallback must be reached"
+    assert len(out) > 1000
+    # and it must be SLICED to the window, not handed back whole
+    assert int(out["time"].iloc[0]) >= int(datetime(2026, 8, 1, tzinfo=timezone.utc).timestamp())
+    assert int(out["time"].iloc[-1]) <= int(datetime(2026, 9, 20, tzinfo=timezone.utc).timestamp())
+
+
+def test_the_position_fallback_never_asks_for_more_than_maxbars(stub):
+    """A request for `maxbars` or more is refused, so asking is the same as
+    not having the fallback at all."""
+    stub.dated_calls_fail = True
+    _fetch("SPX500", "M5", datetime(2024, 10, 1, tzinfo=timezone.utc),
+           datetime(2026, 9, 20, tzinfo=timezone.utc))
+    assert stub.from_pos_calls, "the fallback must be reached"
+    for count in stub.from_pos_calls:
+        assert count < MAXBARS, f"asked for {count} bars against a maxbars of {MAXBARS}"
+
+
+def test_a_window_the_terminal_does_not_hold_still_raises_through_the_fallback(stub):
+    """The position fallback must not turn "no history" into a silent empty
+    frame: it reads the newest bars, so a 2010 window slices to nothing."""
+    stub.dated_calls_fail = True
     with pytest.raises(df_mod.DataFetchError):
         _fetch("SPX500", "M5", datetime(2010, 1, 1, tzinfo=timezone.utc),
                datetime(2010, 6, 1, tzinfo=timezone.utc))

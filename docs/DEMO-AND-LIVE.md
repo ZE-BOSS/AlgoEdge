@@ -92,6 +92,85 @@ New-NetFirewallRule -DisplayName "AlgoEdge demo" -Direction Inbound -Protocol TC
 
 ---
 
+## Both boxes on one screen (added 2026-10-09)
+
+Two admin sites open in two tabs works, but it is also how you end up doing
+something to the wrong account. The admin app can now talk to **several
+backends from one page**: a server picker in the sidebar, each server signed
+in to separately, and a coloured hairline across the top of every screen —
+**amber for live**, blue for demo — that you cannot navigate away from.
+
+### What makes this possible, and what blocks it
+
+A page served over **HTTPS cannot call `http://<demo-ip>:8000`.** Browsers
+refuse it as mixed content and no backend change fixes that. So the demo box
+is reached through the live domain, by path:
+
+```
+https://api.alphavantiqcapital.com/s/demo/...   ->  demo VPS  :8000
+https://api.alphavantiqcapital.com/s/live/...   ->  live      :8000
+https://api.alphavantiqcapital.com/...          ->  live      :8000   (unchanged)
+```
+
+Copy `deploy/Caddyfile.multi` over the live box's Caddyfile (or paste the
+`handle_path` blocks into the existing one), replace `<demo-private-ip>`, then:
+
+```bash
+caddy reload --config /etc/caddy/Caddyfile
+```
+
+**Nothing existing breaks.** Unprefixed traffic still goes to live, so every
+bookmark, the investor app and the landing page carry on as they were.
+
+### Then, in the admin app
+
+Sidebar → the server button → **Add a server**:
+
+| | |
+|---|---|
+| Name | `Demo VPS` |
+| Address | `https://api.alphavantiqcapital.com/s/demo` |
+| Role | Demo |
+
+Sign in to it. Each backend signs its own tokens with its own
+`JWT_SECRET_KEY`, so **signing in to one does not sign you in to the other** —
+and that is deliberate. Sharing a secret so they interoperate would make a
+demo compromise a live compromise.
+
+### Tell each box what it is
+
+Optional, and worth doing. Add to each `.env`:
+
+```bash
+# LIVE
+ALGOEDGE_SERVER_ROLE=live
+ALGOEDGE_SERVER_LABEL=Live VPS
+
+# DEMO
+ALGOEDGE_SERVER_ROLE=demo
+ALGOEDGE_SERVER_LABEL=Demo VPS
+```
+
+The server then states its own identity on `/api/health/identity`, and the
+admin app **checks the list against it**. A row you labelled "Demo" that is
+actually pointing at the live machine shows a red warning next to the server
+name — the client cannot prevent that mistake, but the server can expose it.
+The same endpoint reports the MT5 login, the running commit and whether the
+bot is on, so the picker shows all of it before you switch.
+
+### Adding a third server later
+
+Four lines in the Caddyfile and one row in the picker. The front end has no
+hard-coded list.
+
+### What stays single-server on purpose
+
+The **investor app has no server picker at all**. Investor money must never be
+served from a demo backend, and the way to guarantee that is to give it no way
+to ask one.
+
+---
+
 ## First-time setup of the demo box
 
 ```powershell

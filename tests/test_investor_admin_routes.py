@@ -17,8 +17,11 @@ What is pinned here is what the ROUTES add on top of the Phase 1 module:
 from __future__ import annotations
 
 import asyncio
+import shutil
+import tempfile
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -60,8 +63,15 @@ class Harness:
         self.user = user
 
     async def __aenter__(self):
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                          connect_args={"check_same_thread": False})
+        # A temp file, not ":memory:" on a StaticPool. StaticPool shares ONE
+        # connection across every session, so the outbox's post-commit delivery
+        # commits while the next request still has statements in progress and
+        # rolls that request back — silently, after it has returned 200. It cost
+        # a password reset in test_investor_email.py on 2026-10-08. See the
+        # longer note on `App` in tests/test_investor_portal.py.
+        self._tmp = tempfile.mkdtemp(prefix="algoedge-admin-")
+        self.engine = create_async_engine(
+            f"sqlite+aiosqlite:///{Path(self._tmp).as_posix()}/admin.db")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
@@ -89,6 +99,7 @@ class Harness:
         outbox.use_session_factory(None)
         await self.client.aclose()
         await self.engine.dispose()
+        shutil.rmtree(self._tmp, ignore_errors=True)
 
     async def get(self, path, **kw):
         r = await self.client.get(BASE + path, **kw)
@@ -476,7 +487,12 @@ def test_closure_pays_out_zeroes_units_and_erases_the_person_not_the_history():
             # the broker still holds Ada's $21.60 of fees until the manager takes
             # them out: 2200 - 1078.40 paid = 1121.60, of which 21.60 is owed
             rec = (await h.get("/reconciliation", params={"pool_equity": "1121.60"})).json()
-            assert rec["healthy"] is True, rec
+            # `lines_agree`, not `healthy`: this harness has no MT5 account
+            # marked as holding investor capital, so nothing here has been
+            # checked against a broker and the page says so. The arithmetic is
+            # what this test is about.
+            assert rec["lines_agree"] is True, rec
+            assert rec["healthy"] is False and rec["broker_configured"] is False
     run(go())
 
 
@@ -489,9 +505,11 @@ def test_reconciliation_uses_the_latest_snapshot_when_no_equity_is_given():
             await h.post("/nav/snapshot", {"pool_equity": "1000"})
             rec = (await h.get("/reconciliation")).json()
             assert rec["pool_equity_source"].startswith("valuation ")
-            assert rec["healthy"] is True
+            assert rec["lines_agree"] is True
             gap = (await h.get("/reconciliation", params={"pool_equity": "900"})).json()
-            assert gap["healthy"] is False
+            assert gap["lines_agree"] is False
+            # and neither is `healthy`, because no broker account is attached
+            assert rec["healthy"] is False and gap["healthy"] is False
     run(go())
 
 

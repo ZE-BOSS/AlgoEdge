@@ -1,10 +1,11 @@
 import { NavLink, Routes, Route } from 'react-router-dom';
-import { Settings, Sliders, Shield, Wifi, Server, Sparkles } from 'lucide-react';
+import { Settings, Sliders, Shield, Wifi, Server, Sparkles, Building2 } from 'lucide-react';
 import ConnectionSettings from './Connection';
 import RiskSettings from './Risk';
 import StrategySettings from './Strategy';
 import BrokerSettings from './Broker';
 import AISettings from './AI';
+import CompanySettings from './Company';
 
 function SettingsNav() {
   const tabs = [
@@ -15,6 +16,10 @@ function SettingsNav() {
     // the broker/prop-firm facts. Per-slot risk lives on the slot (Strategy tab).
     { to: '/settings/risk', label: 'Defaults', icon: Shield },
     { to: '/settings/ai', label: 'AI', icon: Sparkles },
+    // The legal identity the email footers and the published policies
+    // render from. Blank until there is a registered address, and the
+    // screen says what that currently blocks.
+    { to: '/settings/company', label: 'Company', icon: Building2 },
   ];
 
   return (
@@ -44,6 +49,7 @@ export default function SettingsPage() {
         <Route path="strategy" element={<StrategySettings />} />
         <Route path="risk" element={<RiskSettings />} />
         <Route path="ai" element={<AISettings />} />
+        <Route path="company" element={<CompanySettings />} />
       </Routes>
     </>
   );

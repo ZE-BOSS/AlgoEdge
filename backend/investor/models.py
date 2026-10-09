@@ -54,6 +54,12 @@ from sqlalchemy import (
 )
 
 from backend.data.models import Base, generate_id
+# Registers the MT5 cash-ledger tables with the same metadata. The
+# investor reconciliation reads them (never the terminal - see
+# backend/investor/sources.py), so anywhere the investor tables are
+# created the cash tables must be created too, or the comparison fails
+# with "no such table" instead of saying it has nothing to compare.
+import backend.mt5.cash_models  # noqa: F401,E402 - imported for the side effect
 
 # Column types, named once so they cannot drift apart between tables.
 MONEY = Numeric(18, 2)
@@ -365,6 +371,82 @@ class FundSettings(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+# ── who we are, in law ───────────────────────────────────────────────────────
+
+class CompanyProfile(Base):
+    """The legal identity every outward-facing surface renders from.
+
+    WHY THIS IS A TABLE AND NOT A CONSTANT
+    --------------------------------------
+    Commercial email must carry a physical postal address, the privacy policy
+    must name the controller, and the terms must name the jurisdiction they are
+    governed by. None of those existed anywhere in this codebase: the email
+    footer was a sentence of prose and the policies were static HTML. Hard-coding
+    them would put a legal fact in three places and let them drift.
+
+    VERSIONED, NOT MUTATED, for the same reason FundSettings is: a privacy
+    policy is a statement to a person on a date. "What were we telling investors
+    in October?" has to be answerable from rows, which is exactly the question a
+    dispute turns on. `policy_version` is what the published policies display.
+
+    Deliberately all-nullable. There is no registered address yet, and inventing
+    one would be worse than leaving it blank — so the system has to behave
+    correctly while it is empty: the footer omits what it does not have, and
+    `outbox` REFUSES to send commercial mail until the address is set
+    (transactional mail is unaffected).
+    """
+    __tablename__ = "company_profile"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    version = Column(Integer, nullable=False, unique=True)
+
+    legal_entity_name = Column(String(200))
+    trading_name = Column(String(200))
+    jurisdiction = Column(String(120))              # "governed by the laws of ..."
+    registration_number = Column(String(80))
+    tax_number = Column(String(80))
+
+    address_line1 = Column(String(200))
+    address_line2 = Column(String(200))
+    city = Column(String(120))
+    region = Column(String(120))
+    postcode = Column(String(32))
+    country = Column(String(120))
+
+    support_email = Column(String(255))
+    privacy_email = Column(String(255))
+    dpo_contact = Column(String(255))               # data-protection contact, where required
+    phone = Column(String(40))
+
+    policy_version = Column(String(32))             # shown on privacy.html / terms.html
+    policy_updated_at = Column(DateTime)
+    policy_changelog = Column(Text)                 # what changed, per version
+
+    created_by = Column(String(36))
+    created_at = Column(DateTime, server_default=func.now())
+
+    @property
+    def postal_address(self) -> str:
+        """One line, omitting what is not set. Empty when nothing is."""
+        parts = [self.address_line1, self.address_line2, self.city,
+                 self.region, self.postcode, self.country]
+        return ", ".join(p.strip() for p in parts if p and p.strip())
+
+    @property
+    def display_name(self) -> str:
+        return (self.legal_entity_name or self.trading_name or "").strip()
+
+    @property
+    def can_send_commercial_email(self) -> bool:
+        """CAN-SPAM requires a physical postal address in commercial email.
+
+        Read by `backend/notify/outbox.py`, which blocks rather than sends
+        without it — one unsent marketing email is cheaper than one sent
+        unlawfully, and the exposure is charged per message.
+        """
+        return bool(self.display_name and self.postal_address)
+
+
 # ── the audit spine ──────────────────────────────────────────────────────────
 
 class Adjustment(Base):
@@ -552,6 +634,19 @@ class Application(Base):
     status = Column(String(16), nullable=False, default="new", index=True)  # new | contacted | accepted | declined
     investor_id = Column(String(36))                                         # once accepted
     ip = Column(String(64))
+    # [2026-10-08] Age, kept because it is EVIDENCE rather than a form field.
+    #
+    # terms.html S2 already says "You must be at least 18", and the form never
+    # asked — so the promise and the code disagreed, which is the worse of the
+    # two failure modes. A minor signing up is a children's-privacy exposure
+    # that is charged PER CHILD, and the only defence is a record of what was
+    # asked, what was answered and when.
+    #
+    # `date_of_birth` is preferred over a tickbox because it can be checked
+    # later against an identity document; `age_confirmed_at` records that the
+    # SERVER accepted it, not that a browser rendered a checkbox.
+    date_of_birth = Column(Date)
+    age_confirmed_at = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now(), index=True)
     decided_by = Column(String(36))
 

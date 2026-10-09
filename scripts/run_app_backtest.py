@@ -180,8 +180,41 @@ def summarize(res: dict, req, n_signals: int) -> dict:
     }
 
 
+def _attach(choice: str | None) -> None:
+    """Point MT5 at a specific terminal before any fetch happens.
+
+    Without this MT5 attaches to whichever terminal was used last, and the other
+    broker's symbols then report as "not on this account" -- so a Deriv run on a
+    FundedNext terminal returns an EMPTY backtest rather than an error, which is
+    indistinguishable from "the strategy found nothing".
+    """
+    if not choice:
+        return
+    import os
+
+    import MetaTrader5 as mt5
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+    path = {"deriv": os.getenv("DERIV_MT5_PATH"),
+            "fundednext": os.getenv("MT5_PATH")}.get(choice, choice)
+    if not path:
+        raise SystemExit(f"no terminal path configured for {choice!r}")
+    mt5.shutdown()
+    if not mt5.initialize(path=path):
+        raise SystemExit(f"MT5 not available at {path}: {mt5.last_error()}")
+    print(f"# terminal: {mt5.terminal_info().company}", file=sys.stderr)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
+    # Which MT5 terminal to attach to. Without it MT5 attaches to whichever
+    # terminal was used last, which silently reports every symbol of the OTHER
+    # broker as "not on this account" -- so a Deriv run on a FundedNext
+    # terminal returns an empty backtest rather than an error.
+    ap.add_argument("--terminal", default=None,
+                    help='"deriv" for DERIV_MT5_PATH, "fundednext" for MT5_PATH, '
+                         'or an explicit terminal64.exe path')
     ap.add_argument("--strategy", default="ORB_v1")
     ap.add_argument("--symbol", required=True)
     ap.add_argument("--start", required=True)
@@ -207,6 +240,7 @@ def main() -> int:
     ap.add_argument("--slippage", type=float, default=None)
     ap.add_argument("--max-margin-pct", type=float, default=None)
     args = ap.parse_args()
+    _attach(args.terminal)
     if args.min_rr is None:
         args.min_rr = min(args.tp1_rr, 3.0)
     print(json.dumps(asyncio.run(run(args)), indent=2, default=str))

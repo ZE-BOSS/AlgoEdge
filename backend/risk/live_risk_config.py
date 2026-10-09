@@ -16,6 +16,38 @@ from __future__ import annotations
 from typing import Any
 
 
+def _every_risk_field(risk: Any) -> dict[str, Any]:
+    """Every RiskParams field, by name, as the base layer.
+
+    THIS IS WHY THE CURATED LIST BELOW IS NOT THE WHOLE CONFIG.
+
+    `build_live_risk_config` used to BE the curated literal, and a field absent
+    from it simply never reached live. Measured 2026-10-08 against the user's
+    saved config: 22 of 93 RiskParams fields were missing, and six of them were
+    the entire profit-target mechanism —
+
+        max_trade_profit, max_monthly_profit, profit_target_scopes,
+        profit_target_basis, profit_target_action, profit_target_is_pct
+
+    — so a slot could arm a $50 per-trade target, the switch would reach the
+    breaker, and the AMOUNT never would. `ProfitTargetPolicy._check_trade` then
+    returns None for "no per-trade amount set at all", and the target is
+    silently inert. Two Crash 1000 positions sat at +$97.54 and +$52.83 against
+    that target with nothing in the log. `accounting_utc_offset_hours` was
+    dropped the same way, so the WAT day boundary never reached live either.
+
+    Deriving the base from the dataclass makes that class of bug unrepresentable:
+    a new RiskParams field reaches live by existing. The curated entries below
+    still win, because several of them are computed or renamed rather than a
+    straight copy.
+    """
+    import dataclasses
+
+    if dataclasses.is_dataclass(risk):
+        return {f.name: getattr(risk, f.name, None) for f in dataclasses.fields(risk)}
+    return dict(getattr(risk, "__dict__", {}) or {})
+
+
 def build_live_risk_config(config: Any, strategy_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """(risk_config, measured exit defaults that were applied) for `strategy_id`."""
     from backend.risk.multi_tp import slot_overrides_from_config
@@ -24,6 +56,8 @@ def build_live_risk_config(config: Any, strategy_id: str) -> tuple[dict[str, Any
     risk = config.risk
     slot_maps = slot_overrides_from_config(getattr(config, "instrument_slots", None))
     risk_config: dict[str, Any] = {
+        # Every RiskParams field first; the curated entries below override it.
+        **_every_risk_field(risk),
         "risk_per_trade_pct": risk.risk_per_trade_pct,
         "min_rr": risk.min_rr,
         # [per-slot] The drawdown brake's account default; a slot may set its own.

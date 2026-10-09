@@ -20,7 +20,6 @@ _LOADED = False
 def _load_strategies():
     global _LOADED
     if not _LOADED:
-        import backend.strategies.strategy_apa.engine  # noqa: F401
         import backend.strategies.strategy_vwap.engine  # noqa: F401
         import backend.strategies.strategy_two.engine  # noqa: F401
         import backend.strategies.strategy_boom.engine  # noqa: F401
@@ -28,6 +27,7 @@ def _load_strategies():
         import backend.strategies.strategy_synth.engine  # noqa: F401
         import backend.strategies.strategy_five_bias_ifvg.engine  # noqa: F401
         import backend.strategies.strategy_trend.engine  # noqa: F401
+        import backend.strategies.strategy_overnight.engine  # noqa: F401
         import backend.strategies.strategy_spike_resumption.engine  # noqa: F401
         _LOADED = True
 

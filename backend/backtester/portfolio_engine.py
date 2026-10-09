@@ -145,6 +145,51 @@ class PortfolioBacktestEngine(CostModelMixin):
         # a symbol must throttle independently.
         self._last_entry_bar_by_slot: dict[str, int] = {}
 
+    # ── supervision (plan 4.9) ──────────────────────────────────────────
+    #
+    # A supervisor is an extra strategy object that never opens anything. It is
+    # handed positions OTHER strategies own, once per closed bar, and may only
+    # close or tighten. Set by the route from the run request; empty by default,
+    # so a run without supervisors behaves exactly as it did before.
+    _supervisors: list = []
+
+    def set_supervisors(self, supervisors: list) -> None:
+        self._supervisors = [s for s in (supervisors or [])
+                             if getattr(s, "SUPERVISES_OTHER_STRATEGIES", False)]
+
+    def _ask_supervisors(self, symbol, pos, candle_slice, owner_strategy, cache_key):
+        """The first supervisor with something to say, or None.
+
+        `owner` carries the opening strategy's id and the gate vector RECORDED
+        AT ENTRY, from the signal that opened the position — never re-derived,
+        because re-deriving it would read today's parameters onto a past trade.
+        """
+        owner_id = str(getattr(owner_strategy, "strategy_id", "") or pos.get("strategy_id") or "")
+        _sig = pos.get("original_signal") or {}
+        _meta = _sig.get("metadata") or {}
+        owner = {
+            "strategy_id": owner_id,
+            "gate_vector": _meta.get("gate_vector"),
+            "passed_gates": _meta.get("passed_gates"),
+            "confluence_tags": _meta.get("confluence_tags"),
+            "confluence_score": _sig.get("confluence_score"),
+            "slot_id": cache_key,
+        }
+        for sup in self._supervisors:
+            if sup is owner_strategy:
+                continue
+            try:
+                if not sup.supervises(owner_id, symbol):
+                    continue
+                act = sup.on_foreign_position_bar(
+                    symbol, pos.get("timeframe", ""), candle_slice, pos, owner)
+            except Exception as exc:                    # noqa: BLE001
+                logger.debug(f"[PORTFOLIO] supervisor {sup} raised (non-fatal): {exc}")
+                continue
+            if act is not None:
+                return act
+        return None
+
     def _slot_config(self, cache_key: str, strategy_id: str | None = None) -> dict[str, Any]:
         """The config THIS slot trades under — its entries, its exits, its limits."""
         cfg = self.book.slot_configs.get(cache_key)
@@ -612,6 +657,14 @@ class PortfolioBacktestEngine(CostModelMixin):
                             _pbw = max(50, int(getattr(_strat, "POSITION_BAR_WINDOW", 50) or 50))
                             _slice = _sc["df"].iloc[max(0, _j - (_pbw - 1)):_j + 1]
                             _act = _strat.on_position_bar(sym, pos.get("timeframe", ""), _slice, pos)
+                            # [4.9] Supervision. The OWNER is asked first and its
+                            # answer wins — a measured rule is not overridden by
+                            # an agent, which can only act earlier. Supervisors
+                            # are consulted only where the owner said nothing,
+                            # and may only CLOSE or tighten.
+                            if _act is None and self._supervisors:
+                                _act = self._ask_supervisors(
+                                    sym, pos, _slice, _strat, _ckey)
                             if _act is not None and _act.action == "MODIFY_SL" and _act.new_sl:
                                 _new, _cur = float(_act.new_sl), float(pos["stop_loss"])
                                 if (pos["direction"] == "BUY" and _new > _cur) or (pos["direction"] == "SELL" and _new < _cur):

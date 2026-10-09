@@ -422,3 +422,11 @@ input[aria-invalid] { border-color: var(--bad); }
 .notif-row > span:first-child { display: grid; gap: 2px; }
 .notif-row > span:not(:first-child) { justify-self: center; }
 .notif-row.head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 4px 0; }
+
+/* The cost disclosure beside the deposit button. Deliberately quiet rather
+   than alarming — it has to be read, not skipped as a warning banner — but
+   bordered so it reads as terms rather than as body copy. */
+.terms-note { border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px;
+  background: var(--surface); font-size: 0.86rem; line-height: 1.6; color: var(--text-2); }
+.terms-note strong { color: var(--text); }
+.terms-note a { text-decoration: underline; }

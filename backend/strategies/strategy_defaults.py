@@ -69,7 +69,7 @@ OVERRIDABLE: frozenset[str] = frozenset({
 # range from a real measured R:R. Lowering it does not "add a target" — it
 # truncates the right tail the rule lives on.
 NO_MEASURED_TARGET: frozenset[str] = frozenset({
-    "TrendBreakout_v1", })
+    "TrendBreakout_v1", "OvernightSession_v1", })
 
 
 STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -122,26 +122,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
         ),
     },
 
-    # ── APA — was structurally unable to trade ────────────────────────────
-    #
-    # rejection_candle passed 0 of 1,388 evaluations because require_retest
-    # defaults False (so the AWAIT_RETEST branch that sets retest_rejected never
-    # runs) while require_rejection_candle defaults True. Fixed in the engine by
-    # evaluating rejection independently of the retest state.
-    "APA_v1": {
-        # [18.3] Measured best fixed R:R — research/16.
-        # 1:3 best of four ($-3,689 vs $-12,116 at 1:2), n=3,225.
-        "tp1_rr": 3.0,
-        "trail_method_tp1": "NONE",
-        "trail_mode": "NONE",
-        "be_mode": "EITHER",
-        "evidence": (
-            "0 signals from 78,800 candidates until the require_retest / "
-            "require_rejection_candle interlock was fixed. No exit data yet — "
-            "re-measure before changing exits."
-        ),
-    },
-
     # ── Boom mirror of DriftJumpAlpha (research/25) ─────────────────────────
     # Measured with a SINGLE target, break-even OFF and trailing OFF. Break-even
     # is not neutral here: research/25 §4.1 measured it costing up to 0.154 R per
@@ -189,6 +169,19 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     # trails the STRATEGY TIMEFRAME's ATR from the extreme PRICE, while these
     # trail the DAILY ATR from the extreme CLOSE. On M15 those are two different
     # stops and only one of them was measured. See strategies/core/trail.py.
+    "OvernightSession_v1": {
+        "tp_count": 1,
+        "tp1_rr": 20.0,
+        "be_mode": "NONE",
+        "trail_method_tp1": "NONE",
+        "trail_mode": "NONE",
+        "evidence": (
+            "app-form check 2026-09-25, Deriv M5 2021-10 -> 2026-09, US Tech 100 / US SP 500 / "
+            "Germany 40: 2,006 nights, +0.065R, 52.8% win, t +3.15, Sharpe 1.28, +80.1% at "
+            "0.5% risk, max DD 21.7%. Stop swept 0.5/1/1.5/2/3 x daily ATR — 0.5 best. The "
+            "ONLY strategy in this book still positive on FundedNext's bars (+0.056R, t +1.73)."
+        ),
+    },
     "TrendBreakout_v1": {
         "tp_count": 1,
         "tp1_rr": 20.0,
@@ -272,12 +265,6 @@ SLOT_TP1_RR: dict[str, float] = {
     "GER30|VWAP_v1": 4.0,                        #  FundedNext name for the above
     "XAGUSD|VWAP_v1": 4.0,                       #  +$4,088  n=169  DD 30.0%
     # "XAUUSD|VWAP_v1": 5.0,   REMOVED — IS +$2,991 but OOS -$144 (n=86)
-
-    # APA
-    "VOLATILITY 75 INDEX|APA_v1": 4.0,           #  +$5,016  n=113  DD 18.6%
-    "XRPUSD|APA_v1": 5.0,                        #  +$4,988  n=116  DD 22.5%
-    # "BTCUSD|APA_v1": 5.0,   REMOVED — IS +$5,292 but OOS -$923 (n=45)
-    "CRASH 500 INDEX|APA_v1": 3.0,               #  +$4,310  n=104  DD 6.4%
 
     # ORB — chosen on 2024-01..2026-01, then held unchanged (avg R per trade)
     # ORB — 2026-09-13 edge lab: ONE shared setting (M5 break of the 60m range

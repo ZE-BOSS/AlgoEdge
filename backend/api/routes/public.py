@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict, deque
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -120,7 +121,49 @@ class Apply(BaseModel):
     amount_band: str | None = Field(default=None, max_length=40)
     message: str | None = Field(default=None, max_length=2000)
     consent: bool
+    # Either is accepted; a date of birth is preferred because it can be
+    # verified later against an identity document, while a tickbox cannot.
+    date_of_birth: date | None = None
+    confirms_18: bool | None = None
     website: str | None = None           # honeypot: people never see this field; bots fill it
+
+
+# ── the age gate ─────────────────────────────────────────────────────────────
+
+MINIMUM_AGE = 18
+
+
+def _age_on(dob: date, today: date) -> int:
+    """Whole years, counting the birthday itself as reaching that age."""
+    return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+
+def _check_age(body: "Apply") -> int | None:
+    """Reject anyone under `MINIMUM_AGE`, or anyone who declines to say.
+
+    terms.html S2 promises "You must be at least 18". Returning the age (or
+    None for a tickbox-only answer) rather than a bool so the caller can store
+    what was actually established.
+
+    Raises 400 rather than 422 so the website can show the message as written.
+    """
+    today = datetime.now(timezone.utc).date()
+    if body.date_of_birth is not None:
+        if body.date_of_birth > today:
+            raise HTTPException(status_code=400, detail="that date of birth is in the future")
+        age = _age_on(body.date_of_birth, today)
+        if age > 120:
+            raise HTTPException(status_code=400, detail="please check your date of birth")
+        if age < MINIMUM_AGE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"you must be at least {MINIMUM_AGE} to open an account")
+        return age
+    if body.confirms_18:
+        return None
+    raise HTTPException(
+        status_code=400,
+        detail=f"please confirm you are at least {MINIMUM_AGE}")
 
 
 _WINDOW, _LIMIT = 60 * 60, 5
@@ -150,14 +193,119 @@ async def apply(body: Apply, request: Request, db: AsyncSession = Depends(get_db
     thanks = {"ok": True, "message": "Thank you. We will be in touch within two working days."}
     if body.website:                      # a bot: say thanks, keep nothing
         return thanks
+    # The age gate is enforced HERE, not in the form. A checkbox in the browser
+    # is a suggestion; a direct POST skips it entirely, and "we had a checkbox"
+    # is not a record of anything.
+    #
+    # AFTER the honeypot on purpose: a bot that trips it should learn nothing,
+    # and a validation error tells it which field to fix next time.
+    _check_age(body)
     if _braked(f"ip:{ip}") or _braked(f"email:{body.email.lower()}"):
         raise HTTPException(status_code=429, detail="too many applications, please try again later")
     row = Application(name=body.name.strip(), email=body.email.strip().lower(), phone=body.phone,
-                      country=body.country, amount_band=body.amount_band, message=body.message, ip=ip)
+                      country=body.country, amount_band=body.amount_band, message=body.message, ip=ip,
+                      date_of_birth=body.date_of_birth,
+                      age_confirmed_at=datetime.now(timezone.utc))
     db.add(row)
     await db.flush()
     outbox.queue(db, mail.admin_application(row))
     return thanks
+
+
+# ── the legal identity, for the published policies ──────────────────────────
+
+@router.get("/legal")
+async def legal_identity(db: AsyncSession = Depends(get_db)):
+    """What privacy.html and terms.html fill themselves in with.
+
+    The policies are static files served by the website, and the entity name,
+    registered address and governing jurisdiction live in `company_profile`
+    where an admin can change them. Rather than regenerate the HTML on every
+    edit, the pages carry `data-legal` placeholders and fill them from here.
+
+    Everything returned is already public — it is printed on the policies
+    themselves — so this needs no authentication. Fields that are not set come
+    back empty, and the page leaves its own wording in place rather than
+    showing a blank, so a policy never degrades into half a sentence.
+    """
+    from backend.notify import company as companymod
+
+    row = await companymod.current_row(db)
+    if row is None:
+        return {"has_profile": False, "legal_entity_name": "", "trading_name": "",
+                "postal_address": "", "jurisdiction": "", "registration_number": "",
+                "support_email": "", "privacy_email": "", "policy_version": "",
+                "policy_updated_at": None}
+    return {
+        "has_profile": True,
+        "legal_entity_name": row.legal_entity_name or "",
+        "trading_name": row.trading_name or "",
+        "postal_address": row.postal_address,
+        "jurisdiction": row.jurisdiction or "",
+        "registration_number": row.registration_number or "",
+        "support_email": row.support_email or "",
+        "privacy_email": row.privacy_email or row.support_email or "",
+        "policy_version": row.policy_version or "",
+        "policy_updated_at": (row.policy_updated_at.isoformat()
+                              if row.policy_updated_at else None),
+    }
+
+
+# ── unsubscribe ─────────────────────────────────────────────────────────────
+#
+# Two methods on one path, and both are required:
+#
+#   POST  RFC 8058 one-click. Gmail and Yahoo issue this themselves, with no
+#         cookies and no session, when the reader presses their own unsubscribe
+#         button. It must act and return 200 without asking anything.
+#   GET   a person clicking the link in the email. Acts and says so in words,
+#         because a blank page is indistinguishable from a failure.
+#
+# Deliberately NOT authenticated. The token is a signature over
+# (investor_id, setting) and can do nothing else — see
+# backend/investor/unsubscribe.py for why it is not the investor's session
+# token. Braked per token so the endpoint cannot be used to probe for valid
+# ones at speed.
+
+_UNSUB_DONE = ("You will no longer receive these emails. Your statements and "
+               "anything about your money still reach you, and you can turn "
+               "individual emails back on in Settings.")
+
+
+async def _unsubscribe(token: str, db: AsyncSession) -> dict:
+    from backend.investor import unsubscribe as unsubmod
+    from backend.investor.models import Investor
+
+    if _braked(f"unsub:{(token or '')[:24]}"):
+        raise HTTPException(status_code=429, detail="too many attempts, please try again later")
+    try:
+        investor_id, setting = unsubmod.read_token(token)
+    except unsubmod.BadToken as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    investor = await db.get(Investor, investor_id)
+    # Same answer whether or not the id exists: the endpoint is public, and
+    # "that is not a real investor" is something a prober would like to learn.
+    if investor is not None:
+        investor.preferences = unsubmod.apply_to(investor.preferences, setting)
+        await fundmod.audit(db, actor_id=investor_id, actor_kind="investor",
+                            action=f"email.unsubscribed.{setting}",
+                            entity_type="investor", entity_id=investor_id)
+    return {"ok": True, "setting": setting, "message": _UNSUB_DONE}
+
+
+@router.post("/unsubscribe")
+async def unsubscribe_one_click(t: str = Query(..., max_length=512),
+                                db: AsyncSession = Depends(get_db)):
+    """RFC 8058 one-click, called by the reader's mail provider."""
+    return await _unsubscribe(t, db)
+
+
+@router.get("/unsubscribe")
+async def unsubscribe_link(t: str = Query(..., max_length=512),
+                           db: AsyncSession = Depends(get_db)):
+    """The same thing, for a person who clicked the link themselves."""
+    return await _unsubscribe(t, db)
 
 
 # ── the Android app ─────────────────────────────────────────────────────────

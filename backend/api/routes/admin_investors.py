@@ -1106,6 +1106,115 @@ async def change_settings(body: SettingsChange, admin: User = Depends(require_ad
     return _settings_row(row)
 
 
+# ── the legal identity ───────────────────────────────────────────────────────
+#
+# Versioned like the fund terms, and for the same reason: a privacy policy is a
+# statement made to a person on a date, so "what were we telling investors in
+# October" has to be answerable from rows. Editing in place would make it
+# unanswerable.
+
+_PROFILE_FIELDS = (
+    "legal_entity_name", "trading_name", "jurisdiction", "registration_number",
+    "tax_number", "address_line1", "address_line2", "city", "region", "postcode",
+    "country", "support_email", "privacy_email", "dpo_contact", "phone",
+    "policy_version", "policy_changelog",
+)
+
+
+class CompanyProfileChange(BaseModel):
+    """Every field optional: this is normally edited one line at a time, and
+    there is no registered address yet."""
+
+    legal_entity_name: str | None = Field(default=None, max_length=200)
+    trading_name: str | None = Field(default=None, max_length=200)
+    jurisdiction: str | None = Field(default=None, max_length=120)
+    registration_number: str | None = Field(default=None, max_length=80)
+    tax_number: str | None = Field(default=None, max_length=80)
+    address_line1: str | None = Field(default=None, max_length=200)
+    address_line2: str | None = Field(default=None, max_length=200)
+    city: str | None = Field(default=None, max_length=120)
+    region: str | None = Field(default=None, max_length=120)
+    postcode: str | None = Field(default=None, max_length=32)
+    country: str | None = Field(default=None, max_length=120)
+    support_email: str | None = Field(default=None, max_length=255)
+    privacy_email: str | None = Field(default=None, max_length=255)
+    dpo_contact: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=40)
+    policy_version: str | None = Field(default=None, max_length=32)
+    policy_changelog: str | None = Field(default=None, max_length=4000)
+
+
+def _profile_row(row) -> dict:
+    if row is None:
+        # Not an error and not an empty object: the caller needs to know which
+        # fields exist in order to offer them, and that commercial email is
+        # blocked until two of them are filled.
+        return {**{f: None for f in _PROFILE_FIELDS}, "version": 0,
+                "postal_address": "", "can_send_commercial_email": False,
+                "policy_updated_at": None}
+    out = {f: getattr(row, f) for f in _PROFILE_FIELDS}
+    out["version"] = row.version
+    out["postal_address"] = row.postal_address
+    out["can_send_commercial_email"] = row.can_send_commercial_email
+    out["policy_updated_at"] = (row.policy_updated_at.isoformat()
+                                if row.policy_updated_at else None)
+    return out
+
+
+@router.get("/company")
+async def get_company_profile(db: AsyncSession = Depends(get_db)):
+    """The current legal identity, its history, and what is still missing."""
+    from backend.investor.models import CompanyProfile
+    from backend.notify import company as companymod
+
+    current = await companymod.current_row(db)
+    history = (await db.execute(
+        select(CompanyProfile).order_by(desc(CompanyProfile.version)).limit(50)
+    )).scalars().all()
+    body = _profile_row(current)
+    missing = [f for f in ("legal_entity_name", "address_line1", "city", "country",
+                           "jurisdiction")
+               if not (body.get(f) or "").strip()]
+    return {"current": body, "history": [_profile_row(r) for r in history],
+            "missing": missing,
+            "blocks_commercial_email": not body["can_send_commercial_email"]}
+
+
+@router.post("/company", status_code=201)
+async def change_company_profile(body: CompanyProfileChange,
+                                 admin: User = Depends(require_admin),
+                                 db: AsyncSession = Depends(get_db)):
+    """Write a NEW version, carrying forward anything not being changed."""
+    from datetime import datetime, timezone
+
+    from backend.investor.models import CompanyProfile
+    from backend.notify import company as companymod
+
+    changes = body.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="nothing to change")
+
+    current = await companymod.current_row(db)
+    carried = {f: getattr(current, f, None) for f in _PROFILE_FIELDS}
+    carried.update({k: (v.strip() if isinstance(v, str) else v) for k, v in changes.items()})
+    row = CompanyProfile(
+        version=(current.version + 1) if current is not None else 1,
+        created_by=admin.id,
+        policy_updated_at=datetime.now(timezone.utc),
+        **carried,
+    )
+    db.add(row)
+    await db.flush()
+    await fundmod.audit(db, actor_id=admin.id, action="company.profile_changed",
+                        entity_type="company_profile", entity_id=str(row.version),
+                        detail={k: str(v) for k, v in changes.items()})
+    # The email templates read a process-wide cache (they are synchronous and
+    # cannot await a query), so a save that did not refresh it would show the
+    # old address on the next email sent.
+    companymod.set_snapshot(companymod._from_row(row))
+    return _profile_row(row)
+
+
 # ── trade disclosure ─────────────────────────────────────────────────────────
 
 @router.get("/disclosures")
@@ -1191,21 +1300,60 @@ async def reconciliation(pool_equity: Decimal | None = Query(None, ge=0),
                          db: AsyncSession = Depends(get_db)):
     """Raw vs investor-facing.
 
-    `pool_equity` is the broker's figure. Without it, the latest snapshot's
-    equity is used and the response says so — the investor side does not reach
-    into MT5 for it (see backend/investor/__init__.py), so a live figure is
-    typed in by the admin or supplied by the snapshot job.
+    `pool_equity` is the broker's figure, and WHERE IT CAME FROM DECIDES WHETHER
+    THIS PAGE MEANS ANYTHING.
+
+    It used to fall back to the latest NAV snapshot. Every snapshot on the VPS
+    has `source='TRADES'` — a price moved only by booked trade results, never
+    read from an account — so the page was comparing investor claims against a
+    figure derived from the same bookings. It could not disagree with itself,
+    and a $2,207.51 difference went unreported for over a week.
+
+    The order is now: the figure given, then the cash ledger (which is the
+    broker's own deal history, summed), then a real valuation, and only then a
+    booked snapshot — which is marked `stale_snapshot` and **cannot report
+    healthy**, because it is not independent evidence.
     """
+    from backend.investor import sources as srcmod
+
     source = "entered"
     if pool_equity is None:
-        snap = (await db.execute(
-            select(NavSnapshot).order_by(desc(NavSnapshot.as_of_date)).limit(1)
-        )).scalar_one_or_none()
-        pool_equity = snap.pool_equity if snap else D("0")
-        source = f"valuation {snap.as_of_date.isoformat()}" if snap else "none"
+        derived, how = await srcmod.live_equity(db)
+        if derived is not None:
+            pool_equity, source = derived, "ledger"
+        else:
+            snap = (await db.execute(
+                select(NavSnapshot).order_by(desc(NavSnapshot.as_of_date)).limit(1)
+            )).scalar_one_or_none()
+            pool_equity = snap.pool_equity if snap else D("0")
+            if snap is None:
+                source = "none"
+            elif snap.source == "TRADES":
+                source = "stale_snapshot"
+            else:
+                source = f"valuation {snap.as_of_date.isoformat()}"
+
     report = await recmod.build(db, pool_equity=pool_equity)
-    return {**report.as_dict(), "pool_equity": _s(navmod.money(pool_equity)),
-            "pool_equity_source": source}
+    body = report.as_dict()
+    independent = source not in ("stale_snapshot", "none")
+    warnings = []
+    if not independent:
+        warnings.append(
+            "the pool equity came from a figure this ledger produced itself, so "
+            "this comparison is not independent evidence")
+    if not body.get("broker_configured"):
+        warnings.append(
+            "no MT5 account is marked as holding investor capital, so nothing "
+            "here has been checked against a broker — set one in the Journal's "
+            "accounts list")
+    if warnings:
+        # Say why, rather than quietly reporting a clean page built on nothing.
+        body["healthy"] = False
+        body["broker_missing"] = list(body.get("broker_missing") or []) + warnings
+    return {**body, "pool_equity": _s(navmod.money(pool_equity)),
+            "pool_equity_source": source,
+            "pool_equity_is_independent": independent,
+            "shortfall": await recmod.shortfall(db, pool_equity=pool_equity)}
 
 
 # ── audit trail ──────────────────────────────────────────────────────────────

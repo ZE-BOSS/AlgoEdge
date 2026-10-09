@@ -6,10 +6,10 @@
  */
 
 export const STRATEGY_OPTIONS = [
-  ['APA_v1', 'APA (Adv. Price Action)', 'apa'],
   ['VWAP_v1', 'VWAP Institutional', 'vwap'],
   ['ORB_v1', 'Opening Range Breakout', 'orb'],
   ['TrendBreakout_v1', 'Trend Breakout (Donchian)', 'trend_breakout'],
+  ['OvernightSession_v1', 'Overnight Session (index)', 'overnight_session'],
   ['SpikeResumption_v1', 'Spike Resumption (Boom/Crash)', 'spike_resumption'],
   ['DriftJumpAlpha_v1', 'Drift & Jump Alpha', 'drift_jump_alpha'],
   ['BoomDriftJump_v1', 'Boom Drift & Jump', 'boom_drift_jump'],

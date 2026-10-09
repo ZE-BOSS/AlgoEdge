@@ -4,6 +4,7 @@ import { BookOpen, ChevronDown, ChevronRight, Bot, ExternalLink } from 'lucide-r
 import { getTrades, getTradesSummary, analyzeTrade } from '../services/api';
 import { useConnectionStore, useAuthStore } from '../store';
 import AnalyzeButton from '../components/AnalyzeButton';
+import CashLedger from '../components/CashLedger';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
 
 function MiniChart({ data }) {
@@ -415,6 +416,13 @@ export default function Journal() {
           <button className={`btn ${viewMode === 'SUMMARY' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setViewMode('SUMMARY')}>
             Summary View
           </button>
+          {/* What the ACCOUNT did, as opposed to what the bot did. The journal
+              has always shown trades and never deposits, withdrawals or costs,
+              so a profitable-looking list could sit beside a balance that said
+              otherwise with nothing connecting the two. */}
+          <button className={`btn ${viewMode === 'MONEY' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setViewMode('MONEY')}>
+            Money In &amp; Out
+          </button>
           {viewMode === 'SUMMARY' && (
             <select value={summaryGrouping} onChange={e => setSummaryGrouping(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
               <option value="Day">Group by Day</option>
@@ -426,6 +434,7 @@ export default function Journal() {
         </div>
       </div>
 
+      {viewMode === 'MONEY' ? <CashLedger /> : (
       <div className="card">
         {viewMode === 'SUMMARY' ? (
           <div className="table-wrapper">
@@ -502,6 +511,7 @@ export default function Journal() {
         </div>
         )}
       </div>
+      )}
     </>
   );
 }

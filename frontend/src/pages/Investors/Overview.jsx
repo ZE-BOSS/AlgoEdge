@@ -4,6 +4,7 @@ import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { inv } from '../../services/api';
 import { QueryState } from './shared';
 import { fmtMoney, fmtSinceLaunch } from './format';
+import { HEALTH_SHORT, HEALTH_STYLE, HEALTH_TITLE, VERIFIED, healthAdvice, healthState } from './health';
 
 const QUEUES = [
   { key: 'deposits', label: 'Deposits to confirm', to: '/investors/queues' },
@@ -20,17 +21,16 @@ function Health() {
     <QueryState q={q}>
       {(r) => (
         <Link to="/investors/reconciliation" className="card inv-health"
-              style={{ borderColor: r.healthy ? 'var(--green-dim)' : 'var(--red)' }}>
-          {r.healthy
-            ? <CheckCircle2 size={18} color="var(--green)" />
-            : <AlertTriangle size={18} color="var(--red)" />}
+              style={{ borderColor: HEALTH_STYLE[healthState(r)].border }}>
+          {healthState(r) === VERIFIED
+            ? <CheckCircle2 size={18} color={HEALTH_STYLE[VERIFIED].colour} />
+            : <AlertTriangle size={18} color={HEALTH_STYLE[healthState(r)].colour} />}
           <div>
-            <div style={{ fontWeight: 600 }}>
-              {r.healthy ? 'Books reconcile' : 'Reconciliation needs attention'}
-            </div>
+            <div style={{ fontWeight: 600 }}>{HEALTH_SHORT[healthState(r)]}</div>
             <div className="inv-hint">
               Against pool equity {fmtMoney(r.pool_equity)} ({r.pool_equity_source})
               {r.ledger_drift.length > 0 && ` · ${r.ledger_drift.length} ledger/cache mismatch(es)`}
+              {healthAdvice(r) && ` · ${healthAdvice(r)}`}
             </div>
           </div>
         </Link>

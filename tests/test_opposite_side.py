@@ -64,7 +64,7 @@ def test_setup_b_flags_are_reachable_from_the_backtester_payload():
         assert f"'{strategy}'" in spec and f"'{group}'" in spec,             f"{strategy} must map to its schema group or its slot shows the wrong fields"
 
     editor = Path("frontend/src/components/SlotEditor.jsx").read_text(encoding="utf-8")
-    assert "const group = STRATEGY_GROUP[slot.strategy_id] || 'apa';" in editor
+    assert "const group = STRATEGY_GROUP[slot.strategy_id] || 'orb';" in editor
     assert "group={group}" in editor, "the slot editor must render the strategy's own schema group"
 
     js = Path("frontend/src/pages/Backtester.jsx").read_text(encoding="utf-8")

@@ -8,6 +8,7 @@ Actively manages open MT5 positions. Runs in a frequent loop (e.g. every 3s) to:
 """
 
 import asyncio
+import time as _time
 from datetime import datetime
 
 import MetaTrader5 as mt5
@@ -117,10 +118,16 @@ class PositionManager:
             # The account balance right now, stamped onto every trade that closes
             # this cycle as `balance_after`. Read once per loop, not per trade.
             account_balance_now = None
+            # The connected login, stamped onto any Trade row written below.
+            # A journal row that cannot name its account cannot be reconciled
+            # against a balance, and silently re-attributes if the terminal is
+            # pointed somewhere else.
+            account_login_now = None
             try:
                 _acc = mt5.account_info()
                 if _acc is not None:
                     account_balance_now = float(_acc.balance)
+                    account_login_now = int(_acc.login)
             except Exception:
                 pass
 
@@ -157,7 +164,13 @@ class PositionManager:
             }
 
             # --- GOD SYNC (Adopt Missing MT5 Positions) ---
-            current_time = datetime.utcnow().timestamp()
+            # `time.monotonic`, not a wall clock. This is only ever used as a
+            # RELATIVE 15-second delay below, and `datetime.utcnow().timestamp()`
+            # is wrong twice over for that: `utcnow()` is naive, so `.timestamp()`
+            # reads it as LOCAL time (an hour out on this machine), and a wall
+            # clock can step backwards over an NTP correction or a DST change
+            # and strand a pending adoption forever.
+            current_time = _time.monotonic()
             unrecorded_live_tickets = []
             for ticket, live_pos in mt5_tickets.items():
                 if ticket not in all_known_tickets:
@@ -207,6 +220,7 @@ class PositionManager:
                     is_buy = (first_lp.type == mt5.POSITION_TYPE_BUY)
                     new_trade = Trade(
                         user_id=user_id,
+                        mt5_account=account_login_now,
                         strategy_id="MANUAL",
                         symbol=first_lp.symbol,
                         direction="BUY" if is_buy else "SELL",
@@ -295,6 +309,7 @@ class PositionManager:
                         
                         new_trade = Trade(
                             user_id=user_id,
+                            mt5_account=account_login_now,
                             strategy_id="MANUAL_OFFLINE",
                             symbol=first_in.symbol,
                             direction="BUY" if is_buy else "SELL",
@@ -588,6 +603,15 @@ class PositionManager:
                 
                 pip_size_val = get_pip_size(symbol)
 
+                # --- Give-back: protect a trade that peaked and is reversing ---
+                # Checked here, on the live price, rather than on a closed bar:
+                # a 3R run that rejects back to break-even does it inside the
+                # bar, and a bar-close check sees it afterwards. Off unless the
+                # slot switches it on.
+                if await self._check_giveback(pos, live_pos, session, config):
+                    positions_closed += 1
+                    continue
+
                 # --- VWAP mandatory ET hard-close (spec: no VWAP position may run past its configured cutoff) ---
                 if await self._check_vwap_hard_close(pos, live_pos, session, config):
                     continue
@@ -838,6 +862,64 @@ class PositionManager:
             logger.error(f"Error enforcing VWAP hard close for ticket {getattr(live_pos, 'ticket', '?')}: {e}")
             return False
 
+    async def _check_giveback(self, pos, live_pos, session, config) -> bool:
+        """Close a trade that has given back too much of its peak.
+
+        The non-learned answer to "watch the market every second". It is three
+        numbers and a comparison, evaluated on the live price, so it needs no
+        tick-replay harness to be trusted - which a learned per-tick exit
+        would, because `BarFeed`'s backtest/live guarantee is bar-level and
+        has no tick equivalent.
+
+        Returns True if the position was closed.
+        """
+        try:
+            from backend.data.models import Trade
+            from backend.risk.giveback import check as giveback_check
+
+            symbol = live_pos.symbol
+            trade = await session.get(Trade, pos.parent_trade_id)
+            slot = next((sl for sl in (getattr(config, "instrument_slots", None) or [])
+                         if sl.symbol == symbol
+                         and (trade is None or sl.strategy_id == trade.strategy_id)), None)
+            if slot is None or not getattr(slot, "giveback_enabled", False):
+                return False
+
+            position = {
+                "entry_price": live_pos.price_open,
+                "direction": "BUY" if live_pos.type == 0 else "SELL",
+                # The ORIGINAL stop. `pos.stop_loss` is moved by break-even and
+                # trailing, and dividing R by a stop that has crept to entry is
+                # the measured bug that once reported +243.51R on a 1.5R target.
+                "initial_stop_loss": getattr(trade, "stop_loss", None) or pos.stop_loss,
+                "mfe_r": getattr(pos, "mfe_r", None),
+            }
+            closing, why = giveback_check(position, live_pos.price_current, slot)
+            if not closing:
+                return False
+
+            from backend.mt5.order_manager import OrderManager
+            ok = await OrderManager.close_position(live_pos.ticket)
+            if ok:
+                logger.info(f"[GIVE_BACK] {symbol} ticket {live_pos.ticket} closed: {why}")
+                try:
+                    from backend.services.bot_service import bot_service
+                    bot_service.log_system_event(
+                        f"Give-back exit on {symbol}: {why}", "INFO", "RISK")
+                except Exception:
+                    pass
+            else:
+                logger.warning(
+                    f"[GIVE_BACK] close failed for ticket {live_pos.ticket} — "
+                    f"will retry next cycle")
+            return bool(ok)
+        except Exception as exc:                        # noqa: BLE001
+            # On the hot path over open positions: never let this stop the rest
+            # of the position management from running.
+            logger.error(f"[GIVE_BACK] check failed for "
+                         f"{getattr(live_pos, 'symbol', '?')}: {exc}")
+            return False
+
     async def _check_strategy_position_exit(self, pos, live_pos, session, config) -> bool:
         """
         Live half of BaseStrategy.on_position_bar for strategies whose measured
@@ -846,7 +928,7 @@ class PositionManager:
 
           * classic families: 3xATR trail (MODIFY_SL, tightening only), channel,
             mean and flip exits, maximum holding period;
-          * VWAP_v1 / APA_v1 session modes: flat at the session close.
+          * VWAP_v1 session modes: flat at the session close.
 
         A strategy opts in with a truthy LIVE_POSITION_EXITS. The engine is built
         from the live config with the same per-symbol table and slot override
@@ -897,6 +979,14 @@ class PositionManager:
                         "entry_time": trade.entry_time or datetime.utcfromtimestamp(live_pos.time),
                         "stop_loss": live_pos.sl}
             act = engine.on_position_bar(symbol, tf, closed, position)
+            # [4.9] Supervision, live. Same precedence as both backtesters: the
+            # OWNING strategy is asked first and its answer wins, so a measured
+            # rule is never overridden — an agent may only act earlier. A
+            # supervisor can only CLOSE or tighten, which is why it needs no
+            # risk approval: it cannot increase exposure on a position.
+            if act is None:
+                act = await self._ask_live_supervisors(
+                    symbol, tf, closed, position, trade, config)
             if act is None:
                 return False
             if act.action == "CLOSE":
@@ -917,6 +1007,69 @@ class PositionManager:
         except Exception as e:
             logger.error(f"Error in strategy exit for ticket {getattr(live_pos, 'ticket', '?')}: {e}")
             return False
+
+    async def _ask_live_supervisors(self, symbol, tf, closed, position, trade, config):
+        """The RL agents selected on this slot, in order, until one acts.
+
+        Which agents supervise which slot is a per-slot setting, default off:
+        `InstrumentSlot.supervising_agents`. Turning it on names the strategy
+        and the agent in the confirmation, so it cannot be switched on by
+        accident from a screen that does not say what it does.
+
+        Everything here is guarded. A supervisor that raises must not stop the
+        owning strategy's own exit from having already run, and must not stop
+        the position being managed by the stop, the target or the trail — those
+        remain the backstop in every case.
+        """
+        try:
+            slot = next((s for s in getattr(config, "instrument_slots", None) or []
+                         if s.symbol == symbol and s.strategy_id == trade.strategy_id), None)
+            names = list(getattr(slot, "supervising_agents", None) or []) if slot else []
+            if not names:
+                return None
+
+            from backend.rl import registry as rlreg
+            from backend.strategies.registry import get_strategy, list_strategies
+
+            owner = {
+                "strategy_id": trade.strategy_id,
+                # As recorded at entry. `GateRecorder` persisted these on the
+                # trade when the signal was taken; re-deriving them now would
+                # read today's parameters onto a past trade.
+                "gate_vector": getattr(trade, "gate_vector", None),
+                "passed_gates": getattr(trade, "passed_gates", None),
+                "confluence_tags": getattr(trade, "confluence_tags", None),
+                "confluence_score": getattr(trade, "confluence_score", None),
+            }
+            registered = set(list_strategies())
+            for sid in names:
+                if sid not in registered:
+                    # Only agents with an APPROVED charter are registered, so an
+                    # unknown id here means it is unapproved, rejected or
+                    # suspended. Skipped loudly rather than silently.
+                    logger.warning(
+                        f"[RL] slot {symbol}/{trade.strategy_id} names supervisor {sid!r}, "
+                        f"which is not registered - it has no approved charter, or it is "
+                        f"suspended. Not supervising.")
+                    continue
+                try:
+                    sup = get_strategy(sid)(config)
+                except rlreg.NotApproved as exc:
+                    logger.warning(f"[RL] {sid} refused to load for supervision: {exc}")
+                    continue
+                if not getattr(sup, "SUPERVISES_OTHER_STRATEGIES", False):
+                    continue
+                if not sup.supervises(trade.strategy_id, symbol):
+                    continue
+                act = sup.on_foreign_position_bar(symbol, tf, closed, position, owner)
+                if act is not None:
+                    logger.info(f"[RL] {sid} acted on {symbol} ticket "
+                                f"{position.get('ticket')}: {act.action} "
+                                f"({act.close_reason})")
+                    return act
+        except Exception as exc:                        # noqa: BLE001
+            logger.error(f"[RL] live supervision failed for {symbol}: {exc}")
+        return None
 
     async def _check_orb_session_close(self, pos, live_pos, session, config) -> bool:
         """

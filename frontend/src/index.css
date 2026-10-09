@@ -1,4 +1,36 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* FONTS ARE LOCAL. NOTHING HERE MAY REFERENCE A THIRD-PARTY HOST.
+ *
+ * This file used to open with an `@import` of a Google-hosted stylesheet,
+ * which sends every admin page view - IP address, user agent, referring page -
+ * to Google before a single pixel renders. A Munich court made a site pay EUR
+ * 100 to one visitor for exactly that, and the exposure is per visitor, so it
+ * grows with traffic while the cost of this file does not. The landing page and
+ * the investor app already use a system stack; the admin app was the last
+ * holdout.
+ *
+ * `local(...)` first, so a machine that already has Inter or JetBrains Mono
+ * installed uses it. Then `url(...)` for the self-hosted WOFF2 files, which
+ * activate the moment they are dropped into assets/fonts/. Until then the
+ * `src` entry simply fails and the stack falls through to the system font -
+ * no layout break, no request off this origin.
+ *
+ * Guarded by tests/test_no_third_party_assets.py, which fails the build if a
+ * third-party font or analytics host reappears in ANY of the four front ends.
+ */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: local('Inter'), local('Inter var'), url('./assets/fonts/inter-variable.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: local('JetBrains Mono'), url('./assets/fonts/jetbrains-mono-variable.woff2') format('woff2');
+}
 
 :root {
   /* Institutional desk palette: deep navy-graphite surfaces, hairline borders,
@@ -47,7 +79,7 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.6;
@@ -1557,6 +1589,24 @@ html, body {
   font-size: 0.68rem;
   color: var(--text-muted);
   margin: 0 0 10px;
+}
+
+/* [4.9] The supervising-agents list on a slot. One row per approved agent, so
+   a slot with several reads as a list rather than a paragraph. */
+.slot-editor__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  margin: 0 0 4px;
+}
+
+.slot-editor__check code {
+  font-size: 0.7rem;
+}
+
+.slot-editor__warn {
+  color: var(--warn, #d29922);
 }
 
 /* A slot list and its "add" row: both wrap instead of pushing controls out. */

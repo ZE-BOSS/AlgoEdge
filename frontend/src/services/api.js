@@ -1,11 +1,22 @@
 import axios from 'axios';
 import { useLoadingStore } from '../store';
+import {
+  activeServerId, clearServerAuth, getServer, getServerRefresh, getServerToken,
+  getServerUser, listServers, saveServers, storeServerAuth,
+} from './servers';
 
 const DEFAULT_URL = import.meta.env.VITE_DEFAULT_BACKEND_URL || 'http://localhost:8000';
-const BACKEND_URL = localStorage.getItem('backend_url') || DEFAULT_URL;
 
+// ONE instance, but the server is resolved PER REQUEST rather than stored on
+// it. The alternative — mutating `baseURL` when you switch servers — breaks
+// the moment two requests are in flight at once, which is the normal state of
+// this app: the dashboard polls live while a backtest streams from demo, and
+// whichever switch happened last decides where both of them go.
+//
+// Resolving at request time also gives a caller an escape hatch: pass
+// `{ serverId }` on any call to aim it somewhere other than the active server.
+// The Backtester uses that to run against demo without moving the whole UI.
 const api = axios.create({
-  baseURL: `${BACKEND_URL}/api`,
   timeout: 60000,
   headers: { 'Content-Type': 'application/json' },
 });
@@ -42,7 +53,19 @@ const isSilentUrl = (url) => url && (url.includes('/latest_result') || url.inclu
   || url.includes('/chart') || (url.includes('/backtests/') && url.includes('/trades')));
 
 api.interceptors.request.use((config) => {
-  const token = getToken();
+  // Which backend, and whose token. A token is signed with that backend's own
+  // secret, so sending live's token to demo is not merely useless — it is the
+  // kind of cross-wiring that makes a demo breach a live one if the secrets
+  // are ever shared to "fix" it. They are not shared; you sign in per server.
+  const serverId = config.serverId || activeServerId();
+  const server = getServer(serverId);
+  if (server) {
+    config.baseURL = `${server.baseUrl.replace(/\/$/, '')}/api`;
+    config.serverId = serverId;
+  } else {
+    config.baseURL = `${DEFAULT_URL}/api`;
+  }
+  const token = getServerToken(serverId) || getToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -72,19 +95,29 @@ const processQueue = (error, token = null) => {
 // auth-failure handler in hooks/useBackendConnection.js). Stores the new
 // tokens on success; clears auth and rethrows on failure so callers can
 // decide how to react (e.g. force logout).
-export const performTokenRefresh = async () => {
-  const refreshToken = getRefreshToken();
+export const performTokenRefresh = async (serverId = null) => {
+  // Refresh against the server that issued the token, not against whichever
+  // one happens to be active now. Refreshing live's session because a demo
+  // request 401'd would be both wrong and confusing.
+  const id = serverId || activeServerId();
+  const server = getServer(id);
+  const refreshToken = getServerRefresh(id) || getRefreshToken();
   if (!refreshToken) {
+    clearServerAuth(id);
     clearAuth();
     throw new Error('No refresh token available');
   }
+  const base = `${(server?.baseUrl || DEFAULT_URL).replace(/\/$/, '')}/api`;
   try {
-    const { data } = await axios.post(`${api.defaults.baseURL}/auth/refresh`, {
+    const { data } = await axios.post(`${base}/auth/refresh`, {
       refresh_token: refreshToken,
     });
+    storeServerAuth(id, data.access_token, data.refresh_token,
+                    getServerUser(id) || getStoredUser());
     storeAuth(data.access_token, data.refresh_token, getStoredUser());
     return data.access_token;
   } catch (err) {
+    clearServerAuth(id);
     clearAuth();
     throw err;
   }
@@ -101,7 +134,8 @@ api.interceptors.response.use(
 
     // If 401 and not already retrying
     if (err.response?.status === 401 && !originalRequest._retry) {
-      const refreshToken = getRefreshToken();
+      const failedOn = originalRequest?.serverId || activeServerId();
+      const refreshToken = getServerRefresh(failedOn) || getRefreshToken();
 
       if (!refreshToken) {
         clearAuth();
@@ -122,7 +156,7 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const accessToken = await performTokenRefresh();
+        const accessToken = await performTokenRefresh(failedOn);
         processQueue(null, accessToken);
         originalRequest.headers['Authorization'] = `Bearer ${accessToken}`;
         return api(originalRequest);
@@ -144,8 +178,12 @@ api.interceptors.response.use(
 // ── Backend URL ─────────────────────────────────────────────────────────────
 
 export const setBackendUrl = (url) => {
+  // Kept for the Connection screen and for anyone running a single server.
+  // It now edits the ACTIVE registry entry rather than a global baseURL —
+  // there is no global baseURL any more, because a request resolves its own.
   localStorage.setItem('backend_url', url);
-  api.defaults.baseURL = `${url}/api`;
+  const id = activeServerId();
+  saveServers(listServers().map((s) => (s.id === id ? { ...s, baseUrl: url } : s)));
 };
 
 export const getBackendUrl = () => localStorage.getItem('backend_url') || DEFAULT_URL;
@@ -193,7 +231,11 @@ export const getSignalDetail = (id) => api.get(`/signals/${id}`);
 
 // ── Backtest ────────────────────────────────────────────────────────────────
 
-export const runBacktest = (data) => api.post('/backtest', data, { timeout: 300000 });
+// `serverId` aims this one request at a named server without moving the
+// rest of the UI — the request interceptor resolves it per call. This is
+// how a long run goes to demo while you keep watching live.
+export const runBacktest = (data, serverId = null) =>
+  api.post('/backtest', data, { timeout: 300000, ...(serverId ? { serverId } : {}) });
 export const runPortfolioBacktest = (data) => api.post('/portfolio_backtest', data, { timeout: 300000 });
 export const getBacktestStatus = () => api.get('/backtest_status');
 export const getLatestBacktestResult = () => api.get('/latest_result');
@@ -328,6 +370,24 @@ export const deleteStrategy = (strategyId) =>
 // Money and units arrive as STRINGS and are sent back as strings: a JSON number
 // is a float in the browser, and a float is how a statement ends up a cent out.
 
+// What the ACCOUNT did, as opposed to what the bot did: deposits, withdrawals,
+// commission, swap, and whether the journal adds up to the broker's balance.
+// Separate from `inv` because this side may read MT5 and the investor side
+// must never — see backend/investor/__init__.py.
+export const cash = {
+  accounts: () => api.get('/cash/accounts'),
+  updateAccount: (login, data) => api.patch(`/cash/accounts/${login}`, data),
+  sync: (login) => api.post('/cash/sync', null, { params: login ? { login } : {} }),
+  summary: (login) => api.get('/cash/summary', { params: { login } }),
+  ledger: (login, params) => api.get('/cash/ledger', { params: { login, ...params } }),
+  periods: (login, grain) => api.get('/cash/periods', { params: { login, grain } }),
+  reconciliation: (login, balance) => api.get('/cash/reconciliation',
+    { params: { login, ...(balance ? { balance } : {}) } }),
+  review: (login) => api.get('/cash/review', { params: login ? { login } : {} }),
+  reclassify: (id, data) => api.post(`/cash/review/${id}`, data),
+  curves: (login) => api.get('/cash/curves', { params: login ? { login } : {} }),
+};
+
 const INV = '/admin/investors';
 export const inv = {
   overview: () => api.get(`${INV}/overview`),
@@ -359,6 +419,10 @@ export const inv = {
   snapshot: (data) => api.post(`${INV}/nav/snapshot`, data),
   settings: () => api.get(`${INV}/settings/current`),
   changeSettings: (data) => api.post(`${INV}/settings`, data),
+  // The legal identity every outward surface renders from: email footers, the
+  // privacy policy, the terms. Versioned, so a save writes a new row.
+  company: () => api.get(`${INV}/company`),
+  saveCompany: (data) => api.post(`${INV}/company`, data),
   disclosures: (state) => api.get(`${INV}/disclosures`, { params: { state } }),
   publishTrade: (tradeId, data) => api.post(`${INV}/disclosures/${tradeId}/publish`, data || {}),
   hideTrade: (tradeId, data) => api.post(`${INV}/disclosures/${tradeId}/hide`, data || {}),
@@ -385,3 +449,51 @@ export const inv = {
 };
 
 export default api;
+
+// ── RL agents (W4) ─────────────────────────────────────────────────────────
+//
+// Admin-only on the server, enforced by `require_admin` on the router — these
+// bindings are a convenience, not the access control.
+//
+// `approveCharter` is the one that matters: it is the only way an agent ever
+// reaches a live slot, and the server refuses it unless a validation report
+// exists, so the button cannot sign off an intention.
+const RL = '/rl';
+export const rl = {
+  features: () => api.get(`${RL}/features`),
+  leakcheck: () => api.get(`${RL}/leakcheck`),
+
+  list: (params) => api.get(`${RL}/agents`, { params }),
+  create: (data) => api.post(`${RL}/agents`, data),
+  get: (id) => api.get(`${RL}/agents/${id}`),
+  clone: (id, data) => api.post(`${RL}/agents/${id}/clone`, data),
+
+  // A dataset is validated hard on upload: a file whose intervals do not match
+  // its timeframe, or whose highs do not contain its closes, comes back as a
+  // 400 with the reason rather than being quietly repaired.
+  upload: (file, params) => {
+    const body = new FormData();
+    body.append('file', file);
+    return api.post(`${RL}/datasets/upload`, body, {
+      params, headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  overlap: (data) => api.post(`${RL}/overlap`, data),
+
+  train: (id, data) => api.post(`${RL}/agents/${id}/train`, data),
+  progress: (id) => api.get(`${RL}/agents/${id}/progress`),
+  cancel: (id) => api.post(`${RL}/agents/${id}/cancel`),
+  collect: (id) => api.post(`${RL}/agents/${id}/collect`),
+  distil: (id, data) => api.post(`${RL}/agents/${id}/distil`, data),
+  validate: (id, data) => api.post(`${RL}/agents/${id}/validate`, data),
+
+  propose: (id) => api.post(`${RL}/agents/${id}/charter/propose`),
+  approveCharter: (id, data = {}) => api.post(`${RL}/agents/${id}/charter/approve`, data),
+  rejectCharter: (id, data) => api.post(`${RL}/agents/${id}/charter/reject`, data),
+  approveProposal: (pid) => api.post(`${RL}/proposals/${pid}/approve`),
+  rejectProposal: (pid, data) => api.post(`${RL}/proposals/${pid}/reject`, data),
+
+  adherence: (id, days) => api.get(`${RL}/agents/${id}/adherence`, { params: { days } }),
+  unsuspend: (id) => api.post(`${RL}/agents/${id}/unsuspend`),
+  suspensions: () => api.get(`${RL}/suspensions`),
+};

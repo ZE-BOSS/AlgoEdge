@@ -78,7 +78,7 @@ class Trade(Base):
     __tablename__ = "trades"
     id = Column(BigInteger, primary_key=True, default=generate_id)
     user_id = Column(String(36), nullable=False, index=True)
-    strategy_id = Column(String(50), nullable=False, default="APA_v1")
+    strategy_id = Column(String(50), nullable=False, default="VWAP_v1")
     symbol = Column(String(20), nullable=False)
     direction = Column(String(10), nullable=False)  # BUY / SELL
     entry_price = Column(Float)
@@ -109,6 +109,24 @@ class Trade(Base):
     # resolved by symbol, which is ambiguous the moment a slot holds two groups.
     # Nullable: rows written before this change simply have no group.
     group_id = Column(String(36), index=True)
+    # [2026-10-08] WHICH MT5 ACCOUNT THIS TRADE BELONGS TO.
+    #
+    # Until now the only account identifier was `User.mt5_account`, so every
+    # historical row silently re-attributed the moment the connected login
+    # changed: reconnect to a different account and the whole journal claims to
+    # be that account's history. The circuit breaker has guarded against this
+    # since account scoping was added (`reset_for_new_account`); the journal
+    # never did.
+    #
+    # It also makes the ledger possible at all. Reconciling the journal against
+    # "the MT5 balance" is meaningless while a row cannot say which balance.
+    #
+    # Nullable on purpose: rows written before this cannot be attributed with
+    # certainty, and they are shown as "account unknown" rather than guessed
+    # into an account. Measured on the VPS database — 23 of 94 rows carry an
+    # mt5_ticket, so most of the pre-bot block will stay unattributed, which is
+    # the honest answer.
+    mt5_account = Column(BigInteger, index=True)
     created_at = Column(DateTime, server_default=func.now())
     positions = relationship("TradePosition", back_populates="parent_trade", cascade="all, delete-orphan")
 
@@ -204,7 +222,7 @@ class User(Base):
 
     license_key = Column(String(100))
     subscription_status = Column(String(50), default="active")
-    active_strategy = Column(String(50), default="APA_v1")
+    active_strategy = Column(String(50), default="VWAP_v1")
     risk_per_trade = Column(Float, default=1.0)
     max_daily_loss = Column(Float, default=5.0)
     allowed_symbols = Column(Text)  # JSON array

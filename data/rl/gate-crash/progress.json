@@ -1,0 +1,1 @@
+{"stage": "training", "optimiser": "ppo-direct", "seed": 3, "fold": 5, "iteration": 1, "iterations": 3, "best": -Infinity, "pct": 53.33, "elapsed_s": 1587.6, "eta_s": 1389.3, "trades": 101, "mean_r": 0.1688}

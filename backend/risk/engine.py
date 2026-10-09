@@ -170,6 +170,32 @@ class RiskEngine:
         except Exception as e:
             logger.debug(f"[RISK] RR feasibility check skipped: {e}")
 
+
+    # ── per-signal logging ────────────────────────────────────────────────
+    #
+    # Every rejection and every approval used to be a WARNING/INFO line, in a
+    # loop that runs once per candidate signal. Live that is exactly right -
+    # there are a handful a day and each one matters. In a backtest it is the
+    # dominant cost: measured on real Crash 1000 bars, one 5,000-bar RL episode
+    # with 347 candidate signals took 8.8s, about 25ms per signal, almost all
+    # of it loguru formatting and writing lines nobody reads during a sweep.
+    # The same measurement drove the identical change in
+    # `BaseStrategy.log_event` (loguru `_log` was 11.4s of a 64s run).
+    #
+    # So during a backtest these go to DEBUG, where the sink filters them
+    # before formatting. The rejection funnel in the report is what a backtest
+    # is actually read from, and it is unaffected.
+
+    def _signal_log(self, payload: dict, level: str = "WARNING") -> None:
+        text = json.dumps(payload)
+        if self.is_backtesting:
+            logger.debug(text)
+        elif level == "INFO":
+            logger.info(text)
+        else:
+            logger.warning(text)
+
+
     def evaluate_signal(
         self,
         signal_data: dict[str, Any],
@@ -222,31 +248,31 @@ class RiskEngine:
             slot_max_losses_per_day=slot_max_losses_per_day,
         )
         if not cb_ok:
-            logger.warning(json.dumps({
+            self._signal_log({
                 "event": "risk_rejected",
                 "reason": "circuit_breaker_symbol",
                 "details": cb_reason
-            }))
+            })
             return False, cb_reason, []
 
         can_trade, reason = self.circuit.check_all(base_balance, current_time, strategy_id=strategy_id_for_cb)
         if not can_trade:
-            logger.warning(json.dumps({
+            self._signal_log({
                 "event": "risk_rejected",
                 "reason": "circuit_breaker_blocked",
                 "details": reason
-            }))
+            })
             return False, reason, []
 
         # 1b. Prop Firm drawdown hard block (only when account_mode = 'prop_firm')
         if hasattr(self, "prop_firm_validator") and self.prop_firm_validator and self.prop_firm_validator.enabled:
             pf_blocked, pf_reason = self.prop_firm_validator.should_block_trading()
             if pf_blocked:
-                logger.warning(json.dumps({
+                self._signal_log({
                     "event": "risk_rejected",
                     "reason": "prop_firm_drawdown_block",
                     "details": pf_reason
-                }))
+                })
                 return False, pf_reason, []
 
         # 2. Minimum RR Check and Direction Validation
@@ -254,33 +280,33 @@ class RiskEngine:
         is_buy = _is_buy(direction)
         
         if is_buy and sl >= entry:
-            logger.warning(json.dumps({
+            self._signal_log({
                 "event": "risk_rejected",
                 "reason": "invalid_sl",
                 "direction": "BUY",
                 "entry": entry,
                 "sl": sl
-            }))
+            })
             return False, "BUY Stop Loss must be below entry", []
             
         if not is_buy and sl <= entry:
-            logger.warning(json.dumps({
+            self._signal_log({
                 "event": "risk_rejected",
                 "reason": "invalid_sl",
                 "direction": "SELL",
                 "entry": entry,
                 "sl": sl
-            }))
+            })
             return False, "SELL Stop Loss must be above entry", []
             
         risk = abs(entry - sl)
         if risk == 0:
-            logger.warning(json.dumps({
+            self._signal_log({
                 "event": "risk_rejected",
                 "reason": "zero_risk",
                 "entry": entry,
                 "sl": sl
-            }))
+            })
             return False, "Risk is zero (entry == SL)", []
 
         # 3. Position Sizing
@@ -330,11 +356,11 @@ class RiskEngine:
                 reject_below_confluence=self.reject_below_confluence,
             )
             if effective_base_risk_pct <= 0:
-                logger.warning(json.dumps({
+                self._signal_log({
                     "event": "risk_rejected",
                     "reason": "confluence_score_too_low",
                     "confluence_score": confluence_score,
-                }))
+                })
                 return False, f"Confluence score {confluence_score} below minimum threshold for risk deployment", []
         else:
             effective_base_risk_pct = base_risk_pct
@@ -360,13 +386,13 @@ class RiskEngine:
                 max_scale=self.vol_target_max_scale,
             )
             effective_base_risk_pct = _vol_result.scaled_risk_pct
-            logger.info(json.dumps({
+            self._signal_log({
                 "event": "vol_target_applied",
                 "symbol": signal_data.get("symbol"),
                 "scale": round(_vol_result.scale, 4),
                 "binding": _vol_result.binding,
                 "detail": _vol_result.explain(),
-            }))
+            }, level="INFO")
 
         # Both live and backtest use MT5 data when available → InstrumentProfile fallback.
         # This matches how _calc_pnl() works (MT5 first via get_symbol_info).
@@ -396,7 +422,7 @@ class RiskEngine:
             remaining_daily_risk = max_loss_dollars - already_lost_dollars
 
             if remaining_daily_risk <= 0:
-                logger.warning(json.dumps({"event": "risk_rejected", "reason": "daily_drawdown_exhausted"}))
+                self._signal_log({"event": "risk_rejected", "reason": "daily_drawdown_exhausted"})
                 return False, f"Daily drawdown limit of {max_daily_dd}% is fully exhausted.", []
 
             if strategy_budget_pct is not None:
@@ -404,7 +430,7 @@ class RiskEngine:
                 strategy_already_lost = -getattr(self.circuit, "strategy_daily_pnl", {}).get(strategy_id_for_cb, 0.0)
                 strategy_remaining = strategy_max_loss - strategy_already_lost
                 if strategy_remaining <= 0:
-                    logger.warning(json.dumps({"event": "risk_rejected", "reason": "strategy_daily_risk_budget_exhausted", "strategy_id": strategy_id_for_cb}))
+                    self._signal_log({"event": "risk_rejected", "reason": "strategy_daily_risk_budget_exhausted", "strategy_id": strategy_id_for_cb})
                     return False, (
                         f"{strategy_id_for_cb}'s daily risk budget ({strategy_budget_pct}% of the "
                         f"{max_daily_dd}% daily drawdown budget) is fully exhausted."
@@ -423,7 +449,7 @@ class RiskEngine:
             remaining_weekly_risk = max_weekly_loss_dollars - already_lost_weekly
 
             if remaining_weekly_risk <= 0:
-                logger.warning(json.dumps({"event": "risk_rejected", "reason": "weekly_drawdown_exhausted"}))
+                self._signal_log({"event": "risk_rejected", "reason": "weekly_drawdown_exhausted"})
                 return False, f"Weekly drawdown limit of {max_weekly_dd}% is fully exhausted.", []
 
             if strategy_budget_pct is not None:
@@ -431,7 +457,7 @@ class RiskEngine:
                 strategy_already_lost_w = -getattr(self.circuit, "strategy_weekly_pnl", {}).get(strategy_id_for_cb, 0.0)
                 strategy_remaining_w = strategy_max_loss_w - strategy_already_lost_w
                 if strategy_remaining_w <= 0:
-                    logger.warning(json.dumps({"event": "risk_rejected", "reason": "strategy_weekly_risk_budget_exhausted", "strategy_id": strategy_id_for_cb}))
+                    self._signal_log({"event": "risk_rejected", "reason": "strategy_weekly_risk_budget_exhausted", "strategy_id": strategy_id_for_cb})
                     return False, (
                         f"{strategy_id_for_cb}'s weekly risk budget ({strategy_budget_pct}% of the "
                         f"{max_weekly_dd}% weekly drawdown budget) is fully exhausted."
@@ -454,11 +480,11 @@ class RiskEngine:
                 if brake_mult < 1.0:
                     requested_risk_dollars *= brake_mult
                     dd_binding = "slot_drawdown_brake"
-                    logger.info(json.dumps({
+                    self._signal_log({
                         "event": "slot_brake_applied", "symbol": symbol,
                         "strategy_id": strategy_id_for_cb, "slot_drawdown_r": round(dd_r, 2),
                         "size_multiplier": round(brake_mult, 3),
-                    }))
+                    }, level="INFO")
 
         # Calculate lot size based on (potentially scaled down) requested_risk_dollars
         max_risk_hard_cap_pct_val = self.config.get("max_risk_hard_cap_pct", 3.0)
@@ -493,11 +519,11 @@ class RiskEngine:
             # (set in position_sizer.py) already carries the specific one; surface
             # it here instead of discarding it.
             specific_reason = sizer_diag.get("refused_reason") or "zero_lot_size"
-            logger.warning(json.dumps({
+            self._signal_log({
                 "event": "risk_rejected",
                 "reason": specific_reason,
                 "balance": account_balance
-            }))
+            })
             reason_text = {
                 "no_instrument_profile": f"No instrument profile or live MT5 data for {symbol} — cannot size a position",
                 "stop_below_min_viable": "Stop distance is inside the minimum viable stop (spread/stops-level would consume it)",
@@ -516,11 +542,11 @@ class RiskEngine:
         if hasattr(self, "prop_firm_validator") and self.prop_firm_validator and self.prop_firm_validator.enabled:
             pf_lot_ok, pf_lot_reason, _ = self.prop_firm_validator.validate_trade(symbol, total_lots)
             if not pf_lot_ok:
-                logger.warning(json.dumps({
+                self._signal_log({
                     "event": "risk_rejected",
                     "reason": "prop_firm_lot_cap_breach",
                     "details": pf_lot_reason
-                }))
+                })
                 return False, pf_lot_reason, []
 
         # 4. Multi-Position Splits (TP1/TP2/TP3)
@@ -561,7 +587,7 @@ class RiskEngine:
             # genuinely bad SL distance. Surface the clearer reason when that's the case.
             floor_overshoot = getattr(self.multi_tp, "_last_overshoot_reason", None) == "account_too_small_for_sl_distance"
             reason_code = "account_too_small_for_sl_distance" if floor_overshoot else "post_split_risk_overshoot"
-            logger.warning(json.dumps({
+            self._signal_log({
                 "event": "risk_rejected",
                 "reason": reason_code,
                 "requested_risk_dollars": round(requested_risk_dollars, 2),
@@ -569,7 +595,7 @@ class RiskEngine:
                 "overshoot_pct": round(overshoot_pct, 1),
                 "actual_total_lots": actual_total_lots,
                 "balance": account_balance,
-            }))
+            })
             if floor_overshoot:
                 return False, (
                     f"Account too small for this SL distance on {symbol}: the broker's minimum "
@@ -583,14 +609,14 @@ class RiskEngine:
                 f"(likely a bad SL/TP distance for {symbol})"
             ), []
         elif actual_risk_dollars > (requested_risk_dollars * (1.0 + 0.2 * tolerance_pct / 100.0)):
-            logger.warning(json.dumps({
+            self._signal_log({
                 "event": "risk_warning_post_split_overshoot",
                 "requested_risk_dollars": round(requested_risk_dollars, 2),
                 "actual_risk_dollars": round(actual_risk_dollars, 2),
                 "actual_total_lots": actual_total_lots,
                 "balance": account_balance,
                 "note": "Residual overshoot after TP scaling — within tolerance"
-            }))
+            })
 
         # 4b. Portfolio governor — cluster exposure + directional netting caps [9.5/9.6]
         if (self.max_cluster_risk_pct > 0 or self.max_net_direction_risk_pct > 0) and base_balance > 0:
@@ -601,11 +627,11 @@ class RiskEngine:
                 prospective = self.circuit.get_cluster_open_risk(cluster, self.symbol_cluster_overrides) + actual_risk_dollars
                 prospective_pct = prospective / base_balance * 100.0
                 if prospective_pct > self.max_cluster_risk_pct:
-                    logger.warning(json.dumps({
+                    self._signal_log({
                         "event": "risk_rejected", "reason": "cluster_exposure_cap",
                         "cluster": cluster, "prospective_pct": round(prospective_pct, 3),
                         "max_cluster_risk_pct": self.max_cluster_risk_pct,
-                    }))
+                    })
                     return False, (
                         f"Cluster exposure cap breached: {cluster} would reach "
                         f"{prospective_pct:.2f}% > {self.max_cluster_risk_pct}% of balance"
@@ -615,12 +641,12 @@ class RiskEngine:
                 prospective = self.circuit.get_net_direction_open_risk(cluster, eff_direction, self.symbol_cluster_overrides) + actual_risk_dollars
                 prospective_pct = prospective / base_balance * 100.0
                 if prospective_pct > self.max_net_direction_risk_pct:
-                    logger.warning(json.dumps({
+                    self._signal_log({
                         "event": "risk_rejected", "reason": "net_direction_cap",
                         "cluster": cluster, "direction": eff_direction,
                         "prospective_pct": round(prospective_pct, 3),
                         "max_net_direction_risk_pct": self.max_net_direction_risk_pct,
-                    }))
+                    })
                     return False, (
                         f"Directional netting cap breached: {cluster} {eff_direction} would reach "
                         f"{prospective_pct:.2f}% > {self.max_net_direction_risk_pct}% of balance"
@@ -657,7 +683,7 @@ class RiskEngine:
         if _rr_sid in self.min_rr_by_strategy:
             min_rr = min(min_rr, self.min_rr_by_strategy[_rr_sid])
         if blended_rr < min_rr:
-            logger.warning(json.dumps({
+            self._signal_log({
                 "event": "risk_rejected",
                 "reason": "insufficient_rr",
                 "min_rr": min_rr,
@@ -666,7 +692,7 @@ class RiskEngine:
                 "entry": entry,
                 "sl": sl,
                 "last_tp": last_tp_price
-            }))
+            })
             return False, f"Blended RR {blended_rr:.2f} below minimum {min_rr}", []
 
         group_id = signal_data.get("group_id", "unknown")
@@ -742,7 +768,7 @@ class RiskEngine:
             "last_tp_rr": round(last_tp_rr, 3),
         }
 
-        logger.info(json.dumps({
+        self._signal_log({
             "event": "trade_approved",
             "direction": direction,
             "symbol": symbol,
@@ -753,7 +779,7 @@ class RiskEngine:
             "tp_count": len(tp_levels),
             "last_tp_rr": round(last_tp_rr, 2),
             "binding_constraint": binding_constraint,
-        }))
+        }, level="INFO")
         return True, "APPROVED", tp_levels
 
     def manage_open_position(

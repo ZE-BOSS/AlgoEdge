@@ -139,20 +139,20 @@ def build_full_schema() -> list[dict]:
     from backend.core.config_schema import (
         RiskParams, PropFirmParams, UserConfigV2,
     )
-    from backend.strategies.strategy_apa.params import APAParams
     from backend.strategies.strategy_vwap.params import VWAPParams
     from backend.strategies.strategy_orb.params import ORBParams
     from backend.strategies.strategy_spike_resumption.params import SpikeResumptionParams
+    from backend.strategies.strategy_overnight.params import OvernightSessionParams
     from backend.strategies.strategy_trend.params import TrendBreakoutParams
     from backend.core.config_schema import DriftJumpAlphaParams
 
     groups: list[tuple[type, str]] = [
         (RiskParams, "risk"),
         (PropFirmParams, "prop_firm"),
-        (APAParams, "apa"),
         (VWAPParams, "vwap"),
         (ORBParams, "orb"),
         (TrendBreakoutParams, "trend_breakout"),
+        (OvernightSessionParams, "overnight_session"),
         (SpikeResumptionParams, "spike_resumption"),
         (DriftJumpAlphaParams, "drift_jump_alpha"),
     ]

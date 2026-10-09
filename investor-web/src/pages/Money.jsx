@@ -55,6 +55,26 @@ function AddMoney() {
                   <input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
                 </Field>
                 <Problem error={error} />
+                {/* What this money costs, on the screen where it is committed.
+                    It is in the Terms as well, but a cost disclosed only behind
+                    a link is the thing auto-renewal rules exist to stop: the
+                    person committing should not have to go and find it. */}
+                {i.terms && (
+                  <div className="terms-note">
+                    <strong>Before you send:</strong> fees are a share of
+                    {' '}<em>profit</em> only, taken {i.terms.fee_period} —
+                    {' '}{i.terms.performance_fee_pct}% performance and
+                    {' '}{i.terms.management_fee_pct}% management. You can withdraw up to
+                    {' '}{i.terms.withdrawal_cap_pct}% of your profit each month, after
+                    {' '}{i.terms.notice_days} days&rsquo; notice, once your money has been
+                    invested for {i.terms.lockup_days} days.
+                    {' '}<a href="/terms.html" target="_blank" rel="noreferrer">Full terms</a>.
+                    <div className="muted small" style={{ marginTop: 6 }}>
+                      Your money is at risk. You can lose some or all of it, and past
+                      performance does not guarantee future results.
+                    </div>
+                  </div>
+                )}
                 <button className="btn primary" disabled={busy || !clean}>{busy ? 'Sending…' : 'I have sent it'}</button>
                 <p className="muted small">Nothing is added to your account until we see the money arrive.</p>
               </form>

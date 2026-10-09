@@ -17,9 +17,12 @@ Pinned here:
 from __future__ import annotations
 
 import asyncio
+import shutil
+import tempfile
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
@@ -49,8 +52,31 @@ def run(coro):
 class App:
     async def __aenter__(self):
         authmod.reset_rate_limit()
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                          connect_args={"check_same_thread": False})
+        # A TEMP FILE, not ":memory:" with a StaticPool, and the distinction is
+        # why this harness looks heavier than the others.
+        #
+        # StaticPool hands every session the SAME connection. The outbox sends
+        # as a loop task after a request commits, so that task's own commit
+        # lands while the NEXT request still has statements in progress ->
+        # "cannot commit transaction - SQL statements in progress", which rolls
+        # the in-flight request back. The route has already returned 200 by
+        # then, so the write is simply lost.
+        #
+        # That is not hypothetical here. It cost
+        # `test_the_emailed_reset_link_works` on 2026-10-08: accept returned
+        # 200, the delivery of the earlier reset email rolled its transaction
+        # back, the new password_hash was never written, and logging in with the
+        # OLD password still worked. The symptom was a password reset that
+        # silently did nothing. Purely a timing accident of the shared
+        # connection — the same test passed for weeks before an unrelated
+        # import shifted the awaits.
+        #
+        # Production is a file-backed sqlite on the default pool, one connection
+        # per session, so this cannot happen there. Modelling that here measures
+        # the application instead of aiosqlite's single-connection semantics.
+        self._tmp = tempfile.mkdtemp(prefix="algoedge-app-")
+        self.engine = create_async_engine(
+            f"sqlite+aiosqlite:///{Path(self._tmp).as_posix()}/app.db")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
@@ -84,6 +110,7 @@ class App:
         outbox.use_session_factory(None)
         await self.http.aclose()
         await self.engine.dispose()
+        shutil.rmtree(self._tmp, ignore_errors=True)
 
     # admin side
     async def admin(self, method, path, json=None, **kw):

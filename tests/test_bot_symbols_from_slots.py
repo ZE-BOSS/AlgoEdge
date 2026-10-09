@@ -3,7 +3,7 @@
 2026-09-15: Settings had one enabled slot (Crash 1000 Index / DriftJumpAlpha_v1)
 while the Dashboard's Bot Control showed — and Start Bot sent — a hardcoded
 eight-symbol list. The scan loop then gave every started symbol without a slot
-a default APA_v1 strategy, so the bot would have traded APA on XAUUSD, EURUSD…
+a default ORB_v1 strategy, so the bot would have traded ORB on XAUUSD, EURUSD…
 and never scanned the slot the user had enabled.
 """
 
@@ -16,7 +16,7 @@ from backend.services.bot_service import BotService
 
 def test_only_enabled_slots_count():
     cfg = UserConfigV2.from_dict({"instrument_slots": [
-        {"slot_id": "a", "symbol": "XRPUSD", "strategy_id": "APA_v1", "enabled": False},
+        {"slot_id": "a", "symbol": "XRPUSD", "strategy_id": "ORB_v1", "enabled": False},
         {"slot_id": "b", "symbol": "Crash 1000 Index", "strategy_id": "DriftJumpAlpha_v1", "enabled": True},
         {"slot_id": "c", "symbol": "Boom 1000 Index", "strategy_id": "SpikeFade_v1", "enabled": False},
         {"slot_id": "d", "symbol": "Crash 1000 Index", "strategy_id": "SpikeFade_v1", "enabled": True},
@@ -26,8 +26,8 @@ def test_only_enabled_slots_count():
 
 def test_legacy_instrument_settings_still_resolve():
     cfg = UserConfigV2.from_dict({"instrument_settings": [
-        {"symbol": "EURUSD", "strategy_id": "APA_v1", "enabled": True},
-        {"symbol": "GBPUSD", "strategy_id": "APA_v1", "enabled": False},
+        {"symbol": "EURUSD", "strategy_id": "ORB_v1", "enabled": True},
+        {"symbol": "GBPUSD", "strategy_id": "ORB_v1", "enabled": False},
     ]})
     assert BotService.active_slot_symbols(cfg) == ["EURUSD"]
 

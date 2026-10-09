@@ -31,12 +31,13 @@ import BacktestReplay from '../components/BacktestReplay';
  */
 
 const STRATEGIES = [
-  { id: 'APA_v1', group: 'apa', label: 'APA (H&S inversion)' },
   { id: 'VWAP_v1', group: 'vwap', label: 'VWAP reversion' },
   { id: 'ORB_v1', group: 'orb', label: 'Opening range breakout' },
   { id: 'TrendBreakout_v1', group: 'trend_breakout', label: 'Trend breakout (Donchian)' },
+  { id: 'OvernightSession_v1', group: 'overnight_session', label: 'Overnight session (index)' },
   { id: 'SpikeResumption_v1', group: 'spike_resumption', label: 'Spike resumption (Boom/Crash)' },
   { id: 'DriftJumpAlpha_v1', group: 'drift_jump_alpha', label: 'Drift / jump alpha' },
+  { id: 'BoomDriftJump_v1', group: 'boom_drift_jump', label: 'Boom drift / jump' },
   { id: 'BiasIFVG_v1', group: 'bias_ifvg', label: 'Bias + key level IFVG' },
   { id: 'SpikeFade_v1', group: 'synth', label: 'Spike fade' },
   { id: 'RangeRevert_v1', group: 'synth', label: 'Range revert' },
@@ -50,7 +51,7 @@ const SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'GBPJPY', 'XAUUSD', 'XA
 const PROMOTE_KEY = 'algoedge_bt_config_v2';
 
 export default function StrategyLab() {
-  const [strategyId, setStrategyId] = useState('APA_v1');
+  const [strategyId, setStrategyId] = useState('VWAP_v1');
   const [symbol, setSymbol] = useState('EURUSD');
   // Default to a window long enough to be informative: a strategy taking a few
   // trades a month needs months, not the 45 days this screen used to force.

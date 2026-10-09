@@ -300,7 +300,11 @@ class CircuitBreaker:
     # ── profit targets ──────────────────────────────────────────────────────
     def note_group_floating(self, group_id: str, unrealised_pnl: float,
                             account_balance: float | None = None,
-                            symbol: str | None = None) -> None:
+                            symbol: str | None = None,
+                            direction: str | None = None,
+                            strategy_id: str | None = None,
+                            slot_id: str | None = None,
+                            initial_risk_dollars: float | None = None) -> None:
         """Record one of THIS SLOT's open groups' unrealised P&L.
 
         Called once per bar per open group by both backtesters, and once per
@@ -328,8 +332,19 @@ class CircuitBreaker:
             # such a position, which is strictly better than today, where it is
             # invisible to every group-keyed check.
             group = {
-                "symbol": symbol or "", "strategy_id": "", "slot_id": "",
-                "sub_trades": 1, "pnl": 0.0, "initial_risk": 0.0, "adopted": True,
+                "symbol": symbol or "",
+                # Whatever the caller knows, rather than blanks: with `direction`
+                # empty, get_net_direction_open_risk() matched nothing and the
+                # net-direction cap stayed blind even for an adopted group.
+                "strategy_id": strategy_id or "",
+                "slot_id": slot_id or "",
+                "direction": direction or "",
+                "sub_trades": 1, "pnl": 0.0,
+                # 0.0 only when genuinely unknown. It under-counts open risk for
+                # such a group, which is strictly better than the group being
+                # invisible to every group-keyed check.
+                "initial_risk": float(initial_risk_dollars or 0.0),
+                "adopted": True,
             }
             self.active_groups[group_id] = group
             logger.info(
@@ -666,6 +681,19 @@ class CircuitBreaker:
                 "daily_pnl": self.daily_pnl,
                 "weekly_pnl": self.weekly_pnl,
                 "open_positions_by_symbol": self.open_positions_by_symbol,
+                # The GROUPS, not just the per-symbol count. Without this every
+                # group-keyed check — get_open_risk, get_cluster_open_risk,
+                # get_net_direction_open_risk, floating_pnl — read 0 after a
+                # restart for positions that were still open, so the next
+                # signal sized as though nothing were held. Silent: the
+                # per-symbol count WAS restored, so the position limits still
+                # bit and nothing looked wrong.
+                #
+                # Safe to restore because `reconcile_from_mt5` runs on every bot
+                # start and drops any group whose symbol has no open MT5
+                # position, so a group closed while the bot was off cannot
+                # survive.
+                "active_groups": self.active_groups,
                 "last_trade_closed_time": self.last_trade_closed_time,
                 "is_paused": self.is_paused,
                 "pause_reason": self.pause_reason,
@@ -734,6 +762,20 @@ class CircuitBreaker:
             # Always restore weekly state (survives day boundaries)
             self.weekly_pnl = data.get("weekly_pnl", 0.0)
             self.last_reset_week = data.get("last_reset_week", today.isocalendar()[1])
+
+            # Open groups outlive a calendar day, so they are restored whether or
+            # not the day rolled over — a position held through midnight is still
+            # held. `reconcile_from_mt5` prunes whatever MT5 no longer reports.
+            groups = data.get("active_groups")
+            if isinstance(groups, dict):
+                self.active_groups = {
+                    str(gid): dict(g) for gid, g in groups.items() if isinstance(g, dict)
+                }
+                if self.active_groups:
+                    logger.info(
+                        f"[CB] restored {len(self.active_groups)} open group(s) from disk — "
+                        f"open risk {self.get_open_risk():.2f}"
+                    )
 
             if is_new_day:
                 # New day — reset daily counters (do not carry over daily streak or daily trades)

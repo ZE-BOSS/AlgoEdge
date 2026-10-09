@@ -300,6 +300,11 @@
         <label>Phone <span class="opt">(optional)</span><input name="phone" type="tel" autocomplete="tel" maxlength="40" /></label>
         <label>Country<input name="country" autocomplete="country-name" maxlength="80" /></label>
       </div>
+      <!-- Asked because the Terms require you to be 18. The server rejects an
+           application without it, so this field is not decorative. -->
+      <label>Date of birth<input name="date_of_birth" type="date" autocomplete="bday"
+          required id="dob" />
+        <span class="opt">You must be at least 18 to open an account.</span></label>
       <label>How much are you thinking of investing?
         <select name="amount_band">
           <option value="">Choose one</option>

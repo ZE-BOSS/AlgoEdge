@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Copy, Trash2 } from 'lucide-react';
 import SchemaForm from './SchemaForm';
+import { useApprovedAgents } from '../hooks/useAgents';
 import { ACCOUNT_ONLY_KEYS, SLOT_RISK_KEYS, SLOT_RISK_SECTIONS, STRATEGY_GROUP, STRATEGY_LABEL, STRATEGY_OPTIONS, TP_LEVEL_OF, slotSummary } from './slotSpec';
 import SymbolPicker from './SymbolPicker';
 
@@ -48,7 +49,7 @@ export default function SlotEditor({
   // A book of slots stays readable when each is one line until you open it.
   const [open, setOpen] = useState(defaultOpen);
   const isOpen = collapsible ? open : true;
-  const group = STRATEGY_GROUP[slot.strategy_id] || 'apa';
+  const group = STRATEGY_GROUP[slot.strategy_id] || 'orb';
   const set = (patch) => onChange({ ...slot, ...patch });
 
   // Strategy rows for THIS strategy only, re-based on the saved account value
@@ -255,6 +256,7 @@ export default function SlotEditor({
               showFilter={strategyRows.length > 10}
               minWidth={190}
             />
+            <SlotSupervisors slot={slot} set={set} />
           </>
         ) : (
           <>
@@ -288,5 +290,64 @@ export default function SlotEditor({
         )}
       </div>)}
     </div>
+  );
+}
+
+
+/**
+ * [4.9] Which RL agents may close or tighten THIS slot's trades early.
+ *
+ * Default off and it stays off until someone turns it on here. An agent does
+ * not start supervising a slot because it exists, or because it happens to
+ * have been trained on the same symbol.
+ *
+ * Turning it on names the strategy and the agent in the confirmation, because
+ * the mistake worth preventing is not pressing the switch - it is not
+ * realising which slot you were looking at.
+ */
+function SlotSupervisors({ slot, set }) {
+  const { data: agents = [] } = useApprovedAgents();
+  const chosen = slot.supervising_agents || [];
+  if (!agents.length) return null;
+
+  const toggle = (sid) => {
+    const on = !chosen.includes(sid);
+    if (on) {
+      const ok = window.confirm(
+        `Let ${sid} close or tighten ${STRATEGY_LABEL[slot.strategy_id] || slot.strategy_id} `
+        + `trades on ${slot.symbol || 'this symbol'}?\n\n`
+        + 'It will never open a position, never size one and cannot widen a stop. '
+        + `The ${STRATEGY_LABEL[slot.strategy_id] || slot.strategy_id} rule's own exit `
+        + 'is asked first and wins, so the agent can only act earlier.\n\n'
+        + 'The one thing it can get wrong is cutting a trade that would have '
+        + 'recovered. Measure that in the Backtester before you run it live.');
+      if (!ok) return;
+    }
+    set({
+      supervising_agents: on ? [...chosen, sid] : chosen.filter((x) => x !== sid),
+    });
+  };
+
+  return (
+    <>
+      <p className="slot-editor__note">
+        <b>Supervising agents.</b> An agent selected here watches this slot&apos;s
+        open positions once per closed bar and may only close them or tighten
+        their stop. Every action it takes is written to the trade&apos;s exit
+        reason as <code>RL_SUPERVISOR::&lt;agent&gt;@&lt;version&gt;</code>, so the
+        Journal shows which exits were the agent&apos;s.
+      </p>
+      {agents.map((a) => (
+        <label key={a.strategy_id} className="slot-editor__check">
+          <input
+            type="checkbox"
+            checked={chosen.includes(a.strategy_id)}
+            onChange={() => toggle(a.strategy_id)}
+          />
+          <code>{a.strategy_id}</code>
+          {a.suspended && <span className="slot-editor__warn"> — suspended, it will not act</span>}
+        </label>
+      ))}
+    </>
   );
 }

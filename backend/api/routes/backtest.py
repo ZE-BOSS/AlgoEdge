@@ -403,12 +403,12 @@ def _trade_chart_payload(trade: dict, tf: str | None = None) -> dict:
 # other silently dropped every tuned parameter for it — which is exactly what
 # happened to the five synthetic strategies added in research/26.
 STRATEGY_PARAM_SECTION: dict[str, str] = {
-    "APA_v1": "apa",
     "VWAP_v1": "vwap",
     "DriftJumpAlpha_v1": "drift_jump_alpha",
     "BoomDriftJump_v1": "boom_drift_jump",
     "ORB_v1": "orb",
     "TrendBreakout_v1": "trend_breakout",
+    "OvernightSession_v1": "overnight_session",
     "SpikeResumption_v1": "spike_resumption",
     "BiasIFVG_v1": "bias_ifvg",
     "SpikeFade_v1": "synth",
@@ -585,7 +585,7 @@ class BulkBacktestRequest(BaseModel):
     ids: list[str]
 
 class BacktestRequest(BaseModel):
-    strategy_id: str = "APA_v1"
+    strategy_id: str = "VWAP_v1"
     symbol: str
     start_date: str | None = None
     end_date: str | None = None
@@ -604,6 +604,16 @@ class BacktestRequest(BaseModel):
     # live bot resolve the same slot — which is what makes a single run, a
     # portfolio leg and live agree. Empty = the flat fields below, as before.
     slot_risk: dict[str, Any] = {}
+    # [4.9] RL agents allowed to CLOSE or tighten this run's trades early.
+    # Strategy ids as the registry knows them (`RL::<name>@<version>`), and only
+    # agents with an APPROVED charter are ever registered - so an id that is not
+    # in the registry is reported rather than silently ignored.
+    #
+    # When this is non-empty the run reports THREE columns from ONE bar
+    # sequence: unsupervised, supervised, and the difference. Two separate runs
+    # would drift apart on the fills and on the risk engine's state, and the
+    # difference between two drifted runs is not the supervisor's effect.
+    supervising_agents: list[str] = []
     # As above, for the one slot this run tests.
     use_measured_params: bool = True
     # Whether this strategy's measured exits fill in what `slot_risk` leaves out.
@@ -774,7 +784,7 @@ class SaveBacktestRequest(BaseModel):
 class PortfolioSymbolConfig(BaseModel):
     """Config for a single symbol/strategy pair in a portfolio backtest."""
     symbol: str
-    strategy_id: str = "APA_v1"
+    strategy_id: str = "VWAP_v1"
     strategy_params: dict[str, Any] = {}
     # [12.8/Part14] Optional — when two rows share the same `symbol` under
     # different strategies, each needs its own slot_id so their candle data,
@@ -1239,8 +1249,11 @@ async def run_backtest_endpoint(
                 try:
                     await ws_manager.broadcast_to_user(
                         current_user.id, {"type": "backtest_error", "message": message})
-                except Exception:
-                    pass
+                except Exception as _ws_exc:
+                    # The state is already saved, so a reload still shows the
+                    # error. Logged because a silently dead socket is how "the
+                    # page just sat there" becomes unexplainable.
+                    logger.warning(f"[BACKTEST] could not push the error to the UI: {_ws_exc}")
 
 
             # NOTE: Engine is built first so we can call get_required_timeframes()
@@ -1288,7 +1301,7 @@ async def run_backtest_endpoint(
                 from backend.strategies.strategy_defaults import get_strategy_defaults
                 _sd = get_strategy_defaults(req.strategy_id)
                 if "session_filter_enabled" in _sd and req.session_filter_enabled is None:
-                    _target = {"APA_v1": "apa", "VWAP_v1": "vwap"}.get(req.strategy_id)
+                    _target = {"VWAP_v1": "vwap"}.get(req.strategy_id)
                     _blk = getattr(config, _target, None) if _target else None
                     if _blk is not None and hasattr(_blk, "session_filter_enabled"):
                         _blk.session_filter_enabled = _sd["session_filter_enabled"]
@@ -1307,7 +1320,7 @@ async def run_backtest_endpoint(
             
             strategy_id = req.strategy_id
             if strategy_id == "SMC_v1":
-                strategy_id = "APA_v1"
+                strategy_id = "VWAP_v1"
             engine_class = get_strategy(strategy_id)
             engine = engine_class(config)
             engine.is_backtesting = True
@@ -1624,6 +1637,17 @@ async def run_backtest_endpoint(
                 candles_h1=indexed_by_tf.get("H1"),
             )
 
+            # [4.9] The supervised half, from the SAME signals and the same
+            # frame. The run above is the unsupervised baseline; this one adds
+            # the agents and nothing else, so the difference between the two is
+            # the supervisor's effect rather than two runs that drifted apart.
+            supervision = None
+            if req.supervising_agents:
+                supervision = await _run_supervised(
+                    req, candles, signals, merged_risk_config, engine,
+                    candles_m15_idx, candles_m5_idx, indexed_by_tf.get("H1"),
+                    current_user.id, results)
+
             # [18.4] Stop the pump as soon as the engine returns. Leaving it
             # running would keep polling for the life of the request, and
             # `close()` before the route emits its own stage="complete" is what
@@ -1631,6 +1655,8 @@ async def run_backtest_endpoint(
             _progress.close()
             _pump_task.cancel()
 
+            if supervision is not None:
+                results["supervision"] = supervision
             report = results.get("report")
             elapsed = (_time.time() - bt_start) * 1000
             pnl = results.get('final_balance', 0) - req.initial_balance
@@ -1853,8 +1879,10 @@ async def run_portfolio_backtest_endpoint(
                     data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
                     if data:
                         return json.loads(data)
-                except Exception:
-                    pass
+                except Exception as _redis_exc:
+                    logger.debug(
+                        f"[BACKTEST] Redis state read failed, using the in-process copy: "
+                        f"{_redis_exc}")
             return USER_BACKTEST_STATE.get(current_user.id, initial_state.copy())
 
         await _save_state(initial_state)
@@ -2106,7 +2134,7 @@ async def run_portfolio_backtest_endpoint(
 
                 config.instrument_settings = [InstrumentSettings(symbol=sym, strategy_id=strat_id)]
                 if strat_id == "SMC_v1":
-                    strat_id = "APA_v1"
+                    strat_id = "VWAP_v1"
                 engine_class = get_strategy(strat_id)
                 strategy_engine = engine_class(config)
                 strategy_engine.is_backtesting = True
@@ -2473,8 +2501,8 @@ async def run_portfolio_backtest_endpoint(
             for _held in (portfolio_data, portfolio_data_m15, portfolio_data_m5, portfolio_signals):
                 try:
                     _held.clear()
-                except Exception:
-                    pass
+                except Exception as _free_exc:
+                    logger.debug(f"[PORTFOLIO_BT] could not release a held frame: {_free_exc}")
             current_state = await _get_state()
             current_state["status"] = "complete"
             current_state["progress"] = {"stage": "complete", "pct": 100}
@@ -2497,8 +2525,8 @@ async def run_portfolio_backtest_endpoint(
             current_state["result"] = None
             try:
                 await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_error", "message": str(e)})
-            except Exception:
-                pass
+            except Exception as _ws_exc:
+                logger.warning(f"[PORTFOLIO_BT] could not push the error to the UI: {_ws_exc}")
             await _save_state(current_state)
             from backend.services.bot_service import bot_service
             bot_service.log_system_event(f"Portfolio backtest failed: {e!s}", category="BACKTEST", level="ERROR")
@@ -2661,8 +2689,12 @@ async def get_backtest(
     try:
         params = safe_json_loads(run.params_snapshot, {})
         initial_balance = params.get("initial_balance", 10000.0)
-    except Exception:
-        pass
+    except Exception as _snap_exc:
+        # The equity curve below is built from this balance, so falling back to
+        # 10,000 silently would draw a curve for an account that never existed.
+        logger.warning(
+            f"[BACKTEST] run {getattr(run, 'id', '?')}: unreadable params_snapshot "
+            f"({_snap_exc}) - the equity curve assumes a $10,000 starting balance")
 
     balance = initial_balance
 
@@ -2871,8 +2903,8 @@ async def get_replay_series(
             data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
             if data:
                 state = json.loads(data)
-        except Exception:
-            pass
+        except Exception as _redis_exc:
+            logger.debug(f"[BACKTEST] Redis state read failed: {_redis_exc}")
 
     if not state or not state.get("result"):
         raise HTTPException(status_code=404, detail="No active or completed backtest found")
@@ -3053,8 +3085,8 @@ async def get_unsaved_trade_chart(
             data = await redis_client.redis.get(f"backtest_state:{current_user.id}")
             if data:
                 state = json.loads(data)
-        except Exception:
-            pass
+        except Exception as _redis_exc:
+            logger.debug(f"[BACKTEST] Redis state read failed: {_redis_exc}")
     if not state or not state.get("result"):
         raise HTTPException(status_code=404, detail="No active or completed backtest found")
     result = state["result"]
@@ -3183,7 +3215,7 @@ async def save_backtest_from_client(
     run = BacktestRun(
         id=backtest_id,
         user_id=current_user.id,
-        strategy_id=data.get("strategy_id", "APA_v1"),
+        strategy_id=data.get("strategy_id", "VWAP_v1"),
         symbol=data.get("symbol", "Volatility 75 Index"),
         # User-supplied title takes priority. Falls back to symbol so
         # single-symbol saves (which didn't bother typing a title) still get
@@ -3444,6 +3476,122 @@ def _is_live_run(state: dict | None) -> bool:
         return True  # pre-heartbeat state: assume it is real
     import time as _t
     return (_t.time() - float(beat)) < STALE_RUN_SECONDS
+
+
+async def _run_supervised(req, candles, signals, risk_config, owner_engine,
+                          candles_m15, candles_m5, candles_h1, user_id,
+                          unsupervised: dict) -> dict:
+    """The supervised column, and the difference from the unsupervised one.
+
+    ONE bar sequence, ONE signal list. The only thing that changes between the
+    two runs is the strategy object handed to the engine, which is what makes
+    the comparison a measurement of supervision rather than of two runs.
+
+    An agent that is not registered is REPORTED by name rather than skipped
+    silently: only agents with an APPROVED charter are registered, so an
+    unknown id means it has not been approved, was rejected, or is suspended -
+    and all three are things you want to be told.
+    """
+    import asyncio
+
+    from backend.backtester.engine import BacktestEngine
+    from backend.rl import registry as rlreg
+    from backend.strategies.registry import get_strategy, list_strategies
+
+    registered = set(list_strategies())
+    supervisors, unavailable = [], []
+    for sid in req.supervising_agents:
+        if sid not in registered:
+            unavailable.append(sid)
+            continue
+        try:
+            sup = get_strategy(sid)(owner_engine.config if hasattr(owner_engine, "config")
+                                    else risk_config)
+        except rlreg.NotApproved as exc:
+            unavailable.append(f"{sid} ({exc})")
+            continue
+        except Exception as exc:                        # noqa: BLE001
+            unavailable.append(f"{sid} ({type(exc).__name__}: {exc})")
+            continue
+        if not getattr(sup, "SUPERVISES_OTHER_STRATEGIES", False):
+            unavailable.append(f"{sid} (not trained as a supervisor)")
+            continue
+        sup.is_backtesting = True
+        supervisors.append(sup)
+
+    if not supervisors:
+        return {"available": False, "unavailable": unavailable,
+                "note": "no usable supervising agent - only agents with an APPROVED "
+                        "charter are registered"}
+
+    def work():
+        engine = BacktestEngine(dict(risk_config))
+        engine.set_supervisors(supervisors)
+        return engine.run(candles, [dict(x) for x in signals], req.initial_balance,
+                          candles_m15, candles_m5, owner_engine, None, candles_h1)
+
+    supervised = await asyncio.to_thread(work)
+
+    def summarise(res: dict) -> dict:
+        rep = res.get("report")
+        groups = res.get("grouped_trades") or []
+        from backend.analytics.metrics import compute_trade_metrics
+        rs = []
+        for g in groups:
+            try:
+                r = compute_trade_metrics(g).get("realized_rr")
+            except Exception:
+                r = None
+            if r is not None:
+                rs.append(float(r))
+        return {
+            "trades": len(groups),
+            "expectancy_r": (sum(rs) / len(rs)) if rs else None,
+            "total_pnl": float(res.get("final_balance", 0) - req.initial_balance),
+            "win_rate": getattr(rep, "win_rate", None),
+            "max_drawdown_pct": getattr(rep, "max_drawdown_pct", None),
+            "_rs": rs,
+            "_groups": groups,
+        }
+
+    base, sup = summarise(unsupervised), summarise(supervised)
+    prefix = "RL_SUPERVISOR::"
+    closed_early = [r for g, r in zip(sup["_groups"], sup["_rs"])
+                    if str(g.get("exit_reason", "")).startswith(prefix)]
+    let_run = [r for g, r in zip(sup["_groups"], sup["_rs"])
+               if not str(g.get("exit_reason", "")).startswith(prefix)]
+    mean = lambda xs: (sum(xs) / len(xs)) if xs else None   # noqa: E731
+
+    for d in (base, sup):
+        d.pop("_rs", None)
+        d.pop("_groups", None)
+
+    delta = None
+    if base["expectancy_r"] is not None and sup["expectancy_r"] is not None:
+        delta = sup["expectancy_r"] - base["expectancy_r"]
+
+    return {
+        "available": True,
+        "agents": [getattr(s, "strategy_id", "?") for s in supervisors],
+        "unavailable": unavailable,
+        "unsupervised": base,
+        "supervised": sup,
+        "delta_expectancy_r": delta,
+        "delta_pnl": sup["total_pnl"] - base["total_pnl"],
+        "closed_early": len(closed_early),
+        "mean_r_closed_early": mean(closed_early),
+        "mean_r_let_run": mean(let_run),
+        # The winner-protection test, inline: if the trades it cut averaged
+        # BETTER than the ones it let run, it is cutting winners - the one
+        # failure mode a supervisor has, and the one this project has already
+        # measured twice.
+        "cutting_winners": bool(closed_early and let_run
+                                and mean(closed_early) > mean(let_run)),
+        "measurable": len(closed_early) >= 100,
+        "note": ("Both columns come from the same bars and the same signal list; "
+                 "only the strategy object differs. Fewer than 100 supervised "
+                 "exits is not a measurement."),
+    }
 
 
 def build_merged_risk_config(req: "BacktestRequest") -> dict[str, Any]:

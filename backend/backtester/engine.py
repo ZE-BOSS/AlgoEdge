@@ -850,6 +850,54 @@ class BacktestEngine(CostModelMixin):
             or "UNKNOWN"
         )
 
+    # ── supervision (plan 4.9) ──────────────────────────────────────────
+    #
+    # A supervisor never opens anything. It is handed the positions the running
+    # strategy owns, once per closed bar, and may only close or tighten — which
+    # is why it needs no risk approval: it cannot increase exposure. Empty by
+    # default, so a run without supervisors is byte-identical to one built
+    # before this existed.
+    _supervisors: list = []
+
+    def set_supervisors(self, supervisors: list) -> None:
+        self._supervisors = [s for s in (supervisors or [])
+                             if getattr(s, "SUPERVISES_OTHER_STRATEGIES", False)]
+
+    def _ask_supervisors(self, pos: dict, candle_slice):
+        """The first supervisor with something to say, or None.
+
+        `owner` carries the opening strategy's id and the gate vector AS
+        RECORDED AT ENTRY, read off the signal that opened the position. Never
+        re-derived: re-deriving it would read today's parameters onto a past
+        trade, which is a lookahead with no symptom.
+        """
+        owner_id = str(getattr(self._strategy, "strategy_id", "")
+                       or pos.get("strategy_id") or "")
+        _sig = pos.get("original_signal") or {}
+        _meta = _sig.get("metadata") or {}
+        owner = {
+            "strategy_id": owner_id,
+            "gate_vector": _meta.get("gate_vector"),
+            "passed_gates": _meta.get("passed_gates"),
+            "confluence_tags": _meta.get("confluence_tags"),
+            "confluence_score": _sig.get("confluence_score"),
+        }
+        symbol = pos.get("symbol", "")
+        for sup in self._supervisors:
+            if sup is self._strategy:
+                continue
+            try:
+                if not sup.supervises(owner_id, symbol):
+                    continue
+                act = sup.on_foreign_position_bar(
+                    symbol, pos.get("timeframe", ""), candle_slice, pos, owner)
+            except Exception as exc:                    # noqa: BLE001
+                logger.debug(f"[ENGINE] supervisor {sup} raised (non-fatal): {exc}")
+                continue
+            if act is not None:
+                return act
+        return None
+
     def run(
         self,
         candles: pd.DataFrame,
@@ -1210,6 +1258,14 @@ class BacktestEngine(CostModelMixin):
                             _candle_slice,
                             pos,
                         )
+                        # [4.9] Supervision. The OWNING strategy is asked first
+                        # and its answer wins — an agent may only act EARLIER
+                        # than a measured rule, never instead of it. Supervisors
+                        # are consulted only where the owner said nothing, and
+                        # can only CLOSE or tighten, so this can never increase
+                        # risk on a position.
+                        if _pos_action is None and self._supervisors:
+                            _pos_action = self._ask_supervisors(pos, _candle_slice)
                         if _pos_action is not None and _pos_action.action == "MODIFY_SL" and _pos_action.new_sl:
                             # A strategy-owned trailing stop (the classic families'
                             # ATR trail). Computed from THIS bar's close, so it

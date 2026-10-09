@@ -275,6 +275,11 @@ def note_and_check(circuit: Any, positions, pnl_of, account_balance: float = 0.0
     """
     by_group: dict[str, float] = {}
     by_symbol: dict[str, str] = {}
+    # What a group IS, for a group this breaker did not open. Passed straight
+    # through to `note_group_floating`, which uses it instead of blanks when it
+    # has to adopt the group — a group with no `direction` is invisible to the
+    # net-direction risk cap even once it has been adopted.
+    meta: dict[str, dict] = {}
     for pos in positions:
         gid = pos.get("group_id")
         if not gid:
@@ -290,9 +295,14 @@ def note_and_check(circuit: Any, positions, pnl_of, account_balance: float = 0.0
             by_group[gid] = by_group.get(gid, 0.0) + float(pnl_of(pos) or 0.0)
             if pos.get("symbol"):
                 by_symbol[gid] = str(pos["symbol"])
+            if gid not in meta:
+                meta[gid] = {k: pos.get(k) for k in
+                             ("direction", "strategy_id", "slot_id", "initial_risk_dollars")
+                             if pos.get(k) is not None}
         except Exception:  # a valuation failure must never stop position management
             logger.debug(f"[TARGET] could not value {gid}", exc_info=True)
     for gid, value in by_group.items():
-        circuit.note_group_floating(gid, value, account_balance, symbol=by_symbol.get(gid))
+        circuit.note_group_floating(gid, value, account_balance, symbol=by_symbol.get(gid),
+                                    **meta.get(gid, {}))
     circuit.check_profit_target(account_balance)
     return circuit.take_pending_closes()

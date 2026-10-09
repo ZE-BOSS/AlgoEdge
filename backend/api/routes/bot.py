@@ -134,3 +134,32 @@ async def get_bot_logs(
 ):
     """Get recent bot activity log entries."""
     return bot_service.get_logs(limit=limit)
+
+@router.get("/slot-diagnostics")
+async def slot_diagnostics(current_user: User = Depends(get_current_user)):
+    """Why is this slot not trading?
+
+    One row per configured slot, with the three cases separated: not scanned at
+    all, scanning but finding no setup, or finding setups that something then
+    refused. Without this, all three look identical from the outside - which is
+    what makes "demo and live take different trades with the same settings"
+    impossible to answer by looking.
+
+    Read `verdict` first. `dropped` names what refused each signal, with counts,
+    in the same shape as the backtester's rejection funnel so the two can be
+    compared directly.
+    """
+    # The config the BOT is running, not a fresh read: the question is what
+    # the running bot is doing, and a re-read would answer a different one.
+    rows = bot_service.slot_diagnostics(getattr(bot_service, "config", None))
+    return {
+        "bot_running": bool(getattr(bot_service, "running", False)),
+        "account": getattr(bot_service, "account_id", None),
+        "slots": rows,
+        "configured": len(rows),
+        "scanning": sum(1 for r in rows if r["scans"]),
+        "trading": sum(1 for r in rows if r["trades"]),
+        "note": ("A slot with scans=0 is not running - that is a configuration "
+                 "answer. A slot with signals=0 is running and the strategy finds "
+                 "no setup - that is a market answer."),
+    }

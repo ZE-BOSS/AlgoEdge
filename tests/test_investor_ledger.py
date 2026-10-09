@@ -16,9 +16,12 @@ import asyncio
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import shutil
+import tempfile
+from pathlib import Path
+
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 from backend.data.models import Base
 from backend.investor import nav as navmod
@@ -40,15 +43,33 @@ def run(coro):
     return asyncio.run(coro)
 
 
-async def _fresh():
-    """A throwaway in-memory database with the investor tables.
+# Temp directories created by `_fresh`, removed when this module's tests end.
+# Kept in a list rather than cleaned per call because every caller already owns
+# the engine and disposes of it; this only has to remove the file afterwards.
+_TMP_DIRS: list[str] = []
 
-    StaticPool because every async connection to `:memory:` otherwise gets its
-    OWN empty database, and the tables would vanish between statements.
+
+@pytest.fixture(scope="module", autouse=True)
+def _clean_up_databases():
+    yield
+    for d in _TMP_DIRS:
+        shutil.rmtree(d, ignore_errors=True)
+    _TMP_DIRS.clear()
+
+
+async def _fresh():
+    """A throwaway database with the investor tables.
+
+    A temp FILE rather than ":memory:" on a StaticPool. StaticPool shares ONE
+    connection between every session in a test, so two sessions open at the same
+    time are the same transaction - and the outbox's after-commit hook opens a
+    session of its own. The symptom is a write that silently does not land,
+    which is the worst failure mode a ledger test can have: the assertion that
+    would have caught the bug passes.
     """
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:",
-                                 poolclass=StaticPool,
-                                 connect_args={"check_same_thread": False})
+    tmp = tempfile.mkdtemp(prefix="algoedge-ledger-")
+    _TMP_DIRS.append(tmp)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{Path(tmp).as_posix()}/ledger.db")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     return engine, async_sessionmaker(engine, expire_on_commit=False)
@@ -324,11 +345,19 @@ def test_a_healthy_ledger_reports_no_drift():
     async def go():
         engine, Session = await _fresh()
         async with Session() as s:
-            for who in ("a", "b"):
+            # `enumerate`, not `hash(who)`. Python randomises string hashes per
+            # PROCESS, so `hash("a") % 10_000` and `hash("b") % 10_000` collide
+            # on roughly one run in ten thousand - and when they do, the
+            # (source_kind, source_id) uniqueness constraint fires inside
+            # `subscribe` and this test fails for a reason that has nothing to
+            # do with ledger drift. Caught in a full-suite run on 2026-10-09;
+            # it passed on every re-run, which is exactly how a seeded flake
+            # wastes an afternoon.
+            for n, who in enumerate(("a", "b")):
                 await _investor(s, who, who.upper())
                 await unitsmod.subscribe(s, investor_id=who, amount=1000,
                                          price=D("100"), effective=date(2026, 1, 1),
-                                         source_kind="deposit", source_id=hash(who) % 10_000)
+                                         source_kind="deposit", source_id=9000 + n)
             assert await unitsmod.assert_cache_matches_ledger(s) == []
         await engine.dispose()
     run(go())
