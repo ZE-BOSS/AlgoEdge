@@ -461,6 +461,10 @@ export default api;
 const RL = '/rl';
 export const rl = {
   features: () => api.get(`${RL}/features`),
+  strategies: () => api.get(`${RL}/strategies`),
+  // What a spec WOULD be, for a form that has not been submitted. One
+  // source of wording for the create screen and the saved agent.
+  describe: (data) => api.post(`${RL}/describe`, data),
   leakcheck: () => api.get(`${RL}/leakcheck`),
 
   list: (params) => api.get(`${RL}/agents`, { params }),

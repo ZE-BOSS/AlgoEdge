@@ -24,7 +24,9 @@ MT5 work on the event loop, 0.4 seconds at a time; training is minutes to hours.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -73,15 +75,11 @@ async def list_features():
     }
 
 
-@router.get("/leakcheck")
-async def leakcheck():
-    """Run the prefix-stability probe over every registered feature.
+# The probe's answer, computed once. See `leakcheck` below for why.
+_LEAKCHECK_CACHE: dict | None = None
 
-    Exposed as an endpoint as well as a test so a VPS can be checked without a
-    checkout, and so the Agents page can show the result rather than asserting
-    it. The probe's own controls are checked first: a probe that has stopped
-    detecting leaks is worse than no probe, because it is trusted.
-    """
+
+def _run_leakcheck() -> dict:
     from backend.rl import leakguard as lg
     from backend.rl.features import assert_registry_causal
 
@@ -94,6 +92,32 @@ async def leakcheck():
         return {"ok": False, "error": str(exc)}
 
 
+@router.get("/leakcheck")
+async def leakcheck(refresh: bool = False):
+    """Run the prefix-stability probe over every registered feature.
+
+    Exposed as an endpoint as well as a test so a VPS can be checked without a
+    checkout, and so the Agents page can show the result rather than asserting
+    it. The probe's own controls are checked first: a probe that has stopped
+    detecting leaks is worse than no probe, because it is trusted.
+
+    OFF THE EVENT LOOP, AND CACHED
+    The probe recomputes every registered feature at several prefix lengths.
+    That is five seconds of numpy, and run inline it blocked the whole API -
+    the Agents page loads this beside the agent list, so every visit showed an
+    empty list for five seconds while this finished. Same failure as building
+    MT5 frames on the loop, which stalled this backend once already.
+
+    Cached forever rather than for a while: the answer is a pure function of
+    the feature registry, which is code, so it cannot change without a
+    restart. `?refresh=1` forces a re-run for the paranoid.
+    """
+    global _LEAKCHECK_CACHE
+    if _LEAKCHECK_CACHE is None or refresh:
+        _LEAKCHECK_CACHE = await asyncio.to_thread(_run_leakcheck)
+    return _LEAKCHECK_CACHE
+
+
 # -- agents -----------------------------------------------------------------
 
 
@@ -103,7 +127,35 @@ class SpecIn(BaseModel):
     timeframe: str = "M5"
     features: list[str] | None = None
     seeds: list[int] | None = None
+
+    # ── what KIND of agent this is ────────────────────────────────────
+    #
+    # These three were in the AgentSpec and not in this model, which meant
+    # the UI could not create anything but a plain mode-A agent - the
+    # backend could do more than the front end could ask for.
+    #
+    # base_strategy  "" = mode A, the agent finds its own entries.
+    #                A registered id = mode B: that strategy finds the
+    #                setups and the agent decides which to take, where the
+    #                stop goes and what to aim at.
+    # director       a frozen SUPERVISED direction model on top of which
+    #                the RL policy decides. Off = reinforcement only.
+    # exit_timeframe a faster timeframe for the exit head alone.
+    base_strategy: str = ""
+    director: bool = False
+    director_horizon: int = 12
     exit_head: bool = True
+    exit_timeframe: str = ""
+
+    # The two risk numbers the agent chooses, from a menu this admin sets.
+    risk_head: bool = True
+    stop_atr_choices: list[float] | None = None
+    rr_choices: list[float] | None = None
+
+    # Higher timeframes merged in as context columns. Blank means none, and
+    # the merge is as-of the last CLOSED higher-timeframe bar, so an H1
+    # column at 10:05 carries the 09:00 bar and not the one still forming.
+    htf: list[str] | None = None
     supervises: list[str] = Field(default_factory=list)
     supervise_symbols: list[str] = Field(default_factory=list)
     money_weight: float = 0.70
@@ -116,14 +168,28 @@ class SpecIn(BaseModel):
     embargo_bars: int = 288
     max_hold_bars: int = 288
     min_confidence: float = 0.40
+    # How much more a loss counts than a gain of the same size. 1.0 is
+    # symmetric; above it the reward is Sortino-flavoured.
+    downside_penalty: float = 1.0
+    # compute budget - the honest dials, exposed so the admin sets the
+    # trade-off rather than discovering it
+    eval_windows: int = 2
+    eval_window_bars: int = 20_000
+    exit_tries: int = 4
+    # CEM internals. Not interesting most days, but they are what a run
+    # that converges on nothing is usually diagnosed by.
+    elite_frac: float = 0.25
+    init_sigma: float = 0.5
     attempted_symbols: list[str] = Field(default_factory=list)
     notes: str = ""
 
     def to_spec(self) -> AgentSpec:
         d = self.model_dump()
-        d["symbols"] = tuple(d["symbols"])
-        d["features"] = tuple(d["features"]) if d.get("features") else None
-        d["seeds"] = tuple(d["seeds"]) if d.get("seeds") else None
+        for key in ("symbols", "features", "seeds", "stop_atr_choices",
+                    "rr_choices", "supervises", "supervise_symbols",
+                    "attempted_symbols", "htf"):
+            if d.get(key) is not None:
+                d[key] = tuple(d[key])
         d = {k: v for k, v in d.items() if v is not None}
         try:
             return AgentSpec.from_dict(d)
@@ -133,6 +199,129 @@ class SpecIn(BaseModel):
             # supervised symbol the agent was not trained on. All refused here
             # rather than silently corrected.
             raise HTTPException(400, str(exc)) from exc
+
+
+def describe_learning(spec: AgentSpec) -> dict:
+    """What this agent IS, in words, for the screen.
+
+    The three choices compose, and the combination is not obvious from the
+    field names - "mode B with a director" is a supervised direction model
+    feeding an RL policy that selects among an existing strategy's setups.
+    Spelling it out here means the UI and the charter say the same thing,
+    rather than each inventing its own wording.
+    """
+    parts = []
+    if spec.base_strategy:
+        parts.append(
+            f"It does not look for its own entries. {spec.base_strategy} finds "
+            f"the setups and this agent decides which of them to take.")
+    else:
+        parts.append("It looks for its own entries, on every bar.")
+
+    if spec.director:
+        parts.append(
+            f"A SUPERVISED direction model is fitted first on the training fold "
+            f"and then frozen; its call and confidence become two extra inputs. "
+            f"Supervised learning calls direction over the next "
+            f"{spec.director_horizon} bars; the reinforcement policy decides "
+            f"what to do about that call.")
+    else:
+        parts.append("Reinforcement learning only - no supervised direction "
+                     "model. The policy learns direction and timing together.")
+
+    if spec.risk_head:
+        parts.append(
+            f"It chooses its stop from "
+            f"{{{', '.join(f'{v:g}x' for v in spec.stop_atr_choices)}}} ATR and "
+            f"its target from "
+            f"{{{', '.join(f'1:{v:g}' for v in spec.rr_choices)}}}.")
+    else:
+        parts.append("The slot's own stop and target apply; the agent does not "
+                     "choose them.")
+
+    if spec.exit_head:
+        parts.append(
+            "It may close, part-close or tighten a running trade"
+            + (f", judged on {spec.exit_timeframe} bars." if spec.exit_timeframe
+               else " on each closed bar."))
+    else:
+        parts.append("It has no exit head: the stop, target and max hold decide "
+                     "when a trade ends.")
+
+    if spec.supervises:
+        parts.append(f"It may also supervise {', '.join(spec.supervises)}.")
+
+    return {
+        "mode": spec.mode,
+        "mode_label": {"A": "Its own strategy", "B": f"Optimising {spec.base_strategy}",
+                       "C": "Supervisor only"}.get(spec.mode, spec.mode),
+        "reinforcement": True,
+        "supervised": bool(spec.director),
+        "base_strategy": spec.base_strategy,
+        "sentences": parts,
+        "never": ["size a position", "set a risk percentage",
+                  "widen a stop", "override a circuit-breaker halt"],
+    }
+
+
+@router.post("/describe")
+async def describe_spec(spec: SpecIn):
+    """What the form currently in front of the admin would create, in words.
+
+    An endpoint rather than the same sentences written again in JavaScript.
+    The create screen needs to read a spec back BEFORE the agent exists, and
+    the only two ways to do that are to duplicate the wording in the client -
+    where it drifts the first time the backend's rules change and nobody
+    notices - or to ask the server about a spec it has not saved. This is the
+    second. It touches no database and creates nothing.
+    """
+    try:
+        obj = spec.to_spec()
+    except Exception as exc:                      # a half-filled form, mostly
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "mode": obj.mode, "learning": describe_learning(obj),
+            "estimate": estimate_cost(obj)}
+
+
+def estimate_cost(spec: AgentSpec) -> dict:
+    """Roughly how much work the training run will be, before it is started.
+
+    Not a wall-clock promise - that depends on the bar count, which is not
+    known until data is attached - but the JOB COUNT is exact, and it is the
+    number that surprises people: five seeds and eight purged paths is forty
+    training runs per symbol, not one.
+
+    The path count is combinatorial, C(groups, test_groups) capped by
+    max_cpcv_paths, and needs no bars - which is why it can be shown on a
+    form that has not been submitted yet.
+    """
+    paths = min(int(spec.max_cpcv_paths),
+                math.comb(int(spec.cpcv_groups), int(spec.cpcv_test_groups)))
+    symbols = max(1, len(spec.symbols))
+    jobs = len(spec.seeds) * paths * symbols
+    return {
+        "seeds": len(spec.seeds), "paths": paths, "symbols": symbols,
+        "jobs": jobs, "iterations": int(spec.iterations),
+        "note": (f"{len(spec.seeds)} seeds x {paths} purged CPCV paths x "
+                 f"{symbols} symbol(s) = {jobs} separate training runs, each "
+                 f"{int(spec.iterations)} iterations. The seeds are not a "
+                 f"formality: the gate rejects the result outright if they "
+                 f"disagree by more than 1.0 Sharpe."),
+    }
+
+
+@router.get("/strategies")
+async def base_strategy_options():
+    """The rule-based strategies a mode-B agent can be built on.
+
+    Agents are excluded: an agent optimising another agent is not a thing this
+    design supports, and offering it would invite a loop nobody can reason
+    about.
+    """
+    from backend.strategies.registry import get_all_strategies
+
+    return {"strategies": sorted(sid for sid in get_all_strategies()
+                                 if not sid.startswith("RL::"))}
 
 
 @router.get("/agents")
@@ -195,9 +384,16 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
     props = (await db.execute(
         select(RLProposal).where(RLProposal.agent_id == agent_id)
         .order_by(desc(RLProposal.created_at)))).scalars().all()
+    spec_d = json.loads(row.spec_json)
+    try:
+        spec_obj = AgentSpec.from_dict(spec_d)
+        mode, learning = spec_obj.mode, describe_learning(spec_obj)
+    except Exception:
+        mode, learning = "?", {}
     return {
         "agent_id": row.agent_id, "name": row.name, "status": row.status,
-        "optimiser": row.optimiser, "spec": json.loads(row.spec_json),
+        "optimiser": row.optimiser, "spec": spec_d,
+        "mode": mode, "learning": learning,
         "spec_hash": row.spec_hash, "policy_hash": row.policy_hash,
         "trained_on": json.loads(row.trained_on_json or "[]"),
         "training": json.loads(row.training_json) if row.training_json else None,

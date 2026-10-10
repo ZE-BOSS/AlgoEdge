@@ -6,7 +6,12 @@
 # ============================================================
 
 # ── Core MT5 Integration ─────────────────────────────────────
-MetaTrader5
+# Pinned for the same reason as pandas and greenlet below: 5.0.6231's
+# _core.cp312-win_amd64.pyd is refused by Windows Application Control
+# ("DLL load failed while importing _core: An Application Control policy has
+# blocked this file"), which takes out every MT5 route at import. 5.0.5120 and
+# 5.0.4993 both load; 5.0.5120 is the newest that does.
+MetaTrader5==5.0.5120
 pywin32
 
 # ── Async Backend ────────────────────────────────────────────

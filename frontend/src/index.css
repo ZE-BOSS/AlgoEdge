@@ -158,6 +158,48 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* The nav scrolls; the footer does not.
+
+     `.sidebar` is `height: 100vh` with `flex-direction: column`, and the nav
+     is thirteen 40px links plus the brand. Below roughly 700px of window
+     the content is taller than the column, and without this the overflow
+     pushes `.sidebar-footer` — the server switcher and the sign-out — off the
+     bottom of the screen, where there is no way to scroll to them. A flex
+     item also defaults to `min-height: auto`, which means it refuses to
+     shrink below its content and `overflow-y` alone would do nothing; the
+     `min-height: 0` is what actually lets it scroll. */
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* A scrollbar permanently down the side of the nav is louder than the nav.
+   Shown on hover only, and only where the browser supports it. */
+.sidebar-nav {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.sidebar-nav:hover {
+  scrollbar-color: var(--border) transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.sidebar-nav:hover::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
+
+/* The footer is the one part that must always be reachable: it says which
+   server every screen above is talking to. */
+.sidebar-footer {
+  flex-shrink: 0;
 }
 
 .nav-link {
@@ -221,8 +263,18 @@ body {
 .sidebar.collapsed .sidebar-brand h1,
 .sidebar.collapsed .nav-link span,
 .sidebar.collapsed .sidebar-user .user-email,
-.sidebar.collapsed .connection-status {
+.sidebar.collapsed .connection-status,
+.sidebar.collapsed .switcher-label {
   display: none;
+}
+
+/* `.sidebar.collapsed .sidebar-footer` is a centred flex column, so its
+   children size to their content instead of to the 64px rail. Without this
+   the server switcher's wrapper measured 159px inside a 63px sidebar and
+   spilled over the edge. */
+.sidebar-footer > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sidebar.collapsed .sidebar-brand {

@@ -1448,16 +1448,6 @@ export default function Backtester() {
   const [runServer, setRunServer] = useState(activeServerId);
   // [4.9] Approved agents allowed to close or tighten this run's trades early.
   const [supervisors, setSupervisors] = useState([]);
-  const agentIdForStrategy = useAgentIdLookup();
-  // [4.7] Read twice: once for the banner, once for whether Run is clickable.
-  const overlap = useOverlap({
-    agentId: agentIdForStrategy(form.strategy_id),
-    symbol: form.symbol,
-    timeframe: form.timeframe || 'M5',
-    start: form.start_date ? Math.floor(new Date(form.start_date).getTime() / 1000) : null,
-    end: form.end_date ? Math.floor(new Date(form.end_date).getTime() / 1000) : null,
-  });
-
   const PORTFOLIO_KEY = 'algoedge_portfolio_config';
 
   // ── Portfolio state ──
@@ -1610,6 +1600,24 @@ export default function Backtester() {
       return merged;
     }
     return JSON.parse(JSON.stringify(DEFAULT_FORM));
+  });
+
+  // [4.7] The in-sample verdict for the agent being RUN, read twice: once for
+  // the banner and once for whether Run is clickable.
+  //
+  // It lives HERE, below `form`, and that is not cosmetic. These lines were
+  // first placed up beside `runServer`, ~150 lines before `form` is declared,
+  // so the component threw "Cannot access 'form' before initialization" on
+  // every render and the whole Backtester page showed the error boundary. A
+  // `const` is in its temporal dead zone until its own declaration runs, and
+  // hook arguments are evaluated immediately.
+  const agentIdForStrategy = useAgentIdLookup();
+  const overlap = useOverlap({
+    agentId: agentIdForStrategy(form.strategy_id),
+    symbol: form.symbol,
+    timeframe: form.timeframe || 'M5',
+    start: form.start_date ? Math.floor(new Date(form.start_date).getTime() / 1000) : null,
+    end: form.end_date ? Math.floor(new Date(form.end_date).getTime() / 1000) : null,
   });
 
   // The cache is IndexedDB now, which is async — so there is no synchronous

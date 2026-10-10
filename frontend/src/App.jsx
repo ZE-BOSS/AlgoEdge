@@ -24,7 +24,8 @@ import {
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useBackendConnection, useWebSocket } from './hooks/useBackendConnection';
-import ServerSwitcher, { useServerColour } from './components/ServerSwitcher';
+import ServerSwitcher from './components/ServerSwitcher';
+import { useServerColour } from './hooks/useServerColour';
 import { useConnectionStore, useAuthStore, useLoadingStore } from './store';
 // after ./store: services/api and store import each other, and loading api first breaks that cycle
 import { getMe } from './services/api';

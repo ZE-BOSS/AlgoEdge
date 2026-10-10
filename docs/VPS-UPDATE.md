@@ -429,20 +429,34 @@ money.
 
 ## What THIS release needs on the box
 
-- **Four new tables** — `rl_agents`, `rl_charters`, `rl_proposals`,
-  `rl_adherence`. There is no migration tool here: `init_db()` runs
-  `create_all` at startup and `backend/data/database.py` imports
-  `backend.rl.models` before it, so **restarting the backend is the
-  migration**. Nothing to run by hand.
-- **New slot fields** (`supervising_agents`, `giveback_*`) live inside the
-  slot's JSON. No DDL.
-- **No new Python dependencies.** The RL work is numpy and pandas, both
-  already installed — so this is **Path A**, not Path B. `torch`,
-  `stable_baselines3` and `scikit-learn` are deliberately NOT required.
-- **Front-end changes** (the Agents page, the slot-diagnostics panel, the
-  Backtester controls). Per the note above, this box serves through the Vite
-  dev server, so a rebuild is optional — but run it anyway if you want the
-  `dist` output to match what is being served when that changes.
+*(Release of 2026-10-10: the Agents screen rebuild, the leakcheck fix, the
+`trades.mt5_account` migration and the MetaTrader5 pin.)*
+
+- **This is Path B, not Path A.** `requirements.txt` changed:
+  `MetaTrader5` is now pinned to `==5.0.5120`. 5.0.6231 ships a
+  `_core.cp312-win_amd64.pyd` that Windows Application Control refuses
+  outright — *"DLL load failed while importing _core: An Application Control
+  policy has blocked this file"* — which takes out every MT5 route at import.
+  If MT5 works on this box today you could skip the `pip install` and nothing
+  would break, but then the box and `requirements.txt` disagree and the next
+  rebuild inherits the problem. Run it.
+- **One new column, `trades.mt5_account`.** This is the
+  `sqlite3.OperationalError: no such column: trades.mt5_account` that took the
+  box down on 2026-10-09. `create_all` creates missing TABLES and never
+  missing COLUMNS, so it is in `add_column_migrations` in
+  `backend/data/database.py` and runs at startup: **restarting the backend is
+  the migration.** `scripts/fix_trades_mt5_account.py` back-fills the values
+  for existing rows, and is safe to re-run.
+- **Four RL tables** (`rl_agents`, `rl_charters`, `rl_proposals`,
+  `rl_adherence`) if this box has not had the previous release. Same story —
+  the restart creates them.
+- **Front-end changes**: the Agents page, the sidebar server switcher and
+  `index.css`. This box serves through the Vite dev server, so `npm run build`
+  is strictly optional — but the dev server only picks up the new source after
+  `pm2 restart`, and building keeps `dist` honest. Do both.
+- **`pytest.ini` is new** and affects nothing at runtime. It stops pytest
+  collecting `backend/api/routes/mt5_test.py` — FastAPI route handlers named
+  `test_mt5_*` — as if they were tests.
 
 ### Checking it worked
 

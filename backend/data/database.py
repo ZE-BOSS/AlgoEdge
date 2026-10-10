@@ -131,6 +131,14 @@ async def init_db():
             "ALTER TABLE trades ADD COLUMN session_close_time TIMESTAMP;",
             "ALTER TABLE trade_positions ADD COLUMN exit_reason VARCHAR(30);",
             "ALTER TABLE trade_positions ADD COLUMN pnl_pips FLOAT;",
+            # [W1] Which MT5 account a trade belongs to. `create_all` creates
+            # missing TABLES; it never adds a column to a table that already
+            # exists, so a new column on `trades` needs a line here or every
+            # query that selects a Trade fails with "no such column" on an
+            # existing database. That is exactly what happened on the VPS: the
+            # bot kept scanning while ghost cleanup, position management and
+            # the investor live-trade watch all failed every cycle.
+            "ALTER TABLE trades ADD COLUMN mt5_account BIGINT;",
         ]
 
         # DROP COLUMN ... IF EXISTS is Postgres syntax — SQLite's ALTER TABLE

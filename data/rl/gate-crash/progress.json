@@ -1,1 +1,1 @@
-{"stage": "training", "optimiser": "ppo-direct", "seed": 3, "fold": 5, "iteration": 1, "iterations": 3, "best": -Infinity, "pct": 53.33, "elapsed_s": 1587.6, "eta_s": 1389.3, "trades": 101, "mean_r": 0.1688}
+{"stage": "complete", "optimiser": "ppo-direct", "seed": 5, "fold": 7, "iteration": 3, "iterations": 3, "best": 0.092911, "pct": 100.0, "elapsed_s": 1505.7, "eta_s": 0.0, "trades": 181, "mean_r": -0.1163, "seeds": 5, "folds": 8}

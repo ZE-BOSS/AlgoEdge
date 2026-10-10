@@ -1,0 +1,1574 @@
+{
+  "agent_id": "gate-crash",
+  "spec": {
+    "name": "gate-crash",
+    "symbols": [
+      "Crash 1000 Index"
+    ],
+    "base_strategy": "",
+    "timeframe": "M5",
+    "htf": [],
+    "features": [
+      "ret_1",
+      "ret_5",
+      "ret_20",
+      "gap",
+      "ema_dist_20",
+      "ema_dist_50",
+      "ema_slope_20",
+      "efficiency_20",
+      "up_run",
+      "donchian_pos_20",
+      "donchian_pos_60",
+      "dist_high_20",
+      "dist_low_20",
+      "atr_pct",
+      "vol_expansion",
+      "atr_ratio",
+      "body_frac",
+      "upper_wick",
+      "lower_wick",
+      "range_atr",
+      "tod_sin",
+      "tod_cos",
+      "dow_sin",
+      "dow_cos",
+      "volume_ratio"
+    ],
+    "money_weight": 0.7,
+    "adherence_weight": 0.3,
+    "downside_penalty": 1.0,
+    "seeds": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "cpcv_groups": 8,
+    "cpcv_test_groups": 2,
+    "embargo_bars": 288,
+    "iterations": 3,
+    "population": 24,
+    "eval_windows": 1,
+    "eval_window_bars": 5000,
+    "max_cpcv_paths": 8,
+    "elite_frac": 0.25,
+    "init_sigma": 0.5,
+    "exit_tries": 2,
+    "director": false,
+    "director_horizon": 12,
+    "exit_head": true,
+    "exit_timeframe": "",
+    "supervises": [],
+    "supervise_symbols": [],
+    "stop_atr_choices": [
+      0.75,
+      1.0,
+      1.5,
+      2.0,
+      3.0
+    ],
+    "rr_choices": [
+      1.0,
+      1.5,
+      2.0,
+      3.0,
+      5.0
+    ],
+    "risk_head": true,
+    "min_confidence": 0.4,
+    "max_hold_bars": 288,
+    "notes": "",
+    "attempted_symbols": [
+      "Crash 1000 Index"
+    ]
+  },
+  "optimiser": "ppo",
+  "results": [
+    {
+      "seed": 1,
+      "fold": 0,
+      "score": 0.0,
+      "train_score": -Infinity,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.592008,
+          "eval": -Infinity,
+          "entropy": 1.0935
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.640585,
+          "eval": -Infinity,
+          "entropy": 1.0858
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.145933,
+          "eval": -Infinity,
+          "entropy": 1.0601
+        }
+      ],
+      "train_rows": 58883,
+      "test_rows": 19724,
+      "seconds": 19.7
+    },
+    {
+      "seed": 1,
+      "fold": 1,
+      "score": 0.0,
+      "train_score": -Infinity,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.592008,
+          "eval": -Infinity,
+          "entropy": 1.0936
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.640585,
+          "eval": -Infinity,
+          "entropy": 1.0858
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.145933,
+          "eval": -Infinity,
+          "entropy": 1.0601
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 24.2
+    },
+    {
+      "seed": 1,
+      "fold": 2,
+      "score": -2.729775681633952,
+      "train_score": -Infinity,
+      "test_mean_r": -7.720787661811292,
+      "test_trades": 2,
+      "test_adherence": 0.0,
+      "sharpe": -164.34074460425126,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.592008,
+          "eval": -Infinity,
+          "entropy": 1.0935
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.640585,
+          "eval": -Infinity,
+          "entropy": 1.0857
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.145933,
+          "eval": -Infinity,
+          "entropy": 1.0598
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 19.6
+    },
+    {
+      "seed": 1,
+      "fold": 3,
+      "score": -0.2843804405083933,
+      "train_score": 0.055407,
+      "test_mean_r": -0.3248940135275182,
+      "test_trades": 231,
+      "test_adherence": 0.0,
+      "sharpe": -3.4343172579536407,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.471529,
+          "eval": -Infinity,
+          "entropy": 1.0938
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.64059,
+          "eval": 0.055407,
+          "entropy": 1.0869
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.326237,
+          "eval": -0.475188,
+          "entropy": 1.0802
+        }
+      ],
+      "train_rows": 58308,
+      "test_rows": 19723,
+      "seconds": 27.2
+    },
+    {
+      "seed": 1,
+      "fold": 4,
+      "score": -0.18537829849198195,
+      "train_score": -0.070875,
+      "test_mean_r": -0.15978005622058047,
+      "test_trades": 118,
+      "test_adherence": 0.0,
+      "sharpe": -0.9678127068455142,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.866453,
+          "eval": -0.070875,
+          "entropy": 1.0886
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.640585,
+          "eval": -0.201642,
+          "entropy": 1.087
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.386102,
+          "eval": -Infinity,
+          "entropy": 1.0728
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 29.6
+    },
+    {
+      "seed": 1,
+      "fold": 5,
+      "score": 0.0043996800276863285,
+      "train_score": 0.185514,
+      "test_mean_r": 0.10111395097372683,
+      "test_trades": 170,
+      "test_adherence": 0.0,
+      "sharpe": 0.7916468483728827,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.485346,
+          "eval": -0.265041,
+          "entropy": 1.0936
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.524489,
+          "eval": 0.185514,
+          "entropy": 1.0871
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.698927,
+          "eval": -Infinity,
+          "entropy": 1.0829
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 32.0
+    },
+    {
+      "seed": 1,
+      "fold": 6,
+      "score": -0.4564135758048672,
+      "train_score": -0.011252,
+      "test_mean_r": -0.5734622098275745,
+      "test_trades": 109,
+      "test_adherence": 0.0,
+      "sharpe": -2.75801589005428,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.485346,
+          "eval": -0.345953,
+          "entropy": 1.0937
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": 0.037642,
+          "eval": -Infinity,
+          "entropy": 1.0742
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.233906,
+          "eval": -0.011252,
+          "entropy": 1.0799
+        }
+      ],
+      "train_rows": 58595,
+      "test_rows": 19724,
+      "seconds": 29.0
+    },
+    {
+      "seed": 1,
+      "fold": 7,
+      "score": 0.0,
+      "train_score": -Infinity,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.592008,
+          "eval": -Infinity,
+          "entropy": 1.0935
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.640585,
+          "eval": -Infinity,
+          "entropy": 1.0857
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.145933,
+          "eval": -Infinity,
+          "entropy": 1.0599
+        }
+      ],
+      "train_rows": 58595,
+      "test_rows": 19724,
+      "seconds": 21.4
+    },
+    {
+      "seed": 2,
+      "fold": 0,
+      "score": 0.0929112201564152,
+      "train_score": 0.338225,
+      "test_mean_r": 0.2133174868733891,
+      "test_trades": 129,
+      "test_adherence": 0.0,
+      "sharpe": 1.1550798474054236,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.39283,
+          "eval": -Infinity,
+          "entropy": 1.0897
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": 0.734831,
+          "eval": 0.318468,
+          "entropy": 1.076
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.535691,
+          "eval": 0.338225,
+          "entropy": 1.0833
+        }
+      ],
+      "train_rows": 58883,
+      "test_rows": 19724,
+      "seconds": 29.2
+    },
+    {
+      "seed": 2,
+      "fold": 1,
+      "score": -0.06153672863663055,
+      "train_score": 0.122483,
+      "test_mean_r": -0.009338183766615155,
+      "test_trades": 150,
+      "test_adherence": 0.0,
+      "sharpe": -0.04909818362617843,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.181454,
+          "eval": 0.122483,
+          "entropy": 1.0895
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": 0.548138,
+          "eval": -Infinity,
+          "entropy": 1.0614
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.63421,
+          "eval": -Infinity,
+          "entropy": 1.0715
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 27.2
+    },
+    {
+      "seed": 2,
+      "fold": 2,
+      "score": -0.09663096099176181,
+      "train_score": 0.17826,
+      "test_mean_r": -0.06369969149212172,
+      "test_trades": 299,
+      "test_adherence": 0.0,
+      "sharpe": -0.5959813442192055,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.372529,
+          "eval": 0.17826,
+          "entropy": 1.096
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": 0.488331,
+          "eval": -0.480304,
+          "entropy": 1.095
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.585716,
+          "eval": -Infinity,
+          "entropy": 1.0818
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 24.6
+    },
+    {
+      "seed": 2,
+      "fold": 3,
+      "score": -0.08119604089992274,
+      "train_score": -0.186185,
+      "test_mean_r": -0.022306681348633797,
+      "test_trades": 101,
+      "test_adherence": 0.0,
+      "sharpe": -0.17883526344312858,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.169155,
+          "eval": -Infinity,
+          "entropy": 1.0943
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.75196,
+          "eval": -0.186185,
+          "entropy": 1.0836
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.132029,
+          "eval": -Infinity,
+          "entropy": 1.0659
+        }
+      ],
+      "train_rows": 58308,
+      "test_rows": 19723,
+      "seconds": 24.4
+    },
+    {
+      "seed": 2,
+      "fold": 4,
+      "score": -0.2293032552628638,
+      "train_score": 0.152947,
+      "test_mean_r": -0.24696964000085847,
+      "test_trades": 223,
+      "test_adherence": 0.0,
+      "sharpe": -2.500945945366476,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.169155,
+          "eval": -Infinity,
+          "entropy": 1.0942
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.585166,
+          "eval": -0.475352,
+          "entropy": 1.0816
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.017747,
+          "eval": 0.152947,
+          "entropy": 1.0795
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 26.5
+    },
+    {
+      "seed": 2,
+      "fold": 5,
+      "score": -0.306544863491393,
+      "train_score": -0.08827,
+      "test_mean_r": -0.36089651261776706,
+      "test_trades": 200,
+      "test_adherence": 0.0,
+      "sharpe": -3.1222369381867967,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.169155,
+          "eval": -Infinity,
+          "entropy": 1.0943
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.493469,
+          "eval": -0.475362,
+          "entropy": 1.0808
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.017747,
+          "eval": -0.08827,
+          "entropy": 1.0762
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 26.4
+    },
+    {
+      "seed": 2,
+      "fold": 6,
+      "score": -0.3275495751158021,
+      "train_score": -0.226031,
+      "test_mean_r": -0.3893565358797173,
+      "test_trades": 228,
+      "test_adherence": 0.0,
+      "sharpe": -3.594984653833544,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.169155,
+          "eval": -Infinity,
+          "entropy": 1.0944
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.493469,
+          "eval": -0.475362,
+          "entropy": 1.0809
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.017747,
+          "eval": -0.226031,
+          "entropy": 1.0763
+        }
+      ],
+      "train_rows": 58595,
+      "test_rows": 19724,
+      "seconds": 29.3
+    },
+    {
+      "seed": 2,
+      "fold": 7,
+      "score": -0.22987548676362712,
+      "train_score": 0.122483,
+      "test_mean_r": -0.24982212394803885,
+      "test_trades": 150,
+      "test_adherence": 0.0,
+      "sharpe": -1.2696730861679209,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.181454,
+          "eval": 0.122483,
+          "entropy": 1.0894
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": 0.548138,
+          "eval": -Infinity,
+          "entropy": 1.0609
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.822378,
+          "eval": -Infinity,
+          "entropy": 1.0607
+        }
+      ],
+      "train_rows": 58595,
+      "test_rows": 19724,
+      "seconds": 28.3
+    },
+    {
+      "seed": 3,
+      "fold": 0,
+      "score": -0.1579030956072498,
+      "train_score": 0.237704,
+      "test_mean_r": -0.1276096821245203,
+      "test_trades": 188,
+      "test_adherence": 0.0,
+      "sharpe": -0.77842873830828,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.850155,
+          "eval": -Infinity,
+          "entropy": 1.09
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.800741,
+          "eval": -Infinity,
+          "entropy": 1.0886
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.323044,
+          "eval": 0.237704,
+          "entropy": 1.0877
+        }
+      ],
+      "train_rows": 58883,
+      "test_rows": 19724,
+      "seconds": 25.4
+    },
+    {
+      "seed": 3,
+      "fold": 1,
+      "score": -0.10385928811701606,
+      "train_score": -0.128428,
+      "test_mean_r": -0.06671600235289692,
+      "test_trades": 149,
+      "test_adherence": 0.0,
+      "sharpe": -0.35075843776342036,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.39052,
+          "eval": -0.128428,
+          "entropy": 1.0926
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.35022,
+          "eval": -Infinity,
+          "entropy": 1.076
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.119228,
+          "eval": -Infinity,
+          "entropy": 1.0742
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 31.5
+    },
+    {
+      "seed": 3,
+      "fold": 2,
+      "score": 0.004997914356680521,
+      "train_score": 0.116549,
+      "test_mean_r": 0.08595645117232598,
+      "test_trades": 245,
+      "test_adherence": 0.0,
+      "sharpe": 0.6152290660957922,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.055706,
+          "eval": -Infinity,
+          "entropy": 1.0895
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.988511,
+          "eval": -0.128428,
+          "entropy": 1.0752
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.553371,
+          "eval": 0.116549,
+          "entropy": 1.0724
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 32.3
+    },
+    {
+      "seed": 3,
+      "fold": 3,
+      "score": -0.017449760837585974,
+      "train_score": -0.121898,
+      "test_mean_r": 0.06843731286662826,
+      "test_trades": 126,
+      "test_adherence": 0.0,
+      "sharpe": 0.5268317709435116,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.055706,
+          "eval": -Infinity,
+          "entropy": 1.0893
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.988511,
+          "eval": -0.121898,
+          "entropy": 1.0748
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.319983,
+          "eval": -Infinity,
+          "entropy": 1.0552
+        }
+      ],
+      "train_rows": 58308,
+      "test_rows": 19723,
+      "seconds": 32.1
+    },
+    {
+      "seed": 3,
+      "fold": 4,
+      "score": -0.012425717060661368,
+      "train_score": -0.228981,
+      "test_mean_r": 0.16879896926292712,
+      "test_trades": 101,
+      "test_adherence": 0.0,
+      "sharpe": 1.2511932836963044,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.055706,
+          "eval": -Infinity,
+          "entropy": 1.0896
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": 0.145803,
+          "eval": -0.228981,
+          "entropy": 1.0748
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.069393,
+          "eval": -Infinity,
+          "entropy": 1.0562
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 32.2
+    },
+    {
+      "seed": 3,
+      "fold": 5,
+      "score": -0.24118712170284212,
+      "train_score": -Infinity,
+      "test_mean_r": -0.2502441479853954,
+      "test_trades": 48,
+      "test_adherence": 0.0,
+      "sharpe": -2.517604896361728,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.055706,
+          "eval": -Infinity,
+          "entropy": 1.0895
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.952947,
+          "eval": -Infinity,
+          "entropy": 1.0648
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.410953,
+          "eval": -Infinity,
+          "entropy": 1.0425
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 27.6
+    },
+    {
+      "seed": 3,
+      "fold": 6,
+      "score": -0.16958701136467455,
+      "train_score": -Infinity,
+      "test_mean_r": -0.1726463115102596,
+      "test_trades": 58,
+      "test_adherence": 0.0,
+      "sharpe": -1.676670175177044,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.055706,
+          "eval": -Infinity,
+          "entropy": 1.0897
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -1.054245,
+          "eval": -Infinity,
+          "entropy": 1.0868
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.611,
+          "eval": -Infinity,
+          "entropy": 1.0717
+        }
+      ],
+      "train_rows": 58595,
+      "test_rows": 19724,
+      "seconds": 22.6
+    },
+    {
+      "seed": 3,
+      "fold": 7,
+      "score": -0.2515808664859719,
+      "train_score": 0.22491,
+      "test_mean_r": -0.26125935770277897,
+      "test_trades": 228,
+      "test_adherence": 0.0,
+      "sharpe": -2.6606678925845917,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.390804,
+          "eval": 0.22491,
+          "entropy": 1.0929
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.31754,
+          "eval": -Infinity,
+          "entropy": 1.0769
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.070732,
+          "eval": -Infinity,
+          "entropy": 1.0829
+        }
+      ],
+      "train_rows": 58595,
+      "test_rows": 19724,
+      "seconds": 27.8
+    },
+    {
+      "seed": 4,
+      "fold": 0,
+      "score": -0.20708871598426304,
+      "train_score": -0.055137,
+      "test_mean_r": -0.2034003012925059,
+      "test_trades": 251,
+      "test_adherence": 0.0,
+      "sharpe": -2.0169113968569716,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.293427,
+          "eval": -Infinity,
+          "entropy": 1.0927
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.049548,
+          "eval": -0.055137,
+          "entropy": 1.0822
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.412457,
+          "eval": -0.21069,
+          "entropy": 1.0752
+        }
+      ],
+      "train_rows": 58883,
+      "test_rows": 19724,
+      "seconds": 25.1
+    },
+    {
+      "seed": 4,
+      "fold": 1,
+      "score": -0.0552514425982239,
+      "train_score": -Infinity,
+      "test_mean_r": -0.20040531167377904,
+      "test_trades": 5,
+      "test_adherence": 0.0,
+      "sharpe": -1.7781954870892067,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.293427,
+          "eval": -Infinity,
+          "entropy": 1.0928
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.138529,
+          "eval": -Infinity,
+          "entropy": 1.0887
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.081522,
+          "eval": -Infinity,
+          "entropy": 1.078
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 21.7
+    },
+    {
+      "seed": 4,
+      "fold": 2,
+      "score": -0.1278153810204777,
+      "train_score": -0.101858,
+      "test_mean_r": -0.1051492471025295,
+      "test_trades": 210,
+      "test_adherence": 0.0,
+      "sharpe": -0.9986937354232163,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.293427,
+          "eval": -Infinity,
+          "entropy": 1.0927
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.291226,
+          "eval": -0.101858,
+          "entropy": 1.0776
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.067625,
+          "eval": -Infinity,
+          "entropy": 1.08
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 22.9
+    },
+    {
+      "seed": 4,
+      "fold": 3,
+      "score": -0.2908264102671707,
+      "train_score": -0.206871,
+      "test_mean_r": -0.265106813685745,
+      "test_trades": 117,
+      "test_adherence": 0.0,
+      "sharpe": -2.658033384235086,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.293427,
+          "eval": -Infinity,
+          "entropy": 1.0927
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.291226,
+          "eval": -0.23941,
+          "entropy": 1.0775
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.738626,
+          "eval": -0.206871,
+          "entropy": 1.0765
+        }
+      ],
+      "train_rows": 58308,
+      "test_rows": 19723,
+      "seconds": 24.2
+    },
+    {
+      "seed": 4,
+      "fold": 4,
+      "score": -0.16449197266033017,
+      "train_score": -0.195191,
+      "test_mean_r": -0.15003806265600703,
+      "test_trades": 207,
+      "test_adherence": 0.0,
+      "sharpe": -1.4517833711041181,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.293427,
+          "eval": -Infinity,
+          "entropy": 1.0928
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.291226,
+          "eval": -0.195191,
+          "entropy": 1.0777
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.136848,
+          "eval": -Infinity,
+          "entropy": 1.0545
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 22.3
+    },
+    {
+      "seed": 4,
+      "fold": 5,
+      "score": -0.21098061530514675,
+      "train_score": 0.084779,
+      "test_mean_r": -0.22817016794667472,
+      "test_trades": 259,
+      "test_adherence": 0.0,
+      "sharpe": -2.2895536442479765,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.12853,
+          "eval": 0.084779,
+          "entropy": 1.0953
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.291226,
+          "eval": 0.044894,
+          "entropy": 1.091
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.442164,
+          "eval": 0.044824,
+          "entropy": 1.0876
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 26.9
+    },
+    {
+      "seed": 4,
+      "fold": 6,
+      "score": -0.31522838303356093,
+      "train_score": 0.135807,
+      "test_mean_r": -0.37024923611393223,
+      "test_trades": 127,
+      "test_adherence": 0.0,
+      "sharpe": -4.017840806263719,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.412346,
+          "eval": 0.135807,
+          "entropy": 1.0941
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.091208,
+          "eval": -0.055127,
+          "entropy": 1.0815
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.46714,
+          "eval": -Infinity,
+          "entropy": 1.0579
+        }
+      ],
+      "train_rows": 58595,
+      "test_rows": 19724,
+      "seconds": 29.5
+    },
+    {
+      "seed": 4,
+      "fold": 7,
+      "score": -0.01762136552097636,
+      "train_score": 0.056876,
+      "test_mean_r": 0.06254548380988406,
+      "test_trades": 164,
+      "test_adherence": 0.0,
+      "sharpe": 0.45621227195261604,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.293427,
+          "eval": -Infinity,
+          "entropy": 1.0927
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.036021,
+          "eval": 0.056876,
+          "entropy": 1.0903
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.059559,
+          "eval": -0.322926,
+          "entropy": 1.0822
+        }
+      ],
+      "train_rows": 58595,
+      "test_rows": 19724,
+      "seconds": 34.2
+    },
+    {
+      "seed": 5,
+      "fold": 0,
+      "score": -0.25327850562827386,
+      "train_score": 0.084774,
+      "test_mean_r": -0.2758997348221099,
+      "test_trades": 125,
+      "test_adherence": 0.0,
+      "sharpe": -2.7994086037586072,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.451758,
+          "eval": -0.488924,
+          "entropy": 1.0957
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.18234,
+          "eval": 0.084774,
+          "entropy": 1.0873
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.510163,
+          "eval": -0.083222,
+          "entropy": 1.0884
+        }
+      ],
+      "train_rows": 58883,
+      "test_rows": 19724,
+      "seconds": 32.7
+    },
+    {
+      "seed": 5,
+      "fold": 1,
+      "score": 0.06989443942740314,
+      "train_score": 0.259025,
+      "test_mean_r": 0.178420627753433,
+      "test_trades": 190,
+      "test_adherence": 0.0,
+      "sharpe": 1.0237319881948248,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.451758,
+          "eval": -Infinity,
+          "entropy": 1.0957
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.263859,
+          "eval": 0.259025,
+          "entropy": 1.0938
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -1.190995,
+          "eval": -0.256972,
+          "entropy": 1.0897
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 31.1
+    },
+    {
+      "seed": 5,
+      "fold": 2,
+      "score": -0.16354436809898484,
+      "train_score": 0.178254,
+      "test_mean_r": -0.14994038760923112,
+      "test_trades": 207,
+      "test_adherence": 0.0,
+      "sharpe": -1.4508832446886355,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.451758,
+          "eval": -0.088494,
+          "entropy": 1.0957
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.54165,
+          "eval": -Infinity,
+          "entropy": 1.096
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.850438,
+          "eval": 0.178254,
+          "entropy": 1.0926
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 30.2
+    },
+    {
+      "seed": 5,
+      "fold": 3,
+      "score": -0.355688436903312,
+      "train_score": 0.252846,
+      "test_mean_r": -0.428880678768008,
+      "test_trades": 210,
+      "test_adherence": 0.0,
+      "sharpe": -4.852030235610886,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.451758,
+          "eval": 0.252846,
+          "entropy": 1.0957
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.261631,
+          "eval": -Infinity,
+          "entropy": 1.0972
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -1.560465,
+          "eval": -0.231064,
+          "entropy": 1.0893
+        }
+      ],
+      "train_rows": 58308,
+      "test_rows": 19723,
+      "seconds": 28.8
+    },
+    {
+      "seed": 5,
+      "fold": 4,
+      "score": -0.06881699198106324,
+      "train_score": 0.03299,
+      "test_mean_r": -0.009347912752758869,
+      "test_trades": 213,
+      "test_adherence": 0.0,
+      "sharpe": -0.07269105767125608,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.319038,
+          "eval": -0.615325,
+          "entropy": 1.0905
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": 0.036558,
+          "eval": 0.03299,
+          "entropy": 1.0943
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.274717,
+          "eval": -Infinity,
+          "entropy": 1.0923
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 29.0
+    },
+    {
+      "seed": 5,
+      "fold": 5,
+      "score": -0.18072035912386245,
+      "train_score": 0.053516,
+      "test_mean_r": -0.18072821185291413,
+      "test_trades": 327,
+      "test_adherence": 0.0,
+      "sharpe": -1.7741235344138335,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -0.225458,
+          "eval": 0.053516,
+          "entropy": 1.0933
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": 0.036558,
+          "eval": -0.545887,
+          "entropy": 1.0892
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.495342,
+          "eval": -0.624504,
+          "entropy": 1.0859
+        }
+      ],
+      "train_rows": 58307,
+      "test_rows": 19724,
+      "seconds": 31.3
+    },
+    {
+      "seed": 5,
+      "fold": 6,
+      "score": -0.233871835745043,
+      "train_score": -0.562015,
+      "test_mean_r": -0.2488565980749928,
+      "test_trades": 263,
+      "test_adherence": 0.0,
+      "sharpe": -1.268590931425337,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": -1.094523,
+          "eval": -Infinity,
+          "entropy": 1.0921
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": 0.316583,
+          "eval": -0.562015,
+          "entropy": 1.0878
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": 0.343117,
+          "eval": -Infinity,
+          "entropy": 1.08
+        }
+      ],
+      "train_rows": 58595,
+      "test_rows": 19724,
+      "seconds": 23.0
+    },
+    {
+      "seed": 5,
+      "fold": 7,
+      "score": -0.11979849270550318,
+      "train_score": 0.044846,
+      "test_mean_r": -0.11630164996282205,
+      "test_trades": 181,
+      "test_adherence": 0.0,
+      "sharpe": -1.1092340223400388,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 5000,
+          "batch_score": 0.451758,
+          "eval": 0.044846,
+          "entropy": 1.0957
+        },
+        {
+          "iteration": 1,
+          "decisions": 5000,
+          "batch_score": -0.577636,
+          "eval": 0.028921,
+          "entropy": 1.0925
+        },
+        {
+          "iteration": 2,
+          "decisions": 5000,
+          "batch_score": -0.288511,
+          "eval": -Infinity,
+          "entropy": 1.0903
+        }
+      ],
+      "train_rows": 58595,
+      "test_rows": 19724,
+      "seconds": 21.2
+    }
+  ],
+  "best": {
+    "seed": 2,
+    "fold": 0,
+    "score": 0.0929112201564152,
+    "train_score": 0.338225,
+    "test_mean_r": 0.2133174868733891,
+    "test_trades": 129,
+    "test_adherence": 0.0,
+    "sharpe": 1.1550798474054236,
+    "history": [
+      {
+        "iteration": 0,
+        "decisions": 5000,
+        "batch_score": 0.39283,
+        "eval": -Infinity,
+        "entropy": 1.0897
+      },
+      {
+        "iteration": 1,
+        "decisions": 5000,
+        "batch_score": 0.734831,
+        "eval": 0.318468,
+        "entropy": 1.076
+      },
+      {
+        "iteration": 2,
+        "decisions": 5000,
+        "batch_score": -0.535691,
+        "eval": 0.338225,
+        "entropy": 1.0833
+      }
+    ],
+    "train_rows": 58883,
+    "test_rows": 19724,
+    "seconds": 29.2
+  },
+  "symbols_attempted": [
+    "Crash 1000 Index"
+  ],
+  "sharpe_dispersion": 20.6398,
+  "started_at": "2026-10-09T21:49:53.738163+00:00",
+  "finished_at": "2026-10-09T22:14:59.408117+00:00",
+  "seconds": 1505.7,
+  "error": ""
+}

@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { AlertTriangle, Check, Plus, Server, Trash2, X } from 'lucide-react';
 import {
-  DEMO, LIVE, ROLE_COLOUR, activeServer, activeServerId, clearServerAuth,
-  getServerUser, isSignedIn, listServers, saveServers, setActiveServerId,
-  storeServerAuth,
+  DEMO, LIVE, ROLE_COLOUR, activeServerId, clearServerAuth, getServerUser,
+  isSignedIn, listServers, saveServers, setActiveServerId, storeServerAuth,
 } from '../services/servers';
 
 /**
@@ -24,6 +23,67 @@ import {
  */
 
 const HEALTH_MS = 20000;
+
+// Room the panel wants below the button before it gives up and opens upward.
+const WANTS_PX = 280;
+const PANEL_PX = 340;
+const GAP_PX = 6;
+
+/**
+ * Where to draw a panel hanging off `ref`, in viewport coordinates.
+ *
+ * `position: absolute; top: 110%; right: 0` is what this used to be, and it
+ * was wrong in both directions for the only place it is mounted. The switcher
+ * lives in the sidebar FOOTER, so "110% from the top of the button" is below
+ * the bottom of the screen — the panel was there, you just could not see it.
+ * And a 340px panel anchored to the right edge of a 240px sidebar hangs 100px
+ * off the left of the window.
+ *
+ * So it is measured rather than assumed: fixed positioning from the button's
+ * own rect, flipped upward when there is no room below, clamped to the
+ * viewport on both axes, and capped in height with its own scrollbar. Fixed
+ * rather than absolute also means no ancestor's `overflow` can clip it.
+ */
+function useAnchoredPanel(ref, showing) {
+  const [pos, setPos] = useState(null);
+
+  const place = useCallback(() => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const width = Math.min(PANEL_PX, window.innerWidth - 16);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    const below = window.innerHeight - r.bottom - GAP_PX * 2;
+    const above = r.top - GAP_PX * 2;
+    const up = below < WANTS_PX && above > below;
+    setPos({
+      position: 'fixed', left, width,
+      ...(up ? { bottom: window.innerHeight - r.top + GAP_PX }
+        : { top: r.bottom + GAP_PX }),
+      maxHeight: Math.max(160, up ? above : below),
+      overflowY: 'auto',
+    });
+  }, [ref]);
+
+  useLayoutEffect(() => {
+    if (!showing) return undefined;
+    place();
+    // `true` so a scroll in any ancestor re-places it, not only the window's.
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    // A window resize does not move a fixed-width sidebar's button, so the
+    // resize listener alone misses the case that actually moves it: the
+    // sidebar collapsing from 240px to 64px.
+    const ro = new ResizeObserver(place);
+    if (ref.current) ro.observe(ref.current);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+      ro.disconnect();
+    };
+  }, [showing, place, ref]);
+
+  return pos;
+}
 
 function rolePill(role) {
   const colour = ROLE_COLOUR[role] || ROLE_COLOUR.unknown;
@@ -125,12 +185,31 @@ export default function ServerSwitcher() {
   const [adding, setAdding] = useState(false);
   const [servers, setServers] = useState(listServers);
   const [activeId, setActiveId] = useState(activeServerId);
+  const anchor = useRef(null);
+  const panel = useRef(null);
 
   useEffect(() => {
     const sync = () => { setServers(listServers()); setActiveId(activeServerId()); };
     window.addEventListener('servers-changed', sync);
     return () => window.removeEventListener('servers-changed', sync);
   }, []);
+
+  // A dropdown that covers the whole nav and only closes from the button it
+  // came out of is a trap. Escape and a click anywhere else both close it.
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e) => {
+      if (panel.current?.contains(e.target) || anchor.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const key = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', key);
+    };
+  }, [open]);
 
   // Health is asked of EVERY server, not only the active one: the point of
   // the strip is to see at a glance that demo is up before switching to it.
@@ -150,6 +229,10 @@ export default function ServerSwitcher() {
   const activeHealth = health[servers.indexOf(active)]?.data;
   const activeMismatch = active && mismatch(active, activeHealth);
   const colour = ROLE_COLOUR[active?.role] || ROLE_COLOUR.unknown;
+  // Measured whenever a panel is about to be shown, and kept above the early
+  // return below because a hook cannot be conditional. Measuring once at
+  // mount instead would go stale the moment the sidebar collapsed.
+  const place = useAnchoredPanel(anchor, Boolean(open || activeMismatch));
 
   const switchTo = (id) => {
     setActiveServerId(id);
@@ -166,20 +249,36 @@ export default function ServerSwitcher() {
 
   return (
     <div style={{ position: 'relative' }}>
-      <button className="btn btn-secondary btn-sm" onClick={() => setOpen((v) => !v)}
-              style={{ borderColor: colour, color: colour, gap: 6 }}>
+      <button ref={anchor} className="btn btn-secondary btn-sm"
+              aria-expanded={open} aria-haspopup="menu"
+              onClick={() => setOpen((v) => !v)}
+              style={{
+                borderColor: colour, color: colour, gap: 6,
+                // The sidebar is 240px and collapses to 64px. Without this the
+                // label and both pills push the button wider than its own
+                // column and the row spills over the edge.
+                maxWidth: '100%', overflow: 'hidden',
+              }}>
         <Server size={13} />
-        {active.label}
-        {rolePill(active.role)}
+        {/* Hidden in the collapsed rail, the same way `.nav-link span` and
+            `.user-email` are. The icon and the warning triangle stay: a
+            64px rail still has to be able to say "this is the wrong
+            server". */}
+        <span className="switcher-label">
+          {active.label}
+          {rolePill(active.role)}
+        </span>
         {activeMismatch && <AlertTriangle size={13} color="var(--red)" />}
         {!isSignedIn(active.id) && (
-          <span className="inv-hint" style={{ fontSize: '0.65rem' }}>signed out</span>
+          <span className="inv-hint switcher-label" style={{ fontSize: '0.65rem' }}>
+            signed out
+          </span>
         )}
       </button>
 
       {activeMismatch && (
         <div style={{
-          position: 'absolute', top: '110%', right: 0, zIndex: 60, width: 320,
+          ...place, zIndex: 60,
           background: 'var(--bg-card)', border: '1px solid var(--red)', borderRadius: 8,
           padding: 10, fontSize: '0.76rem', lineHeight: 1.5,
         }}>
@@ -190,8 +289,8 @@ export default function ServerSwitcher() {
       )}
 
       {open && (
-        <div style={{
-          position: 'absolute', top: '110%', right: 0, zIndex: 50, width: 340,
+        <div ref={panel} role="menu" style={{
+          ...place, zIndex: 50,
           background: 'var(--bg-card)', border: '1px solid var(--border)',
           borderRadius: 8, boxShadow: '0 10px 30px rgba(0,0,0,0.45)',
         }}>
@@ -271,15 +370,4 @@ export default function ServerSwitcher() {
       )}
     </div>
   );
-}
-
-/** The accent for the active server, for anything that wants to tint itself. */
-export function useServerColour() {
-  const [colour, setColour] = useState(() => ROLE_COLOUR[activeServer()?.role] || ROLE_COLOUR.unknown);
-  useEffect(() => {
-    const sync = () => setColour(ROLE_COLOUR[activeServer()?.role] || ROLE_COLOUR.unknown);
-    window.addEventListener('servers-changed', sync);
-    return () => window.removeEventListener('servers-changed', sync);
-  }, []);
-  return colour;
 }

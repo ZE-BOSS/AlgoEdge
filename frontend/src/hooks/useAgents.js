@@ -62,3 +62,19 @@ export function useAgentIdLookup() {
   return (strategyId) => (agents.find((a) => a.strategy_id === strategyId) || {}).agent_id
     || null;
 }
+
+/**
+ * The rule-based strategies a mode-B agent can be built on.
+ *
+ * Agents are excluded by the endpoint: an agent optimising another agent is
+ * not something this design supports, and offering it would invite a loop
+ * nobody can reason about.
+ */
+export function useBaseStrategies() {
+  const { data } = useQuery({
+    queryKey: qk('rl-base-strategies'),
+    queryFn: () => rl.strategies().then((r) => r.data?.strategies || []),
+    staleTime: 600000,
+  });
+  return data || [];
+}

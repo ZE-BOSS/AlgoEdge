@@ -89,6 +89,10 @@ def available_optimiser(prefer: str | None = None) -> str:
 class SeedResult:
     seed: int
     fold: int
+    # Which instrument this row is from. Without it a multi-symbol run's
+    # results table is a list of numbers nobody can attribute, and "seed 3
+    # disagrees" cannot be told apart from "Boom disagrees with Crash".
+    symbol: str = ""
     score: float = 0.0
     # The IN-SAMPLE score, kept beside the out-of-sample one because PBO is
     # built from the pair: which candidate looked best on the training rows,
@@ -172,6 +176,23 @@ class Progress:
         self.path = Path(path) if path else None
         self.started = time.time()
         self.state: dict[str, Any] = {}
+
+    def event(self, text: str) -> None:
+        """One human-readable line about what just happened.
+
+        The percentage says how far along it is; it does not say what it is
+        DOING. "seed 3 of 5, path 2 of 8, iteration 7 of 40 - best so far
+        +0.0412R over 118 trades" is the difference between a progress bar you
+        watch and one you trust.
+        """
+        log = self.state.setdefault("events", [])
+        log.append({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "text": text})
+        # Bounded: this file is read on a poll and a 10-hour run would
+        # otherwise grow it without limit.
+        if len(log) > 200:
+            del log[:-200]
+        self.set()
 
     def set(self, **kw) -> None:
         self.state.update(kw)
@@ -470,6 +491,8 @@ def train_ppo(spec: AgentSpec, data: E.EpisodeData, risk_config: dict, fold: E.F
             progress.set(stage="training", optimiser="ppo-direct", seed=seed,
                          fold=fold.path, iteration=it + 1, iterations=int(spec.iterations),
                          best=round(best_score[0], 6),
+                         decisions=int(len(rb)), entropy=round(
+                             float(_entropy(policy.entry_probs(Zb)).mean()), 3),
                          pct=round(pct_from + (pct_to - pct_from) * frac, 2))
 
     best_policy.seed = seed
@@ -588,6 +611,20 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
     total = len(spec.seeds) * len(folds) * len(episodes)
     done = 0
 
+    progress.set(stage="starting", pct=0.0, optimiser=run.optimiser,
+                 seeds=len(spec.seeds), folds=len(folds), symbols=len(episodes),
+                 total_jobs=total, jobs_done=0, mode=spec.mode,
+                 base_strategy=spec.base_strategy, director=spec.director,
+                 datasets=[{"symbol": d.symbol, "bars": len(d),
+                            "start": int(d.times[0]), "end": int(d.times[-1]),
+                            "base_signals": len(d.base_signals or {})}
+                           for d in episodes])
+    progress.event(
+        f"{len(episodes)} symbol(s), {len(spec.seeds)} seeds x {len(folds)} purged "
+        f"paths = {total} training jobs, optimiser {run.optimiser}"
+        + (f", base strategy {spec.base_strategy}" if spec.base_strategy else "")
+        + (", with a supervised direction model" if spec.director else ""))
+
     for data in episodes:
         for seed in spec.seeds:
             for fold in folds:
@@ -610,7 +647,11 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
                 if not in_sample:
                     in_sample = [h.get("best") for h in history
                                  if isinstance(h.get("best"), (int, float))]
-                res = SeedResult(seed=seed, fold=fold.path, policy=policy.to_dict(),
+                progress.event(
+                    f"{data.symbol} seed {seed} path {fold.path}: trained on "
+                    f"{fold.train_rows:,} bars, testing on {fold.test_rows:,}")
+                res = SeedResult(seed=seed, fold=fold.path, symbol=data.symbol,
+                                 policy=policy.to_dict(),
                                  scaler=scaler.to_dict(), history=history,
                                  train_score=float(max(in_sample)) if in_sample else 0.0,
                                  train_rows=fold.train_rows, test_rows=fold.test_rows,
@@ -634,7 +675,13 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
                 done += 1
                 progress.set(stage="fold complete", pct=round(100.0 * done / total, 2),
                              seed=seed, fold=fold.path, trades=res.test_trades,
-                             mean_r=round(res.test_mean_r, 5))
+                             mean_r=round(res.test_mean_r, 5),
+                             jobs_done=done, total_jobs=total, symbol=data.symbol,
+                             best_so_far=round(run.best.score, 6) if run.best else None)
+                progress.event(
+                    f"{data.symbol} seed {seed} path {fold.path} done: "
+                    f"{res.test_trades} test trades at {res.test_mean_r:+.4f}R "
+                    f"(Sharpe {res.sharpe:+.2f}) in {res.seconds:.0f}s")
             if run.error == "cancelled":
                 break
         if run.error == "cancelled":
@@ -644,8 +691,20 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
     run.finished_at = datetime.now(timezone.utc).isoformat()
     save_run(run, root)
     progress.set(stage="complete", pct=100.0,
-                 seeds=len(spec.seeds), folds=len(folds),
-                 best=round(run.best.score, 6) if run.best else None)
+                 seeds=len(spec.seeds), folds=len(folds), jobs_done=done,
+                 best=round(run.best.score, 6) if run.best else None,
+                 dispersion=(None if run.sharpe_dispersion == float("inf")
+                             else round(run.sharpe_dispersion, 3)))
+    if run.best:
+        progress.event(
+            f"Finished in {run.seconds / 60:.0f} min. Best: seed {run.best.seed} "
+            f"path {run.best.fold}, {run.best.test_trades} test trades at "
+            f"{run.best.test_mean_r:+.4f}R. Seed dispersion "
+            f"{'n/a' if run.sharpe_dispersion == float('inf') else f'{run.sharpe_dispersion:.2f}'}"
+            f" - over 1.0 means the seeds disagree and there is no result yet.")
+    else:
+        progress.event("Finished with no usable result - no fold produced a policy.")
+    progress.event("Next: Collect, then Distil the charter, then Run the gate.")
     return run
 
 
