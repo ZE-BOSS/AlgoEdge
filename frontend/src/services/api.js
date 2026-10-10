@@ -462,6 +462,10 @@ const RL = '/rl';
 export const rl = {
   features: () => api.get(`${RL}/features`),
   strategies: () => api.get(`${RL}/strategies`),
+  // How far back the terminal carries a symbol, so a training
+  // window can be chosen rather than discovered by failing.
+  mt5Range: (symbol, timeframe) => api.get(`${RL}/mt5-range`,
+    { params: { symbol, timeframe } }),
   // What a spec WOULD be, for a form that has not been submitted. One
   // source of wording for the create screen and the saved agent.
   describe: (data) => api.post(`${RL}/describe`, data),

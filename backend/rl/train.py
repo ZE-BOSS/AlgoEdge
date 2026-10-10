@@ -704,6 +704,27 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
             f" - over 1.0 means the seeds disagree and there is no result yet.")
     else:
         progress.event("Finished with no usable result - no fold produced a policy.")
+
+    # A run where nothing ever traded is a FAILURE wearing a completion's
+    # clothes. It reports 100%, a seed dispersion of 0.00 (because every seed
+    # agreed on doing nothing) and a best score of +0.0000R, and an admin
+    # watching the bar fill up has no reason to think anything is wrong. It
+    # is also the most common way a short run ends: too few iterations and
+    # the policy never learns to take a trade at all.
+    total_trades = sum(int(r.test_trades) for r in run.results)
+    if total_trades == 0:
+        progress.set(no_trades=True)
+        progress.event(
+            "WARNING: not one fold took a single trade. The policy learned to "
+            "stay flat, which scores zero and cannot be distinguished from a "
+            "careful one. Raise iterations, lower min_confidence, or give it "
+            "more bars - and do not read the 0.00 seed dispersion as agreement.")
+    elif run.best and run.best.test_trades < 30:
+        progress.set(thin_result=True)
+        progress.event(
+            f"WARNING: the best fold took only {run.best.test_trades} test "
+            f"trades. The gate's sample-size check needs far more than that, "
+            f"so this run will be rejected on arrival.")
     progress.event("Next: Collect, then Distil the charter, then Run the gate.")
     return run
 
@@ -990,15 +1011,18 @@ def _run_job_inner(payload: dict, prog: "Progress | None" = None) -> dict:
                  stage_detail=f"reading bars for {len(spec.symbols)} symbol(s)")
         prog.event(f"starting: reading bars for {', '.join(spec.symbols)}")
     frames = load_frames(payload.get("datasets") or {}, spec)
+    failures = list(getattr(load_frames, "last_failures", []) or [])
     if prog is not None:
         prog.event("bars loaded: " + (", ".join(
             f"{k} {len(v):,}" for k, v in frames.items()) or "NONE"))
+        for f in failures:
+            prog.event(f"source failed - {f}")
     if not frames:
-        raise ValueError(
-            "no bars for any pre-registered symbol - every source either failed "
-            "to load or returned nothing. Check the Data tab: a source has to be "
-            "chosen for each symbol and it has to still be there when you press "
-            "Start.")
+        # The per-symbol reasons, not a summary. "No bars for any symbol" is
+        # true and tells the admin nothing about which source to fix.
+        detail = ("; ".join(failures) if failures
+                  else "no source was recorded for any symbol")
+        raise ValueError(f"no bars loaded. {detail}")
     charter = None
     if payload.get("charter"):
         from backend.rl.charter import StrategyCharter

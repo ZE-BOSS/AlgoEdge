@@ -311,6 +311,38 @@ def estimate_cost(spec: AgentSpec) -> dict:
     }
 
 
+@router.get("/mt5-range")
+async def mt5_available_range(symbol: str, timeframe: str = "M5"):
+    """How far back this broker actually carries an instrument.
+
+    Asked for because a training run failed with "no bars" and there was no
+    way to find out why without reading a log on the VPS. MT5 hands back a
+    limited history per symbol, and it is shorter for recently listed ones -
+    so "from the beginning of the data" is a request the terminal may simply
+    refuse. Now the Data tab can say so before anything is started.
+    """
+    from backend.mt5.data_fetcher import DataFetcher
+
+    try:
+        frame = await DataFetcher.get_historical_data(symbol, timeframe, 200_000)
+    except Exception as exc:                            # noqa: BLE001
+        return {"symbol": symbol, "timeframe": timeframe, "ok": False,
+                "error": f"{type(exc).__name__}: {exc}"}
+    if frame is None or not len(frame):
+        return {"symbol": symbol, "timeframe": timeframe, "ok": False,
+                "error": "the terminal returned no bars for this symbol"}
+    t = frame["time"]
+    first, last = t.iloc[0], t.iloc[-1]
+    return {
+        "symbol": symbol, "timeframe": timeframe, "ok": True,
+        "bars": int(len(frame)),
+        "first": str(first)[:19], "last": str(last)[:19],
+        "note": (f"{len(frame):,} {timeframe} bars available, "
+                 f"{str(first)[:10]} to {str(last)[:10]}. A training window "
+                 f"starting before {str(first)[:10]} returns nothing."),
+    }
+
+
 @router.get("/strategies")
 async def base_strategy_options():
     """The rule-based strategies a mode-B agent can be built on.

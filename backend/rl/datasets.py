@@ -324,6 +324,51 @@ def clip_to_window(frame: pd.DataFrame, start: str = "", end: str = "") -> pd.Da
     return out
 
 
+def load_mt5_range(symbol: str, timeframe: str, start: str, end: str, **kw) -> Dataset:
+    """Ask MT5 for a DATE RANGE, rather than for recent bars to be clipped.
+
+    THE BUG THIS FIXES
+    `load_mt5` asks for the most recent N bars and `load_frames` then clips
+    them to the requested window. 200,000 M5 bars is about 1.9 years, so a
+    request for "from the beginning to the end of last year" fetches roughly
+    2024-11 to today, clips away everything after 2025-12-31, and - for any
+    instrument MT5 only carries recent history for, which is every newly
+    listed synthetic - clips away *everything*. The run then failed with "no
+    bars for any pre-registered symbol" and no indication of which symbol or
+    why.
+
+    `get_data_range` uses `copy_rates_range`, which is the call that answers
+    the question actually being asked, and falls back to `copy_rates_from`
+    when the broker refuses a start date older than its history.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+
+    from backend.mt5.data_fetcher import DataFetcher
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise DatasetError("load_mt5_range must not be called from the event loop")
+
+    def _parse(v: str, fallback: datetime) -> datetime:
+        if not v:
+            return fallback
+        return datetime.fromisoformat(v).replace(tzinfo=timezone.utc)
+
+    a = _parse(start, datetime(2000, 1, 1, tzinfo=timezone.utc))
+    b = _parse(end, datetime.now(timezone.utc))
+    frame = asyncio.run(DataFetcher.get_data_range(symbol, timeframe, a, b))
+    if frame is None or not len(frame):
+        raise DatasetError(
+            f"{symbol} {timeframe}: MT5 returned no bars between "
+            f"{a:%Y-%m-%d} and {b:%Y-%m-%d}. The broker may not carry this "
+            f"instrument that far back - try a later start date.")
+    return normalise(frame, symbol, timeframe, source="mt5", **kw)
+
+
 def load_mt5(symbol: str, timeframe: str, bars: int = 200_000, **kw) -> Dataset:
     """Straight from the terminal, which is the primary source on this machine.
 
@@ -521,6 +566,7 @@ def load_frames(sources: dict, spec) -> dict:
     training PROCESS, so the parent never has to pickle a 400,000-row frame.
     """
     out = {}
+    failures: list[str] = []
     for symbol in spec.symbols:
         src = (sources or {}).get(symbol)
         if src is None:
@@ -528,7 +574,13 @@ def load_frames(sources: dict, spec) -> dict:
             continue
         try:
             window = src if isinstance(src, dict) else {}
-            if src == "mt5" or window.get("source") == "mt5":
+            is_mt5 = src == "mt5" or window.get("source") == "mt5"
+            w_start, w_end = window.get("start", ""), window.get("end", "")
+            if is_mt5 and (w_start or w_end):
+                # Ask for the dates wanted, not for recent bars to be clipped.
+                ds = load_mt5_range(symbol, spec.timeframe, w_start, w_end)
+                w_start = w_end = ""          # already applied by the fetch
+            elif is_mt5:
                 ds = load_mt5(symbol, spec.timeframe,
                               bars=int(window.get("bars") or 200_000))
             elif isinstance(src, dict):
@@ -540,7 +592,11 @@ def load_frames(sources: dict, spec) -> dict:
             else:
                 ds = load_file(src, symbol, spec.timeframe)
         except Exception as exc:                        # noqa: BLE001
-            logger.error(f"[RL] {symbol}: {type(exc).__name__}: {exc}")
+            # Collected rather than only logged: the backend log is on the
+            # VPS and the person who needs this is looking at a screen.
+            msg = f"{symbol}: {type(exc).__name__}: {exc}"
+            logger.error(f"[RL] {msg}")
+            failures.append(msg)
             continue
         frame = ds.frame
         # Clipped AFTER loading rather than fetched narrower, so the clip is
@@ -553,4 +609,7 @@ def load_frames(sources: dict, spec) -> dict:
             logger.info(f"[RL] {symbol}: clipped {before:,} bars to {len(frame):,} "
                         f"({frame.index[0]:%Y-%m-%d} to {frame.index[-1]:%Y-%m-%d})")
         out[symbol] = frame
+    # Attached to the result so the caller can put it in front of the admin.
+    # A bare "no bars for any symbol" is true and useless.
+    load_frames.last_failures = failures
     return out

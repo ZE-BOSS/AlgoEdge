@@ -1,0 +1,517 @@
+{
+ "feed": "deriv",
+ "split": "2025-04-01",
+ "markets": [
+  "XAUUSD",
+  "XAGUSD",
+  "EURUSD",
+  "GBPUSD",
+  "USDJPY",
+  "GBPJPY",
+  "BTCUSD",
+  "US Tech 100",
+  "US SP 500",
+  "Germany 40"
+ ],
+ "alternation": {
+  "asia->london": {
+   "n": 11564,
+   "p_opposite": 50.12971290210999,
+   "best_market": "USDJPY",
+   "best_z": -2.2334251518835964
+  },
+  "london->newyork": {
+   "n": 11567,
+   "p_opposite": 50.69594536180514,
+   "best_market": "BTCUSD",
+   "best_z": 1.5977014334408197
+  },
+  "newyork->asia": {
+   "n": 9567,
+   "p_opposite": 51.81352566112679,
+   "best_market": "GBPUSD",
+   "best_z": 1.9410611581431745
+  }
+ },
+ "break_retest": {
+  "pick": {
+   "look": 12,
+   "wide": 1.2,
+   "trail": 4.0
+  },
+  "in_sample": {
+   "n": 842,
+   "expectancy_r": 0.1300144516688077,
+   "win_rate": 25.534441805225654,
+   "t_stat": 1.3781208463666554,
+   "payoff": 3.454075912886833,
+   "total_r": 109.47216830513608,
+   "thin": false
+  },
+  "out_of_sample": {
+   "n": 453,
+   "expectancy_r": 0.13548963327734917,
+   "win_rate": 23.178807947019866,
+   "t_stat": 0.8576880016635833,
+   "payoff": 3.9328070507091324,
+   "total_r": 61.37680387463918,
+   "thin": false
+  },
+  "money_oos": {
+   "final": 11283.183251845217,
+   "return_pct": 12.831832518452169,
+   "profit_usd": 1283.1832518452175,
+   "max_dd_pct": 18.995322067311772,
+   "max_dd_usd": 2403.280502949012,
+   "profit_factor": 1.076001102480776,
+   "win_rate": 23.11111111111111,
+   "avg_win_usd": 174.6820046787584,
+   "avg_loss_usd": -48.796951545507675,
+   "best_trade_usd": 1517.3571428571438,
+   "worst_trade_usd": -154.19999999999987,
+   "longest_win_streak": 4,
+   "longest_loss_streak": 18,
+   "month_pos_pct": 44.44444444444444,
+   "best_month_usd": 1067.988453383112,
+   "worst_month_usd": -955.2938996121012,
+   "sharpe": 0.5612851171326861,
+   "sortino": 1.1169569535571395,
+   "trades": 450
+  }
+ },
+ "trend_opt": {
+  "pick": {
+   "entry_win": 4,
+   "atr_stop": 2.0,
+   "trail_atr": 5.0,
+   "filter": "none"
+  },
+  "in_sample": {
+   "n": 1368,
+   "expectancy_r": 0.1935689562258451,
+   "win_rate": 28.801169590643276,
+   "t_stat": 2.801181513957092,
+   "payoff": 3.20637815511344,
+   "total_r": 264.8023321169561,
+   "thin": false
+  },
+  "surrogate_p95": 0.10889529498551233,
+  "out_of_sample": {
+   "n": 701,
+   "expectancy_r": 0.13955088278841163,
+   "win_rate": 31.383737517831666,
+   "t_stat": 1.4198295279461197,
+   "payoff": 2.6782585231551086,
+   "total_r": 97.82516883467656,
+   "thin": false
+  },
+  "money": {
+   "0.25": {
+    "final": 13496.126160978538,
+    "return_pct": 34.96126160978539,
+    "profit_usd": 3496.126160978538,
+    "max_dd_pct": 14.861623464991805,
+    "max_dd_usd": 1994.1815096736227,
+    "profit_factor": 1.2876380627469952,
+    "win_rate": 31.1178247734139,
+    "avg_win_usd": 75.97440834993294,
+    "avg_loss_usd": -26.654828857692177,
+    "best_trade_usd": 934.5714285714281,
+    "worst_trade_usd": -87.35714285714303,
+    "longest_win_streak": 8,
+    "longest_loss_streak": 21,
+    "month_pos_pct": 44.44444444444444,
+    "best_month_usd": 1358.3610666513398,
+    "worst_month_usd": -739.9859114877481,
+    "sharpe": 1.1129640116052952,
+    "sortino": 3.7337574062218435,
+    "trades": 662
+   },
+   "0.5": {
+    "final": 14580.8981437511,
+    "return_pct": 45.808981437511,
+    "profit_usd": 4580.898143751099,
+    "max_dd_pct": 25.14317471676943,
+    "max_dd_usd": 3706.8320001628454,
+    "profit_factor": 1.1783255216498063,
+    "win_rate": 31.22302158273381,
+    "avg_win_usd": 139.489874216981,
+    "avg_loss_usd": -53.74143213668153,
+    "best_trade_usd": 1570.4914285714292,
+    "worst_trade_usd": -203.20000000000005,
+    "longest_win_streak": 8,
+    "longest_loss_streak": 22,
+    "month_pos_pct": 50.0,
+    "best_month_usd": 1717.9423745210916,
+    "worst_month_usd": -1032.0842431662402,
+    "sharpe": 1.0344000217737492,
+    "sortino": 3.678151786012428,
+    "trades": 695
+   },
+   "1.0": {
+    "final": 17545.588397954783,
+    "return_pct": 75.45588397954783,
+    "profit_usd": 7545.588397954783,
+    "max_dd_pct": 40.25785248606806,
+    "max_dd_usd": 6750.58798509979,
+    "profit_factor": 1.1394168203527593,
+    "win_rate": 31.285714285714285,
+    "avg_win_usd": 281.5894951259424,
+    "avg_loss_usd": -112.52081296180168,
+    "best_trade_usd": 3140.9828571428584,
+    "worst_trade_usd": -253.14999999999984,
+    "longest_win_streak": 8,
+    "longest_loss_streak": 22,
+    "month_pos_pct": 44.44444444444444,
+    "best_month_usd": 4067.097888007589,
+    "worst_month_usd": -1840.2586047634366,
+    "sharpe": 0.9545450608387572,
+    "sortino": 3.2329195134188473,
+    "trades": 700
+   },
+   "2.0": {
+    "final": 29532.360190674197,
+    "return_pct": 195.32360190674197,
+    "profit_usd": 19532.360190674197,
+    "max_dd_pct": 65.57052799989249,
+    "max_dd_usd": 18589.5780941565,
+    "profit_factor": 1.1309610783177546,
+    "win_rate": 31.383737517831666,
+    "avg_win_usd": 766.7211797544796,
+    "avg_loss_usd": -310.07546643515866,
+    "best_trade_usd": 7067.2114285714315,
+    "worst_trade_usd": -628.7356446841845,
+    "longest_win_streak": 8,
+    "longest_loss_streak": 22,
+    "month_pos_pct": 44.44444444444444,
+    "best_month_usd": 11968.762275118379,
+    "worst_month_usd": -5364.348624228969,
+    "sharpe": 1.088184846541562,
+    "sortino": 4.254144205804061,
+    "trades": 701
+   }
+  },
+  "per_market": {
+   "XAUUSD": {
+    "out_of_sample": {
+     "n": 64,
+     "expectancy_r": 0.5977845992487902,
+     "win_rate": 29.6875,
+     "t_stat": 0.9730250987330911,
+     "payoff": 4.726874168146653,
+     "total_r": 38.258214351922575,
+     "thin": false
+    },
+    "money_all": {
+     "final": 15645.752142857138,
+     "return_pct": 56.45752142857139,
+     "profit_usd": 5645.752142857138,
+     "max_dd_pct": 6.383367919927292,
+     "max_dd_usd": 871.4178571428547,
+     "profit_factor": 1.890619899519728,
+     "win_rate": 31.55339805825243,
+     "avg_win_usd": 184.38274725274724,
+     "avg_loss_usd": -44.9583434650456,
+     "best_trade_usd": 1570.4914285714292,
+     "worst_trade_usd": -170.74571428571468,
+     "longest_win_streak": 7,
+     "longest_loss_streak": 12,
+     "month_pos_pct": 60.3448275862069,
+     "best_month_usd": 1352.0057142857158,
+     "worst_month_usd": -539.7528571428578,
+     "sharpe": 1.1940254755000217,
+     "sortino": 3.299829348506768,
+     "trades": 206
+    }
+   },
+   "XAGUSD": {
+    "out_of_sample": {
+     "n": 62,
+     "expectancy_r": 0.5094992618186339,
+     "win_rate": 37.096774193548384,
+     "t_stat": 1.12599550219244,
+     "payoff": 3.112718631560292,
+     "total_r": 31.588954232755302,
+     "thin": false
+    },
+    "money_all": {
+     "final": 12653.078571428567,
+     "return_pct": 26.530785714285663,
+     "profit_usd": 2653.0785714285666,
+     "max_dd_pct": 11.22528776064367,
+     "max_dd_usd": 1547.7214285714308,
+     "profit_factor": 1.3443478680072918,
+     "win_rate": 31.01851851851852,
+     "avg_win_usd": 154.59291044776114,
+     "avg_loss_usd": -51.709036433365306,
+     "best_trade_usd": 1106.678571428571,
+     "worst_trade_usd": -203.20000000000005,
+     "longest_win_streak": 3,
+     "longest_loss_streak": 10,
+     "month_pos_pct": 52.63157894736842,
+     "best_month_usd": 921.049999999999,
+     "worst_month_usd": -676.2035714285721,
+     "sharpe": 0.6631185117642714,
+     "sortino": 1.2651346201709504,
+     "trades": 216
+    }
+   },
+   "EURUSD": {
+    "out_of_sample": {
+     "n": 71,
+     "expectancy_r": -0.07131212759414403,
+     "win_rate": 29.577464788732392,
+     "t_stat": -0.3726255879851674,
+     "payoff": 2.1074991271457746,
+     "total_r": -5.063161059184226,
+     "thin": false
+    },
+    "money_all": {
+     "final": 9770.797142857185,
+     "return_pct": -2.2920285714281508,
+     "profit_usd": -229.20285714281454,
+     "max_dd_pct": 11.548166618048445,
+     "max_dd_usd": 1225.5414285713741,
+     "profit_factor": 0.9685271399032059,
+     "win_rate": 27.966101694915253,
+     "avg_win_usd": 106.86898268398306,
+     "avg_loss_usd": -42.83856302521002,
+     "best_trade_usd": 388.2457142857148,
+     "worst_trade_usd": -53.097142857141954,
+     "longest_win_streak": 3,
+     "longest_loss_streak": 12,
+     "month_pos_pct": 53.44827586206896,
+     "best_month_usd": 525.205714285713,
+     "worst_month_usd": -448.3478571428596,
+     "sharpe": -0.04229058995209573,
+     "sortino": -0.06675451612473292,
+     "trades": 236
+    }
+   },
+   "GBPUSD": {
+    "out_of_sample": {
+     "n": 59,
+     "expectancy_r": 0.16647314601423985,
+     "win_rate": 32.20338983050847,
+     "t_stat": 0.6889767913510167,
+     "payoff": 2.6763572672164724,
+     "total_r": 9.821915614840151,
+     "thin": false
+    },
+    "money_all": {
+     "final": 11357.23214285715,
+     "return_pct": 13.572321428571499,
+     "profit_usd": 1357.2321428571504,
+     "max_dd_pct": 13.23712833067553,
+     "max_dd_usd": 1554.2628571428468,
+     "profit_factor": 1.1870060044662,
+     "win_rate": 28.77358490566038,
+     "avg_win_usd": 141.22827868852477,
+     "avg_loss_usd": -48.06419110690627,
+     "best_trade_usd": 606.3028571428584,
+     "worst_trade_usd": -58.74428571428539,
+     "longest_win_streak": 3,
+     "longest_loss_streak": 15,
+     "month_pos_pct": 57.14285714285714,
+     "best_month_usd": 457.40285714285767,
+     "worst_month_usd": -491.10071428571564,
+     "sharpe": 0.4542378221241473,
+     "sortino": 0.8357247307484656,
+     "trades": 212
+    }
+   },
+   "USDJPY": {
+    "out_of_sample": {
+     "n": 76,
+     "expectancy_r": -0.0030555719283697695,
+     "win_rate": 31.57894736842105,
+     "t_stat": -0.016749330977894605,
+     "payoff": 2.155570855156956,
+     "total_r": -0.2322234665561025,
+     "thin": false
+    },
+    "money_all": {
+     "final": 12199.295914418552,
+     "return_pct": 21.99295914418551,
+     "profit_usd": 2199.2959144185515,
+     "max_dd_pct": 10.306600346829812,
+     "max_dd_usd": 1154.604288315304,
+     "profit_factor": 1.2734251360342537,
+     "win_rate": 28.512396694214875,
+     "avg_win_usd": 148.44636173852206,
+     "avg_loss_usd": -46.494237257453534,
+     "best_trade_usd": 1400.6744503664513,
+     "worst_trade_usd": -61.554244678123425,
+     "longest_win_streak": 3,
+     "longest_loss_streak": 9,
+     "month_pos_pct": 48.275862068965516,
+     "best_month_usd": 1315.3889236798043,
+     "worst_month_usd": -367.5387455513193,
+     "sharpe": 0.5063072693258271,
+     "sortino": 1.4953797370943516,
+     "trades": 242
+    }
+   },
+   "GBPJPY": {
+    "out_of_sample": {
+     "n": 74,
+     "expectancy_r": -0.14261715810373077,
+     "win_rate": 28.37837837837838,
+     "t_stat": -0.6644441849554062,
+     "payoff": 1.995086667523724,
+     "total_r": -10.553669699676076,
+     "thin": false
+    },
+    "money_all": {
+     "final": 9781.085965141237,
+     "return_pct": -2.189140348587626,
+     "profit_usd": -218.91403485876253,
+     "max_dd_pct": 15.29817216557631,
+     "max_dd_usd": 1704.4209660112538,
+     "profit_factor": 0.970274670267022,
+     "win_rate": 29.059829059829063,
+     "avg_win_usd": 105.08305884016212,
+     "avg_loss_usd": -44.36483154210719,
+     "best_trade_usd": 552.3461516153341,
+     "worst_trade_usd": -58.48703671480786,
+     "longest_win_streak": 5,
+     "longest_loss_streak": 9,
+     "month_pos_pct": 46.42857142857143,
+     "best_month_usd": 552.3461516153341,
+     "worst_month_usd": -313.61969650832316,
+     "sharpe": -0.04704532997140005,
+     "sortino": -0.0957219851369416,
+     "trades": 234
+    }
+   },
+   "BTCUSD": {
+    "out_of_sample": {
+     "n": 112,
+     "expectancy_r": 0.14369340447793993,
+     "win_rate": 28.57142857142857,
+     "t_stat": 0.5696081075858759,
+     "payoff": 3.0429400841186203,
+     "total_r": 16.093661301529274,
+     "thin": false
+    },
+    "money_all": {
+     "final": 14639.088319285722,
+     "return_pct": 46.390883192857224,
+     "profit_usd": 4639.088319285722,
+     "max_dd_pct": 6.421507158965296,
+     "max_dd_usd": 878.9010799999978,
+     "profit_factor": 1.3709445579375827,
+     "win_rate": 28.695652173913043,
+     "avg_win_usd": 173.1842264285714,
+     "avg_loss_usd": -50.83800852497095,
+     "best_trade_usd": 1559.8946257142845,
+     "worst_trade_usd": -71.384851428571,
+     "longest_win_streak": 5,
+     "longest_loss_streak": 12,
+     "month_pos_pct": 48.333333333333336,
+     "best_month_usd": 1559.8946257142845,
+     "worst_month_usd": -578.7480257142869,
+     "sharpe": 0.7029197876956943,
+     "sortino": 2.522236938917701,
+     "trades": 345
+    }
+   },
+   "US Tech 100": {
+    "out_of_sample": {
+     "n": 63,
+     "expectancy_r": 0.13530620637807536,
+     "win_rate": 33.33333333333333,
+     "t_stat": 0.4176993523149572,
+     "payoff": 2.4492863438853028,
+     "total_r": 8.524291001818748,
+     "thin": false
+    },
+    "money_all": {
+     "final": 10545.128499999993,
+     "return_pct": 5.451284999999939,
+     "profit_usd": 545.1284999999934,
+     "max_dd_pct": 6.770266393622531,
+     "max_dd_usd": 724.2766428571413,
+     "profit_factor": 1.1820536116683216,
+     "win_rate": 32.800000000000004,
+     "avg_win_usd": 86.32824390243904,
+     "avg_loss_usd": -35.64677976190477,
+     "best_trade_usd": 484.9658571428569,
+     "worst_trade_usd": -90.23914285714261,
+     "longest_win_streak": 4,
+     "longest_loss_streak": 8,
+     "month_pos_pct": 51.724137931034484,
+     "best_month_usd": 337.7996428571437,
+     "worst_month_usd": -283.2022857142856,
+     "sharpe": 0.4203622780670686,
+     "sortino": 0.8384629715176702,
+     "trades": 125
+    }
+   },
+   "US SP 500": {
+    "out_of_sample": {
+     "n": 62,
+     "expectancy_r": 0.014800603786076618,
+     "win_rate": 32.25806451612903,
+     "t_stat": 0.06246743020144173,
+     "payoff": 2.1542933731913108,
+     "total_r": 0.9176374347367503,
+     "thin": false
+    },
+    "money_all": {
+     "final": 10303.294785714277,
+     "return_pct": 3.032947857142765,
+     "profit_usd": 303.29478571427717,
+     "max_dd_pct": 6.526795814531634,
+     "max_dd_usd": 697.0323571428544,
+     "profit_factor": 1.0844152583232407,
+     "win_rate": 31.147540983606557,
+     "avg_win_usd": 102.53119360902254,
+     "avg_loss_usd": -42.77250680272116,
+     "best_trade_usd": 459.6119999999998,
+     "worst_trade_usd": -53.76000000000036,
+     "longest_win_streak": 4,
+     "longest_loss_streak": 7,
+     "month_pos_pct": 53.125,
+     "best_month_usd": 373.7068571428567,
+     "worst_month_usd": -425.4981428571443,
+     "sharpe": 0.22383980493124006,
+     "sortino": 0.33390022707824557,
+     "trades": 122
+    }
+   },
+   "Germany 40": {
+    "out_of_sample": {
+     "n": 58,
+     "expectancy_r": 0.14602670900845124,
+     "win_rate": 34.48275862068966,
+     "t_stat": 0.6312362057244252,
+     "payoff": 2.359330728952518,
+     "total_r": 8.469549122490172,
+     "thin": false
+    },
+    "money_all": {
+     "final": 10205.079428571438,
+     "return_pct": 2.0507942857143746,
+     "profit_usd": 205.07942857143826,
+     "max_dd_pct": 5.7849688471345955,
+     "max_dd_usd": 595.1337857142807,
+     "profit_factor": 1.0611262681263138,
+     "win_rate": 29.599999999999998,
+     "avg_win_usd": 96.21871621621622,
+     "avg_loss_usd": -38.12514853896102,
+     "best_trade_usd": 416.59757142857177,
+     "worst_trade_usd": -52.63671428571393,
+     "longest_win_streak": 3,
+     "longest_loss_streak": 11,
+     "month_pos_pct": 51.61290322580645,
+     "best_month_usd": 348.04885714285706,
+     "worst_month_usd": -246.7451428571446,
+     "sharpe": 0.16848025904709388,
+     "sortino": 0.44246537212166376,
+     "trades": 125
+    }
+   }
+  }
+ }
+}

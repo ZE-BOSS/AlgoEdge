@@ -279,7 +279,19 @@ def money(trades: list[dict], risk_pct: float = 1.0) -> dict:
     rep = eng.report(acct, "x")
     sh, so = sharpe_sortino(acct["rows"], 10_000.0)
     return {"final": rep.get("final"), "return_pct": rep.get("return_pct"),
-            "max_dd_pct": rep.get("max_dd_pct"), "profit_factor": rep.get("profit_factor"),
+            "profit_usd": rep.get("final", 10_000.0) - 10_000.0,
+            "max_dd_pct": rep.get("max_dd_pct"),
+            "max_dd_usd": rep.get("max_dd_usd"),
+            "profit_factor": rep.get("profit_factor"),
+            "win_rate": rep.get("win_rate"),
+            "avg_win_usd": rep.get("avg_win"), "avg_loss_usd": rep.get("avg_loss"),
+            "best_trade_usd": rep.get("best_trade"),
+            "worst_trade_usd": rep.get("worst_trade"),
+            "longest_win_streak": rep.get("longest_win_streak"),
+            "longest_loss_streak": rep.get("longest_loss_streak"),
+            "month_pos_pct": rep.get("month_pos_pct"),
+            "best_month_usd": rep.get("best_month"),
+            "worst_month_usd": rep.get("worst_month"),
             "sharpe": sh, "sortino": so, "trades": rep.get("trades")}
 
 

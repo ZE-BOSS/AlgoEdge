@@ -577,6 +577,25 @@ function PhaseTimeline({ pipeline, phase }) {
           {st.error && (
             <div style={{ color: C.red, fontSize: 11.5, marginTop: 4 }}>{st.error}</div>
           )}
+          {/* A run where nothing ever traded reports 100% and a seed
+              dispersion of 0.00 — every seed agreeing on doing nothing — and
+              looks exactly like a success from the progress bar alone. */}
+          {(st.no_trades || st.thin_result) && (
+            <div style={{
+              color: C.amber, fontSize: 11.5, marginTop: 6, padding: 8,
+              background: `${C.amber}14`, border: `1px solid ${C.amber}55`,
+              borderRadius: 6, lineHeight: 1.55,
+            }}>
+              <AlertTriangle size={12} />{' '}
+              {st.no_trades
+                ? 'This run finished without taking a single trade on any fold. '
+                  + 'It scores zero, its 0.00 seed dispersion means the seeds agreed '
+                  + 'on doing nothing, and the gate will reject it. Raise iterations '
+                  + 'or give it more bars.'
+                : 'The best fold took very few trades — far short of what the '
+                  + "gate's sample-size check needs, so it will be rejected."}
+            </div>
+          )}
 
           {/* The gate's checks, as they land. This is the point of the whole
               exercise: a 32-minute run that says nothing is indistinguishable
@@ -1259,6 +1278,19 @@ function DataTab({ agent, busy, onStarted }) {
   const [files, setFilesRaw] = useState(() => saved?.files || {});
   const [uploading, setUploading] = useState('');
   const [error, setError] = useState('');
+  const [ranges, setRanges] = useState({});
+
+  const probe = async (symbol) => {
+    setRanges((r) => ({ ...r, [symbol]: null }));
+    try {
+      const { data } = await rl.mt5Range(symbol, agent.spec.timeframe);
+      setRanges((r) => ({ ...r, [symbol]: data }));
+    } catch (e) {
+      setRanges((r) => ({
+        ...r, [symbol]: { ok: false, error: e?.response?.data?.detail || String(e) },
+      }));
+    }
+  };
   // Ends three months ago by default, and that default is the point. MT5
   // hands back the most recent N bars, so an unbounded run trains right up to
   // today and leaves nothing after it to forward test in — and the
@@ -1380,8 +1412,32 @@ function DataTab({ agent, busy, onStarted }) {
                     <>
                       <Pill colour={C.blue}>live MT5</Pill>
                       <span style={{ color: C.dim, marginLeft: 6 }}>
-                        up to 200,000 bars, clipped to the window above
+                        fetched for the window above
                       </span>
+                      {/* What the terminal actually carries. A window that
+                          starts before this returns nothing, which used to
+                          surface as "no bars" with no explanation. */}
+                      {ranges[s] === undefined ? (
+                        <button className="btn btn-sm" style={{ marginLeft: 8 }}
+                                onClick={() => probe(s)}>
+                          check history
+                        </button>
+                      ) : ranges[s]?.ok ? (
+                        <span style={{ color: C.faint, marginLeft: 8 }}>
+                          has {Number(ranges[s].bars).toLocaleString()} bars,{' '}
+                          <b>{ranges[s].first.slice(0, 10)}</b> to{' '}
+                          {ranges[s].last.slice(0, 10)}
+                          {win.start && win.start < ranges[s].first.slice(0, 10) && (
+                            <b style={{ color: C.amber }}>
+                              {' '}— your start is before this, so it would return nothing
+                            </b>
+                          )}
+                        </span>
+                      ) : (
+                        <span style={{ color: C.red, marginLeft: 8 }}>
+                          {ranges[s]?.error || 'the terminal has no history for this'}
+                        </span>
+                      )}
                     </>
                   )
                     : files[s] ? (
