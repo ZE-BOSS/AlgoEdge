@@ -404,3 +404,49 @@ def test_both_mt5_paths_select_the_symbol_first():
 
     assert "ensure_symbol" in inspect.getsource(df.DataFetcher.get_data_range)
     assert "ensure_symbol" in inspect.getsource(df._fetch_rates_frame)
+
+
+# -- the epoch unit, pinned to the calendar rather than to itself ------------
+# Every test above derived its window date from `normalised_times`, so when
+# that function read epoch SECONDS as MICROSECONDS they all still passed while
+# every real training window clipped its dataset to nothing. These pin literal
+# dates, which is the only thing that can catch a unit error.
+#
+# `_normalised_frame` starts at t0 = 1,700,000,000, which is
+# 2023-11-14 22:13:20 UTC. Read as microseconds it is 1970-01-01 00:28:20.
+
+def test_normalised_times_reads_the_unit_that_normalise_writes():
+    import pandas as pd
+
+    from backend.rl.datasets import normalised_times
+
+    first = normalised_times(_normalised_frame().frame).iloc[0]
+    assert first == pd.Timestamp("2023-11-14 22:13:20"), (
+        f"got {first}. If this says 1970 the unit is wrong again, and every "
+        f"training window with a FROM date will clip its dataset to nothing.")
+
+
+def test_a_from_date_keeps_the_bars_inside_it():
+    """The failure the admin saw: a FROM date, and then no bars, whatever
+    dates were tried. Asserted against raw epoch ints so this test cannot
+    cancel out against the function it is testing."""
+    from backend.rl.datasets import clip_to_window
+
+    ds = _normalised_frame()                    # 2023-11-14 22:13 -> 2023-11-25
+    out = clip_to_window(ds.frame, "2023-11-20", "")
+
+    assert len(out) > 0, "a window well inside the data must not clip it to nothing"
+    assert len(out) < len(ds.frame), "and it must actually clip something"
+    assert int(out["time"].min()) >= 1_700_438_400      # 2023-11-20 00:00 UTC
+    assert int(out["time"].max()) == int(ds.frame["time"].max())
+
+
+def test_a_window_that_misses_the_data_names_the_real_coverage():
+    """Not "no bars": the dates the source does hold, in the right century."""
+    import pytest as _pytest
+
+    from backend.rl.datasets import DatasetError, clip_to_window
+
+    with _pytest.raises(DatasetError) as e:
+        clip_to_window(_normalised_frame().frame, "2099-01-01", "")
+    assert "2023-11" in str(e.value), str(e.value)

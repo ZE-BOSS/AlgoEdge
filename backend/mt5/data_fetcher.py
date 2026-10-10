@@ -352,6 +352,80 @@ def _fetch_rates_frame(symbol: str, tf_code: int, timeframe: str, count: int):
     return _normalize_df(pd.DataFrame(rates)), None
 
 
+def _probe_history(symbol: str, tf_code: int, timeframe: str) -> tuple[dict | None, str]:
+    """How far back this terminal will serve `symbol`, in one cheap pass.
+
+    WHY THIS IS NOT `get_historical_data(count=200_000)`
+    ---------------------------------------------------
+    That is what the /mt5-range route used to be, and it could never work.
+    `terminal_max_bars()` exists in this module precisely because a request AT
+    or ABOVE the terminal's `maxbars` is refused with
+    (-2, 'Terminal: Invalid params'), and 200,000 is above every real `maxbars`.
+    So the Data tab's history probe failed on every symbol, on every broker,
+    always - and said:
+
+        MT5 returned no data for Crash 1000 Index M15 ... insufficient history
+        for 200000 candles
+
+    which reads as "this symbol has no history" and sends you changing dates for
+    an hour. Reported from the VPS on 2026-10-10, where the very next log line
+    fetched 34,944 bars of the same symbol and timeframe for training. The
+    probe was the only thing broken; the fetch underneath it was fine.
+
+    Position-anchored, one bar per call: the newest bar, then a binary search
+    for the oldest position the terminal still answers. ~18 single-bar requests
+    instead of a 99,000-row frame, and `capped` says when the answer is the
+    REQUEST limit rather than the end of the data - so the UI can stop short of
+    claiming history ends where one request does.
+
+    Returns ({bars, first, last, capped, cap}, "") or (None, reason).
+    """
+    problem = ensure_symbol(symbol)
+    if problem:
+        return None, problem
+
+    def bar_at(pos: int):
+        got = mt5.copy_rates_from_pos(symbol, tf_code, int(pos), 1)
+        return got if got is not None and len(got) else None
+
+    newest = bar_at(0)
+    if newest is None:
+        return None, (
+            f"The terminal served no bars at all for {symbol} {timeframe} "
+            f"(MT5 error: {mt5.last_error()}). The symbol IS in Market Watch, so "
+            f"this is history the terminal does not hold - not a date problem.")
+
+    # The largest position that still answers, bounded by what a single request
+    # is allowed to reach. Availability is monotone in position: the terminal
+    # holds a contiguous tail of history, so anything past the oldest bar is
+    # empty and a bisection is exact.
+    cap = terminal_max_bars()
+    lo, hi = 0, cap - 1
+    if bar_at(hi) is not None:
+        lo = hi
+    else:
+        while lo + 1 < hi:
+            mid = (lo + hi) // 2
+            if bar_at(mid) is not None:
+                lo = mid
+            else:
+                hi = mid
+    oldest = bar_at(lo)
+    if oldest is None:                      # a transient refusal mid-search
+        oldest = newest
+        lo = 0
+    # Through _normalize_df so the dates match what a fetch would report: the
+    # broker's server offset is applied here exactly as it is there.
+    frame = _normalize_df(pd.DataFrame(np.concatenate([oldest, newest])))
+    return {
+        "bars": int(lo + 1),
+        "first": int(frame["time"].iloc[0]),
+        "last": int(frame["time"].iloc[-1]),
+        "capped": bool(lo >= cap - 1),
+        "cap": int(cap),
+    }, ""
+
+
 class DataFetcher:
     """Handles retrieval of historical candles from MT5."""
 
@@ -401,6 +475,28 @@ class DataFetcher:
         cls._cache[cache_key] = df
         cls._cache_time[cache_key] = time.time()
         return df.copy()
+
+    @classmethod
+    async def available_history(cls, symbol: str,
+                                timeframe: str) -> tuple[dict | None, str]:
+        """What history the terminal holds for `symbol`, as an ANSWER not a fault.
+
+        Never raises and never calls `logger.error`. The old route went through
+        `get_historical_data`, which logs its failure at error level - and the
+        bot log republishes anything at that level as "SYSTEM ERROR", so a
+        date-picker hint painted the user's log panel red every few seconds.
+        "This terminal has no history for that symbol" is a legitimate reply to
+        a question; it is not a system error.
+        """
+        if not mt5:
+            return None, "MT5 is not available on this host."
+        tf_code = _get_timeframe_code(timeframe)
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(
+                _executor, lambda: _probe_history(symbol, tf_code, timeframe))
+        except Exception as exc:                            # noqa: BLE001
+            return None, f"{type(exc).__name__}: {exc}"
 
     @classmethod
     async def get_data_range(

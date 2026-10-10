@@ -39,6 +39,10 @@ class _TerminalInfo:
     maxbars = MAXBARS
 
 
+class _SymbolInfo:
+    visible = True
+
+
 class FakeMT5:
     """Just enough MT5 to answer a history request the way the real one does."""
 
@@ -55,10 +59,22 @@ class FakeMT5:
         # with (-1, "Terminal: Call failed") while copy_rates_from_pos served
         # every symbol. Set this to reproduce that terminal.
         self.dated_calls_fail = False
+        # Symbols this terminal has never heard of, for the probe tests.
+        self.unknown: set[str] = set()
         self._err = (1, "Success")
 
     def terminal_info(self):
         return _TerminalInfo()
+
+    def symbol_info(self, symbol):
+        """`ensure_symbol` runs in front of every history call now (2026-10-10),
+        and a fake without this errored all eight tests here with
+        AttributeError. Keeping it on the fake means the Market Watch step is
+        exercised rather than skipped."""
+        return None if symbol in self.unknown else _SymbolInfo()
+
+    def symbol_select(self, symbol, enable=True):
+        return symbol not in self.unknown
 
     def last_error(self):
         return self._err
@@ -245,3 +261,83 @@ def test_a_window_the_terminal_does_not_hold_still_raises_through_the_fallback(s
     with pytest.raises(df_mod.DataFetchError):
         _fetch("SPX500", "M5", datetime(2010, 1, 1, tzinfo=timezone.utc),
                datetime(2010, 6, 1, tzinfo=timezone.utc))
+
+
+# ─────────────────────────── the history probe ──────────────────────────────
+# /api/rl/mt5-range asked get_historical_data for 200,000 bars, which is above
+# every real `maxbars`, so the Data tab's "check history" button failed on
+# every symbol on every broker and reported it as "insufficient history" -
+# while the fetch it was checking worked. Reported from the VPS 2026-10-10
+# after an hour of changing dates against a probe that could not succeed.
+
+
+def _probe(symbol="SPX500", tf="M5"):
+    return asyncio.run(df_mod.DataFetcher.available_history(symbol, tf))
+
+
+def test_the_old_two_hundred_thousand_bar_probe_really_was_always_refused(stub):
+    """The regression guard. If this ever stops raising, the premise is wrong."""
+    with pytest.raises(df_mod.DataFetchError):
+        asyncio.run(df_mod.DataFetcher.get_historical_data("SPX500", "M5", 200_000))
+
+
+def test_the_probe_answers_where_the_old_one_was_refused(stub):
+    rng, problem = _probe()
+    assert problem == ""
+    assert rng["bars"] > 1000
+    for count in stub.from_pos_calls:
+        assert count == 1, "the probe reads one bar per call, never a frame"
+        assert count < MAXBARS
+
+
+def test_the_probe_finds_the_oldest_bar_a_short_history_holds(monkeypatch):
+    """A symbol listed recently: fewer bars than the cap, so the answer is exact."""
+    last = int(datetime(2026, 9, 20, tzinfo=timezone.utc).timestamp())
+    fake = FakeMT5(last - 5_000 * STEP, last)
+    monkeypatch.setattr(df_mod, "mt5", fake)
+    monkeypatch.setattr(df_mod, "_SERVER_OFFSET_CACHE", 0.0)
+    monkeypatch.setenv("ALGOEDGE_MT5_SERVER_UTC_OFFSET", "0")
+
+    rng, problem = _probe()
+    assert problem == ""
+    assert rng["capped"] is False, "5,000 bars is nowhere near the request cap"
+    assert rng["bars"] == pytest.approx(5_000, abs=2)
+    assert rng["first"] == pytest.approx(fake.first, abs=2 * STEP)
+    assert rng["last"] == pytest.approx(fake.last, abs=2 * STEP)
+
+
+def test_the_probe_says_when_the_answer_is_the_request_cap(stub):
+    """Two years of M5 is 210,240 bars against a cap of 95,000. Reporting the
+    cap as the first available date would tell the user their window starts too
+    early when it does not - so `capped` has to come back true."""
+    rng, problem = _probe()
+    assert problem == ""
+    assert rng["capped"] is True
+    assert rng["bars"] == df_mod.terminal_max_bars()
+    assert rng["first"] > stub.first, "the cap is nearer than the real first bar"
+
+
+def test_the_probe_stays_cheap(stub):
+    """A bisection over the cap, not a walk. ~17 calls plus a handful."""
+    _probe()
+    assert len(stub.from_pos_calls) <= 25, len(stub.from_pos_calls)
+
+
+def test_the_probe_blames_the_symbol_list_not_the_dates(stub):
+    """The failure that started all of this read like a date problem and was
+    not one. An unknown symbol has to say so in those words."""
+    stub.unknown.add("Vol over Crash 750")
+    rng, problem = _probe("Vol over Crash 750")
+    assert rng is None
+    assert "symbol list" in problem
+    assert "Vol over Crash 750" in problem
+
+
+def test_the_probe_reports_an_empty_terminal_without_raising(stub, monkeypatch):
+    """The route turns the reason into a line of UI. It must never raise, and
+    it must never log at error level - the bot log republishes that as
+    SYSTEM ERROR, which is how a date-picker hint came to fill the log panel."""
+    monkeypatch.setattr(stub, "copy_rates_from_pos", lambda *a, **k: None)
+    rng, problem = _probe()
+    assert rng is None
+    assert "not a date problem" in problem

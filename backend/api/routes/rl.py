@@ -315,31 +315,45 @@ def estimate_cost(spec: AgentSpec) -> dict:
 async def mt5_available_range(symbol: str, timeframe: str = "M5"):
     """How far back this broker actually carries an instrument.
 
-    Asked for because a training run failed with "no bars" and there was no
-    way to find out why without reading a log on the VPS. MT5 hands back a
-    limited history per symbol, and it is shorter for recently listed ones -
-    so "from the beginning of the data" is a request the terminal may simply
-    refuse. Now the Data tab can say so before anything is started.
+    Asked for because a training run failed with "no bars" and there was no way
+    to find out why without reading a log on the VPS.
+
+    THIS ROUTE WAS ITSELF THE BUG, 2026-10-10
+    It asked `get_historical_data` for 200,000 bars, which is above every real
+    terminal's `maxbars`, so MT5 refused it with (-2, 'Terminal: Invalid
+    params') on EVERY symbol and every broker - and the message it produced,
+    "insufficient history for 200000 candles", reads as "this symbol has no
+    history". An hour was spent changing dates against a probe that could not
+    succeed, while the fetch it was supposed to be checking worked perfectly.
+    `DataFetcher.available_history` asks within the cap and reports the cap.
     """
     from backend.mt5.data_fetcher import DataFetcher
 
-    try:
-        frame = await DataFetcher.get_historical_data(symbol, timeframe, 200_000)
-    except Exception as exc:                            # noqa: BLE001
+    rng, problem = await DataFetcher.available_history(symbol, timeframe)
+    if problem:
         return {"symbol": symbol, "timeframe": timeframe, "ok": False,
-                "error": f"{type(exc).__name__}: {exc}"}
-    if frame is None or not len(frame):
-        return {"symbol": symbol, "timeframe": timeframe, "ok": False,
-                "error": "the terminal returned no bars for this symbol"}
-    t = frame["time"]
-    first, last = t.iloc[0], t.iloc[-1]
+                "error": problem}
+
+    first = datetime.fromtimestamp(rng["first"], timezone.utc)
+    last = datetime.fromtimestamp(rng["last"], timezone.utc)
+    if rng["capped"]:
+        note = (f"At least {rng['bars']:,} {timeframe} bars, "
+                f"{first:%Y-%m-%d} to {last:%Y-%m-%d}. This terminal serves "
+                f"{rng['cap']:,} bars per request, so the history may reach "
+                f"further back than {first:%Y-%m-%d} - that figure is the "
+                f"request cap, not the end of the data.")
+    else:
+        note = (f"{rng['bars']:,} {timeframe} bars available, "
+                f"{first:%Y-%m-%d} to {last:%Y-%m-%d}. A training window "
+                f"starting before {first:%Y-%m-%d} returns nothing.")
     return {
         "symbol": symbol, "timeframe": timeframe, "ok": True,
-        "bars": int(len(frame)),
-        "first": str(first)[:19], "last": str(last)[:19],
-        "note": (f"{len(frame):,} {timeframe} bars available, "
-                 f"{str(first)[:10]} to {str(last)[:10]}. A training window "
-                 f"starting before {str(first)[:10]} returns nothing."),
+        "bars": int(rng["bars"]),
+        # Strings, sliced to a date by the Data tab. Kept as "YYYY-MM-DD HH:MM:SS".
+        "first": first.strftime("%Y-%m-%d %H:%M:%S"),
+        "last": last.strftime("%Y-%m-%d %H:%M:%S"),
+        "capped": bool(rng["capped"]), "request_cap": int(rng["cap"]),
+        "note": note,
     }
 
 

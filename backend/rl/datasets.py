@@ -302,7 +302,7 @@ def clip_to_window(frame: pd.DataFrame, start: str = "", end: str = "") -> pd.Da
     agent's training range, so every backtest is blocked too.
 
     THE SHAPE THIS OPERATES ON
-    A normalised frame carries `time` as an int64 COLUMN of microseconds and
+    A normalised frame carries `time` as an int64 COLUMN of epoch SECONDS and
     a plain RangeIndex - not a DatetimeIndex. The first version of this
     function compared `frame.index` against a Timestamp, which raises
     TypeError on every real dataset; `load_frames` caught it per symbol and
@@ -334,13 +334,41 @@ def clip_to_window(frame: pd.DataFrame, start: str = "", end: str = "") -> pd.Da
 
 
 def normalised_times(frame: pd.DataFrame) -> pd.Series:
-    """Bar-open times as datetimes, whatever shape the frame arrived in."""
+    """Bar-open times as datetimes, whatever shape the frame arrived in.
+
+    THE UNIT IS SECONDS, AND GETTING IT WRONG IS SILENT
+    `normalise` writes `time` as epoch SECONDS - see the `secs` variable it
+    builds, and `datetime.fromtimestamp(int(df["time"]...))` a few lines
+    below it, which only makes sense in seconds. This function read them as
+    MICROSECONDS, which turns every real bar time into 1970-01-01 and makes
+    `clip_to_window` compare 1970 against the dates the admin typed:
+
+        FROM set  ->  `ts >= 2025-01-01` is false for every bar, so the whole
+                      dataset is clipped to nothing and the run reports "no
+                      bars" however the dates are changed
+        TO only   ->  `ts <= 2026-07-10` is true for every bar, so nothing is
+                      clipped and it appears to work
+
+    That asymmetry is why it survived: the failure only appears once a start
+    date is entered, which is the moment it looks like the DATES are wrong.
+    Found 2026-10-10 by printing the clipped range instead of trusting it.
+
+    The existing tests all passed because each derived its window date from
+    THIS function, so the error cancelled; the test below now pins a real
+    calendar date instead.
+    """
     if "time" in frame.columns:
         col = frame["time"]
         if np.issubdtype(col.dtype, np.datetime64):
             return col
-        # int64 from a normalised frame: microseconds since the epoch
-        return pd.to_datetime(col.astype("int64"), unit="us")
+        v = col.astype("int64")
+        # Seconds is what `normalise` produces. The magnitude check only
+        # guards a frame that reached here without going through it; the
+        # boundaries are far from any plausible trading epoch (1e11 s is the
+        # year 5138, 1e14 ms is the year 5138 too).
+        biggest = int(v.abs().max()) if len(v) else 0
+        unit = "s" if biggest < 10**11 else "ms" if biggest < 10**14 else "us"
+        return pd.to_datetime(v, unit=unit)
     return pd.Series(pd.to_datetime(frame.index), index=frame.index)
 
 
@@ -410,7 +438,7 @@ def load_mt5_range(symbol: str, timeframe: str, start: str, end: str, **kw) -> D
     return normalise(frame, symbol, timeframe, source="mt5", **kw)
 
 
-def load_mt5(symbol: str, timeframe: str, bars: int = 200_000, **kw) -> Dataset:
+def load_mt5(symbol: str, timeframe: str, bars: int = 0, **kw) -> Dataset:
     """Straight from the terminal, which is the primary source on this machine.
 
     Goes through `DataFetcher.get_historical_data` rather than calling MT5
@@ -419,10 +447,23 @@ def load_mt5(symbol: str, timeframe: str, bars: int = 200_000, **kw) -> Dataset:
     everything. It is `async`, and this function is called from the TRAINING
     PROCESS where there is no running loop, so `asyncio.run` is correct here -
     it would not be in the API process, which is why the API never calls this.
+
+    `bars=0` means "as many as this terminal will serve", which is what the
+    caller always meant. The default used to be a literal 200,000 - above
+    every real `maxbars`, so MT5 refused the request outright with
+    (-2, 'Terminal: Invalid params') and the run died with
+
+        insufficient history for 200000 candles
+
+    This is the LAST fallback in the MT5 path: `load_mt5_range` lands here
+    whenever a dated fetch comes back empty, which is exactly the case where
+    the terminal is being awkward and the fallback has to work. With a blank
+    FROM date - the documented default, "as far back as the source goes" -
+    there was no route to any bars at all. Reported from the VPS 2026-10-10.
     """
     import asyncio
 
-    from backend.mt5.data_fetcher import DataFetcher
+    from backend.mt5.data_fetcher import DataFetcher, terminal_max_bars
 
     try:
         asyncio.get_running_loop()
@@ -433,7 +474,12 @@ def load_mt5(symbol: str, timeframe: str, bars: int = 200_000, **kw) -> Dataset:
             "load_mt5 must not be called from the event loop - building MT5 frames on "
             "the loop has already stalled this API once. Call it in the training process.")
 
-    frame = asyncio.run(DataFetcher.get_historical_data(symbol, timeframe, int(bars)))
+    # Clamped, not merely defaulted: a caller passing 200,000 is asking for
+    # something no terminal answers, and serving the most it will give beats
+    # refusing the whole run.
+    cap = terminal_max_bars()
+    want = min(int(bars), cap) if int(bars or 0) > 0 else cap
+    frame = asyncio.run(DataFetcher.get_historical_data(symbol, timeframe, want))
     if frame is None or not len(frame):
         raise DatasetError(f"{symbol} {timeframe}: MT5 returned no bars")
     return normalise(frame, symbol, timeframe, source="mt5", **kw)
@@ -622,8 +668,10 @@ def load_frames(sources: dict, spec) -> dict:
                 ds = load_mt5_range(symbol, spec.timeframe, w_start, w_end)
                 w_start = w_end = ""          # already applied by the fetch
             elif is_mt5:
+                # 0 = as far back as the terminal serves, which is what the
+                # form promises with "blank means as far back as the source goes".
                 ds = load_mt5(symbol, spec.timeframe,
-                              bars=int(window.get("bars") or 200_000))
+                              bars=int(window.get("bars") or 0))
             elif isinstance(src, dict):
                 ds = load_file(src["path"], symbol, src.get("timeframe", spec.timeframe),
                                time_is=src.get("time_is", "open"),
@@ -646,9 +694,39 @@ def load_frames(sources: dict, spec) -> dict:
         start, end = window.get("start", ""), window.get("end", "")
         if start or end:
             before = len(frame)
-            frame = clip_to_window(frame, start, end)
+            # In its own try: `clip_to_window` RAISES when the window selects
+            # nothing, and it used to do so from outside any handler - so one
+            # symbol whose window was off by a day took down the data load for
+            # every other symbol in the run.
+            try:
+                frame = clip_to_window(frame, start, end)
+            except Exception as exc:                    # noqa: BLE001
+                msg = f"{symbol}: {type(exc).__name__}: {exc}"
+                logger.error(f"[RL] {msg}")
+                failures.append(msg)
+                continue
+            if not len(frame):
+                # A window the source does not cover is the single most
+                # common reason a run ends with "no bars", and leaving it to
+                # be discovered downstream loses the only two facts that
+                # explain it: which symbol, and which window.
+                msg = (f"{symbol}: the window {start or 'start'} -> "
+                       f"{end or 'now'} contains none of the {before:,} bars "
+                       f"the source returned")
+                logger.error(f"[RL] {msg}")
+                failures.append(msg)
+                continue
+            # Through normalised_times, NOT frame.index: a normalised frame
+            # carries bar times in a `time` COLUMN and keeps a plain RangeIndex,
+            # so formatting the index as a date raised
+            #   ValueError: Invalid format specifier '%Y-%m-%d' for object of
+            #   type 'int'
+            # from OUTSIDE the per-symbol try/except - killing the data load
+            # for every symbol over a log line. Same mistake as clip_to_window
+            # had this morning, one function further down.
+            t = normalised_times(frame)
             logger.info(f"[RL] {symbol}: clipped {before:,} bars to {len(frame):,} "
-                        f"({frame.index[0]:%Y-%m-%d} to {frame.index[-1]:%Y-%m-%d})")
+                        f"({t.iloc[0]:%Y-%m-%d} to {t.iloc[-1]:%Y-%m-%d})")
         out[symbol] = frame
     # Attached to the result so the caller can put it in front of the admin.
     # A bare "no bars for any symbol" is true and useless.

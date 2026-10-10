@@ -464,8 +464,12 @@ export const rl = {
   strategies: () => api.get(`${RL}/strategies`),
   // How far back the terminal carries a symbol, so a training
   // window can be chosen rather than discovered by failing.
+  // 3 minutes, not the 60 s client default: the FIRST deep read of a symbol
+  // makes the terminal download that history from the broker, measured at
+  // 25 s for XAUUSD M15 and longer for a symbol it holds nothing for yet.
+  // Aborting that looks to the user like the server is broken.
   mt5Range: (symbol, timeframe) => api.get(`${RL}/mt5-range`,
-    { params: { symbol, timeframe } }),
+    { params: { symbol, timeframe }, timeout: 180000 }),
   // What a spec WOULD be, for a form that has not been submitted. One
   // source of wording for the create screen and the saved agent.
   describe: (data) => api.post(`${RL}/describe`, data),
@@ -482,8 +486,13 @@ export const rl = {
   upload: (file, params) => {
     const body = new FormData();
     body.append('file', file);
+    // The server accepts up to 200 MB; the client default is 60 s. A 25 MB
+    // bar file - 400,000 M5 bars, an ordinary request here - cannot cross a
+    // home connection in 60 s, so the upload aborted client-side and the
+    // page showed a bare network error while the POST was still in flight.
     return api.post(`${RL}/datasets/upload`, body, {
       params, headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 15 * 60 * 1000,
     });
   },
   overlap: (data) => api.post(`${RL}/overlap`, data),

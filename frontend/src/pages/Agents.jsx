@@ -856,7 +856,7 @@ function CreatePanel({ features, onCreated, onCancel }) {
   const create = useMutation({
     mutationFn: () => rl.create(payload),
     onSuccess: (r) => { setError(''); onCreated(r.data); },
-    onError: (e) => setError(e?.response?.data?.detail || String(e)),
+    onError: (e) => setError(apiError(e)),
   });
 
   // Mode B with nothing chosen is the one half-filled state that would
@@ -1266,6 +1266,28 @@ function saveChoices(agentId, value) {
   } catch { /* nothing to do: the form still works, it just will not persist */ }
 }
 
+/**
+ * What actually went wrong, in words that point somewhere.
+ *
+ * `String(e)` on an axios failure gives "AxiosError: Network Error", which
+ * was on screen for an hour meaning nothing. The three cases need different
+ * actions and must not look alike:
+ *   - the server answered with a reason   -> fix the request
+ *   - the request never reached it        -> check the backend or the link
+ *   - the client gave up waiting          -> it may still be running
+ */
+function apiError(e) {
+  const said = e?.response?.data?.detail;
+  if (said) return typeof said === 'string' ? said : JSON.stringify(said);
+  if (e?.response) return `the server returned ${e.response.status}`;
+  if (e?.code === 'ECONNABORTED') {
+    return 'the browser stopped waiting for a reply - the request may still be '
+      + 'running on the server; check the Logs tab before retrying';
+  }
+  return 'the request never reached the server - the backend may be down, or '
+    + 'the connection dropped. Nothing was changed.';
+}
+
 /** Today minus N months, as YYYY-MM-DD. */
 function monthsAgo(n) {
   const d = new Date();
@@ -1287,7 +1309,7 @@ function DataTab({ agent, busy, onStarted }) {
       setRanges((r) => ({ ...r, [symbol]: data }));
     } catch (e) {
       setRanges((r) => ({
-        ...r, [symbol]: { ok: false, error: e?.response?.data?.detail || String(e) },
+        ...r, [symbol]: { ok: false, error: apiError(e) },
       }));
     }
   };
@@ -1332,14 +1354,14 @@ function DataTab({ agent, busy, onStarted }) {
       const r = await rl.upload(file, { symbol, timeframe: agent.spec.timeframe });
       setFiles((x) => ({ ...x, [symbol]: r.data }));
     } catch (e) {
-      setError(e?.response?.data?.detail || String(e));
+      setError(apiError(e));
     } finally { setUploading(''); }
   };
 
   const start = useMutation({
     mutationFn: () => rl.train(agent.agent_id, { datasets }),
     onSuccess: onStarted,
-    onError: (e) => setError(e?.response?.data?.detail || String(e)),
+    onError: (e) => setError(apiError(e)),
   });
 
   return (
@@ -1422,12 +1444,36 @@ function DataTab({ agent, busy, onStarted }) {
                                 onClick={() => probe(s)}>
                           check history
                         </button>
+                      ) : ranges[s] === null ? (
+                        /* The first deep read of a symbol makes the terminal
+                           download that history from the broker, which took
+                           25 s for XAUUSD M15 when measured. Without this
+                           branch the waiting state fell through to the error
+                           branch and said "the terminal has no history for
+                           this" while it was busy fetching it. */
+                        <span style={{ color: C.dim, marginLeft: 8 }}>
+                          asking the terminal… the first check on a symbol can
+                          take half a minute while MT5 downloads its history
+                        </span>
                       ) : ranges[s]?.ok ? (
                         <span style={{ color: C.faint, marginLeft: 8 }}>
-                          has {Number(ranges[s].bars).toLocaleString()} bars,{' '}
+                          {ranges[s].capped ? 'at least' : 'has'}{' '}
+                          {Number(ranges[s].bars).toLocaleString()} bars,{' '}
                           <b>{ranges[s].first.slice(0, 10)}</b> to{' '}
                           {ranges[s].last.slice(0, 10)}
-                          {win.start && win.start < ranges[s].first.slice(0, 10) && (
+                          {/* `capped` means the figure is this terminal's
+                              per-request limit, not the end of the data —
+                              so a start before it is not a reason to worry,
+                              and the warning below must not fire. */}
+                          {ranges[s].capped && (
+                            <span style={{ color: C.dim }}>
+                              {' '}— that is this terminal's
+                              {' '}{Number(ranges[s].request_cap).toLocaleString()}-bar
+                              {' '}request limit, not the end of its history
+                            </span>
+                          )}
+                          {!ranges[s].capped && win.start
+                            && win.start < ranges[s].first.slice(0, 10) && (
                             <b style={{ color: C.amber }}>
                               {' '}— your start is before this, so it would return nothing
                             </b>
@@ -1721,7 +1767,7 @@ function CharterTab({ agent, busy, onChanged }) {
   const act = (fn) => async () => {
     setError('');
     try { await fn(); onChanged(); } catch (e) {
-      setError(e?.response?.data?.detail || String(e));
+      setError(apiError(e));
     }
   };
 
@@ -1918,7 +1964,7 @@ function ProposalsTab({ agent, busy, onChanged }) {
   const act = (fn) => async () => {
     setError('');
     try { await fn(); onChanged(); } catch (e) {
-      setError(e?.response?.data?.detail || String(e));
+      setError(apiError(e));
     }
   };
 
@@ -2149,7 +2195,7 @@ export default function Agents() {
       setNotice(r?.data?.note || `${label} done`);
       refreshAll();
     } catch (e) {
-      setNotice(e?.response?.data?.detail || String(e));
+      setNotice(apiError(e));
     }
   };
 
