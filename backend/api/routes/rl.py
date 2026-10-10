@@ -33,6 +33,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -558,6 +559,40 @@ async def start_training(agent_id: str, body: TrainIn, db: AsyncSession = Depend
 @router.get("/agents/{agent_id}/progress")
 async def training_progress(agent_id: str):
     return trainmod.queue.status(agent_id)
+
+
+@router.delete("/agents/{agent_id}")
+async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
+    """Remove an agent that never became anything.
+
+    There was no way to do this from any screen, which is how a list fills
+    with half-started drafts nobody can clear.
+
+    An APPROVED charter is refused: an approved agent can be in a live slot,
+    and the adherence record of something that traded is not disposable. Make
+    a new one or supersede the charter instead.
+    """
+    row = await rlreg.get_agent(db, agent_id)
+    if row is None:
+        raise HTTPException(404, f"no agent {agent_id}")
+    charters = await rlreg.list_charters(db, agent_id)
+    if any(c.status == ch.APPROVED for c in charters):
+        raise HTTPException(409, (
+            "this agent has an APPROVED charter and may be in a live slot - "
+            "its record is not disposable. Supersede the charter instead."))
+    if trainmod.queue.status(agent_id)["looks_alive"]:
+        raise HTTPException(409, "it is still training - cancel it first")
+
+    await db.execute(sa_delete(RLProposal).where(RLProposal.agent_id == agent_id))
+    await db.execute(sa_delete(RLCharter).where(RLCharter.agent_id == agent_id))
+    await db.execute(sa_delete(RLAgent).where(RLAgent.agent_id == agent_id))
+    await db.commit()
+
+    # The artefacts too, or the next agent that happens to share an id reads
+    # a stale policy off disk and reports it as its own.
+    import shutil
+    shutil.rmtree(trainmod.ARTEFACT_ROOT / agent_id, ignore_errors=True)
+    return {"agent_id": agent_id, "deleted": True}
 
 
 @router.post("/agents/{agent_id}/reset-training")

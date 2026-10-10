@@ -41,7 +41,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity, AlertTriangle, Ban, Brain, Check, ChevronRight, Copy, Database,
   FlaskConical, GraduationCap, Info, Loader2, Play, Plus, RefreshCw,
-  ShieldCheck, Target, Upload, X,
+  ShieldCheck, Target, Trash2, Upload, X,
 } from 'lucide-react';
 import { rl } from '../services/api';
 import { qk } from '../services/servers';
@@ -235,7 +235,11 @@ function LearningSummary({ learning, compact }) {
 function lifecycle(agent) {
   const charters = agent.charters || [];
   const approved = charters.find((c) => c.status === 'APPROVED');
-  const training = agent.status === 'TRAINING';
+  // Liveness, not the status column. The column says TRAINING until Collect
+  // writes it back, so a run that died left the rail announcing "Train is
+  // running now" directly above a banner saying nothing was running.
+  const training = agent.status === 'TRAINING' && Boolean(agent.run?.looks_alive);
+  const failed = Boolean(agent.run?.failed);
   // A run cannot start without a source for every symbol, so a run in flight
   // IS the proof that step 2 happened - `trained_on` is only written when the
   // run finishes, and until then the rail was telling the admin to go and
@@ -261,7 +265,7 @@ function lifecycle(agent) {
         + 'that do not contain their closes, and it is refused with the reason.',
     },
     {
-      key: 'train', label: 'Train', done: trained, busy: training,
+      key: 'train', label: 'Train', done: trained, busy: training, failed,
       what: 'Every seed against every purged CPCV path, in a separate process. '
         + 'The seeds are the experiment: if they disagree by more than 1.0 Sharpe '
         + 'the gate rejects the whole run later.',
@@ -293,8 +297,8 @@ function lifecycle(agent) {
   const firstUndone = steps.findIndex((s) => !s.done);
   const currentIdx = training ? steps.findIndex((s) => s.key === 'train') : firstUndone;
   return {
-    steps, currentIdx, training, trained, collected, hasCharter, validated,
-    hasData, approved,
+    steps, currentIdx, training, failed, trained, collected, hasCharter,
+    validated, hasData, approved,
   };
 }
 
@@ -305,9 +309,12 @@ function LifecycleRail({ life, onJump }) {
       <div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
         {steps.map((s, i) => {
           const state = s.busy ? 'busy'
-            : s.done ? 'done'
-              : i === currentIdx ? 'next' : 'locked';
-          const colour = { done: C.green, busy: C.blue, next: C.amber, locked: C.faint }[state];
+            : s.failed ? 'failed'
+              : s.done ? 'done'
+                : i === currentIdx ? 'next' : 'locked';
+          const colour = {
+            done: C.green, busy: C.blue, next: C.amber, locked: C.faint, failed: C.red,
+          }[state];
           return (
             <button key={s.key} type="button" onClick={() => onJump?.(s.key)}
                     title={s.what}
@@ -326,7 +333,8 @@ function LifecycleRail({ life, onJump }) {
                   color: state === 'done' ? '#0d1117' : colour, fontWeight: 700,
                 }}>
                   {state === 'done' ? <Check size={10} strokeWidth={4} />
-                    : state === 'busy' ? <Loader2 size={10} className="spin" /> : i + 1}
+                    : state === 'busy' ? <Loader2 size={10} className="spin" />
+                      : state === 'failed' ? '!' : i + 1}
                 </span>
                 <span style={{
                   fontSize: 11.5, fontWeight: 600, color: state === 'locked' ? C.faint : colour,
@@ -342,6 +350,11 @@ function LifecycleRail({ life, onJump }) {
           <><Check size={12} color={C.green} /> <b style={{ color: C.green }}>Approved.</b>{' '}
             This agent is registered as a strategy and can be put in a live slot.
             It is scored against its charter on every closed trade from here on.</>
+        ) : life.failed ? (
+          <><AlertTriangle size={12} color={C.red} /> <b style={{ color: C.red }}>
+            Step {currentIdx + 1}, {steps[currentIdx].label}, started and
+            failed.</b>{' '} The reason is in the banner above and in that
+            phase&rsquo;s event log on the Training tab.</>
         ) : life.training ? (
           <><Loader2 size={12} className="spin" /> <b style={{ color: C.blue }}>
             Step {currentIdx + 1}, {steps[currentIdx].label}, is running now.</b>{' '}
@@ -1200,6 +1213,40 @@ function CreatePanel({ features, onCreated, onCancel }) {
 // ── data ──────────────────────────────────────────────────────────────────
 
 /** Attach a source per symbol, then start the run. */
+/**
+ * The Data tab's choices, kept per agent and across reloads.
+ *
+ * THE BUG THIS FIXES
+ * `files` and the training window were `useState` INSIDE `DataTab`, and
+ * `DataTab` only renders while its tab is selected. Switching to Training to
+ * watch the run and coming back unmounted the component and threw both away —
+ * so the sources went back to "no source yet" and the window silently reset to
+ * its three-months-ago default. Reported after a run was started against a
+ * date range that had already been discarded.
+ *
+ * localStorage rather than lifting the state up, because lifting it would
+ * survive a tab switch and still not survive the page reload that the admin
+ * does after a deploy. Wrapped in try/catch: a private window has no storage
+ * and the form must still work there.
+ */
+function dataChoicesKey(agentId) {
+  return `rl-data-choices:${agentId}`;
+}
+
+function loadChoices(agentId) {
+  try {
+    const raw = localStorage.getItem(dataChoicesKey(agentId));
+    if (raw) return JSON.parse(raw);
+  } catch { /* no storage, or corrupt - fall through to the defaults */ }
+  return null;
+}
+
+function saveChoices(agentId, value) {
+  try {
+    localStorage.setItem(dataChoicesKey(agentId), JSON.stringify(value));
+  } catch { /* nothing to do: the form still works, it just will not persist */ }
+}
+
 /** Today minus N months, as YYYY-MM-DD. */
 function monthsAgo(n) {
   const d = new Date();
@@ -1208,7 +1255,8 @@ function monthsAgo(n) {
 }
 
 function DataTab({ agent, busy, onStarted }) {
-  const [files, setFiles] = useState({});
+  const saved = loadChoices(agent.agent_id);
+  const [files, setFilesRaw] = useState(() => saved?.files || {});
   const [uploading, setUploading] = useState('');
   const [error, setError] = useState('');
   // Ends three months ago by default, and that default is the point. MT5
@@ -1216,7 +1264,19 @@ function DataTab({ agent, busy, onStarted }) {
   // today and leaves nothing after it to forward test in — and the
   // Backtester refuses a window that sits entirely inside the training
   // range, so every backtest is blocked too.
-  const [win, setWin] = useState({ start: '', end: monthsAgo(3) });
+  const [win, setWinRaw] = useState(
+    () => saved?.win || { start: '', end: monthsAgo(3) });
+
+  // Every change is written through, so the choice survives a tab switch,
+  // a navigation away and a reload.
+  const persist = (nextFiles, nextWin) =>
+    saveChoices(agent.agent_id, { files: nextFiles, win: nextWin });
+  const setFiles = (updater) => setFilesRaw((prev) => {
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    persist(next, win);
+    return next;
+  });
+  const setWin = (next) => { persist(files, next); setWinRaw(next); };
   const symbols = agent?.spec?.symbols || [];
   const progressed = agent.progress?.datasets || [];
   const trained = agent.trained_on || [];
@@ -2051,6 +2111,9 @@ export default function Agents() {
   const claimsTraining = agent?.status === 'TRAINING';
   const alive = Boolean(agent?.run?.looks_alive);
   const busy = claimsTraining && alive;
+  // Covers both "the backend restarted under it" and "the worker raised on
+  // its first line", which look identical from the status column and need
+  // very different things said about them.
   const stuck = claimsTraining && !alive;
   const life = agent ? lifecycle(agent) : null;
 
@@ -2148,6 +2211,28 @@ export default function Agents() {
                     Re-enable
                   </button>
                 )}
+                {/* There was no way to remove an agent from any screen, which
+                    is how the list fills with half-started drafts. The server
+                    refuses it for an APPROVED charter and while a run is
+                    alive; the confirm is here because this cannot be undone. */}
+                <button className="btn btn-sm" disabled={busy}
+                        style={{ marginLeft: 'auto', color: C.red }}
+                        title={busy ? 'Training is running'
+                          : 'Delete this agent and its files'}
+                        onClick={() => {
+                          const ok = window.confirm(
+                            `Delete "${agent.name}" and everything it has `
+                            + 'produced? Its charters, proposals and training '
+                            + 'artefacts go with it. This cannot be undone.');
+                          if (!ok) return;
+                          step(async () => {
+                            const r = await rl.remove(agent.agent_id);
+                            setPicked(null);
+                            return r;
+                          }, 'Deleting');
+                        }}>
+                  <Trash2 size={12} /> Delete
+                </button>
               </div>
 
               {busy && (
@@ -2172,12 +2257,26 @@ export default function Agents() {
                   lineHeight: 1.6,
                 }}>
                   <AlertTriangle size={13} color={C.amber} />{' '}
-                  <b>This agent says it is training, but nothing is running.</b>
+                  <b>{agent.run?.failed
+                    ? 'The run started and then failed.'
+                    : 'This agent says it is training, but nothing is running.'}</b>
+                  {agent.run?.failed && (agent.run?.error || agent.progress?.error) && (
+                    <pre style={{
+                      whiteSpace: 'pre-wrap', margin: '6px 0', padding: 8,
+                      background: C.sunk, border: `1px solid ${C.red}55`,
+                      borderRadius: 6, color: C.red, fontSize: 11.5,
+                    }}>{agent.run?.error || agent.progress?.error}</pre>
+                  )}
                   <div style={{ marginTop: 4 }}>
-                    The training worker is a child of the backend process, so
-                    restarting the backend ends the run. The status column is only
-                    ever written back by Collect, which is why it is still stuck
-                    on TRAINING.
+                    {agent.run?.failed ? (
+                      <>The worker raised before it finished. Its data sources and
+                        everything it managed to say are on the Training tab.</>
+                    ) : (
+                      <>The training worker is a child of the backend process, so
+                        restarting the backend ends the run. The status column is
+                        only ever written back by Collect, which is why it is still
+                        stuck on TRAINING.</>
+                    )}
                     {agent.progress?.age_s !== undefined && (
                       <> The run last wrote to its progress file{' '}
                         <b>{Math.round(agent.progress.age_s / 60)} minutes</b> ago.

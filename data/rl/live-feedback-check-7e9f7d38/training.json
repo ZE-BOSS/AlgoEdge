@@ -1,0 +1,1574 @@
+{
+  "agent_id": "live-feedback-check-7e9f7d38",
+  "spec": {
+    "name": "live-feedback-check",
+    "symbols": [
+      "EURUSD"
+    ],
+    "base_strategy": "",
+    "timeframe": "M5",
+    "htf": [],
+    "features": [
+      "ret_1",
+      "ret_5",
+      "ret_20",
+      "gap",
+      "ema_dist_20",
+      "ema_dist_50",
+      "ema_slope_20",
+      "efficiency_20",
+      "up_run",
+      "donchian_pos_20",
+      "donchian_pos_60",
+      "dist_high_20",
+      "dist_low_20",
+      "atr_pct",
+      "vol_expansion",
+      "atr_ratio",
+      "body_frac",
+      "upper_wick",
+      "lower_wick",
+      "range_atr",
+      "tod_sin",
+      "tod_cos",
+      "dow_sin",
+      "dow_cos",
+      "volume_ratio"
+    ],
+    "money_weight": 0.7,
+    "adherence_weight": 0.3,
+    "downside_penalty": 1.0,
+    "seeds": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "cpcv_groups": 8,
+    "cpcv_test_groups": 2,
+    "embargo_bars": 288,
+    "iterations": 4,
+    "population": 8,
+    "eval_windows": 1,
+    "eval_window_bars": 4000,
+    "max_cpcv_paths": 8,
+    "elite_frac": 0.25,
+    "init_sigma": 0.5,
+    "exit_tries": 4,
+    "director": false,
+    "director_horizon": 12,
+    "exit_head": true,
+    "exit_timeframe": "",
+    "supervises": [],
+    "supervise_symbols": [],
+    "stop_atr_choices": [
+      0.75,
+      1.0,
+      1.5,
+      2.0,
+      3.0
+    ],
+    "rr_choices": [
+      1.0,
+      1.5,
+      2.0,
+      3.0,
+      5.0
+    ],
+    "risk_head": true,
+    "min_confidence": 0.4,
+    "max_hold_bars": 288,
+    "notes": "",
+    "attempted_symbols": [
+      "EURUSD"
+    ]
+  },
+  "optimiser": "ppo",
+  "results": [
+    {
+      "seed": 1,
+      "fold": 0,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6462,
+      "test_rows": 2250,
+      "seconds": 11.4
+    },
+    {
+      "seed": 1,
+      "fold": 1,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 3.0
+    },
+    {
+      "seed": 1,
+      "fold": 2,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 2.5
+    },
+    {
+      "seed": 1,
+      "fold": 3,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 3.1
+    },
+    {
+      "seed": 1,
+      "fold": 4,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 2.6
+    },
+    {
+      "seed": 1,
+      "fold": 5,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 2.8
+    },
+    {
+      "seed": 1,
+      "fold": 6,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6174,
+      "test_rows": 2250,
+      "seconds": 4.3
+    },
+    {
+      "seed": 1,
+      "fold": 7,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6174,
+      "test_rows": 2250,
+      "seconds": 4.4
+    },
+    {
+      "seed": 2,
+      "fold": 0,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6462,
+      "test_rows": 2250,
+      "seconds": 4.6
+    },
+    {
+      "seed": 2,
+      "fold": 1,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 549,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 5.5
+    },
+    {
+      "seed": 2,
+      "fold": 2,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.4
+    },
+    {
+      "seed": 2,
+      "fold": 3,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 5.0
+    },
+    {
+      "seed": 2,
+      "fold": 4,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 5.2
+    },
+    {
+      "seed": 2,
+      "fold": 5,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.7
+    },
+    {
+      "seed": 2,
+      "fold": 6,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6174,
+      "test_rows": 2250,
+      "seconds": 5.9
+    },
+    {
+      "seed": 2,
+      "fold": 7,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6174,
+      "test_rows": 2250,
+      "seconds": 5.5
+    },
+    {
+      "seed": 3,
+      "fold": 0,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6462,
+      "test_rows": 2250,
+      "seconds": 5.8
+    },
+    {
+      "seed": 3,
+      "fold": 1,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 549,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 5.7
+    },
+    {
+      "seed": 3,
+      "fold": 2,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 6.1
+    },
+    {
+      "seed": 3,
+      "fold": 3,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 5.4
+    },
+    {
+      "seed": 3,
+      "fold": 4,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.8
+    },
+    {
+      "seed": 3,
+      "fold": 5,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 5.3
+    },
+    {
+      "seed": 3,
+      "fold": 6,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6174,
+      "test_rows": 2250,
+      "seconds": 5.0
+    },
+    {
+      "seed": 3,
+      "fold": 7,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6174,
+      "test_rows": 2250,
+      "seconds": 4.6
+    },
+    {
+      "seed": 4,
+      "fold": 0,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6462,
+      "test_rows": 2250,
+      "seconds": 4.0
+    },
+    {
+      "seed": 4,
+      "fold": 1,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 549,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.3
+    },
+    {
+      "seed": 4,
+      "fold": 2,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.3
+    },
+    {
+      "seed": 4,
+      "fold": 3,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.2
+    },
+    {
+      "seed": 4,
+      "fold": 4,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 5.3
+    },
+    {
+      "seed": 4,
+      "fold": 5,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.8
+    },
+    {
+      "seed": 4,
+      "fold": 6,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6174,
+      "test_rows": 2250,
+      "seconds": 4.6
+    },
+    {
+      "seed": 4,
+      "fold": 7,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6174,
+      "test_rows": 2250,
+      "seconds": 4.8
+    },
+    {
+      "seed": 5,
+      "fold": 0,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6462,
+      "test_rows": 2250,
+      "seconds": 5.0
+    },
+    {
+      "seed": 5,
+      "fold": 1,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.8
+    },
+    {
+      "seed": 5,
+      "fold": 2,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.6
+    },
+    {
+      "seed": 5,
+      "fold": 3,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.7
+    },
+    {
+      "seed": 5,
+      "fold": 4,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.0
+    },
+    {
+      "seed": 5,
+      "fold": 5,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 837,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 5886,
+      "test_rows": 2250,
+      "seconds": 4.3
+    },
+    {
+      "seed": 5,
+      "fold": 6,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6174,
+      "test_rows": 2250,
+      "seconds": 5.5
+    },
+    {
+      "seed": 5,
+      "fold": 7,
+      "symbol": "EURUSD",
+      "score": 0.0,
+      "train_score": 0.0,
+      "test_mean_r": 0.0,
+      "test_trades": 0,
+      "test_adherence": 0.0,
+      "sharpe": 0.0,
+      "history": [
+        {
+          "iteration": 0,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 1,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 2,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        },
+        {
+          "iteration": 3,
+          "decisions": 1125,
+          "note": "every decision scored the same - no gradient"
+        }
+      ],
+      "train_rows": 6174,
+      "test_rows": 2250,
+      "seconds": 5.1
+    }
+  ],
+  "best": {
+    "seed": 1,
+    "fold": 0,
+    "symbol": "EURUSD",
+    "score": 0.0,
+    "train_score": 0.0,
+    "test_mean_r": 0.0,
+    "test_trades": 0,
+    "test_adherence": 0.0,
+    "sharpe": 0.0,
+    "history": [
+      {
+        "iteration": 0,
+        "decisions": 1125,
+        "note": "every decision scored the same - no gradient"
+      },
+      {
+        "iteration": 1,
+        "decisions": 1125,
+        "note": "every decision scored the same - no gradient"
+      },
+      {
+        "iteration": 2,
+        "decisions": 1125,
+        "note": "every decision scored the same - no gradient"
+      },
+      {
+        "iteration": 3,
+        "decisions": 1125,
+        "note": "every decision scored the same - no gradient"
+      }
+    ],
+    "train_rows": 6462,
+    "test_rows": 2250,
+    "seconds": 11.4
+  },
+  "symbols_attempted": [
+    "EURUSD"
+  ],
+  "sharpe_dispersion": 0.0,
+  "started_at": "2026-10-10T11:36:52.479778+00:00",
+  "finished_at": "2026-10-10T11:40:31.544088+00:00",
+  "seconds": 219.1,
+  "error": ""
+}

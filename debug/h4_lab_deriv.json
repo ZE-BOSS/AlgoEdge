@@ -1,0 +1,688 @@
+{
+ "feed": "deriv",
+ "split": "2025-04-01",
+ "configs": 96,
+ "markets": {
+  "XAUUSD": {
+   "pick": {
+    "entry_win": 20,
+    "atr_stop": 1.5,
+    "trail_atr": 4.0,
+    "filter": "vol+sweep"
+   },
+   "in_sample": {
+    "n": 52,
+    "expectancy_r": 0.6743845717474014,
+    "win_rate": 40.38461538461539,
+    "t_stat": 1.596386201186719,
+    "payoff": 3.3504989538831604,
+    "total_r": 35.067997730864874,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 13,
+    "thin": true,
+    "expectancy_r": -9.0,
+    "t_stat": 0.0
+   },
+   "surrogate_p95": 0.6440292185748265,
+   "surrogates": 24,
+   "money_oos": {},
+   "money_all": {
+    "final": 20750.06428571429,
+    "return_pct": 107.50064285714286,
+    "max_dd_pct": 5.51843893435594,
+    "profit_factor": 3.8163215430280832,
+    "sharpe": 0.9879368655770133,
+    "sortino": 8.802396734646303,
+    "trades": 65
+   }
+  },
+  "US Tech 100": {
+   "pick": {
+    "entry_win": 12,
+    "atr_stop": 2.5,
+    "trail_atr": 4.0,
+    "filter": "vol+trend"
+   },
+   "in_sample": {
+    "n": 26,
+    "expectancy_r": 0.3015217201951064,
+    "win_rate": 38.46153846153847,
+    "t_stat": 0.6847743437771695,
+    "payoff": 2.492294957919863,
+    "total_r": 7.839564725072767,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 45,
+    "expectancy_r": -0.422574089284009,
+    "win_rate": 24.444444444444443,
+    "t_stat": -4.066680444327341,
+    "payoff": 0.7534029856281201,
+    "total_r": -19.015834017780406,
+    "thin": false
+   },
+   "surrogate_p95": 0.5122040023583625,
+   "surrogates": 24,
+   "money_oos": {
+    "final": 8613.597214285714,
+    "return_pct": -13.864027857142869,
+    "max_dd_pct": 13.92855785714286,
+    "profit_factor": 0.2618210191113558,
+    "sharpe": -3.284614413066788,
+    "sortino": -3.803176807509025,
+    "trades": 45
+   },
+   "money_all": {
+    "final": 9276.900785714286,
+    "return_pct": -7.23099214285714,
+    "max_dd_pct": 14.269650553473051,
+    "profit_factor": 0.7757904445218282,
+    "sharpe": -0.3784676239854803,
+    "sortino": -1.1493596613042583,
+    "trades": 71
+   }
+  },
+  "GBPJPY": {
+   "pick": {
+    "entry_win": 12,
+    "atr_stop": 1.5,
+    "trail_atr": 4.0,
+    "filter": "none"
+   },
+   "in_sample": {
+    "n": 208,
+    "expectancy_r": 0.22103842057589443,
+    "win_rate": 31.25,
+    "t_stat": 1.2767538699212453,
+    "payoff": 2.965152637276886,
+    "total_r": 45.97599147978604,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 116,
+    "expectancy_r": -0.3125834061381936,
+    "win_rate": 17.24137931034483,
+    "t_stat": -1.7865711936207467,
+    "payoff": 2.843507309403265,
+    "total_r": -36.25967511203046,
+    "thin": false
+   },
+   "surrogate_p95": 0.16344702983744028,
+   "surrogates": 24,
+   "money_oos": {
+    "final": 6932.915406951475,
+    "return_pct": -30.670845930485246,
+    "max_dd_pct": 36.90181426178858,
+    "profit_factor": 0.5525727651268797,
+    "sharpe": -1.6079568617588977,
+    "sortino": -2.9938549742787752,
+    "trades": 116
+   },
+   "money_all": {
+    "final": 10061.421538773828,
+    "return_pct": 0.6142153877382706,
+    "max_dd_pct": 40.95961961517463,
+    "profit_factor": 1.002478190504815,
+    "sharpe": 0.08468471170854425,
+    "sortino": 0.1819275068020987,
+    "trades": 324
+   }
+  },
+  "EURUSD": {
+   "pick": {
+    "entry_win": 12,
+    "atr_stop": 2.5,
+    "trail_atr": 4.0,
+    "filter": "vol+sweep"
+   },
+   "in_sample": {
+    "n": 65,
+    "expectancy_r": 0.024772153737665635,
+    "win_rate": 33.84615384615385,
+    "t_stat": 0.15583510256012637,
+    "payoff": 2.0540975101981127,
+    "total_r": 1.6101899929482664,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 23,
+    "thin": true,
+    "expectancy_r": -9.0,
+    "t_stat": 0.0
+   },
+   "surrogate_p95": 0.03406011259811455,
+   "surrogates": 24,
+   "money_oos": {},
+   "money_all": {
+    "final": 9861.815357142865,
+    "return_pct": -1.3818464285713539,
+    "max_dd_pct": 13.713287238317553,
+    "profit_factor": 0.9673190601580764,
+    "sharpe": -0.029781073606235813,
+    "sortino": -0.06632756769883805,
+    "trades": 88
+   }
+  },
+  "US SP 500": {
+   "pick": {
+    "entry_win": 30,
+    "atr_stop": 1.5,
+    "trail_atr": 4.0,
+    "filter": "vol"
+   },
+   "in_sample": {
+    "n": 27,
+    "expectancy_r": 0.6498563646115466,
+    "win_rate": 33.33333333333333,
+    "t_stat": 0.9304098996944179,
+    "payoff": 3.928223095900556,
+    "total_r": 17.54612184451176,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 34,
+    "expectancy_r": -0.48136918875358914,
+    "win_rate": 17.647058823529413,
+    "t_stat": -2.329996541913366,
+    "payoff": 1.7333936256809406,
+    "total_r": -16.36655241762203,
+    "thin": false
+   },
+   "surrogate_p95": 0.18372998827389653,
+   "surrogates": 24,
+   "money_oos": {
+    "final": 8513.465571428562,
+    "return_pct": -14.865344285714377,
+    "max_dd_pct": 19.234016143130425,
+    "profit_factor": 0.3671744114624181,
+    "sharpe": -2.6404356593439773,
+    "sortino": -4.6374731899803034,
+    "trades": 34
+   },
+   "money_all": {
+    "final": 9939.92285714284,
+    "return_pct": -0.6007714285716115,
+    "max_dd_pct": 19.39202402534347,
+    "profit_factor": 0.986889500065153,
+    "sharpe": 0.039241969509768916,
+    "sortino": 0.12252548525581224,
+    "trades": 61
+   }
+  },
+  "GBPUSD": {
+   "pick": {
+    "entry_win": 12,
+    "atr_stop": 2.5,
+    "trail_atr": 4.0,
+    "filter": "vol+trend"
+   },
+   "in_sample": {
+    "n": 80,
+    "expectancy_r": 0.05086716054623362,
+    "win_rate": 41.25,
+    "t_stat": 0.3156433512365857,
+    "payoff": 1.574884094432251,
+    "total_r": 4.06937284369869,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 32,
+    "expectancy_r": -0.12780709106271143,
+    "win_rate": 34.375,
+    "t_stat": -0.740848684578338,
+    "payoff": 1.413312066095597,
+    "total_r": -4.089826914006766,
+    "thin": false
+   },
+   "surrogate_p95": 0.10996951128651303,
+   "surrogates": 24,
+   "money_oos": {
+    "final": 9607.74357142857,
+    "return_pct": -3.922564285714303,
+    "max_dd_pct": 7.616464285714319,
+    "profit_factor": 0.7277621538337968,
+    "sharpe": -0.6044453687220419,
+    "sortino": -1.175687263682418,
+    "trades": 32
+   },
+   "money_all": {
+    "final": 9935.875714285747,
+    "return_pct": -0.6412428571425322,
+    "max_dd_pct": 15.077782362987682,
+    "profit_factor": 0.9877923478007411,
+    "sharpe": 0.003934178193663397,
+    "sortino": 0.008840644144536483,
+    "trades": 112
+   }
+  },
+  "USDJPY": {
+   "pick": {
+    "entry_win": 30,
+    "atr_stop": 1.5,
+    "trail_atr": 4.0,
+    "filter": "sweep"
+   },
+   "in_sample": {
+    "n": 141,
+    "expectancy_r": 0.22199730334989468,
+    "win_rate": 25.53191489361702,
+    "t_stat": 0.9489247785090353,
+    "payoff": 3.84021502964056,
+    "total_r": 31.30161977233515,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 61,
+    "expectancy_r": 0.07208235744253212,
+    "win_rate": 22.950819672131146,
+    "t_stat": 0.27902950547970967,
+    "payoff": 3.7121640533122653,
+    "total_r": 4.397023803994459,
+    "thin": false
+   },
+   "surrogate_p95": 0.35983935620604407,
+   "surrogates": 24,
+   "money_oos": {
+    "final": 10296.392478999302,
+    "return_pct": 2.963924789993011,
+    "max_dd_pct": 14.692812557654253,
+    "profit_factor": 1.0736980847076816,
+    "sharpe": 0.20618584778127555,
+    "sortino": 0.5444347814039239,
+    "trades": 61
+   },
+   "money_all": {
+    "final": 13330.445561378869,
+    "return_pct": 33.3044556137887,
+    "max_dd_pct": 14.658730416526724,
+    "profit_factor": 1.1962884889414962,
+    "sharpe": 0.46030608730508543,
+    "sortino": 1.5129246731169943,
+    "trades": 202
+   }
+  },
+  "BTCUSD": {
+   "pick": {
+    "entry_win": 30,
+    "atr_stop": 1.5,
+    "trail_atr": 4.0,
+    "filter": "vol"
+   },
+   "in_sample": {
+    "n": 64,
+    "expectancy_r": 0.768038577833186,
+    "win_rate": 32.8125,
+    "t_stat": 1.825104974866944,
+    "payoff": 4.661692778097707,
+    "total_r": 49.1544689813239,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 32,
+    "expectancy_r": 0.6497486208889454,
+    "win_rate": 46.875,
+    "t_stat": 1.6442860270631225,
+    "payoff": 2.7642981221365055,
+    "total_r": 20.79195586844625,
+    "thin": false
+   },
+   "surrogate_p95": 0.22387432655640874,
+   "surrogates": 24,
+   "money_oos": {
+    "final": 11934.236153928568,
+    "return_pct": 19.34236153928568,
+    "max_dd_pct": 3.2084742425086894,
+    "profit_factor": 2.343101054316728,
+    "sharpe": 1.5362863221327356,
+    "sortino": 3.98704511349583,
+    "trades": 32
+   },
+   "money_all": {
+    "final": 18886.474435357144,
+    "return_pct": 88.86474435357144,
+    "max_dd_pct": 6.189916032706144,
+    "profit_factor": 2.3169615138416177,
+    "sharpe": 1.0093584038762713,
+    "sortino": 5.03815738696926,
+    "trades": 96
+   }
+  },
+  "XAGUSD": {
+   "pick": {
+    "entry_win": 20,
+    "atr_stop": 1.5,
+    "trail_atr": 4.0,
+    "filter": "vol+sweep"
+   },
+   "in_sample": {
+    "n": 53,
+    "expectancy_r": 0.21124805986159179,
+    "win_rate": 35.84905660377358,
+    "t_stat": 0.7143436023568317,
+    "payoff": 2.3888113312632053,
+    "total_r": 11.196147172664364,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 18,
+    "thin": true,
+    "expectancy_r": -9.0,
+    "t_stat": 0.0
+   },
+   "surrogate_p95": 0.1845204664598421,
+   "surrogates": 24,
+   "money_oos": {},
+   "money_all": {
+    "final": 11723.77857142858,
+    "return_pct": 17.237785714285803,
+    "max_dd_pct": 6.9306015401603585,
+    "profit_factor": 1.386143081381117,
+    "sharpe": 0.4894853123502404,
+    "sortino": 1.6793932362921653,
+    "trades": 69
+   }
+  },
+  "Germany 40": {
+   "pick": {
+    "entry_win": 6,
+    "atr_stop": 1.5,
+    "trail_atr": 4.0,
+    "filter": "sweep"
+   },
+   "in_sample": {
+    "n": 69,
+    "expectancy_r": 0.17538270567400738,
+    "win_rate": 24.637681159420293,
+    "t_stat": 0.5459631336477907,
+    "payoff": 3.822655594823435,
+    "total_r": 12.10140669150651,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 101,
+    "expectancy_r": -0.2515449389258291,
+    "win_rate": 19.801980198019802,
+    "t_stat": -1.6699212085776793,
+    "payoff": 2.6419432082762095,
+    "total_r": -25.406038831508738,
+    "thin": false
+   },
+   "surrogate_p95": 0.4418839260324964,
+   "surrogates": 24,
+   "money_oos": {
+    "final": 8033.483142857153,
+    "return_pct": -19.66516857142847,
+    "max_dd_pct": 26.398854884657162,
+    "profit_factor": 0.6608538501177823,
+    "sharpe": -1.3717956816960493,
+    "sortino": -2.4780925260745987,
+    "trades": 101
+   },
+   "money_all": {
+    "final": 8623.237535714285,
+    "return_pct": -13.767624642857157,
+    "max_dd_pct": 28.28848119524042,
+    "profit_factor": 0.8787039136665395,
+    "sharpe": -0.35085658238322187,
+    "sortino": -0.8760123234649102,
+    "trades": 170
+   }
+  },
+  "Volatility 75 Index": {
+   "pick": {
+    "entry_win": 6,
+    "atr_stop": 1.5,
+    "trail_atr": 4.0,
+    "filter": "none"
+   },
+   "in_sample": {
+    "n": 231,
+    "expectancy_r": 0.17404101367382932,
+    "win_rate": 32.467532467532465,
+    "t_stat": 1.3371425963960892,
+    "payoff": 2.6628039965256507,
+    "total_r": 40.20347415865457,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 114,
+    "expectancy_r": -0.03035938075617878,
+    "win_rate": 24.561403508771928,
+    "t_stat": -0.12120620913746431,
+    "payoff": 2.935632801255187,
+    "total_r": -3.460969406204381,
+    "thin": false
+   },
+   "surrogate_p95": 0.10502488204801523,
+   "surrogates": 24,
+   "money_oos": {
+    "final": 9311.690267132139,
+    "return_pct": -6.883097328678611,
+    "max_dd_pct": 15.093219270092442,
+    "profit_factor": 0.9077048783815045,
+    "sharpe": -0.09207917852929456,
+    "sortino": -0.1935714678274154,
+    "trades": 114
+   },
+   "money_all": {
+    "final": 13319.434131303566,
+    "return_pct": 33.19434131303565,
+    "max_dd_pct": 31.93339989765958,
+    "profit_factor": 1.1069961687601129,
+    "sharpe": 0.4022234795036514,
+    "sortino": 0.7354934511506712,
+    "trades": 345
+   }
+  },
+  "Volatility 100 Index": {
+   "pick": {
+    "entry_win": 6,
+    "atr_stop": 1.5,
+    "trail_atr": 2.5,
+    "filter": "vol+sweep"
+   },
+   "in_sample": {
+    "n": 61,
+    "expectancy_r": 0.25142931989160594,
+    "win_rate": 37.704918032786885,
+    "t_stat": 1.0303802741937782,
+    "payoff": 2.435503289191124,
+    "total_r": 15.33718851338796,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 35,
+    "expectancy_r": -0.08747884442665599,
+    "win_rate": 28.57142857142857,
+    "t_stat": -0.43081974058302164,
+    "payoff": 2.0878989323332204,
+    "total_r": -3.0617595549329595,
+    "thin": false
+   },
+   "surrogate_p95": 0.3333104040089291,
+   "surrogates": 24,
+   "money_oos": {
+    "final": 9672.995382142857,
+    "return_pct": -3.2700461785714285,
+    "max_dd_pct": 7.121988040388988,
+    "profit_factor": 0.8207691340869975,
+    "sharpe": -0.43524968394734176,
+    "sortino": -0.6259912234669319,
+    "trades": 35
+   },
+   "money_all": {
+    "final": 10922.528917857144,
+    "return_pct": 9.225289178571439,
+    "max_dd_pct": 8.374498593299004,
+    "profit_factor": 1.2215367032575761,
+    "sharpe": 0.3667553691422033,
+    "sortino": 0.7757458512449608,
+    "trades": 69
+   }
+  },
+  "Step Index": {
+   "pick": {
+    "entry_win": 30,
+    "atr_stop": 1.5,
+    "trail_atr": 2.5,
+    "filter": "sweep"
+   },
+   "in_sample": {
+    "n": 182,
+    "expectancy_r": 0.14703093043710513,
+    "win_rate": 30.21978021978022,
+    "t_stat": 1.062165904337138,
+    "payoff": 2.8950623945655387,
+    "total_r": 26.759629339553136,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 86,
+    "expectancy_r": 0.023279642103376845,
+    "win_rate": 32.55813953488372,
+    "t_stat": 0.13014335284067782,
+    "payoff": 2.1519523003136793,
+    "total_r": 2.0020492208904086,
+    "thin": false
+   },
+   "surrogate_p95": 0.05344152866515262,
+   "surrogates": 24,
+   "money_oos": {
+    "final": 10113.511071428587,
+    "return_pct": 1.1351107142858696,
+    "max_dd_pct": 16.47513571428557,
+    "profit_factor": 1.0240945031001063,
+    "sharpe": 0.1180062573434547,
+    "sortino": 0.31680142883624973,
+    "trades": 86
+   },
+   "money_all": {
+    "final": 12676.295714285669,
+    "return_pct": 26.76295714285668,
+    "max_dd_pct": 28.00802493992764,
+    "profit_factor": 1.1532750797754152,
+    "sharpe": 0.42083320142001535,
+    "sortino": 1.069223395554953,
+    "trades": 268
+   }
+  },
+  "Boom 1000 Index": {
+   "pick": {
+    "entry_win": 30,
+    "atr_stop": 1.5,
+    "trail_atr": 4.0,
+    "filter": "vol+sweep"
+   },
+   "in_sample": {
+    "n": 25,
+    "expectancy_r": 0.47707337174515,
+    "win_rate": 32.0,
+    "t_stat": 0.9087568955918354,
+    "payoff": 3.7168557188695033,
+    "total_r": 11.926834293628751,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 12,
+    "thin": true,
+    "expectancy_r": -9.0,
+    "t_stat": 0.0
+   },
+   "surrogate_p95": 0.8337500499478138,
+   "surrogates": 24,
+   "money_oos": {},
+   "money_all": {
+    "final": 10505.096699714282,
+    "return_pct": 5.050966997142825,
+    "max_dd_pct": 11.047489199388833,
+    "profit_factor": 1.178731682200757,
+    "sharpe": 0.31067941369251273,
+    "sortino": 1.3195188971144767,
+    "trades": 37
+   }
+  },
+  "Crash 1000 Index": {
+   "pick": {
+    "entry_win": 12,
+    "atr_stop": 1.5,
+    "trail_atr": 2.5,
+    "filter": "vol+sweep"
+   },
+   "in_sample": {
+    "n": 40,
+    "expectancy_r": 0.5720332825823766,
+    "win_rate": 45.0,
+    "t_stat": 1.7728104913314082,
+    "payoff": 2.639372756611062,
+    "total_r": 22.881331303295067,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 20,
+    "thin": true,
+    "expectancy_r": -9.0,
+    "t_stat": 0.0
+   },
+   "surrogate_p95": 0.22407322292083254,
+   "surrogates": 24,
+   "money_oos": {},
+   "money_all": {
+    "final": 11503.666030964296,
+    "return_pct": 15.036660309642947,
+    "max_dd_pct": 8.504963520729564,
+    "profit_factor": 1.4290324126934109,
+    "sharpe": 0.6007815106522408,
+    "sortino": 2.07150918789518,
+    "trades": 60
+   }
+  },
+  "Jump 100 Index": {
+   "pick": {
+    "entry_win": 12,
+    "atr_stop": 1.5,
+    "trail_atr": 4.0,
+    "filter": "vol"
+   },
+   "in_sample": {
+    "n": 76,
+    "expectancy_r": 0.5458477542957335,
+    "win_rate": 36.84210526315789,
+    "t_stat": 1.7726766352944041,
+    "payoff": 3.240103676123173,
+    "total_r": 41.48442932647575,
+    "thin": false
+   },
+   "out_of_sample": {
+    "n": 45,
+    "expectancy_r": -0.32542114943998307,
+    "win_rate": 20.0,
+    "t_stat": -1.3560185338607724,
+    "payoff": 2.1761474308609756,
+    "total_r": -14.643951724799239,
+    "thin": false
+   },
+   "surrogate_p95": 0.3529970860894485,
+   "surrogates": 24,
+   "money_oos": {
+    "final": 8587.369164285716,
+    "return_pct": -14.126308357142847,
+    "max_dd_pct": 14.380833063026868,
+    "profit_factor": 0.5275486793537812,
+    "sharpe": -0.9603998992149357,
+    "sortino": -1.9706082573431163,
+    "trades": 45
+   },
+   "money_all": {
+    "final": 12027.428621428578,
+    "return_pct": 20.274286214285773,
+    "max_dd_pct": 16.751887683270933,
+    "profit_factor": 1.1880668259802818,
+    "sharpe": 0.35482061881214527,
+    "sortino": 0.8493216121862089,
+    "trades": 121
+   }
+  }
+ }
+}

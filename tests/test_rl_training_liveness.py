@@ -332,3 +332,99 @@ def test_the_gate_guard_uses_the_shared_terminal_list(run_dir, monkeypatch):
         "the already-running guard keeps its own copy of the terminal stages "
         "again, and it will drift from TERMINAL_STAGES again")
     assert api.trainmod.TERMINAL_STAGES == T.TERMINAL_STAGES
+
+
+# -- a job that dies must say why ------------------------------------------
+
+
+def test_a_job_that_raises_records_the_reason(tmp_path, monkeypatch):
+    """The failure mode reported on 2026-10-10.
+
+    Three starts in a row produced the "nothing is running" banner and no
+    explanation. The worker was raising on its first line; the exception went
+    into the future, nobody called `.result()` or `.exception()`, and the
+    future's "done" state was indistinguishable from a backend restart.
+
+    The file matters more than the exception: the exception dies with the API
+    process, the file survives it.
+    """
+    monkeypatch.setattr(T, "ARTEFACT_ROOT", tmp_path)
+    payload = {"spec": {"name": "boom", "symbols": ["Nope 1"], "timeframe": "M5",
+                        "seeds": [1, 2, 3, 4, 5]},
+               "datasets": {}, "risk_config": {}, "agent_id": "boom"}
+
+    with pytest.raises(Exception):
+        T._run_job(payload)
+
+    st = T.read_phase("boom", "train", tmp_path)
+    assert st["stage"] == "failed"
+    assert "no bars" in st["error"]
+    assert st.get("traceback"), "a failure with no traceback cannot be diagnosed"
+
+
+def test_the_failure_keeps_what_the_run_said_before_it_died(tmp_path, monkeypatch):
+    """One Progress object for the whole job, not one per handler.
+
+    Two of them each hold their own copy of the state, so the failure handler's
+    write ERASED the events explaining what the run was doing when it failed —
+    which is the only part anyone needs.
+    """
+    monkeypatch.setattr(T, "ARTEFACT_ROOT", tmp_path)
+    payload = {"spec": {"name": "boom", "symbols": ["Nope 1"], "timeframe": "M5",
+                        "seeds": [1, 2, 3, 4, 5]},
+               "datasets": {}, "risk_config": {}, "agent_id": "boom"}
+    with pytest.raises(Exception):
+        T._run_job(payload)
+
+    texts = [e["text"] for e in T.read_phase("boom", "train", tmp_path)["events"]]
+    assert any("starting" in t for t in texts), "lost the line saying it began"
+    assert any("bars loaded" in t for t in texts), "lost what it managed to load"
+    assert any("FAILED" in t for t in texts)
+
+
+def test_a_failed_run_is_not_alive_and_is_not_merely_quiet(tmp_path, monkeypatch):
+    """`failed` and `looks_alive` have to disagree, or the banner is wrong.
+
+    Without the distinction a crashed job reads as "the backend restarted
+    under it", and the admin is told to press Reset and start again — which
+    reproduces the crash.
+    """
+    monkeypatch.setattr(T, "ARTEFACT_ROOT", tmp_path)
+    (tmp_path / "dead").mkdir()
+    (tmp_path / "dead" / "progress.json").write_text(
+        json.dumps({"stage": "failed", "error": "ValueError: no bars"}),
+        encoding="utf-8")
+
+    st = T.queue.status("dead")
+    assert st["failed"] is True
+    assert st["looks_alive"] is False
+    assert "no bars" in st["error"]
+
+
+def test_the_data_tab_choices_are_persisted(tmp_path):
+    """Sources and the training window must survive a tab switch.
+
+    They were `useState` inside `DataTab`, which only renders while its tab is
+    selected — so switching to Training to watch the run and coming back threw
+    both away, silently resetting the window to its default. Checked as text
+    because the project has no JS test runner; it catches the guard being
+    deleted, which is the realistic regression.
+    """
+    page = pathlib.Path("frontend/src/pages/Agents.jsx").read_text(encoding="utf-8")
+    assert "loadChoices(agent.agent_id)" in page
+    assert "saveChoices(agent.agent_id" in page
+    assert "localStorage" in page
+
+
+def test_an_agent_can_be_deleted_but_not_an_approved_one():
+    """There was no delete on any screen, which is how the list fills up.
+
+    Refused for an APPROVED charter: that agent may be in a live slot and the
+    adherence record of something that traded is not disposable.
+    """
+    src = pathlib.Path("backend/api/routes/rl.py").read_text(encoding="utf-8")
+    assert '@router.delete("/agents/{agent_id}")' in src
+    body = src.split('@router.delete("/agents/{agent_id}")', 1)[1][:2000]
+    assert "ch.APPROVED" in body, "an approved agent must not be deletable"
+    assert "looks_alive" in body, "a running job must not be deleted under itself"
+    assert "shutil.rmtree" in body, "the artefacts outlive the row otherwise"

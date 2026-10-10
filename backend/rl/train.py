@@ -910,14 +910,26 @@ class TrainingQueue:
         """
         f = self._futures.get(agent_id)
         state = "unknown"
+        error = ""
         if f is not None:
             state = "done" if f.done() else "running" if f.running() else "queued"
+            if f.done():
+                try:
+                    exc = f.exception(timeout=0)
+                    if exc is not None:
+                        state = "failed"
+                        error = f"{type(exc).__name__}: {exc}"
+                except Exception:               # noqa: BLE001  (cancelled)
+                    pass
         prog = read_progress(agent_id)
         return {"agent_id": agent_id, "state": state, "progress": prog,
+                "error": error or prog.get("error", ""),
                 "owned_by_this_process": f is not None,
-                "looks_alive": bool(state in ("running", "queued")
-                                    or (prog and not prog.get("stale")
-                                        and prog.get("stage") != "complete"))}
+                "failed": bool(state == "failed" or prog.get("stage") == "failed"),
+                "looks_alive": bool(
+                    state in ("running", "queued")
+                    or (state != "failed" and prog and not prog.get("stale")
+                        and prog.get("stage") not in TERMINAL_STAGES))}
 
     def cancel(self, agent_id: str) -> bool:
         request_cancel(agent_id)
@@ -935,12 +947,58 @@ queue = TrainingQueue()
 
 
 def _run_job(payload: dict) -> dict:
-    """The process entry point. Module level, because a closure cannot be pickled."""
+    """The process entry point. Module level, because a closure cannot be pickled.
+
+    EVERY failure is written to the progress file before it is re-raised.
+    Without that, a job that died on its first line left a future in the
+    "done" state carrying an exception nobody read, and the screen said
+    "nothing is running" with no reason given — which is indistinguishable
+    from a backend restart and tells the admin nothing at all. Reported by
+    the admin on 2026-10-10 after three starts in a row vanished.
+
+    The file matters more than the exception: the exception dies with the API
+    process, the file does not.
+    """
+    agent_id = payload.get("agent_id") or ""
+    # ONE progress object for the whole job. Two of them would each hold their
+    # own copy of the state and the second write would erase the first's
+    # events - so the failure would land in the file having deleted the lines
+    # explaining what it was doing when it failed.
+    prog = phase_progress(agent_id, "train") if agent_id else None
+    try:
+        return _run_job_inner(payload, prog)
+    except BaseException as exc:                        # noqa: BLE001
+        import traceback
+        if prog is not None:
+            prog.set(stage="failed", pct=0.0,
+                     error=f"{type(exc).__name__}: {exc}",
+                     traceback=traceback.format_exc()[-2000:])
+            prog.event(f"FAILED before finishing: {type(exc).__name__}: {exc}")
+        raise
+
+
+def _run_job_inner(payload: dict, prog: "Progress | None" = None) -> dict:
     from backend.rl.datasets import load_frames
 
     spec = AgentSpec.from_dict(payload["spec"])
     risk_config = payload.get("risk_config") or {}
+    # Pulling 200,000 bars per symbol out of the MT5 terminal takes minutes,
+    # and until this returns there was no progress file at all — so the first
+    # thing the run does now is say that it has started.
+    if prog is not None:
+        prog.set(stage="loading", pct=0.0,
+                 stage_detail=f"reading bars for {len(spec.symbols)} symbol(s)")
+        prog.event(f"starting: reading bars for {', '.join(spec.symbols)}")
     frames = load_frames(payload.get("datasets") or {}, spec)
+    if prog is not None:
+        prog.event("bars loaded: " + (", ".join(
+            f"{k} {len(v):,}" for k, v in frames.items()) or "NONE"))
+    if not frames:
+        raise ValueError(
+            "no bars for any pre-registered symbol - every source either failed "
+            "to load or returned nothing. Check the Data tab: a source has to be "
+            "chosen for each symbol and it has to still be there when you press "
+            "Start.")
     charter = None
     if payload.get("charter"):
         from backend.rl.charter import StrategyCharter

@@ -490,6 +490,8 @@ export const rl = {
   // For a run whose process died: the row still says TRAINING and
   // nothing else ever writes it back.
   resetTraining: (id) => api.post(`${RL}/agents/${id}/reset-training`),
+  // Refused for an APPROVED charter, and while a run is alive.
+  remove: (id) => api.delete(`${RL}/agents/${id}`),
   collect: (id) => api.post(`${RL}/agents/${id}/collect`),
   distil: (id, data) => api.post(`${RL}/agents/${id}/distil`, data),
   validate: (id, data) => api.post(`${RL}/agents/${id}/validate`, data),
