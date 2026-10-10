@@ -311,3 +311,96 @@ def test_several_training_ranges_are_merged_before_the_fraction_is_taken():
 
 def test_an_inverted_window_is_clean_rather_than_an_error():
     assert D.overlap(coverage(), "EURUSD", "M5", START + 1000, START).state == "clean"
+
+
+# -- the training window, against a frame that has been through normalise --
+
+
+def _normalised_frame(rows: int = 3000):
+    """A frame in the shape everything upstream actually produces.
+
+    This matters more than it looks. `clip_to_window`'s first test built a
+    frame with a DatetimeIndex by hand and passed; a normalised frame carries
+    `time` as an int64 COLUMN of microseconds with a plain RangeIndex, and
+    the function raised TypeError on every one of them. `load_frames` caught
+    it per symbol, skipped them all, and the training run died with "no bars
+    for any pre-registered symbol" - which sent the admin off changing dates
+    for an hour. A fixture that lies about its input is worse than no test.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from backend.rl.datasets import normalise
+
+    t0 = 1_700_000_000
+    t = np.arange(rows, dtype=np.int64) * 300 + t0
+    px = 100.0 + np.cumsum(np.full(rows, 0.001))
+    df = pd.DataFrame({
+        "time": pd.to_datetime(t, unit="s"),
+        "open": px, "high": px + 0.05, "low": px - 0.05, "close": px,
+        "tick_volume": np.full(rows, 100.0),
+    })
+    return normalise(df, "TEST", "M5", source="test")
+
+
+def test_clip_to_window_works_on_a_normalised_frame():
+    import pandas as pd
+
+    from backend.rl.datasets import clip_to_window, normalised_times
+
+    ds = _normalised_frame()
+    ts = normalised_times(ds.frame)
+    assert not isinstance(ds.frame.index, pd.DatetimeIndex), (
+        "if this ever becomes a DatetimeIndex the bug this guards is gone, "
+        "but so is the reason the test is written this way")
+
+    mid = ts.iloc[len(ts) // 2].strftime("%Y-%m-%d")
+    whole = clip_to_window(ds.frame, "", "")
+    assert len(whole) == len(ds.frame), "no window must change nothing"
+
+    later = clip_to_window(ds.frame, mid, "")
+    assert 0 < len(later) < len(ds.frame)
+    assert normalised_times(later).min() >= pd.Timestamp(mid)
+
+
+def test_a_bare_end_date_includes_that_whole_day():
+    import pandas as pd
+
+    from backend.rl.datasets import clip_to_window, normalised_times
+
+    ds = _normalised_frame()
+    ts = normalised_times(ds.frame)
+    day = ts.iloc[len(ts) // 2].strftime("%Y-%m-%d")
+    out = normalised_times(clip_to_window(ds.frame, "", day))
+    assert out.max() >= pd.Timestamp(day) + pd.Timedelta(hours=23), (
+        "an end date of 2026-01-31 has to mean the end of the 31st, not "
+        "midnight at its start - otherwise a whole day vanishes silently")
+
+
+def test_an_empty_window_says_what_the_source_actually_covers():
+    import pytest as _pytest
+
+    from backend.rl.datasets import DatasetError, clip_to_window
+
+    ds = _normalised_frame()
+    with _pytest.raises(DatasetError) as e:
+        clip_to_window(ds.frame, "2099-01-01", "")
+    assert "the source covers" in str(e.value), (
+        "the admin needs the range that EXISTS, or they change the dates at "
+        "random, which is exactly what happened")
+
+
+def test_both_mt5_paths_select_the_symbol_first():
+    """`(-2, Invalid params)` on an unselected symbol reads like a date bug.
+
+    `get_historical_data` selected the symbol and `get_data_range` did not,
+    so recent-bar fetches worked and every dated fetch failed on every
+    symbol and every fallback. One shared helper now, and this fails if
+    either path stops using it.
+    """
+    import inspect
+
+    from backend.mt5 import data_fetcher as df
+
+    assert "ensure_symbol" in inspect.getsource(df.DataFetcher.get_data_range)
+    assert "ensure_symbol" in inspect.getsource(df._fetch_rates_frame)

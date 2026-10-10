@@ -296,32 +296,52 @@ def clip_to_window(frame: pd.DataFrame, start: str = "", end: str = "") -> pd.Da
     """Keep only the bars between `start` and `end`, inclusive, both optional.
 
     WHY A TRAINING RUN NEEDS THIS
-    `load_mt5` takes the most recent N bars, which means the training range
-    always ends at *now*. Train on that and there is no period after it to
-    forward test in - and the Backtester deliberately refuses a window that
-    lies entirely inside an agent's training range, so every backtest is
-    blocked too. Leaving the last few months out is the difference between an
-    agent you can evaluate and one you can only admire.
+    `load_mt5` takes the most recent N bars, so the training range always
+    ended at *now*. Train on that and there is no period after it to forward
+    test in - and the Backtester refuses a window that lies entirely inside an
+    agent's training range, so every backtest is blocked too.
 
-    Dates are read as UTC and compared against the frame's own index, so a
-    broker-offset frame is clipped by the same clock it was normalised to.
+    THE SHAPE THIS OPERATES ON
+    A normalised frame carries `time` as an int64 COLUMN of microseconds and
+    a plain RangeIndex - not a DatetimeIndex. The first version of this
+    function compared `frame.index` against a Timestamp, which raises
+    TypeError on every real dataset; `load_frames` caught it per symbol and
+    skipped them all, and the run then failed with "no bars for any
+    pre-registered symbol". It passed its own test because that test built a
+    DatetimeIndex frame by hand, which is not what anything upstream
+    produces. Hence `normalised_times` below, and a test that uses a frame
+    that has actually been through `normalise`.
     """
     if not (start or end):
         return frame
-    out = frame
+    ts = normalised_times(frame)
+    keep = np.ones(len(frame), dtype=bool)
     if start:
-        out = out[out.index >= pd.Timestamp(start, tz="UTC").tz_localize(None)]
+        keep &= ts >= pd.Timestamp(start).tz_localize(None)
     if end:
-        # Inclusive of the whole end day when given as a bare date.
-        stop = pd.Timestamp(end, tz="UTC").tz_localize(None)
-        if stop.normalize() == stop:
+        stop = pd.Timestamp(end).tz_localize(None)
+        if stop.normalize() == stop:        # a bare date means the whole day
             stop = stop + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        out = out[out.index <= stop]
+        keep &= ts <= stop
+    out = frame[keep]
     if not len(out):
+        have = (f"{ts.min():%Y-%m-%d} to {ts.max():%Y-%m-%d}"
+                if len(frame) else "nothing")
         raise DatasetError(
             f"no bars between {start or 'the start'} and {end or 'the end'} - "
-            f"the source covers {frame.index[0]:%Y-%m-%d} to {frame.index[-1]:%Y-%m-%d}")
+            f"the source covers {have}")
     return out
+
+
+def normalised_times(frame: pd.DataFrame) -> pd.Series:
+    """Bar-open times as datetimes, whatever shape the frame arrived in."""
+    if "time" in frame.columns:
+        col = frame["time"]
+        if np.issubdtype(col.dtype, np.datetime64):
+            return col
+        # int64 from a normalised frame: microseconds since the epoch
+        return pd.to_datetime(col.astype("int64"), unit="us")
+    return pd.Series(pd.to_datetime(frame.index), index=frame.index)
 
 
 def load_mt5_range(symbol: str, timeframe: str, start: str, end: str, **kw) -> Dataset:
@@ -360,12 +380,33 @@ def load_mt5_range(symbol: str, timeframe: str, start: str, end: str, **kw) -> D
 
     a = _parse(start, datetime(2000, 1, 1, tzinfo=timezone.utc))
     b = _parse(end, datetime.now(timezone.utc))
-    frame = asyncio.run(DataFetcher.get_data_range(symbol, timeframe, a, b))
+
+    frame, dated_error = None, ""
+    try:
+        frame = asyncio.run(DataFetcher.get_data_range(symbol, timeframe, a, b))
+    except Exception as exc:                            # noqa: BLE001
+        dated_error = f"{type(exc).__name__}: {exc}"
+
     if frame is None or not len(frame):
-        raise DatasetError(
-            f"{symbol} {timeframe}: MT5 returned no bars between "
-            f"{a:%Y-%m-%d} and {b:%Y-%m-%d}. The broker may not carry this "
-            f"instrument that far back - try a later start date.")
+        # Fall back to "most recent N bars, then clip". A terminal can serve
+        # `copy_rates_from_pos` perfectly while refusing every DATED call -
+        # observed on both brokers - and when that happens the window is
+        # still satisfiable, just by a different route. Failing here instead
+        # would be refusing data the terminal is holding.
+        logger.warning(f"[RL] {symbol}: dated fetch gave nothing "
+                       f"({dated_error or 'empty'}); falling back to recent bars")
+        ds = load_mt5(symbol, timeframe, **kw)
+        clipped = clip_to_window(ds.frame, start, end)
+        logger.info(f"[RL] {symbol}: fallback gave {len(clipped):,} bars in window")
+        # Back through `normalise`, so the row count, range and content hash
+        # are derived from the clipped frame rather than left as the
+        # unclipped one's - the hash is what freezes the training range.
+        out = normalise(clipped.reset_index().rename(columns={"index": "time"}),
+                        symbol, timeframe, source="mt5")
+        out.notes = list(out.notes) + [
+            "fetched as recent bars and clipped: this terminal refused the "
+            "dated request"]
+        return out
     return normalise(frame, symbol, timeframe, source="mt5", **kw)
 
 

@@ -302,22 +302,45 @@ class DataFetchError(Exception):
         super().__init__(f"Data fetch failed for {symbol} {timeframe}: {reason}")
 
 
+def ensure_symbol(symbol: str) -> str:
+    """Put `symbol` in Market Watch, reconnecting the terminal if need be.
+
+    WHY THIS IS A SHARED FUNCTION
+    Every history call fails on a symbol the terminal has not selected, and
+    it fails with `(-2, 'Terminal: Invalid params')` - which reads like a bad
+    date range and sends you off changing dates forever. `get_historical_data`
+    did this inline and `get_data_range` did not, so the two calls behaved
+    differently on the same symbol: recent-bars worked, dated fetches
+    returned nothing on every symbol and every fallback. Reported from the
+    Agents screen on 2026-10-10 after repeated date changes made no
+    difference, which is the signature of a cause that has nothing to do with
+    dates.
+
+    Returns "" when the symbol is ready, or the reason it is not.
+    """
+    info = mt5.terminal_info()
+    if info is None or not info.connected:
+        logger.warning("MT5 connection lost in DataFetcher. Re-initialising IPC...")
+        mt5.initialize()
+    si = mt5.symbol_info(symbol)
+    if si is None:
+        if mt5.symbol_select(symbol, True):
+            si = mt5.symbol_info(symbol)
+        if si is None:
+            return (f"Symbol '{symbol}' is not in this terminal's symbol list. "
+                    f"Check the exact name, including spaces and case.")
+    if not si.visible and not mt5.symbol_select(symbol, True):
+        return (f"Symbol '{symbol}' exists but could not be added to Market "
+                f"Watch, so the terminal will not serve its history.")
+    return ""
+
+
 def _fetch_rates_frame(symbol: str, tf_code: int, timeframe: str, count: int):
     """The blocking half of DataFetcher.get_historical_data, run on the MT5 thread.
     Returns (normalised frame, None) or (None, error message)."""
-    terminal_info = mt5.terminal_info()
-    if terminal_info is None or not terminal_info.connected:
-        logger.warning("MT5 connection lost in DataFetcher. Attempting to re-initialize IPC...")
-        mt5.initialize()
-    symbol_info = mt5.symbol_info(symbol)
-    if symbol_info is None:
-        # The symbol might just not be in Market Watch yet, try selecting it
-        if mt5.symbol_select(symbol, True):
-            symbol_info = mt5.symbol_info(symbol)
-        if symbol_info is None:
-            return None, f"Symbol '{symbol}' not found in MT5. Check broker symbol list."
-    if not symbol_info.visible:
-        mt5.symbol_select(symbol, True)
+    problem = ensure_symbol(symbol)
+    if problem:
+        return None, problem
     rates = mt5.copy_rates_from_pos(symbol, tf_code, 0, count)
     if rates is None or len(rates) == 0:
         return None, (
@@ -398,12 +421,14 @@ class DataFetcher:
             logger.error(error_msg)
             raise DataFetchError(symbol, timeframe, error_msg)
 
-        # ── IPC Auto-Recovery ──
-        terminal_info = mt5.terminal_info()
-        if terminal_info is None or not terminal_info.connected:
-            logger.warning("MT5 connection lost in DataFetcher. Attempting to re-initialize IPC...")
-            mt5.initialize()
-            
+        # The symbol has to be in Market Watch before ANY history call, or
+        # every one of them returns (-2, 'Terminal: Invalid params') - which
+        # looks exactly like a bad date range and is not one.
+        loop0 = asyncio.get_running_loop()
+        problem = await loop0.run_in_executor(_executor, ensure_symbol, symbol)
+        if problem:
+            raise DataFetchError(symbol, timeframe, problem)
+
         tf_code = _get_timeframe_code(timeframe)
         
         # Convert to epoch to avoid timezone mismatch issues
