@@ -46,13 +46,19 @@ Write-Host "Building against $api"
 # Windows will not delete a file a running program has loaded. The old PM2 app
 # "algoedge-frontend" runs `vite preview` out of frontend\node_modules, which
 # keeps Vite's native binary open — and `npm ci` must delete node_modules first,
-# so it fails with EPERM on rolldown-binding.win32-x64-msvc.node. Stop it first.
+# so it fails with EPERM on rolldown-binding.win32-x64-msvc.node. Stop them
+# first - BOTH of them. "algoedge-investor" only runs when ALGOEDGE_CADDY is
+# unset, so on a box behind Caddy it was never there and this went unnoticed;
+# the moment it runs, EVERY build dies at investor-web with EPERM and the
+# deploy stops half done. Seen on the VPS 2026-10-10, right after
+# `pm2 start ecosystem.config.js` brought the investor app up for the first time.
 # (Behind Caddy it is not used at all; ALGOEDGE_CADDY=1 stops PM2 starting it.)
 # Run through cmd so pm2's "not found" (normal behind Caddy, where that app no
 # longer exists) is not turned into a terminating error by PowerShell 5.1,
 # which treats any native stderr as an error under $ErrorActionPreference = Stop.
 if (Get-Command pm2 -ErrorAction SilentlyContinue) {
     cmd /c "pm2 stop algoedge-frontend >nul 2>&1"
+    cmd /c "pm2 stop algoedge-investor >nul 2>&1"
     Start-Sleep -Seconds 2
 }
 
@@ -76,4 +82,7 @@ function Build-App($dir, $envName) {
 Build-App "frontend" "VITE_DEFAULT_BACKEND_URL"
 Build-App "investor-web" "VITE_API_URL"
 
-Write-Host "Built frontend\dist and investor-web\dist. Caddy serves them as-is; no restart needed."
+Write-Host "Built frontend\dist and investor-web\dist."
+# Said plainly because this script STOPPED those two apps above, so on a box
+# that is NOT behind Caddy they are down until they are started again.
+Write-Host "Behind Caddy that is all. Otherwise run 'pm2 restart all' - this script stopped algoedge-frontend and algoedge-investor so their files could be replaced."
