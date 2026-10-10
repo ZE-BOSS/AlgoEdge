@@ -383,7 +383,21 @@ function LifecycleRail({ life, onJump }) {
 function TrainingMonitor({ agent, busy, onCancel }) {
   const p = agent.progress || {};
   if (!Object.keys(p).length) return null;
-  const dead = agent.status === 'TRAINING' && !agent.run?.looks_alive;
+  // A run that FINISHED is not a run that died, and telling them apart needs
+  // the phase's own stage - not the agent's status.
+  //
+  // The agent stays at status TRAINING until Collect runs, because Collect is
+  // what stores the result. So every successful run looked exactly like a
+  // crashed one from here: status TRAINING, nothing writing any more, and a
+  // banner reading "Training stopped - which is exactly what a restart looks
+  // like". Reported 2026-10-10 by someone whose run had completed all 50 jobs
+  // perfectly well.
+  const stage = String(p.stage || '');
+  const finished = ['complete', 'scored', 'failed', 'cancelled'].includes(stage);
+  const dead = agent.status === 'TRAINING' && !agent.run?.looks_alive && !finished;
+  // Finished, but the result has not been stored yet - the normal state
+  // between Train and Collect, and the one that needs an instruction.
+  const uncollected = finished && agent.status === 'TRAINING';
   const pct = Math.max(0, Math.min(100, Number(p.pct || 0)));
   const events = [...(p.events || [])].reverse();
   const done = p.jobs_done ?? 0;
@@ -392,7 +406,10 @@ function TrainingMonitor({ agent, busy, onCancel }) {
   return (
     <Section
       icon={<Loader2 size={15} className={busy ? 'spin' : undefined} />}
-      title={busy ? 'Training now' : dead ? 'Training stopped' : 'Last training run'}
+      title={busy ? 'Training now'
+        : dead ? 'Training stopped'
+          : uncollected ? 'Training finished - not collected yet'
+            : 'Last training run'}
       why={busy
         ? 'Running in a separate process behind a queue, never on the API - this '
           + 'project has already stalled its own backend once by doing heavy work '
@@ -417,7 +434,7 @@ function TrainingMonitor({ agent, busy, onCancel }) {
       </div>
       <div style={{ fontSize: 12, color: C.dim, marginTop: 6 }}>
         <b style={{ color: busy ? C.blue : dead ? C.amber : C.dim }}>
-          {dead ? 'stopped' : p.stage || '—'}
+          {dead ? 'stopped' : stage === 'complete' ? 'finished' : stage || '—'}
         </b> · {pct.toFixed(1)}%
         {total ? ` · job ${done} of ${total}` : ''}
         {busy && p.eta_s ? ` · about ${Math.round(p.eta_s / 60)} min left` : ''}
@@ -435,6 +452,19 @@ function TrainingMonitor({ agent, busy, onCancel }) {
           {Math.round((p.age_s || 0) / 60)} minutes, and this backend does not own
           the job &mdash; which is exactly what a restart looks like from in here.
           These numbers are where it got to, not where it is.
+        </p>
+      )}
+      {uncollected && (
+        <p style={{ fontSize: 11.5, color: C.dim, marginTop: 6, lineHeight: 1.55 }}>
+          All {total || '—'} jobs ran and the run ended normally. The agent still
+          says TRAINING because <b>Collect</b> is what stores the result &mdash;
+          that is step 2 below, and nothing is lost until you run it.
+          {p.no_trades && (
+            <b style={{ color: C.amber }}>
+              {' '}There is nothing worth collecting from this one, though: no
+              fold took a trade. Clone the agent with more iterations instead.
+            </b>
+          )}
         </p>
       )}
 
