@@ -380,16 +380,18 @@ class PortfolioBacktestEngine(CostModelMixin):
             # current bar with min_periods=1, while engine.py averaged the 14 bars
             # BEFORE it — so the same leg broke even and trailed at different
             # levels run alone and run in a basket.
-            from backend.risk.exit_replay import atr_series, swing_length, swing_points_at
+            from backend.risk.exit_replay import (atr_series, swing_length,
+                                                  swing_masks, swing_points_at)
             atr_array = atr_series(highs_arr, lows_arr, closes_arr, atr_period)
 
             time_vals = df['time'].values
             atr_dict = dict(zip(time_vals, atr_array))
 
             sw_len = swing_length(self.risk_config)
+            masks = swing_masks(highs_arr, lows_arr, sw_len)
             swing_dict: dict = {}
             for i in range(len(df)):
-                points = swing_points_at(highs_arr, lows_arr, i, sw_len)
+                points = swing_points_at(highs_arr, lows_arr, i, sw_len, masks=masks)
                 if points:
                     swing_dict[time_vals[i]] = points
 

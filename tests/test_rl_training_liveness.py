@@ -1,0 +1,334 @@
+"""
+tests/test_rl_training_liveness.py
+
+"It says it is training. Is it?"
+
+THE BUG THIS EXISTS FOR
+-----------------------
+`POST /agents/{id}/train` writes `status = "TRAINING"` to the database, and
+the only thing that ever writes it back is `/collect`, which an admin presses
+by hand after the run finishes. The worker itself is a `ProcessPoolExecutor`
+child of the API process.
+
+So restarting the backend - a deploy, a crash, a reboot - ends the run and
+leaves the row saying TRAINING with nothing running. The Agents screen then
+disables every control, shows a spinner, and reports the percentage the run
+had reached hours earlier, forever. There was no button that cleared it and
+no way to tell that state apart from a job that is merely slow.
+
+WHY THE PROGRESS FILE'S MTIME IS THE ANSWER
+-------------------------------------------
+Whether the orphaned child died or kept running is not knowable from inside
+the new process: process managers kill process trees on some platforms and not
+others, and the future that used to track it died with the old interpreter.
+What IS knowable is whether anything is still writing to the run's progress
+file. A number that keeps rising means something is alive; one that stopped
+means nothing is, whichever way the child went.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import tempfile
+import time
+
+import pytest
+
+from backend.rl import train as T
+
+
+@pytest.fixture()
+def run_dir():
+    root = pathlib.Path(tempfile.mkdtemp(prefix="rl-liveness-"))
+    (root / "ag").mkdir()
+    return root
+
+
+def write(root, state, age_s=0.0):
+    f = root / "ag" / "progress.json"
+    f.write_text(json.dumps(state), encoding="utf-8")
+    if age_s:
+        when = time.time() - age_s
+        os.utime(f, (when, when))
+    return f
+
+
+def test_a_fresh_run_is_not_stale(run_dir):
+    write(run_dir, {"stage": "training", "pct": 2.6})
+    p = T.read_progress("ag", root=run_dir)
+    assert p["age_s"] < 5
+    assert p["stale"] is False
+
+
+def test_a_run_that_stopped_writing_is_stale(run_dir):
+    """The restart case, which is the whole point of the file."""
+    write(run_dir, {"stage": "training", "pct": 2.6, "jobs_done": 2}, age_s=7200)
+    p = T.read_progress("ag", root=run_dir)
+    assert p["age_s"] == pytest.approx(7200, abs=30)
+    assert p["stale"] is True, (
+        "a run that has not written for two hours is not running, and saying "
+        "otherwise is what left the screen spinning at 2.6% overnight")
+
+
+def test_a_finished_run_is_never_stale_however_old(run_dir):
+    """`complete` is a destination, not a silence.
+
+    Without this a successful run from last week would be reported as a
+    stuck one every time its agent was opened.
+    """
+    write(run_dir, {"stage": "complete", "pct": 100.0}, age_s=7 * 86400)
+    assert T.read_progress("ag", root=run_dir)["stale"] is False
+
+
+def test_the_staleness_threshold_is_several_times_the_slowest_step():
+    """A threshold under a minute would cry wolf on a big fold.
+
+    One candidate evaluation over a full fold is tens of seconds on the
+    largest frames this project uses, and the progress file is written once
+    per iteration.
+    """
+    assert T.STALE_AFTER_S >= 120
+
+
+def test_a_missing_progress_file_is_empty_not_an_error(run_dir):
+    assert T.read_progress("no-such-agent", root=run_dir) == {}
+
+
+# -- what the queue admits it does not know --------------------------------
+
+
+def test_the_queue_does_not_claim_a_job_it_never_submitted():
+    """After a restart every future is gone, and the API must say so.
+
+    The failure to avoid is the opposite one: reporting "not running" as
+    though it were a finding, when it only means this process did not start
+    it.
+    """
+    st = T.queue.status("never-submitted-anywhere")
+    assert st["state"] == "unknown"
+    assert st["owned_by_this_process"] is False
+    assert st["looks_alive"] is False
+
+
+def test_looks_alive_follows_the_file_when_the_future_is_gone(tmp_path, monkeypatch):
+    """The case a restart actually produces: no future, but a live file.
+
+    An orphaned child that survived the restart keeps writing. The API has no
+    future for it and must not call it dead on that basis alone.
+    """
+    monkeypatch.setattr(T, "ARTEFACT_ROOT", tmp_path)
+    (tmp_path / "orphan").mkdir()
+    (tmp_path / "orphan" / "progress.json").write_text(
+        json.dumps({"stage": "training", "pct": 40.0}), encoding="utf-8")
+
+    st = T.queue.status("orphan")
+    assert st["owned_by_this_process"] is False
+    assert st["looks_alive"] is True, (
+        "a child that outlived the restart is still training; calling it dead "
+        "would invite a second run over the same files")
+
+
+def test_a_stale_file_with_no_future_is_dead(tmp_path, monkeypatch):
+    monkeypatch.setattr(T, "ARTEFACT_ROOT", tmp_path)
+    (tmp_path / "dead").mkdir()
+    f = tmp_path / "dead" / "progress.json"
+    f.write_text(json.dumps({"stage": "training", "pct": 2.6}), encoding="utf-8")
+    when = time.time() - 7200
+    os.utime(f, (when, when))
+
+    assert T.queue.status("dead")["looks_alive"] is False
+
+
+# -- the reset, over HTTP ---------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reset_refuses_while_the_run_still_looks_alive(tmp_path, monkeypatch):
+    """It must not become a way to stomp on a job that is merely slow."""
+    import httpx
+    from fastapi import FastAPI
+
+    from backend.api.deps import require_admin
+    from backend.api.routes import rl as api
+
+    monkeypatch.setattr(T, "ARTEFACT_ROOT", tmp_path)
+    (tmp_path / "live-one").mkdir()
+    (tmp_path / "live-one" / "progress.json").write_text(
+        json.dumps({"stage": "training", "pct": 12.0}), encoding="utf-8")
+
+    class Row:
+        agent_id, status = "live-one", "TRAINING"
+
+    async def fake_get_agent(_db, agent_id):
+        return Row()
+
+    monkeypatch.setattr(api.rlreg, "get_agent", fake_get_agent)
+
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[require_admin] = lambda: {"id": 1, "role": "admin"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as client:
+        r = await client.post("/api/rl/agents/live-one/reset-training")
+
+    assert r.status_code == 409
+    assert "still looks alive" in r.json()["detail"]
+
+
+# -- what Collect can still recover after the process that ran it died -----
+
+
+def test_the_run_record_is_recoverable_from_disk(run_dir):
+    """`/collect` must not overwrite a good run with an empty record.
+
+    The worker writes `training.json` beside the policy; `/collect` used to
+    read only `queue.result()`, which is `None` once the future's process is
+    gone. Collecting after a restart therefore stored `{}` as the training
+    record — losing the per-fold table and the seed dispersion, and leaving
+    the gate's PBO and seed-agreement checks with nothing to read. The run
+    looked fine right up until the gate could not explain itself.
+    """
+    (run_dir / "ag" / "training.json").write_text(json.dumps({
+        "results": [{"seed": 1, "fold": 0, "test_mean_r": 0.061, "symbol": "Crash 1000 Index"},
+                    {"seed": 2, "fold": 0, "test_mean_r": -0.004, "symbol": "Crash 1000 Index"}],
+        "sharpe_dispersion": 0.42,
+        "best": {"seed": 1, "fold": 0},
+    }), encoding="utf-8")
+
+    got = T.load_training("ag", root=run_dir)
+    assert len(got["results"]) == 2
+    assert got["sharpe_dispersion"] == 0.42
+    assert got["best"]["seed"] == 1
+
+
+def test_a_missing_run_record_is_empty_not_an_error(run_dir):
+    assert T.load_training("never-ran", root=run_dir) == {}
+
+
+# -- the four phases, and the gate narrating itself ------------------------
+
+
+def test_each_phase_writes_its_own_file(run_dir):
+    """Separate files, deliberately.
+
+    The training worker is a child process and the gate runs in the API, so
+    one shared file would have two processes writing it and a crash
+    mid-write could take the training record down with the gate's.
+    """
+    names = {n: T.phase_path("ag", n, run_dir).name for n in T.PHASES}
+    assert names["train"] == "progress.json", (
+        "training keeps its original filename, or every agent trained before "
+        "today loses its record")
+    assert len(set(names.values())) == len(T.PHASES), "two phases share a file"
+
+
+def test_the_pipeline_names_the_one_phase_that_is_running(run_dir):
+    T.phase_progress("ag", "train", run_dir).set(stage="complete", pct=100.0)
+    T.phase_progress("ag", "collect", run_dir).set(stage="complete", pct=100.0)
+    T.phase_progress("ag", "validate", run_dir).set(stage="regime", pct=49.0)
+
+    pipe = T.read_pipeline("ag", run_dir)
+    assert pipe["running"] == "validate"
+    assert pipe["phases"]["train"]["stage"] == "complete"
+    assert pipe["phases"]["distil"] == {}, "a phase that never ran is empty, not absent"
+
+
+def test_a_finished_pipeline_has_nothing_running(run_dir):
+    for n in T.PHASES:
+        T.phase_progress("ag", n, run_dir).set(stage="complete", pct=100.0)
+    assert T.read_pipeline("ag", run_dir)["running"] is None
+
+
+def test_scored_counts_as_finished(run_dir):
+    """The gate has an answer but the caller has not stored it yet.
+
+    Without this in `TERMINAL_STAGES`, a gate that finished would be reported
+    as running until the database write landed, and as STALE if the write
+    failed — which reads as "still going" for something that is not.
+    """
+    assert "scored" in T.TERMINAL_STAGES
+    T.phase_progress("ag", "validate", run_dir).set(stage="scored", pct=100.0)
+    assert T.read_pipeline("ag", run_dir)["running"] is None
+
+
+def test_the_gate_reports_every_check_as_it_lands():
+    """One callback on `Report.add` reaches all 25 checks.
+
+    The alternative was a progress call beside each `rep.add(...)`, which is
+    25 places to forget one.
+    """
+    from backend.rl.validate import Check, Report
+
+    seen = []
+    rep = Report(agent_id="x", on_check=lambda c: seen.append(c.name))
+    rep.add(Check("sample size", True, 147.0, 100.0, "ok"))
+    rep.add(Check("PBO", False, 0.37, 0.2, "too high"))
+    assert seen == ["sample size", "PBO"]
+
+
+def test_a_broken_watcher_cannot_fail_the_gate():
+    """The report is the product; telling someone about it is not."""
+    from backend.rl.validate import Check, Report
+
+    def explode(_check):
+        raise RuntimeError("the screen fell over")
+
+    rep = Report(agent_id="x", on_check=explode)
+    rep.add(Check("sample size", True, 147.0, 100.0, "ok"))
+    assert len(rep.checks) == 1, "a failing watcher must not lose the check"
+
+
+def test_the_watcher_is_not_part_of_what_a_report_means():
+    """Two identical reports must compare equal whoever is watching them."""
+    from backend.rl.validate import Check, Report
+
+    a = Report(agent_id="x", on_check=lambda c: None)
+    b = Report(agent_id="x")
+    chk = Check("sample size", True, 147.0, 100.0, "ok")
+    a.add(chk)
+    b.add(Check("sample size", True, 147.0, 100.0, "ok"))
+    assert a.checks[0] == b.checks[0]
+
+
+def test_the_gate_stage_weights_cover_the_whole_run():
+    """The percentage is built from these, so they have to sum to one."""
+    from backend.rl.validate import GATE_STAGES
+
+    assert sum(w for _, _, w in GATE_STAGES) == pytest.approx(1.0, abs=1e-9)
+    assert len({k for k, _, _ in GATE_STAGES}) == len(GATE_STAGES), "duplicate stage key"
+
+
+def test_a_background_gate_is_held_by_a_strong_reference():
+    """A bare `create_task` can be collected mid-run.
+
+    The event loop keeps only a weak reference to a task, so a 32-minute job
+    whose result nobody holds is eligible for garbage collection the whole
+    time it runs. CPython's docs say to keep the reference; this is that
+    reference, and the check exists so it is not tidied away as unused.
+    """
+    from backend.api.routes import rl as api
+
+    assert isinstance(api._BACKGROUND, set)
+    src = pathlib.Path("backend/api/routes/rl.py").read_text(encoding="utf-8")
+    assert "_BACKGROUND.add(task)" in src
+    assert "add_done_callback(_BACKGROUND.discard)" in src, (
+        "without the discard the set grows by one task per gate run, forever")
+
+
+def test_the_gate_guard_uses_the_shared_terminal_list(run_dir, monkeypatch):
+    """A finished gate must not block the next one.
+
+    The guard originally listed "complete" and "failed" by hand, which left
+    `scored` — the stage the gate sets for ITSELF, before the caller stores
+    the result — reading as "still running". A process that died in that gap
+    would have refused every later run on that agent, permanently.
+    """
+    from backend.api.routes import rl as api
+
+    src = pathlib.Path("backend/api/routes/rl.py").read_text(encoding="utf-8")
+    assert "trainmod.TERMINAL_STAGES" in src, (
+        "the already-running guard keeps its own copy of the terminal stages "
+        "again, and it will drift from TERMINAL_STAGES again")
+    assert api.trainmod.TERMINAL_STAGES == T.TERMINAL_STAGES

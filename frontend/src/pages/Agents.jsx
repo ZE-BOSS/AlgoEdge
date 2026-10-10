@@ -39,9 +39,9 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertTriangle, Ban, Brain, Check, ChevronRight, Copy, Database, FlaskConical,
-  GraduationCap, Info, Loader2, Play, Plus, RefreshCw, ShieldCheck, Target,
-  Upload, X,
+  Activity, AlertTriangle, Ban, Brain, Check, ChevronRight, Copy, Database,
+  FlaskConical, GraduationCap, Info, Loader2, Play, Plus, RefreshCw,
+  ShieldCheck, Target, Upload, X,
 } from 'lucide-react';
 import { rl } from '../services/api';
 import { qk } from '../services/servers';
@@ -370,6 +370,7 @@ function LifecycleRail({ life, onJump }) {
 function TrainingMonitor({ agent, busy, onCancel }) {
   const p = agent.progress || {};
   if (!Object.keys(p).length) return null;
+  const dead = agent.status === 'TRAINING' && !agent.run?.looks_alive;
   const pct = Math.max(0, Math.min(100, Number(p.pct || 0)));
   const events = [...(p.events || [])].reverse();
   const done = p.jobs_done ?? 0;
@@ -378,7 +379,7 @@ function TrainingMonitor({ agent, busy, onCancel }) {
   return (
     <Section
       icon={<Loader2 size={15} className={busy ? 'spin' : undefined} />}
-      title={busy ? 'Training now' : 'Last training run'}
+      title={busy ? 'Training now' : dead ? 'Training stopped' : 'Last training run'}
       why={busy
         ? 'Running in a separate process behind a queue, never on the API - this '
           + 'project has already stalled its own backend once by doing heavy work '
@@ -402,10 +403,27 @@ function TrainingMonitor({ agent, busy, onCancel }) {
         }} />
       </div>
       <div style={{ fontSize: 12, color: C.dim, marginTop: 6 }}>
-        <b style={{ color: busy ? C.blue : C.dim }}>{p.stage || '—'}</b> · {pct.toFixed(1)}%
+        <b style={{ color: busy ? C.blue : dead ? C.amber : C.dim }}>
+          {dead ? 'stopped' : p.stage || '—'}
+        </b> · {pct.toFixed(1)}%
         {total ? ` · job ${done} of ${total}` : ''}
-        {p.eta_s ? ` · about ${Math.round(p.eta_s / 60)} min left` : ''}
+        {busy && p.eta_s ? ` · about ${Math.round(p.eta_s / 60)} min left` : ''}
+        {p.age_s !== undefined && (
+          <span style={{ color: dead ? C.amber : C.faint }}>
+            {' · last wrote '}
+            {p.age_s < 90 ? `${Math.round(p.age_s)}s` : `${Math.round(p.age_s / 60)} min`}
+            {' ago'}
+          </span>
+        )}
       </div>
+      {dead && (
+        <p style={{ fontSize: 11.5, color: C.amber, marginTop: 6, lineHeight: 1.55 }}>
+          Nothing has written to this run&rsquo;s progress file for{' '}
+          {Math.round((p.age_s || 0) / 60)} minutes, and this backend does not own
+          the job &mdash; which is exactly what a restart looks like from in here.
+          These numbers are where it got to, not where it is.
+        </p>
+      )}
 
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))',
@@ -468,6 +486,174 @@ function TrainingMonitor({ agent, busy, onCancel }) {
     </Section>
   );
 }
+
+/**
+ * Every phase of the pipeline at once: what has run, what is running, and
+ * what each one said while it ran.
+ *
+ * The four phases report into four separate files for one reason: the
+ * training worker is a child process and the gate runs in the API, so a
+ * single shared file would have two processes writing it and a crash
+ * mid-write could take the training record with it. The server merges them
+ * on read; this renders the merge.
+ */
+function PhaseTimeline({ pipeline, phase }) {
+  const st = pipeline?.phases?.[phase.key] || {};
+  const running = pipeline?.running === phase.key;
+  const started = Boolean(st.stage);
+  const terminal = ['complete', 'scored'].includes(st.stage);
+  const failed = st.stage === 'failed';
+  const colour = failed ? C.red : running ? C.blue : terminal ? C.green : C.faint;
+  const pct = Math.max(0, Math.min(100, Number(st.pct || 0)));
+  const events = [...(st.events || [])].reverse();
+
+  return (
+    <div style={{
+      border: `1px solid ${started ? `${colour}55` : C.line}`, borderRadius: 8,
+      padding: 12, marginBottom: 10,
+      background: running ? `${C.blue}0d` : 'transparent',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{
+          width: 18, height: 18, borderRadius: 999, flexShrink: 0, fontSize: 10,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          background: terminal ? colour : 'transparent', border: `1px solid ${colour}`,
+          color: terminal ? '#0d1117' : colour, fontWeight: 700,
+        }}>
+          {terminal ? <Check size={11} strokeWidth={4} />
+            : running ? <Loader2 size={11} className="spin" />
+              : failed ? '!' : phase.n}
+        </span>
+        <b style={{ fontSize: 13, color: started ? 'inherit' : C.faint }}>{phase.label}</b>
+        {running && <Pill colour={C.blue}>running</Pill>}
+        {terminal && <Pill colour={C.green}>done</Pill>}
+        {failed && <Pill colour={C.red}>failed</Pill>}
+        {!started && <Pill colour={C.faint}>not run yet</Pill>}
+        {st.age_s !== undefined && (
+          <span style={{
+            marginLeft: 'auto', fontSize: 11, color: st.stale ? C.amber : C.faint,
+          }}>
+            {st.stale ? 'stopped writing ' : 'last wrote '}
+            {st.age_s < 90 ? `${Math.round(st.age_s)}s` : `${Math.round(st.age_s / 60)} min`}
+            {' ago'}
+          </span>
+        )}
+      </div>
+
+      <div style={{ color: C.dim, fontSize: 11.5, margin: '4px 0 0 26px', lineHeight: 1.55 }}>
+        {phase.what}
+      </div>
+
+      {started && (
+        <div style={{ marginLeft: 26, marginTop: 8 }}>
+          <div style={{ height: 5, background: C.raised, borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{
+              width: `${terminal ? 100 : pct}%`, height: '100%', background: colour,
+              transition: 'width .4s',
+            }} />
+          </div>
+          <div style={{ fontSize: 11.5, color: C.dim, marginTop: 4 }}>
+            <b style={{ color: colour }}>{st.stage}</b>
+            {st.stage_detail ? ` \u2014 ${st.stage_detail}` : ''}
+            {!terminal && ` \u00b7 ${pct.toFixed(0)}%`}
+            {st.checks_done !== undefined && ` \u00b7 ${st.checks_done} checks done`}
+            {st.folds_total ? ` \u00b7 path ${(st.folds_done ?? 0) + 1} of ${st.folds_total}` : ''}
+            {st.jobs_done !== undefined && st.total_jobs
+              ? ` \u00b7 job ${st.jobs_done} of ${st.total_jobs}` : ''}
+          </div>
+          {st.error && (
+            <div style={{ color: C.red, fontSize: 11.5, marginTop: 4 }}>{st.error}</div>
+          )}
+
+          {/* The gate's checks, as they land. This is the point of the whole
+              exercise: a 32-minute run that says nothing is indistinguishable
+              from a hang, and a list that grows is not. */}
+          {(st.checks || []).length > 0 && (
+            <table className="table" style={{ fontSize: 11.5, marginTop: 8 }}>
+              <tbody>
+                {st.checks.map((c, i) => (
+                  <tr key={i}>
+                    <td style={{ width: 48 }}>
+                      <Pill colour={c.skipped ? C.dim : c.passed ? C.green : C.red}>
+                        {c.skipped ? 'SKIP' : c.passed ? 'PASS' : 'FAIL'}
+                      </Pill>
+                    </td>
+                    <td style={{ fontWeight: 600 }}>{c.name}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                      <Num value={c.value} />
+                    </td>
+                    <td style={{ color: C.dim, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {c.bar === null || c.bar === undefined
+                        ? '' : `bar ${Number(c.bar).toFixed(2)}`}
+                    </td>
+                    <td style={{ color: C.dim }}>{c.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {events.length > 0 && (
+            <details open={running} style={{ marginTop: 8 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 11.5, color: C.dim }}>
+                {events.length} event{events.length === 1 ? '' : 's'} &mdash; newest first
+              </summary>
+              <div style={{
+                maxHeight: 200, overflowY: 'auto', background: C.sunk, borderRadius: 6,
+                border: `1px solid ${C.line}`, padding: 8, marginTop: 6,
+                fontFamily: 'ui-monospace, monospace', fontSize: 11, lineHeight: 1.7,
+              }}>
+                {events.map((e, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8 }}>
+                    <span style={{ color: C.faint, flexShrink: 0 }}>
+                      {String(e.at || '').slice(11, 19)}
+                    </span>
+                    <span>{e.text}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const PIPELINE_PHASES = [
+  {
+    key: 'train',
+    n: 1,
+    label: 'Train',
+    what: 'Every seed against every purged CPCV path, in a separate process. '
+      + 'Reports the job it is on, the iteration, how many decisions were in the '
+      + 'batch, and how much the policy is still exploring.',
+  },
+  {
+    key: 'collect',
+    n: 2,
+    label: 'Collect',
+    what: "Takes the best fold's weights and scaler off disk and stores them as "
+      + 'this agent. Seconds.',
+  },
+  {
+    key: 'distil',
+    n: 3,
+    label: 'Distil charter',
+    what: 'Replays the policy over the bars to capture its decisions, then fits '
+      + 'readable gates to them. The replay and the fitting are reported '
+      + 'separately, because the replay is the slow half.',
+  },
+  {
+    key: 'validate',
+    n: 4,
+    label: 'Run the gate',
+    what: 'Thirteen stages and up to twenty-five checks. It runs in the '
+      + 'background and reports every stage as it starts and every check as it '
+      + 'lands \u2014 the last full run took 32 minutes, which is far too long to '
+      + 'be a spinner.',
+  },
+];
 
 /** Every (seed, path) result. The table that says whether to believe any of it. */
 function FoldResults({ training }) {
@@ -1014,21 +1200,37 @@ function CreatePanel({ features, onCreated, onCancel }) {
 // ── data ──────────────────────────────────────────────────────────────────
 
 /** Attach a source per symbol, then start the run. */
+/** Today minus N months, as YYYY-MM-DD. */
+function monthsAgo(n) {
+  const d = new Date();
+  d.setMonth(d.getMonth() - n);
+  return d.toISOString().slice(0, 10);
+}
+
 function DataTab({ agent, busy, onStarted }) {
   const [files, setFiles] = useState({});
   const [uploading, setUploading] = useState('');
   const [error, setError] = useState('');
+  // Ends three months ago by default, and that default is the point. MT5
+  // hands back the most recent N bars, so an unbounded run trains right up to
+  // today and leaves nothing after it to forward test in — and the
+  // Backtester refuses a window that sits entirely inside the training
+  // range, so every backtest is blocked too.
+  const [win, setWin] = useState({ start: '', end: monthsAgo(3) });
   const symbols = agent?.spec?.symbols || [];
   const progressed = agent.progress?.datasets || [];
   const trained = agent.trained_on || [];
 
   const datasets = useMemo(() => {
     const out = {};
+    const w = { start: win.start || undefined, end: win.end || undefined };
     Object.entries(files).forEach(([sym, info]) => {
-      out[sym] = info === 'mt5' ? 'mt5' : { path: info.path, timeframe: info.timeframe };
+      out[sym] = info === 'mt5'
+        ? { source: 'mt5', ...w }
+        : { path: info.path, timeframe: info.timeframe, ...w };
     });
     return out;
-  }, [files]);
+  }, [files, win]);
 
   const ready = symbols.length > 0 && symbols.every((s) => files[s]);
 
@@ -1058,13 +1260,70 @@ function DataTab({ agent, busy, onStarted }) {
           with the reason - resampling it quietly would move every feature by an
           amount nothing downstream could detect.`.replace(/\s+/g, ' ')}
       >
+        <div style={{
+          background: C.sunk, border: `1px solid ${C.line}`, borderRadius: 8,
+          padding: 12, marginBottom: 12,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+            Training window
+          </div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <Field label="From" hint="Blank means as far back as the source goes.">
+              <input type="date" value={win.start} disabled={busy}
+                     onChange={(e) => setWin({ ...win, start: e.target.value })} />
+            </Field>
+            <Field label="To"
+                   hint="Everything after this date is kept out of training, and is
+                     what you forward test on.">
+              <input type="date" value={win.end} disabled={busy}
+                     onChange={(e) => setWin({ ...win, end: e.target.value })} />
+            </Field>
+            <div style={{ display: 'flex', gap: 6, paddingBottom: 18 }}>
+              {[1, 3, 6, 12].map((m) => (
+                <button key={m} className="btn btn-sm" disabled={busy}
+                        title={`End the training range ${m} month${m > 1 ? 's' : ''} ago`}
+                        onClick={() => setWin({ ...win, end: monthsAgo(m) })}>
+                  leave {m}m out
+                </button>
+              ))}
+              <button className="btn btn-sm" disabled={busy}
+                      title="Train right up to the latest bar"
+                      onClick={() => setWin({ ...win, end: '' })}>
+                up to now
+              </button>
+            </div>
+          </div>
+          {!win.end ? (
+            <div style={{ color: C.amber, fontSize: 11.5, marginTop: 6, lineHeight: 1.55 }}>
+              <AlertTriangle size={12} /> With no end date the agent trains up to
+              the most recent bar. The purged CPCV folds still hold blocks out, so
+              it is not untested — but there is no period <i>after</i> training to
+              forward test in, and the Backtester will refuse every window that
+              falls inside this range. Leave a few months out unless you have a
+              reason not to.
+            </div>
+          ) : (
+            <div style={{ color: C.dim, fontSize: 11.5, marginTop: 6 }}>
+              Bars after <b>{win.end}</b> are held back. That is your forward
+              test, and it is the only part of the record the agent has never seen.
+            </div>
+          )}
+        </div>
+
         <table className="table" style={{ fontSize: 12 }}>
           <tbody>
             {symbols.map((s) => (
               <tr key={s}>
                 <td style={{ fontWeight: 600 }}>{s}</td>
                 <td>
-                  {files[s] === 'mt5' ? <Pill colour={C.blue}>live MT5</Pill>
+                  {files[s] === 'mt5' ? (
+                    <>
+                      <Pill colour={C.blue}>live MT5</Pill>
+                      <span style={{ color: C.dim, marginLeft: 6 }}>
+                        up to 200,000 bars, clipped to the window above
+                      </span>
+                    </>
+                  )
                     : files[s] ? (
                       <span style={{ color: C.dim }}>
                         {files[s].rows.toLocaleString()} bars,{' '}
@@ -1239,7 +1498,9 @@ function TrainingTab({ agent, busy, life, step }) {
       blocked: !life.hasCharter && 'Distil a charter first — fidelity is one of the checks',
       what: 'Sample size, seed dispersion, CPCV paths, PBO, deflated Sharpe, a '
         + 'regime split, a cost-stress run, the leak probe, adherence and charter '
-        + 'fidelity. It rejects most candidates; a rejection is kept, not deleted.',
+        + 'fidelity. It rejects most candidates; a rejection is kept, not deleted. '
+        + 'Starts in the background and returns at once - the last full run took 32 '
+        + 'minutes, so watch it above rather than waiting on this button.',
     },
   ];
 
@@ -1271,6 +1532,20 @@ function TrainingTab({ agent, busy, life, step }) {
 
       <TrainingMonitor agent={agent} busy={busy}
                        onCancel={() => step(() => rl.cancel(agent.agent_id), 'Cancelling')} />
+
+      <Section
+        icon={<Activity size={15} />} title="Every phase, live"
+        why={`What has run, what is running right now, and what each one said while
+          it ran. The four phases write to four separate files and the server merges
+          them, so this is one poll rather than four.`.replace(/\s+/g, ' ')}
+        right={agent.pipeline?.running
+          ? <Pill colour={C.blue}>{agent.pipeline.running} running</Pill>
+          : <Pill colour={C.faint}>nothing running</Pill>}
+      >
+        {PIPELINE_PHASES.map((ph) => (
+          <PhaseTimeline key={ph.key} pipeline={agent.pipeline} phase={ph} />
+        ))}
+      </Section>
 
       <Section
         icon={<ChevronRight size={15} />} title="After a run finishes"
@@ -1765,7 +2040,18 @@ export default function Agents() {
   // Every control is off while a run is in flight. A second run would race
   // the first over the same progress file and the same policy row, and the
   // loser writes nonsense into whichever the admin reads next.
-  const busy = agent?.status === 'TRAINING';
+  //
+  // "In flight" is NOT the same as `status === 'TRAINING'`. That column is
+  // written when a job is submitted and only ever written back by Collect,
+  // and the worker is a child of the API process - so a restart leaves the
+  // row saying TRAINING with nothing running and every control disabled for
+  // a run that ended hours ago. Liveness comes from the run itself: the
+  // queue still holding its future, or the progress file still being
+  // written to.
+  const claimsTraining = agent?.status === 'TRAINING';
+  const alive = Boolean(agent?.run?.looks_alive);
+  const busy = claimsTraining && alive;
+  const stuck = claimsTraining && !alive;
   const life = agent ? lifecycle(agent) : null;
 
   const jump = (key) => setTab(
@@ -1870,9 +2156,51 @@ export default function Agents() {
                   padding: '8px 10px', fontSize: 12, margin: '10px 0',
                 }}>
                   <Loader2 size={13} className="spin" /> <b>Training.</b> Every
-                  control on this page is disabled until it finishes — a second run
+                  control on this page is disabled until it finishes - a second run
                   would race this one over the same files. Watch it on the Training
                   tab; you can cancel from there.
+                  {agent.progress?.age_s !== undefined && (
+                    <> Last reported <b>{Math.round(agent.progress.age_s)}s</b> ago.</>
+                  )}
+                </div>
+              )}
+
+              {stuck && (
+                <div style={{
+                  background: `${C.amber}18`, border: `1px solid ${C.amber}66`,
+                  borderRadius: 6, padding: '10px 12px', fontSize: 12, margin: '10px 0',
+                  lineHeight: 1.6,
+                }}>
+                  <AlertTriangle size={13} color={C.amber} />{' '}
+                  <b>This agent says it is training, but nothing is running.</b>
+                  <div style={{ marginTop: 4 }}>
+                    The training worker is a child of the backend process, so
+                    restarting the backend ends the run. The status column is only
+                    ever written back by Collect, which is why it is still stuck
+                    on TRAINING.
+                    {agent.progress?.age_s !== undefined && (
+                      <> The run last wrote to its progress file{' '}
+                        <b>{Math.round(agent.progress.age_s / 60)} minutes</b> ago.
+                      </>
+                    )}
+                    {agent.progress?.pct !== undefined && (
+                      <> It had reached <b>{Number(agent.progress.pct).toFixed(1)}%</b>
+                        {agent.progress.jobs_done !== undefined
+                          && ` (job ${agent.progress.jobs_done} of `
+                            + `${agent.progress.total_jobs})`}.
+                      </>
+                    )}
+                  </div>
+                  <button className="btn btn-sm" style={{ marginTop: 8 }}
+                          onClick={() => step(
+                            () => rl.resetTraining(agent.agent_id), 'Resetting')}>
+                    <RefreshCw size={12} /> Clear this and let me use the page
+                  </button>
+                  <div style={{ color: C.dim, marginTop: 6, fontSize: 11 }}>
+                    If the run finished before the restart its policy is still on
+                    disk and this lands on TRAINED - press Collect next. If it did
+                    not, it goes back to DRAFT and has to be run again.
+                  </div>
                 </div>
               )}
 

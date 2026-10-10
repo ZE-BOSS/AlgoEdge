@@ -487,6 +487,9 @@ export const rl = {
   train: (id, data) => api.post(`${RL}/agents/${id}/train`, data),
   progress: (id) => api.get(`${RL}/agents/${id}/progress`),
   cancel: (id) => api.post(`${RL}/agents/${id}/cancel`),
+  // For a run whose process died: the row still says TRAINING and
+  // nothing else ever writes it back.
+  resetTraining: (id) => api.post(`${RL}/agents/${id}/reset-training`),
   collect: (id) => api.post(`${RL}/agents/${id}/collect`),
   distil: (id, data) => api.post(`${RL}/agents/${id}/distil`, data),
   validate: (id, data) => api.post(`${RL}/agents/${id}/validate`, data),

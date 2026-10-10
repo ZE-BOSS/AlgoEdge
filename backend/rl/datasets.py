@@ -292,6 +292,38 @@ def load_file(path: str | Path, symbol: str, timeframe: str, **kw) -> Dataset:
     raise DatasetError(f"{path}: unsupported file type {suffix!r}")
 
 
+def clip_to_window(frame: pd.DataFrame, start: str = "", end: str = "") -> pd.DataFrame:
+    """Keep only the bars between `start` and `end`, inclusive, both optional.
+
+    WHY A TRAINING RUN NEEDS THIS
+    `load_mt5` takes the most recent N bars, which means the training range
+    always ends at *now*. Train on that and there is no period after it to
+    forward test in - and the Backtester deliberately refuses a window that
+    lies entirely inside an agent's training range, so every backtest is
+    blocked too. Leaving the last few months out is the difference between an
+    agent you can evaluate and one you can only admire.
+
+    Dates are read as UTC and compared against the frame's own index, so a
+    broker-offset frame is clipped by the same clock it was normalised to.
+    """
+    if not (start or end):
+        return frame
+    out = frame
+    if start:
+        out = out[out.index >= pd.Timestamp(start, tz="UTC").tz_localize(None)]
+    if end:
+        # Inclusive of the whole end day when given as a bare date.
+        stop = pd.Timestamp(end, tz="UTC").tz_localize(None)
+        if stop.normalize() == stop:
+            stop = stop + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        out = out[out.index <= stop]
+    if not len(out):
+        raise DatasetError(
+            f"no bars between {start or 'the start'} and {end or 'the end'} - "
+            f"the source covers {frame.index[0]:%Y-%m-%d} to {frame.index[-1]:%Y-%m-%d}")
+    return out
+
+
 def load_mt5(symbol: str, timeframe: str, bars: int = 200_000, **kw) -> Dataset:
     """Straight from the terminal, which is the primary source on this machine.
 
@@ -495,8 +527,10 @@ def load_frames(sources: dict, spec) -> dict:
             logger.warning(f"[RL] {symbol}: no data source recorded - skipped")
             continue
         try:
-            if src == "mt5":
-                ds = load_mt5(symbol, spec.timeframe)
+            window = src if isinstance(src, dict) else {}
+            if src == "mt5" or window.get("source") == "mt5":
+                ds = load_mt5(symbol, spec.timeframe,
+                              bars=int(window.get("bars") or 200_000))
             elif isinstance(src, dict):
                 ds = load_file(src["path"], symbol, src.get("timeframe", spec.timeframe),
                                time_is=src.get("time_is", "open"),
@@ -508,5 +542,15 @@ def load_frames(sources: dict, spec) -> dict:
         except Exception as exc:                        # noqa: BLE001
             logger.error(f"[RL] {symbol}: {type(exc).__name__}: {exc}")
             continue
-        out[symbol] = ds.frame
+        frame = ds.frame
+        # Clipped AFTER loading rather than fetched narrower, so the clip is
+        # the same operation for an upload and for MT5 and there is one place
+        # the training range is decided.
+        start, end = window.get("start", ""), window.get("end", "")
+        if start or end:
+            before = len(frame)
+            frame = clip_to_window(frame, start, end)
+            logger.info(f"[RL] {symbol}: clipped {before:,} bars to {len(frame):,} "
+                        f"({frame.index[0]:%Y-%m-%d} to {frame.index[-1]:%Y-%m-%d})")
+        out[symbol] = frame
     return out

@@ -1000,14 +1000,20 @@ class BacktestEngine(CostModelMixin):
         # ATR and swing points for break-even / trailing come from
         # risk/exit_replay.py — the same functions the portfolio engine and the
         # live position manager use, so a leg trails identically in all three.
-        from backend.risk.exit_replay import atr_series, swing_length, swing_points_at
+        from backend.risk.exit_replay import (atr_series, swing_length, swing_masks,
+                                              swing_points_at)
         atr_array = atr_series(highs_arr, lows_arr, closes_arr, atr_period)
 
         # ── Pre-compute swing point cache ──
+        # The masks are computed ONCE for the whole series and handed to every
+        # bar. Without them each call re-derived "is bar j a swing" from
+        # scratch, which is the same answer every time and was 77% of an RL
+        # rollout. Identical output either way - see test_exit_replay_speed.
         sw_len = swing_length(self.risk_config)
+        masks = swing_masks(highs_arr, lows_arr, sw_len)
         swing_cache = {}
         for i in range(len(candles)):
-            points = swing_points_at(highs_arr, lows_arr, i, sw_len)
+            points = swing_points_at(highs_arr, lows_arr, i, sw_len, masks=masks)
             if points:
                 swing_cache[i] = points
 

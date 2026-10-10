@@ -412,6 +412,10 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
             "proposed": json.loads(p.proposal_json),
         } for p in props],
         "progress": trainmod.read_progress(agent_id),
+        "run": trainmod.queue.status(agent_id),
+        # Every phase on one poll, so the screen can show the whole pipeline
+        # rather than only the phase someone happens to be looking at.
+        "pipeline": trainmod.read_pipeline(agent_id),
     }
 
 
@@ -556,6 +560,52 @@ async def training_progress(agent_id: str):
     return trainmod.queue.status(agent_id)
 
 
+@router.post("/agents/{agent_id}/reset-training")
+async def reset_training(agent_id: str, db: AsyncSession = Depends(get_db)):
+    """Un-stick an agent whose run died with the process that owned it.
+
+    THE SITUATION THIS EXISTS FOR
+    `/train` writes `status = "TRAINING"` to the database, and the only thing
+    that ever writes it back is `/collect`, which an admin presses after the
+    run finishes. The worker is a child of the API process, so restarting the
+    backend - a deploy, a crash, a reboot - leaves the row saying TRAINING
+    with nothing running and no button that clears it. The screen then
+    disables every control for a run that ended hours ago, forever.
+
+    This refuses while the run still looks alive, so it cannot be used to
+    paper over a job that is simply slow. Where it lands depends on what is
+    on disk, because that is what `/collect` reads: a finished run left its
+    policy there and is genuinely TRAINED-able, an interrupted one did not
+    and is back to a DRAFT that needs running again.
+    """
+    row = await rlreg.get_agent(db, agent_id)
+    if row is None:
+        raise HTTPException(404, f"no agent {agent_id}")
+    if row.status != "TRAINING":
+        return {"agent_id": agent_id, "status": row.status, "changed": False,
+                "note": "not stuck - nothing to reset"}
+
+    st = trainmod.queue.status(agent_id)
+    if st["looks_alive"]:
+        age = (st.get("progress") or {}).get("age_s")
+        raise HTTPException(409, (
+            f"this run still looks alive - it last reported "
+            f"{age if age is not None else '?'}s ago. Cancel it if you want it "
+            f"stopped; resetting a running job would leave two of them writing "
+            f"to the same files."))
+
+    has_policy = trainmod.load_policy(agent_id) is not None
+    row.status = "TRAINED" if has_policy else "DRAFT"
+    await db.commit()
+    return {
+        "agent_id": agent_id, "status": row.status, "changed": True,
+        "note": ("the run finished and left a policy on disk - press Collect to "
+                 "store it" if has_policy else
+                 "the run was interrupted before it wrote a policy - its data "
+                 "sources are still attached, so start it again"),
+    }
+
+
 @router.post("/agents/{agent_id}/cancel")
 async def cancel_training(agent_id: str):
     """Ask a running job to stop at the next candidate.
@@ -584,17 +634,31 @@ async def collect_training(agent_id: str, db: AsyncSession = Depends(get_db)):
     row = await rlreg.get_agent(db, agent_id)
     if row is None:
         raise HTTPException(404, f"no agent {agent_id}")
+    prog = trainmod.phase_progress(agent_id, "collect")
+    prog.set(stage="reading", pct=10.0, stage_detail="reading the policy from disk")
     loaded = trainmod.load_policy(agent_id)
     if loaded is None:
+        prog.set(stage="failed", error="no trained policy on disk yet")
         raise HTTPException(409, "no trained policy on disk yet")
     policy, scaler = loaded
     spec = AgentSpec.from_dict(json.loads(row.spec_json))
-    result = trainmod.queue.result(agent_id) or {}
+    # The in-memory future first, then the file the worker wrote. After a
+    # restart only the file survives, and without this fallback collecting
+    # would overwrite a good run's record with `{}`.
+    result = trainmod.queue.result(agent_id) or trainmod.load_training(agent_id) or {}
     trained_on = result.get("trained_on") or json.loads(row.trained_on_json or "[]")
     await rlreg.save_agent(db, agent_id=agent_id, spec=spec, policy=policy, scaler=scaler,
                            trained_on=trained_on, training=result,
                            optimiser=row.optimiser or "", status="TRAINED")
     await db.commit()
+    prog.set(stage="complete", pct=100.0, policy_hash=policy.content_hash,
+             folds=len((result or {}).get("results") or []),
+             recovered_from_disk=not bool(trainmod.queue.result(agent_id)))
+    prog.event(
+        f"stored policy {policy.content_hash} with "
+        f"{len((result or {}).get('results') or [])} fold result(s)"
+        + ("" if trainmod.queue.result(agent_id)
+           else " - recovered from disk, this process did not run the job"))
     return {"agent_id": agent_id, "policy_hash": policy.content_hash,
             "scaler_fitted_on": scaler.fitted_on,
             "note": "call /distil to build the charter, then /validate to run the gate"}
@@ -615,8 +679,6 @@ async def distil_charter(agent_id: str, body: RunIn, db: AsyncSession = Depends(
     fidelity with which those gates reproduce the policy's own decisions. Below
     the gate's floor the charter is decoration and validation will reject it.
     """
-    import asyncio
-
     row = await rlreg.get_agent(db, agent_id)
     if row is None:
         raise HTTPException(404, f"no agent {agent_id}")
@@ -625,18 +687,27 @@ async def distil_charter(agent_id: str, body: RunIn, db: AsyncSession = Depends(
         raise HTTPException(409, "train the agent first")
     policy, scaler = loaded
     spec = AgentSpec.from_dict(json.loads(row.spec_json))
+    prog = trainmod.phase_progress(agent_id, "distil")
 
     def work():
         from backend.rl import distill
         from backend.rl import env as E
+        prog.set(stage="loading", pct=5.0, stage_detail="reading the bars")
+        prog.event("loading bars")
         frames = dsmod.load_frames(body.datasets, spec)
         if not frames:
             raise ValueError("no bars - supply a dataset per pre-registered symbol")
         symbol = next(iter(frames))
+        prog.set(stage="replaying", pct=25.0,
+                 stage_detail="replaying the policy to collect its decisions")
+        prog.event(f"{symbol}: {len(frames[symbol]):,} bars - replaying the policy")
         data = E.EpisodeData.build(symbol, spec.timeframe, frames[symbol], spec.features)
         env = E.TradingEnv(spec, data, body.risk_config or
                            E.default_risk_config(symbol), scaler=scaler)
         ep = env.rollout(policy, transitions=True)
+        prog.set(stage="distilling", pct=75.0,
+                 stage_detail="turning the weights into readable gates")
+        prog.event(f"{ep.breakdown.n_trades} trades replayed - fitting the gates")
         return distill.distil(
             policy, env.Z, data.names, spec, agent_id=agent_id,
             trade_bars=distill.trade_bars_from([ep]),
@@ -646,6 +717,8 @@ async def distil_charter(agent_id: str, body: RunIn, db: AsyncSession = Depends(
     try:
         charter, coverage = await asyncio.to_thread(work)
     except Exception as exc:                            # noqa: BLE001
+        prog.set(stage="failed", error=f"{type(exc).__name__}: {exc}")
+        prog.event(f"FAILED: {type(exc).__name__}: {exc}")
         raise HTTPException(400, f"{type(exc).__name__}: {exc}") from exc
 
     existing = await rlreg.list_charters(db, agent_id)
@@ -658,19 +731,39 @@ async def distil_charter(agent_id: str, body: RunIn, db: AsyncSession = Depends(
     await rlreg.save_charter(db, charter)
     row.trained_on_json = json.dumps(coverage)
     await db.commit()
+    # `validation` is the distiller's own note about the charter - how
+    # faithfully its gates reproduce the policy's decisions, and on how many
+    # trades. It is a dict, not a number, so it is reported as it stands.
+    note = charter.validation if isinstance(charter.validation, dict) else {}
+    prog.set(stage="complete", pct=100.0, version=charter.version,
+             gates=len(charter.gates or []), tiers=len(charter.tiers or []),
+             **{k: v for k, v in note.items() if isinstance(v, (int, float, str))})
+    prog.event(
+        f"charter v{charter.version}: {len(charter.gates or [])} gates, "
+        f"{len(charter.tiers or [])} tier(s)"
+        + (f", fidelity {note['fidelity']:.1%}"
+           if isinstance(note.get("fidelity"), (int, float)) else ""))
     return charter.to_dict() | {"english": charter.english()}
+
+
+# Strong references to in-flight background jobs. See the note where it is
+# added to.
+_BACKGROUND: set = set()
 
 
 @router.post("/agents/{agent_id}/validate")
 async def run_gate(agent_id: str, body: RunIn, db: AsyncSession = Depends(get_db)):
-    """Run the whole validation gate and store the report, pass or fail.
+    """Start the validation gate. Returns at once; watch the phase progress.
 
-    Runs in a worker thread, not on the event loop - it is dozens of engine
-    runs. Rejections are STORED: the record of what did not work is worth more
-    than another candidate, and it stops the same idea being retried as new.
+    NOT a request that waits for the answer. The §6.9 run took 32 minutes on
+    78,895 bars, and a 32-minute HTTP request is one a proxy will cut, a
+    browser will abandon, and nobody can tell apart from a hang. It now runs
+    as a background task that reports every stage and every check to
+    `phase-validate.json`, which is what the screen polls.
+
+    Rejections are STORED: the record of what did not work is worth more than
+    another candidate, and it stops the same idea being retried as new.
     """
-    import asyncio
-
     row = await rlreg.get_agent(db, agent_id)
     if row is None:
         raise HTTPException(404, f"no agent {agent_id}")
@@ -685,35 +778,84 @@ async def run_gate(agent_id: str, body: RunIn, db: AsyncSession = Depends(get_db
         charter = charters[0] if charters else None
     training = json.loads(row.training_json) if row.training_json else None
 
+    prog = trainmod.phase_progress(agent_id, "validate")
+    existing = trainmod.read_phase(agent_id, "validate")
+    # The shared terminal list, not a local copy of two of them. `scored` is
+    # the stage the gate sets for itself before the caller stores the result,
+    # so a process that died in that gap would leave a file this guard read
+    # as "still running" - and refuse every later run, forever.
+    if (existing and not existing.get("stale")
+            and existing.get("stage") not in trainmod.TERMINAL_STAGES):
+        raise HTTPException(409, "the gate is already running for this agent")
+
+    optimiser = row.optimiser or ""
+
     def work():
         from backend.rl import env as E
         from backend.rl import validate as V
+        prog.set(stage="loading", stage_detail="reading the bars", pct=0.0)
+        prog.event("loading bars")
         frames = dsmod.load_frames(body.datasets, spec)
         if not frames:
             raise ValueError("no bars - supply a dataset per pre-registered symbol")
         symbol = next(iter(frames))
+        prog.event(f"{symbol}: {len(frames[symbol]):,} bars")
         data = E.EpisodeData.build(symbol, spec.timeframe, frames[symbol], spec.features)
         run = _rehydrate_run(training)
-        rep = V.validate(spec, policy, scaler, data,
-                         body.risk_config or E.default_risk_config(symbol),
-                         agent_id=agent_id, training_run=run, charter=charter,
-                         optimiser=row.optimiser or "")
-        return rep
+        return V.validate(spec, policy, scaler, data,
+                          body.risk_config or E.default_risk_config(symbol),
+                          agent_id=agent_id, training_run=run, charter=charter,
+                          optimiser=optimiser, progress=prog)
 
-    try:
-        report = await asyncio.to_thread(work)
-    except Exception as exc:                            # noqa: BLE001
-        raise HTTPException(400, f"{type(exc).__name__}: {exc}") from exc
+    async def run_and_store():
+        """The gate, then the one database write it earns.
 
-    from backend.rl import notify as rl_notify
-    rl_notify.validation_finished(agent_id, report.to_dict())
-    row.validation_json = json.dumps(report.to_dict())
-    row.status = "VALIDATED" if report.passed else "REJECTED"
-    if not report.passed:
-        row.reject_reason = ("failed the gate: "
-                             + ", ".join(c.name for c in report.failures))
-    await db.commit()
-    return report.to_dict() | {"text": report.text()}
+        Its own session: the request's `db` is closed the moment this
+        endpoint returns, which is long before the gate finishes.
+        """
+        from backend.data.database import async_session
+
+        try:
+            report = await asyncio.to_thread(work)
+        except Exception as exc:                        # noqa: BLE001
+            prog.set(stage="failed", error=f"{type(exc).__name__}: {exc}")
+            prog.event(f"FAILED: {type(exc).__name__}: {exc}")
+            return
+        try:
+            async with async_session() as session:
+                r = await rlreg.get_agent(session, agent_id)
+                if r is not None:
+                    r.validation_json = json.dumps(report.to_dict())
+                    r.status = "VALIDATED" if report.passed else "REJECTED"
+                    if not report.passed:
+                        r.reject_reason = ("failed the gate: "
+                                           + ", ".join(c.name for c in report.failures))
+                    await session.commit()
+            from backend.rl import notify as rl_notify
+            rl_notify.validation_finished(agent_id, report.to_dict())
+        except Exception as exc:                        # noqa: BLE001
+            # The report itself survived; only storing it did not. Say so
+            # rather than reporting a gate failure that did not happen.
+            prog.event(f"the gate finished but storing it failed: {exc}")
+        prog.set(stage="complete", pct=100.0, passed=report.passed,
+                 trades=report.trades, expectancy_r=report.expectancy_r,
+                 failures=[c.name for c in report.failures],
+                 skipped=[c.name for c in report.skipped])
+        prog.event(
+            f"{'PASSED' if report.passed else 'REJECTED'} - {report.trades} trades at "
+            f"{(report.expectancy_r or 0.0):+.4f}R"
+            + (f". Failed: {', '.join(c.name for c in report.failures)}"
+               if report.failures else ""))
+
+    # Held in a module-level set, not dropped on the floor. The event loop
+    # keeps only a WEAK reference to a task, so a bare `create_task(...)`
+    # whose result nobody keeps can be garbage-collected mid-run - and a
+    # 32-minute job is a long time to be eligible for collection.
+    task = asyncio.get_running_loop().create_task(run_and_store())
+    _BACKGROUND.add(task)
+    task.add_done_callback(_BACKGROUND.discard)
+    return {"agent_id": agent_id, "started": True,
+            "note": "the gate runs in the background - watch the Validate phase"}
 
 
 def _rehydrate_run(training: dict | None):

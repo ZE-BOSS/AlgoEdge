@@ -746,12 +746,117 @@ def load_policy(agent_id: str, root: Path | None = None
         return None
 
 
-def read_progress(agent_id: str, root: Path | None = None) -> dict:
-    f = Path(root or ARTEFACT_ROOT) / agent_id / "progress.json"
+# -- phases ----------------------------------------------------------------
+#
+# Training is one of four things that happen to an agent, and it was the only
+# one that said anything while it ran. Collect and Distil are seconds, but the
+# gate took 32 minutes on real bars with no output at all - one HTTP request
+# held open, long enough to hit a proxy timeout, and indistinguishable from a
+# hang.
+#
+# Each phase writes its OWN file. One shared file would be simpler to read and
+# would have two processes writing it - the training worker is a child
+# process, the gate runs in the API - so a crash mid-write could take the
+# training record with it. Separate files, merged on read.
+
+PHASES = ("train", "collect", "distil", "validate")
+
+# A phase sitting on one of these has finished and is never "stale", however
+# long ago it was. "scored" is the gate having an answer but not yet having
+# had it stored, which is the caller's job.
+TERMINAL_STAGES = ("complete", "failed", "cancelled", "scored")
+
+
+def phase_path(agent_id: str, name: str, root: Path | None = None) -> Path:
+    """Where a phase keeps its state. Training keeps its original name."""
+    d = Path(root or ARTEFACT_ROOT) / agent_id
+    return d / ("progress.json" if name == "train" else f"phase-{name}.json")
+
+
+def phase_progress(agent_id: str, name: str, root: Path | None = None) -> "Progress":
+    f = phase_path(agent_id, name, root)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    return Progress(f)
+
+
+def read_phase(agent_id: str, name: str, root: Path | None = None) -> dict:
+    f = phase_path(agent_id, name, root)
+    try:
+        state = json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    try:
+        age = max(0.0, time.time() - f.stat().st_mtime)
+        state["age_s"] = round(age, 1)
+        state["stale"] = (age > STALE_AFTER_S
+                          and state.get("stage") not in TERMINAL_STAGES)
+    except OSError:
+        pass
+    return state
+
+
+def read_pipeline(agent_id: str, root: Path | None = None) -> dict:
+    """Every phase at once, plus which one is running.
+
+    The screen asks for this on one poll rather than four, and "which phase
+    is live" is a question about all of them together: a phase is running if
+    it has started, has not finished, and is still writing.
+    """
+    out = {n: read_phase(agent_id, n, root) for n in PHASES}
+    live = [n for n, st in out.items()
+            if st and not st.get("stale")
+            and st.get("stage") not in (None, *TERMINAL_STAGES)]
+    return {"phases": out, "running": live[0] if live else None}
+
+
+def load_training(agent_id: str, root: Path | None = None) -> dict:
+    """The finished run's own record, from disk.
+
+    The worker writes `training.json` beside the policy, and until now
+    nothing read it: `/collect` took the result from the in-memory future
+    instead. Those futures die with the API process, so collecting after a
+    restart stored an EMPTY training record over a perfectly good run -
+    losing the per-fold table, the seed dispersion, and with them the PBO and
+    seed-agreement checks, which then have nothing to read. The files were on
+    disk the whole time.
+    """
+    f = Path(root or ARTEFACT_ROOT) / agent_id / "training.json"
     try:
         return json.loads(f.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+# A run that has not written anything for this long is not running. The
+# slowest single step is one candidate evaluation over a full fold, which is
+# tens of seconds on the biggest frames this project uses; three minutes is
+# several times that and still short enough to notice.
+STALE_AFTER_S = 180
+
+
+def read_progress(agent_id: str, root: Path | None = None) -> dict:
+    """The run's own state, plus how long ago it last said anything.
+
+    `age_s` is the whole answer to "is this still going, or did it die?" -
+    and it is the only honest one available after a restart. The training
+    worker is a child of the API process, so `pm2 restart` either kills it or
+    orphans it, and which of the two happened is not knowable from inside the
+    new process. The file's mtime IS knowable: a number that keeps rising
+    means something is still writing, and one that has stopped means nothing
+    is, whichever way the child went.
+    """
+    f = Path(root or ARTEFACT_ROOT) / agent_id / "progress.json"
+    try:
+        state = json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    try:
+        age = max(0.0, time.time() - f.stat().st_mtime)
+        state["age_s"] = round(age, 1)
+        state["stale"] = age > STALE_AFTER_S and state.get("stage") != "complete"
+    except OSError:
+        pass
+    return state
 
 
 # -- the queue --------------------------------------------------------------
@@ -795,11 +900,24 @@ class TrainingQueue:
         return agent_id
 
     def status(self, agent_id: str) -> dict:
+        """What THIS process knows about the job, which is not everything.
+
+        `state` is "unknown" whenever the API has been restarted since the job
+        was submitted, because the futures live in memory and the worker was a
+        child of the process that died. "unknown" therefore means "this
+        backend did not start that run", not "that run is not happening" -
+        the progress file's `age_s` is what distinguishes the two.
+        """
         f = self._futures.get(agent_id)
         state = "unknown"
         if f is not None:
             state = "done" if f.done() else "running" if f.running() else "queued"
-        return {"agent_id": agent_id, "state": state, "progress": read_progress(agent_id)}
+        prog = read_progress(agent_id)
+        return {"agent_id": agent_id, "state": state, "progress": prog,
+                "owned_by_this_process": f is not None,
+                "looks_alive": bool(state in ("running", "queued")
+                                    or (prog and not prog.get("stale")
+                                        and prog.get("stage") != "complete"))}
 
     def cancel(self, agent_id: str) -> bool:
         request_cancel(agent_id)

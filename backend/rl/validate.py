@@ -42,6 +42,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+from typing import Any
+
 from backend.rl import env as E
 from backend.rl import leakguard as lg
 from backend.rl import policy as pol
@@ -106,6 +108,9 @@ class Report:
     symbols_attempted: list = field(default_factory=list)
     cost_model: dict = field(default_factory=dict)
     created_at: str = ""
+    # Not part of the report's content: excluded from compare and repr so a
+    # watcher cannot change what two reports mean when held side by side.
+    on_check: Any = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         self.created_at = self.created_at or datetime.now(timezone.utc).isoformat()
@@ -136,6 +141,13 @@ class Report:
 
     def add(self, check: Check) -> Check:
         self.checks.append(check)
+        if self.on_check is not None:
+            try:
+                self.on_check(check)
+            except Exception:          # noqa: BLE001
+                # A broken watcher must never fail the gate. The report is
+                # the product; telling someone about it is not.
+                pass
         return check
 
     def to_dict(self) -> dict:
@@ -331,9 +343,45 @@ def t_stat(rs) -> tuple[float, int]:
 # -- the gate ---------------------------------------------------------------
 
 
+# The gate's stages, in the order they run, with a rough share of the total
+# time each one takes. The shares are only used to turn "stage 4 of 8" into a
+# percentage that does not jump around; they came from timing the §6.9 run on
+# 78,895 Crash 1000 bars.
+GATE_STAGES = (
+    ("rollouts", "running the policy over every purged test fold", 0.30),
+    ("sample", "sample size, seeds and seed dispersion", 0.01),
+    ("pbo", "probability of backtest overfitting", 0.02),
+    ("dsr", "deflated Sharpe against the number of attempts", 0.01),
+    ("cost", "re-running at twice the measured cost", 0.15),
+    ("regime", "splitting the history into independent windows", 0.15),
+    ("broker", "the same rule on a second broker's bars", 0.02),
+    ("adherence", "scoring the policy against its own charter", 0.02),
+    ("exit", "what the exit head is worth on its own", 0.10),
+    ("base", "whether it beats the strategy it was built on", 0.05),
+    ("leak", "prefix-stability of every feature, at six cuts", 0.02),
+    ("shuffled", "the shuffled-feature control", 0.08),
+    ("shifted", "the one-bar-late control", 0.07),
+)
+_STAGE_AT = {}
+_acc = 0.0
+for _k, _d, _w in GATE_STAGES:
+    _STAGE_AT[_k] = (_acc, _d)
+    _acc += _w
+
+
+def _say(progress, key: str, extra: str = "") -> None:
+    """Mark a gate stage as started, if anyone is listening."""
+    if progress is None:
+        return
+    pct_from, desc = _STAGE_AT.get(key, (0.0, key))
+    progress.set(stage=key, stage_detail=desc, pct=round(pct_from * 100, 1))
+    progress.event(f"{desc}{(' - ' + extra) if extra else ''}")
+
+
 def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeData,
              risk_config: dict, *, agent_id: str, training_run=None, charter=None,
-             broker_data: dict | None = None, optimiser: str = "") -> Report:
+             broker_data: dict | None = None, optimiser: str = "",
+             progress=None) -> Report:
     """Run the whole gate. Nothing here stops early on a failure.
 
     `broker_data` maps a broker name to another `EpisodeData` for the same
@@ -346,12 +394,32 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
                  mode=spec.mode, base_strategy=spec.base_strategy,
                  symbols_attempted=list(spec.attempted_symbols or spec.symbols))
 
+    if progress is not None:
+        done = []
+
+        def _watch(check):
+            done.append(check)
+            verdict = "SKIP" if check.skipped else "PASS" if check.passed else "FAIL"
+            shown = "" if check.value is None else f" {check.value:+.4f}"
+            against = "" if check.bar is None else f" (bar {check.bar:g})"
+            progress.set(checks_done=len(done),
+                         checks=[c.to_dict() for c in done])
+            progress.event(f"{verdict} {check.name}{shown}{against}"
+                           + (f" - {check.detail}" if check.detail else ""))
+
+        rep.on_check = _watch
+
     folds = E.cpcv_folds(len(data), spec.cpcv_groups, spec.cpcv_test_groups,
                          spec.embargo_bars)[:spec.max_cpcv_paths]
+    _say(progress, "rollouts", f"{len(folds)} purged paths over {len(data):,} bars")
 
     # -- the headline run, on every test fold ------------------------------
     test_eps, rs = [], []
-    for f in folds:
+    for i, f in enumerate(folds):
+        if progress is not None:
+            progress.set(fold=f.path, folds_done=i, folds_total=len(folds),
+                         pct=round(100 * _STAGE_AT["rollouts"][0]
+                                   + 30.0 * i / max(1, len(folds)), 1))
         for a, b in f.test:
             env = E.TradingEnv(spec, data.slice(a, b), risk_config,
                                scaler=scaler, charter=charter)
@@ -364,6 +432,7 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
     from backend.rl.train import sharpe_of
     rep.sharpe = sharpe_of(rs)
 
+    _say(progress, "sample", f"{rep.trades} trades at {rep.expectancy_r:+.4f}R" if rep.expectancy_r is not None else f"{rep.trades} trades")
     # -- sample size -------------------------------------------------------
     rep.add(Check("sample size", rep.trades >= BARS["min_trades"], float(rep.trades),
                   float(BARS["min_trades"]),
@@ -416,6 +485,7 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
                   f"Sharpe {rep.sharpe:+.3f} against {dsr['expected_max']:+.3f} expected from "
                   f"{trials} attempts on noise; P(real) {dsr['probability']:.1%}"))
 
+    _say(progress, "cost")
     # -- cost stress -------------------------------------------------------
     stressed = []
     for f in folds[:max(1, len(folds) // 2)]:
@@ -429,6 +499,7 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
                   stressed_mean, 0.0,
                   "the measured cost model priced twice as high"))
 
+    _say(progress, "regime")
     # -- regime split ------------------------------------------------------
     n = len(data)
     wins = 0
@@ -541,6 +612,7 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
         rep.add(Check("beats its base strategy", True, skipped=True,
                       detail="mode A - this agent has no base strategy to beat"))
 
+    _say(progress, "leak")
     # -- the leak probe ----------------------------------------------------
     try:
         from backend.rl.features import assert_registry_causal
@@ -550,6 +622,7 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
     except lg.LookaheadError as exc:
         rep.add(Check("leak probe", False, None, None, str(exc)[:200]))
 
+    _say(progress, "shuffled")
     # -- shuffled labels ---------------------------------------------------
     shuffled = []
     for f in folds[:max(1, len(folds) // 2)]:
@@ -564,6 +637,7 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
                   v.detail if v else "no trades on the shuffled control",
                   skipped=not shuffled))
 
+    _say(progress, "shifted")
     # -- shifted entry -----------------------------------------------------
     shifted = []
     for f in folds:
@@ -577,6 +651,22 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
                   float(np.mean(shifted)) if shifted else None, None,
                   sv.detail if sv else "not enough trades to compare",
                   skipped=sv is None))
+
+
+    if progress is not None:
+        # "scored" rather than "complete": the gate has an answer, but
+        # storing it is the caller's job and has not happened yet. The route
+        # overwrites this with "complete" once the row is written.
+        progress.set(stage="scored", pct=100.0, passed=rep.passed,
+                     trades=rep.trades, expectancy_r=rep.expectancy_r,
+                     checks_done=len(rep.checks),
+                     failures=[c.name for c in rep.failures],
+                     skipped_checks=[c.name for c in rep.skipped])
+        progress.event(
+            f"{'PASSED' if rep.passed else 'REJECTED'}: {rep.trades} trades at "
+            f"{(rep.expectancy_r or 0.0):+.4f}R, "
+            f"{len(rep.failures)} failed / {len(rep.skipped)} skipped of "
+            f"{len(rep.checks)} checks")
 
     return rep
 
