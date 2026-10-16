@@ -112,6 +112,32 @@ class Investor(Base):
     # the investor's own dashboard and notification settings (investor/prefs.py)
     preferences = Column(Text)
 
+    # ── who introduced them ───────────────────────────────────────────
+    #
+    # An investor may bring in other investors and earn a share of what the
+    # fund makes from them. `referred_by` is that link, and it points at
+    # another INVESTOR rather than a user: the person earning is themselves
+    # someone with money in the pool.
+    #
+    # Nullable and self-referential, set either by the affiliate link used at
+    # application time or by an admin afterwards - people forget to use the
+    # link, and refusing to fix that later would make the feature useless in
+    # practice.
+    #
+    # A cycle here (A under B under A) would make the upline walk in
+    # `referrals.py` loop forever, so every write goes through
+    # `referrals.set_referrer`, which refuses one. The column cannot enforce
+    # that on its own.
+    referred_by = Column(String(36), ForeignKey("investors.id"), index=True)
+    # Their own affiliate code, the one in the link they hand out. Unique and
+    # stable: it ends up in other people's browsers and in printed material,
+    # so it is never regenerated once issued.
+    referral_code = Column(String(16), unique=True, index=True)
+    referred_at = Column(DateTime)
+    # How the link was made, for the audit trail: LINK (they used the code) or
+    # ADMIN (someone attached them afterwards).
+    referral_source = Column(String(16))
+
     created_at = Column(DateTime, server_default=func.now())
     activated_at = Column(DateTime)
     closed_at = Column(DateTime)
@@ -360,6 +386,30 @@ class FundSettings(Base):
     notice_days = Column(Integer, nullable=False, default=7)
     base_currency = Column(String(8), nullable=False, default="USD")
 
+    # ── what an introducer earns ──────────────────────────────────────
+    #
+    # Versioned with every other term, and for the same reason: an investor
+    # was introduced under one arrangement and must not be moved onto another
+    # one retroactively.
+    #
+    # `referral_model` decides WHO PAYS, and it is the whole business
+    # question:
+    #   HOUSE_FEE        the introducer is paid out of the management and
+    #                    performance fees WE collect from their referral. The
+    #                    referred investor pays exactly what any other
+    #                    investor pays; our own take is what shrinks.
+    #   INVESTOR_PROFIT  the referred investor's profit is split three ways
+    #                    and they net less than an investor nobody
+    #                    introduced. This changes what a given investor is
+    #                    charged depending on who brought them, so it has to
+    #                    be disclosed at application time.
+    # OFF disables referral earnings without unpicking the tree.
+    referral_model = Column(String(16), nullable=False, default="HOUSE_FEE")
+    # Level 1 is the investor who introduced them; level 2 is whoever
+    # introduced THAT investor. Two levels only - deliberately not unlimited.
+    referral_l1_pct = Column(Numeric(9, 4), nullable=False, default=0)
+    referral_l2_pct = Column(Numeric(9, 4), nullable=False, default=0)
+
     # Where investors are told to send a bank transfer.
     bank_name = Column(String(120))
     bank_account_number = Column(String(64))
@@ -372,6 +422,48 @@ class FundSettings(Base):
 
 
 # ── who we are, in law ───────────────────────────────────────────────────────
+
+class ReferralEarning(Base):
+    """What one investor earned because of someone they introduced.
+
+    A LEDGER, not a running total. Every row names the fee accrual it came
+    out of, the rate in force at the time and the level it was earned at, so
+    "why am I owed this" is answerable from the row itself rather than by
+    re-running a calculation against today's settings. Totals are summed from
+    here; they are never stored and edited.
+
+    `source_investor_id` is the person whose fees produced it. An investor is
+    allowed to see their own earnings and the deposits and profits of people
+    below them - that is what they are being paid on - and is never shown
+    anything about the investor ABOVE them beyond the rate they are paying.
+    `investor/referrals.py` is the only place that decides who may see what.
+    """
+    __tablename__ = "referral_earnings"
+
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    # who is owed the money
+    earner_id = Column(String(36), ForeignKey("investors.id"), nullable=False, index=True)
+    # whose activity produced it
+    source_investor_id = Column(String(36), ForeignKey("investors.id"),
+                                nullable=False, index=True)
+    level = Column(Integer, nullable=False)              # 1 = direct, 2 = their referral
+    # the accrual this was derived from. One earning per (accrual, earner),
+    # which is what makes re-running a period safe.
+    fee_accrual_id = Column(BigInteger, ForeignKey("fee_accruals.id"), index=True)
+    model = Column(String(16), nullable=False)           # HOUSE_FEE / INVESTOR_PROFIT
+    terms_version = Column(Integer)
+    period_start = Column(Date)
+    period_end = Column(Date)
+    basis_amount = Column(MONEY, nullable=False)         # what the rate was applied to
+    rate_pct = Column(Numeric(9, 4), nullable=False)
+    amount = Column(MONEY, nullable=False)
+    # accrued -> settled. Settling is an admin action with a cash movement
+    # behind it; accruing one does not move money on its own.
+    state = Column(String(20), nullable=False, default="accrued", index=True)
+    settled_at = Column(DateTime)
+    note = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
 
 class CompanyProfile(Base):
     """The legal identity every outward-facing surface renders from.
@@ -647,6 +739,13 @@ class Application(Base):
     # SERVER accepted it, not that a browser rendered a checkbox.
     date_of_birth = Column(Date)
     age_confirmed_at = Column(DateTime)
+    # The affiliate code the applicant arrived with, exactly as typed, and the
+    # investor it resolved to at the time. Both are kept: a code that did not
+    # resolve is still worth showing the admin ("used ABCD1234, not ours"),
+    # and it is applied to the new investor only when the application is
+    # ACCEPTED - an application is not yet an account.
+    referral_code = Column(String(16))
+    referred_by = Column(String(36))
     created_at = Column(DateTime, server_default=func.now(), index=True)
     decided_by = Column(String(36))
 

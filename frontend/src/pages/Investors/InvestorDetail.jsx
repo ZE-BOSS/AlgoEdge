@@ -337,6 +337,97 @@ function Terms({ investor, terms }) {
   );
 }
 
+/**
+ * Who introduced this investor, who they introduced, and what is owed.
+ *
+ * The admin sees both directions. The investor, in their own app, sees only
+ * downwards plus the rate they pay - that rule lives on the server.
+ *
+ * "Place under" exists because people apply without using the link. Earnings
+ * already accrued stay with the placement they were earned under; only later
+ * fee periods follow a move.
+ */
+function Referrals({ investor }) {
+  const q = useQuery({ queryKey: ['inv', 'referrals', investor.id],
+                       queryFn: () => inv.referrals(investor.id) });
+  const place = useInvAction((b) => inv.setReferrer(investor.id, b));
+  const [err, setErr] = useState(null);
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">Referrals</span>
+        <ActionForm label="Place under…" icon={Pencil} submitLabel="Place"
+                    fields={[{ name: 'referral_code', label: "Introducer's referral code", required: true,
+                               hint: "The code shown on the introducer’s own Referrals card." }]}
+                    onSubmit={(b) => place.mutateAsync(b).catch((e) => { setErr(e); throw e; })} />
+      </div>
+      <QueryState q={q}>
+        {(d) => (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div className="detail-pairs inv-pairs">
+              <span>Their code</span><span><code>{d.referral_code}</code></span>
+              <span>How they were placed</span><span>{d.referral_source || (d.upline.length ? '—' : 'Not introduced by anyone')}</span>
+              {d.upline.map((u) => (
+                <FragmentPair key={u.id}
+                              label={u.level === 1 ? 'Introduced by' : "Introducer's introducer"}
+                              value={<Link to={`/investors/p/${u.id}`}>{u.name || u.id}</Link>} />
+              ))}
+            </div>
+            {d.upline.length > 0 && (
+              <div>
+                <button className="btn btn-secondary btn-sm"
+                        onClick={() => place.mutateAsync({ referrer_id: null }).catch(setErr)}>
+                  <Undo2 size={14} /> Detach from introducer
+                </button>
+              </div>
+            )}
+            <ErrorLine error={err || place.error} />
+
+            <div className="kpi-label">People they introduced</div>
+            {d.downline.length ? (
+              <div className="table-wrapper"><table>
+                <thead><tr><th>Level</th><th>Name</th><th>Status</th>
+                  <th className="num">Deposited</th><th className="num">Value</th><th className="num">Profit</th></tr></thead>
+                <tbody>{d.downline.map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.level === 1 ? 'Direct' : 'Their referral'}</td>
+                    <td><Link to={`/investors/p/${p.id}`}>{p.name}</Link></td>
+                    <td><StateBadge state={p.status} /></td>
+                    <td className="num">{fmtMoney(p.deposited)}</td>
+                    <td className="num">{fmtMoney(p.current_value)}</td>
+                    <td className="num">{fmtMoney(p.profit, { sign: true })}</td>
+                  </tr>))}
+                </tbody></table></div>
+            ) : <Empty>Nobody yet.</Empty>}
+
+            <div className="kpi-label">What they have earned</div>
+            {d.earned.length ? (
+              <div className="table-wrapper"><table>
+                <thead><tr><th>Period</th><th>Level</th><th>Model</th><th className="num">Basis</th>
+                  <th className="num">Rate</th><th className="num">Amount</th><th>State</th></tr></thead>
+                <tbody>{d.earned.map((e) => (
+                  <tr key={e.id}>
+                    <td>{e.period_start} → {e.period_end}</td>
+                    <td>{e.level}</td><td>{e.model}</td>
+                    <td className="num">{fmtMoney(e.basis)}</td>
+                    <td className="num">{Number(e.rate_pct)}%</td>
+                    <td className="num">{fmtMoney(e.amount)}</td>
+                    <td><StateBadge state={e.state} /></td>
+                  </tr>))}
+                </tbody></table></div>
+            ) : <Empty>No referral earnings yet.</Empty>}
+          </div>
+        )}
+      </QueryState>
+    </div>
+  );
+}
+
+function FragmentPair({ label, value }) {
+  return <><span>{label}</span><span>{value}</span></>;
+}
+
 function Table({ title, rows, cols, empty }) {
   return (
     <div className="card">
@@ -386,6 +477,8 @@ export default function InvestorDetail() {
               <CapitalView c={d.capital} />
               <TradeShares t={d.trades} />
             </div>
+
+            <Referrals investor={d.investor} />
 
             <div className="grid-2">
               <div className="card">

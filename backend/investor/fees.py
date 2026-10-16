@@ -297,6 +297,14 @@ async def charge(session, line: FeeLine, *, period_start: date, period_end: date
                              period_start=period_start, period_end=period_end, waived=waive,
                              actor_id=actor_id, basis=max(D("0"), line.profit - line.high_water_mark),
                              rate=line.performance_pct, mark=line.new_high_water_mark))
+    # What this period earned whoever introduced the investor (two levels at
+    # most). Same transaction on purpose: collecting a fee and failing to
+    # record what we owe the introducer must not be able to happen separately.
+    from backend.investor import referrals as refmod
+    await refmod.accrue(session, investor_id=line.investor_id, accruals=out,
+                        period_profit=line.period_profit, period_start=period_start,
+                        period_end=period_end, nav_price=line.nav, actor_id=actor_id,
+                        waived=waive)
     return out
 
 

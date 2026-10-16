@@ -215,12 +215,66 @@ async def tick(now: datetime | None = None) -> None:
     yesterday = wat.date() - timedelta(days=1)
     # Valuation first: the digest quotes the NAV, and the ledger check is
     # more useful once the day's real figure is in.
-    for job in (broker_valuation, ledger_check, daily_digest):
+    for job in (broker_valuation, ledger_check, daily_digest,
+                trade_aftermath_sweep, signal_outcome_sweep):
         try:
             async with async_session() as s:
                 await job(s, yesterday)
         except Exception as exc:
             logger.error(f"[JOBS] {job.__name__} failed: {exc}")
+
+
+async def trade_aftermath_sweep(session, day) -> dict | None:
+    """Score yesterday's hand-closed trades, and finish scoring older ones.
+
+    A trade the stop or the target closed was decided by the plan; a trade a
+    person or an agent CLOSED is the only decision made by hand, and it was
+    the one never measured. This fills in what the market did next.
+
+    Looks back 30 days rather than at `day` alone, deliberately: a trade
+    closed last night has barely any window yet, and its row stays
+    provisional until the full holding period has elapsed. Rows whose window
+    HAS elapsed are skipped, so the repeat costs a query and nothing more.
+
+    `day` keys the once-a-day claim. What to measure the sweep decides for
+    itself, which is also what makes "Measure now" usable as a backfill.
+    """
+    from backend.services import trade_aftermath as A
+
+    # Once a day, like every other job here. `tick` calls this on EVERY pass
+    # after RUN_AFTER_WAT_HOUR - about ninety times a day - and each run fetches
+    # bars for every unfinished row through the same single MT5 executor the
+    # live bot uses. Without the claim it would compete with live trading for
+    # the terminal all day.
+    run = await _claim(session, "trade_aftermath", day.isoformat())
+    if run is None:
+        return None
+    stats = await A.sweep(session, lookback_days=30, limit=200)
+    run.result = stats
+    await session.commit()
+    if stats.get("measured"):
+        logger.info(f"[JOBS] trade aftermath: {stats}")
+    return stats
+
+
+async def signal_outcome_sweep(session, day) -> dict | None:
+    """Score every recent signal's own plan, so each gate's cost is known.
+
+    Same shape as `trade_aftermath_sweep` and the same reasoning: looks back
+    30 days, skips rows whose window has elapsed, so a repeat is cheap.
+    """
+    from backend.services import signal_outcome as SO
+
+    # Once a day - see trade_aftermath_sweep for why the claim matters.
+    run = await _claim(session, "signal_outcome", day.isoformat())
+    if run is None:
+        return None
+    stats = await SO.sweep(session, lookback_days=30, limit=300)
+    run.result = stats
+    await session.commit()
+    if stats.get("measured"):
+        logger.info(f"[JOBS] signal outcomes: {stats}")
+    return stats
 
 
 async def watch_live() -> int:

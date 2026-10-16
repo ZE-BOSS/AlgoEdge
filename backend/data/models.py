@@ -426,3 +426,125 @@ class UserConfigModel(Base):
     config_json = Column(Text, nullable=False)  # Full UserConfig as JSON
     preset_name = Column(String(30))
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+# ── What happened AFTER a trade was closed by hand ───────────────────────────
+
+class TradeAftermath(Base):
+    """The counterfactual for a trade that a person or an agent closed early.
+
+    WHY THIS TABLE EXISTS
+    A trade that hits its stop or its target needs no second look: the plan
+    decided it. A trade someone CLOSED - because it looked wrong, or because
+    the day ended, or because an agent judged it - has an unanswered question
+    attached to it. Would it have reached the target? How far did it get
+    before it turned? The journal records the exit and nothing after it, so
+    the one decision the operator actually makes by hand is the one decision
+    never scored.
+
+    That is also the single richest training signal available for exit
+    policy: every row is a labelled example of a human or agent exit against
+    what the market went on to do.
+
+    One row per trade, written by `services/trade_aftermath.py`. Rows stay
+    `watch_complete = False` and are revisited until the watch window has
+    fully elapsed, so a trade closed an hour ago is measured again tomorrow
+    rather than being judged on the one hour that existed at the time.
+    """
+    __tablename__ = "trade_aftermath"
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    trade_id = Column(BigInteger, ForeignKey("trades.id", ondelete="CASCADE"),
+                      nullable=False, unique=True, index=True)
+    user_id = Column(String(36), nullable=False, index=True)
+    symbol = Column(String(20), index=True)
+    strategy_id = Column(String(50), index=True)
+    direction = Column(String(10))
+
+    # -- the close being scored ------------------------------------------
+    closed_at = Column(DateTime, index=True)
+    close_reason = Column(String(32), index=True)   # MANUAL, CLIENT, ...
+    closed_by = Column(String(16))                  # USER / AGENT / BOT / UNKNOWN
+    entry_price = Column(Float)
+    exit_price = Column(Float)
+    stop_loss = Column(Float)
+    take_profit = Column(Float)
+    closed_r = Column(Float)        # what the close actually banked, in R
+
+    # -- the watch window -------------------------------------------------
+    watch_until = Column(DateTime)  # closed_at + the max a trade may be held
+    watch_hours = Column(Float)     # how long that window is, for the record
+    watch_complete = Column(Boolean, default=False, index=True)
+    bars_seen = Column(Integer, default=0)
+
+    # -- what the market did next -----------------------------------------
+    hit_tp = Column(Boolean, default=False)
+    tp_at = Column(DateTime)
+    tp_minutes = Column(Integer)    # from the close to the target
+    hit_sl = Column(Boolean, default=False)
+    sl_at = Column(DateTime)
+    sl_minutes = Column(Integer)
+    best_price = Column(Float)      # furthest IN FAVOUR within the window
+    best_r = Column(Float)
+    best_at = Column(DateTime)
+    best_minutes = Column(Integer)
+    r_at_watch_end = Column(Float)  # where it stood when the window ran out
+
+    # -- the verdict, in one word ------------------------------------------
+    # LEFT_MONEY  the trade went on to do materially better than the close
+    # SAVED_LOSS  it went on to the stop, so closing early was right
+    # FAIR        neither, within the noise band
+    verdict = Column(String(16), index=True)
+    forgone_r = Column(Float)       # best_r - closed_r; negative means saved
+    note = Column(Text)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# ── What a signal's own plan would have done ────────────────────────────────
+
+class SignalOutcome(Base):
+    """Every signal scored against its OWN entry, stop and first target.
+
+    WHY THIS EXISTS ALONGSIDE TradeAftermath
+    The trade aftermath scores what someone closed. This scores what the
+    GATES decided. A skipped signal is recorded with the gate that stopped it
+    and nothing more, so nobody can tell whether a filter is saving money or
+    costing it - and earlier research in this project found shipped gates that
+    were actively harmful. One row per signal, taken or skipped, gives:
+
+      * for SKIPPED signals, the counterfactual: what the gate gave up
+      * for TAKEN signals, the plan-as-written outcome, independent of how the
+        trade was later managed - a clean "was the signal right" label
+
+    The fill is ASSUMED at `entry_price` at signal time. A signal whose entry
+    was never actually reached would be scored as if it had been; `note` says
+    so, and that is the main way these numbers can flatter a gate.
+    """
+    __tablename__ = "signal_outcomes"
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    signal_id = Column(BigInteger, ForeignKey("signals.id", ondelete="CASCADE"),
+                       nullable=False, unique=True, index=True)
+    user_id = Column(String(36), nullable=False, index=True)
+    symbol = Column(String(20), index=True)
+    strategy_id = Column(String(50), index=True)
+    timeframe = Column(String(10))
+    direction = Column(String(10))
+    acted_on = Column(Boolean, index=True)
+    skip_gate = Column(String(80), index=True)      # the first clause of skip_reason
+    signal_time = Column(DateTime, index=True)
+    entry_price = Column(Float)
+    stop_loss = Column(Float)
+    take_profit = Column(Float)                     # tp1: the nearest target
+    watch_until = Column(DateTime)
+    watch_hours = Column(Float)
+    watch_complete = Column(Boolean, default=False, index=True)
+    bars_seen = Column(Integer, default=0)
+    hit_tp = Column(Boolean, default=False)
+    tp_minutes = Column(Integer)
+    hit_sl = Column(Boolean, default=False)
+    sl_minutes = Column(Integer)
+    best_r = Column(Float)
+    # What following the plan would have banked: +R at the target, -1 at the
+    # stop, or where it stood when the window ran out.
+    outcome_r = Column(Float)
+    ambiguous_bar = Column(Boolean, default=False)
+    note = Column(Text)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

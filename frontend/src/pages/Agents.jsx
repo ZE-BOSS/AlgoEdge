@@ -1318,6 +1318,41 @@ function apiError(e) {
     + 'the connection dropped. Nothing was changed.';
 }
 
+/**
+ * Download one agent as a single JSON file.
+ *
+ * The point is not backup - it is being able to hand the whole run to
+ * someone who was not watching it. What goes in is decided by the backend
+ * (`/export`), including a `findings` list at the top that states the few
+ * numbers which separate "the agent is bad" from "this run never measured
+ * anything" - those two look identical in every other field, and telling
+ * them apart by eye took a day.
+ */
+async function downloadAgentExport(agentId, setBusy, setErr) {
+  setBusy(true);
+  setErr('');
+  try {
+    const { data } = await rl.exportAgent(agentId);
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '');
+    const blob = new Blob([JSON.stringify(data, null, 2)],
+                          { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `algoedge-agent-${agentId}-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // Next tick: revoking synchronously cancels the download in some browsers
+    // before they have finished reading the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    setErr(apiError(e));
+  } finally {
+    setBusy(false);
+  }
+}
+
 /** Today minus N months, as YYYY-MM-DD. */
 function monthsAgo(n) {
   const d = new Date();
@@ -2188,6 +2223,7 @@ export default function Agents() {
   // default cascades a render for something that is a pure derivation.
   const [picked, setPicked] = useState(null);
   const [tab, setTab] = useState('Overview');
+  const [exporting, setExporting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState('');
 
@@ -2452,6 +2488,19 @@ export default function Agents() {
                       && ' •'}
                   </button>
                 ))}
+                {/* Not a tab: one file containing the whole run, for someone
+                    who was not watching it happen. Pushed right so it does
+                    not read as a seventh tab. */}
+                <button className="btn btn-sm" disabled={exporting}
+                        style={{ marginLeft: 'auto' }}
+                        title={'Download this agent as one JSON file: the spec, the data it saw, '
+                          + 'the risk config the engine actually used, every phase log, the '
+                          + 'per-seed training record, why signals were rejected, the charter, '
+                          + 'the gate and any backtests run as this agent.'}
+                        onClick={() => downloadAgentExport(
+                          agent.agent_id, setExporting, setNotice)}>
+                  {exporting ? 'building…' : 'Export for analysis'}
+                </button>
               </div>
 
               {tab === 'Overview' && <OverviewTab agent={agent} busy={busy} step={step} />}

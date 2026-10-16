@@ -292,3 +292,213 @@ async def force_close_all_stuck_trades(
     await db.commit()
     logger.info(f"Force-closed {count} stuck trades for {current_user.email}")
     return {"message": f"Successfully closed {count} stuck trades. The bot is now unblocked."}
+
+
+# ── What happened after a hand-closed trade ─────────────────────────────────
+#
+# A trade the stop or the target closed was decided by the plan. A trade a
+# person or an agent CLOSED is the one decision made by hand, and it was the
+# only one never scored - the journal records the exit and nothing after it.
+# `services/trade_aftermath.py` measures the window the trade could still have
+# been held; these routes read it, refresh it, and hand it out for training.
+
+
+@router.get("/trades/aftermath")
+async def list_aftermath(
+    symbol: str | None = None,
+    strategy_id: str | None = None,
+    verdict: str | None = None,
+    closed_by: str | None = None,
+    days: int = Query(90, ge=1, le=1095),
+    limit: int = Query(200, le=2000),
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The scored hand-closes, newest first, with a summary over the filter.
+
+    The summary is the point of the screen: one trade closed early is an
+    anecdote, and `LEFT_MONEY on 61% of manual closes, median 1.4R forgone` is
+    a habit worth changing.
+    """
+    from datetime import timedelta
+
+    from backend.data.models import TradeAftermath
+
+    since = datetime.utcnow() - timedelta(days=days)
+    q = select(TradeAftermath).where(
+        TradeAftermath.user_id == current_user.id,
+        TradeAftermath.closed_at >= since)
+    if symbol:
+        q = q.where(TradeAftermath.symbol == symbol)
+    if strategy_id:
+        q = q.where(TradeAftermath.strategy_id == strategy_id)
+    if verdict:
+        q = q.where(TradeAftermath.verdict == verdict.upper())
+    if closed_by:
+        q = q.where(TradeAftermath.closed_by == closed_by.upper())
+
+    rows = (await db.execute(
+        q.order_by(desc(TradeAftermath.closed_at))
+        .limit(limit).offset(offset))).scalars().all()
+    every = (await db.execute(q)).scalars().all()
+
+    def _avg(vals):
+        vals = [v for v in vals if v is not None]
+        return round(sum(vals) / len(vals), 4) if vals else None
+
+    def _median(vals):
+        vals = sorted(v for v in vals if v is not None)
+        if not vals:
+            return None
+        mid = len(vals) // 2
+        return round(vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2, 4)
+
+    # Only FINISHED rows count towards the headline numbers. A provisional
+    # verdict is a guess about a window that has not happened yet and can
+    # still flip, and `gate_cost` already excludes them - the two summaries
+    # must not disagree about what "scored" means.
+    scored = [r for r in every
+              if r.verdict and r.verdict != "UNKNOWN" and r.watch_complete]
+    counts: dict = {}
+    for r in scored:
+        counts[r.verdict] = counts.get(r.verdict, 0) + 1
+    return {
+        "rows": [_aftermath_dict(r) for r in rows],
+        "total": len(every),
+        "summary": {
+            "scored": len(scored),
+            "by_verdict": counts,
+            "pct_left_money": (round(100.0 * counts.get("LEFT_MONEY", 0) / len(scored), 1)
+                               if scored else None),
+            "median_forgone_r": _median([r.forgone_r for r in scored]),
+            "mean_forgone_r": _avg([r.forgone_r for r in scored]),
+            "reached_tp_after_close": sum(1 for r in every if r.hit_tp),
+            "reached_sl_after_close": sum(1 for r in every if r.hit_sl),
+            "still_watching": sum(1 for r in every if not r.watch_complete),
+        },
+    }
+
+
+def _aftermath_dict(r) -> dict:
+    return {
+        "trade_id": r.trade_id, "symbol": r.symbol, "strategy_id": r.strategy_id,
+        "direction": r.direction, "closed_at": r.closed_at.isoformat() if r.closed_at else None,
+        "close_reason": r.close_reason, "closed_by": r.closed_by,
+        "entry_price": r.entry_price, "exit_price": r.exit_price,
+        "stop_loss": r.stop_loss, "take_profit": r.take_profit,
+        "closed_r": r.closed_r,
+        "watch_hours": r.watch_hours, "watch_complete": r.watch_complete,
+        "bars_seen": r.bars_seen,
+        "hit_tp": r.hit_tp, "tp_minutes": r.tp_minutes,
+        "hit_sl": r.hit_sl, "sl_minutes": r.sl_minutes,
+        "best_price": r.best_price, "best_r": r.best_r, "best_minutes": r.best_minutes,
+        "r_at_watch_end": r.r_at_watch_end,
+        "verdict": r.verdict, "forgone_r": r.forgone_r, "note": r.note,
+    }
+
+
+@router.post("/trades/aftermath/run")
+async def run_aftermath(
+    days: int = Query(30, ge=1, le=1095),
+    limit: int = Query(300, le=2000),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Measure anything not yet measured, now.
+
+    The same call backfills: a larger `days` reaches further into the journal.
+    It is idempotent - rows whose watch window has elapsed are skipped - so
+    running it twice costs time and changes nothing.
+    """
+    from backend.services import trade_aftermath as A
+
+    return await A.sweep(db, user_id=current_user.id, lookback_days=days, limit=limit)
+
+
+@router.get("/trades/journal-export")
+async def export_journal(
+    symbol: str | None = None,
+    strategy_id: str | None = None,
+    days: int = Query(365, ge=1, le=3650),
+    include_open: bool = False,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The journal as training material, filtered, with the aftermath joined on.
+
+    WHY NOT THE EXISTING TRADE LIST
+    That one answers "what did I do". This one answers "what should I have
+    done", which needs three things the trade row does not carry: the signal
+    that produced the entry, whether the exit was the plan's or a person's,
+    and - for the hand-closes - what the market did next. An agent learning
+    exit timing cannot be trained on a table that stops at the exit.
+
+    Filterable by instrument and strategy because that is how it gets fed
+    back: one agent per symbol and strategy, trained on its own history.
+    """
+    from datetime import timedelta
+
+    from backend.data.models import TradeAftermath
+    from backend.services import trade_aftermath as A
+
+    since = datetime.utcnow() - timedelta(days=days)
+    q = select(Trade).where(Trade.user_id == current_user.id,
+                            Trade.entry_time >= since)
+    if symbol:
+        q = q.where(Trade.symbol == symbol)
+    if strategy_id:
+        q = q.where(Trade.strategy_id == strategy_id)
+    if not include_open:
+        q = q.where(Trade.exit_time.isnot(None))
+    trades = (await db.execute(q.order_by(Trade.entry_time))).scalars().all()
+
+    after = {r.trade_id: r for r in (await db.execute(
+        select(TradeAftermath).where(
+            TradeAftermath.user_id == current_user.id))).scalars().all()}
+
+    rows = []
+    for t in trades:
+        planned = A.was_planned_exit(t.exit_reason)
+        a = after.get(t.id)
+        rows.append({
+            "trade_id": t.id, "symbol": t.symbol, "strategy_id": t.strategy_id,
+            "direction": t.direction, "volume": t.volume,
+            "entry_time": t.entry_time.isoformat() if t.entry_time else None,
+            "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+            "entry_price": t.entry_price, "exit_price": t.exit_price,
+            "stop_loss": t.stop_loss, "take_profit": t.take_profit,
+            "pnl": t.pnl, "pnl_pips": t.pnl_pips, "risk_reward": t.risk_reward,
+            "status": t.status, "exit_reason": t.exit_reason,
+            "exit_was_planned": planned,
+            "closed_by": A.closed_by(t.exit_reason) if not planned else "PLAN",
+            "max_drawdown": t.max_drawdown,
+            "session": t.session, "confluence_score": t.confluence_score,
+            "mt5_ticket": t.mt5_ticket,
+            # Only hand-closes have one, and that is the point: these rows are
+            # the labelled examples an exit policy can actually learn from.
+            "aftermath": _aftermath_dict(a) if a else None,
+        })
+
+    unscored = sum(1 for r in rows
+                   if not r["exit_was_planned"] and r["exit_time"] and not r["aftermath"])
+    return {
+        "generated_at": datetime.utcnow().isoformat(),
+        "what_this_is": (
+            "One trading journal, filtered, with the post-close measurement "
+            "joined onto every trade a person or an agent closed by hand. "
+            "`aftermath` is null for exits the plan made (stop or target) "
+            "because there is nothing to second-guess about those."),
+        "filters": {"symbol": symbol, "strategy_id": strategy_id, "days": days,
+                    "include_open": include_open},
+        "counts": {
+            "trades": len(rows),
+            "hand_closed": sum(1 for r in rows if not r["exit_was_planned"] and r["exit_time"]),
+            "with_aftermath": sum(1 for r in rows if r["aftermath"]),
+            "hand_closed_not_yet_measured": unscored,
+        },
+        "note": ("Run POST /api/trades/aftermath/run to measure the "
+                 f"{unscored} hand-closed trade(s) still without one."
+                 if unscored else ""),
+        "trades": rows,
+    }

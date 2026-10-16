@@ -60,6 +60,7 @@ from backend.rl import env as E
 from backend.rl import features as feat
 from backend.rl import policy as pol
 from backend.rl.spec import AgentSpec
+from backend.services import rejection_report as rr
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -130,6 +131,15 @@ class TrainingRun:
     finished_at: str = ""
     seconds: float = 0.0
     error: str = ""
+    # Why signals did not become trades, summed over the TEST folds of this
+    # run. A run that takes no trades has to be able to say why: the engine
+    # counted the refusals all along and nothing ever read them, which is how
+    # an empty risk config went a day without being spotted.
+    rejection_funnel: dict = field(default_factory=dict)
+    # What the engine was ACTUALLY given. Recorded because an empty one makes
+    # every signal get refused, and on 2026-10-11 there was no way to tell
+    # from any artefact which config a finished run had used.
+    risk_config: dict = field(default_factory=dict)
 
     @property
     def sharpe_dispersion(self) -> float:
@@ -157,6 +167,8 @@ class TrainingRun:
                                   else round(self.sharpe_dispersion, 4)),
             "started_at": self.started_at, "finished_at": self.finished_at,
             "seconds": round(self.seconds, 1), "error": self.error,
+            "rejection_funnel": self.rejection_funnel or {},
+            "risk_config": self.risk_config or {},
         }
 
 
@@ -605,6 +617,34 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
         run.finished_at = datetime.now(timezone.utc).isoformat()
         return run
 
+    # An empty risk config is NOT a harmless default - it is a run that cannot
+    # produce a single trade, and it fails silently.
+    #
+    # MEASURED 2026-10-11, same policy and same 2,938-bar slice of XAUUSD M15:
+    #     risk_config {}                        883 signals ->  0 trades
+    #     risk_config default_risk_config(...)  922 signals -> 43 trades
+    # With no config the engine rejects every signal it is handed. `_evaluate`
+    # needs MIN_EVAL_TRADES before it will return anything but -inf, so EVERY
+    # candidate of every iteration scored -inf (measured: 0 of 40 iterations
+    # scoreable), `best_score` never rose above -inf, no policy was ever
+    # selected on merit, and the run finished reporting 0 trades, +0.0000R and
+    # a seed dispersion of 0.00 - which reads as "the seeds agreed" rather
+    # than "nothing was ever measured".
+    #
+    # `POST /train` passes `body.risk_config` straight through and the Agents
+    # screen sends none, so this was EVERY run started from the UI. The two
+    # sibling routes in the same module already do
+    # `body.risk_config or E.default_risk_config(symbol)`; the fallback lives
+    # here instead so a script or a test cannot reintroduce it either.
+    if not risk_config:
+        risk_config = E.default_risk_config(episodes[0].symbol)
+        logger.warning(f"[RL] no risk config supplied - falling back to the "
+                       f"Backtester's own defaults for {episodes[0].symbol}")
+        progress.event(
+            f"no risk config was supplied, so the Backtester's defaults for "
+            f"{episodes[0].symbol} are being used - an empty one rejects every "
+            f"trade and the run would report zero without saying why")
+
     all_folds = E.cpcv_folds(min(len(d) for d in episodes), spec.cpcv_groups,
                              spec.cpcv_test_groups, spec.embargo_bars)
     folds = all_folds[:int(spec.max_cpcv_paths)]
@@ -625,6 +665,7 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
         + (f", base strategy {spec.base_strategy}" if spec.base_strategy else "")
         + (", with a supervised direction model" if spec.director else ""))
 
+    run_funnel = rr.empty_funnel()
     for data in episodes:
         for seed in spec.seeds:
             for fold in folds:
@@ -661,7 +702,12 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
                 for a, b in fold.test:
                     sub = data.slice(a, b)
                     env = E.TradingEnv(spec, sub, risk_config, scaler=scaler, charter=charter)
-                    test_eps.append(env.rollout(policy, seed=seed, label=f"test {a}-{b}"))
+                    tep = env.rollout(policy, seed=seed, label=f"test {a}-{b}")
+                    # The TEST folds only: these are the rollouts whose numbers
+                    # the run reports, so this explains the number on screen
+                    # rather than some interior search statistic.
+                    rr.merge(run_funnel, tep.rejection_funnel)
+                    test_eps.append(tep)
                 rs = [t.r_net for ep in test_eps for t in ep.rewards]
                 res.test_trades = len(rs)
                 res.test_mean_r = float(np.mean(rs)) if rs else 0.0
@@ -689,6 +735,12 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
 
     run.seconds = time.time() - t0
     run.finished_at = datetime.now(timezone.utc).isoformat()
+    # BEFORE save_run, not after. These two are the whole reason the run can
+    # explain itself later, and `save_run` is what writes training.json -
+    # which is what `/export` and `load_training` read. Setting them after the
+    # save left both fields empty on disk while looking correct in memory.
+    run.rejection_funnel = run_funnel
+    run.risk_config = dict(risk_config or {})
     save_run(run, root)
     progress.set(stage="complete", pct=100.0,
                  seeds=len(spec.seeds), folds=len(folds), jobs_done=done,
@@ -711,6 +763,8 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
     # watching the bar fill up has no reason to think anything is wrong. It
     # is also the most common way a short run ends: too few iterations and
     # the policy never learns to take a trade at all.
+    _report_rejections(run, run_funnel, progress)
+
     total_trades = sum(int(r.test_trades) for r in run.results)
     if total_trades == 0:
         progress.set(no_trades=True)
@@ -727,6 +781,45 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
             f"so this run will be rejected on arrival.")
     progress.event("Next: Collect, then Distil the charter, then Run the gate.")
     return run
+
+
+def _report_rejections(run: "TrainingRun", funnel: dict,
+                       progress: "Progress") -> None:
+    """Put the refusal census in the event log and on Telegram.
+
+    Asked for after a run reported 0 trades with no stated cause. Training
+    runs in its own PROCESS with no event loop, so `asyncio.run` is right
+    here - it would not be in the API process.
+
+    Never raises: a reporting path must not be able to fail the run it
+    reports on.
+    """
+    try:
+        if not rr.has_anything(funnel):
+            return
+        t = rr.totals(funnel)
+        progress.event(
+            f"signals over the test folds: {t['raised']:,} raised, "
+            f"{t['approved']:,} taken, {t['rejected']:,} rejected"
+            + (" - see the Telegram report for the causes" if t["rejected"] else ""))
+        for key, label in rr.BUCKETS:
+            reasons = {k: int(v or 0) for k, v in (funnel.get(key) or {}).items()
+                       if int(v or 0) > 0}
+            if not reasons:
+                continue
+            top = sorted(reasons.items(), key=lambda kv: -kv[1])[:4]
+            progress.event(f"  {label}: " + ", ".join(f"{k} x{n:,}" for k, n in top))
+        if not t["rejected"]:
+            return
+        symbols = ", ".join(run.symbols_attempted or [])
+        import asyncio as _asyncio
+        _asyncio.run(rr.notify(
+            funnel,
+            title=f"Training finished - {t['approved']:,} of {t['raised']:,} signals taken",
+            subtitle=f"agent {run.agent_id}" + (f" - {symbols}" if symbols else "")
+                     + chr(10) + "Across the test folds of this run."))
+    except Exception as exc:                                # noqa: BLE001
+        logger.warning(f"[RL] could not report rejections: {exc}")
 
 
 def sharpe_of(rs, periods: float = 252.0) -> float:

@@ -211,8 +211,19 @@ class BotService:
             logger.warning(f"[SYNC] Could not refresh bot ticket set: {e}")
         return self._bot_tickets_cache
 
-    def _log_event(self, message: str, level: str = "INFO", category: str = "BOT"):
-        """Log an event to memory, terminal, and WebSocket."""
+    def _log_event(self, message: str, level: str = "INFO", category: str = "BOT",
+                   echo: bool = True):
+        """Log an event to memory, terminal, and WebSocket.
+
+        `echo=False` records the event for the activity log WITHOUT writing it
+        to the logger. That is for exactly one caller: the global error sink,
+        which runs INSIDE loguru's writer thread. Logging from in there feeds
+        the queue that thread is the only consumer of - under a burst of
+        errors the pipe fills, `put` blocks, nothing drains it, and every
+        thread that logs afterwards waits on the handler lock forever. It is
+        also redundant: the sink only fires because the error was already
+        logged once, which is why the VPS log showed every MT5 error twice.
+        """
         event = {
             "time": datetime.now(timezone.utc).isoformat(),
             "level": level,
@@ -222,7 +233,9 @@ class BotService:
         self._events.appendleft(event)
 
         # Terminal log with colored category
-        if level == "ERROR":
+        if not echo:
+            pass
+        elif level == "ERROR":
             logger.error(f"[{category}] {message}")
         elif level == "WARN":
             logger.warning(f"[{category}] {message}")
@@ -590,8 +603,17 @@ class BotService:
         except Exception as e:
             logger.warning(f"[P1.1] could not publish resolved slot params: {e}")
 
-    async def _save_signal_state(self, signal_domain, status: str, reject_reason: str = "", tp_levels: list = None):
-        """Saves or updates a signal in the database and dispatches Telegram alert instantly."""
+    async def _save_signal_state(self, signal_domain, status: str, reject_reason: str = "", tp_levels: list = None, category: str = ""):
+        """Saves or updates a signal in the database and dispatches Telegram alert instantly.
+
+        `category` names WHICH gate stopped it, in the same words the
+        training and backtest reports use - "risk engine", "strategy
+        gates", "re-check at fill". Without it every live refusal arrived
+        as an undifferentiated "Signal SKIPPED", and a strategy that
+        found nothing looked identical to a risk engine refusing
+        everything - which is the confusion that cost a day on the
+        training side.
+        """
         # 1. Dispatch Telegram Alert Immediately (Decoupled from DB success)
         try:
             from backend.services.telegram import telegram_service
@@ -609,7 +631,12 @@ class BotService:
             signal_type = telegram_service.escape_markdown(str(getattr(signal_domain, 'signal_type', 'UNKNOWN')))
             score = telegram_service.escape_markdown(str(getattr(signal_domain, 'score', getattr(signal_domain, 'confluence_score', 0))))
             
-            msg = f"🟢 *Signal {stat}*\n" if status == "EXECUTED" else f"⚪ *Signal {stat}*\n"
+            # ⛔ rather than ⚪ for a refusal: on a phone a live rejection and
+            # a live fill looked near enough identical to be missed.
+            cat = telegram_service.escape_markdown(category) if category else ""
+            msg = f"🟢 *Signal {stat}*\n" if status == "EXECUTED" else f"⛔ *Signal {stat}*\n"
+            if cat:
+                msg += f"Stopped by: {cat}\n"
             msg += f"Symbol: {sym}\n"
             msg += f"Strategy: {strategy_id} ({timeframe})\n"
             msg += f"Type: {signal_type}\n"
@@ -1400,7 +1427,7 @@ class BotService:
                                     for reason in reasons:
                                         self._log_event(f"[REJECTED] {reason}", "SIGNAL", "SIGNAL")
                                     self._last_signal_time[_dedupe_key] = _sig_fp  # Prevent re-evaluation on next scan
-                                    await self._save_signal_state(signal, "SKIPPED", reason_str)
+                                    await self._save_signal_state(signal, "SKIPPED", reason_str, category="strategy gates")
                                     self._suppressed("strategy_gate", slot.slot_id)
                                     continue
 
@@ -1443,7 +1470,7 @@ class BotService:
                                     )
                                     if not cb_ok:
                                         self._log_event(f"[REJECTED] Circuit breaker blocked {signal.symbol}: {cb_reason}", "SIGNAL", "RISK")
-                                        await self._save_signal_state(signal, "SKIPPED", cb_reason)
+                                        await self._save_signal_state(signal, "SKIPPED", cb_reason, category="circuit breaker")
                                         self._suppressed(f"circuit_breaker:{cb_reason}", slot.slot_id)
                                         continue
 
@@ -1455,7 +1482,7 @@ class BotService:
                                     _block_mins = int(self.news_filter.blackout_before.total_seconds() // 60) if hasattr(self.news_filter, 'blackout_before') else 30
                                     _news_msg = f"News filter: high-impact event within {_block_mins}min window"
                                     self._log_event(f"[REJECTED] {_news_msg} — {signal.symbol}", "SIGNAL", "RISK")
-                                    await self._save_signal_state(signal, "SKIPPED", _news_msg)
+                                    await self._save_signal_state(signal, "SKIPPED", _news_msg, category="news filter")
                                     self._suppressed("news_filter", slot.slot_id)
                                     continue
 
@@ -1489,7 +1516,7 @@ class BotService:
                                         _acc_msg = "No MT5 account info available for risk sizing — broker not connected"
                                         self._log_event(f"[REJECTED] {_acc_msg} — {signal.symbol}", "SIGNAL", "RISK")
                                         self._last_signal_time[_dedupe_key] = _sig_fp
-                                        await self._save_signal_state(signal, "SKIPPED", _acc_msg)
+                                        await self._save_signal_state(signal, "SKIPPED", _acc_msg, category="broker not connected")
                                         self._suppressed("no_account_info", slot.slot_id)
                                         continue
                                     account_balance = broker.account_info.balance
@@ -1787,13 +1814,13 @@ class BotService:
                                             if all_stale:
                                                 self._log_event(f"Signal skipped (stale): price moved past SL before execution for {symbol}", "INFO", "TRADE")
                                                 self._last_signal_time[_dedupe_key] = _sig_fp
-                                                await self._save_signal_state(signal, "SKIPPED", "Stale signal — price moved past SL before execution", tp_levels=tp_levels)
+                                                await self._save_signal_state(signal, "SKIPPED", "Stale signal — price moved past SL before execution", tp_levels=tp_levels, category="re-check at fill")
                                             else:
                                                 self._log_event(f"All orders failed. Rolled back risk state for {group_id}.", "WARN", "RISK")
                                                 # Build detailed failure reason for Telegram (includes MT5 error codes)
                                                 fail_reason = "MT5 execution failed: " + " | ".join(tp_failure_details) if tp_failure_details else "MT5 execution failed for all TP levels"
                                                 self._last_signal_time[_dedupe_key] = _sig_fp  # Prevent same signal from re-firing
-                                                await self._save_signal_state(signal, "FAILED", fail_reason, tp_levels=tp_levels)
+                                                await self._save_signal_state(signal, "FAILED", fail_reason, tp_levels=tp_levels, category="broker execution")
                                             had_execution_failure = True
                                         elif len(db_positions) < len(tp_levels):
                                             _slot_circuit.active_groups[group_id]["sub_trades"] = len(db_positions)
@@ -1921,7 +1948,7 @@ class BotService:
                                             f"Trade rejected by risk engine: {reason}",
                                             "WARN", "RISK"
                                         )
-                                        await self._save_signal_state(signal, "REJECTED", reason, tp_levels=tp_levels)
+                                        await self._save_signal_state(signal, "REJECTED", reason, tp_levels=tp_levels, category="risk engine")
                                         self._last_signal_time[_dedupe_key] = _sig_fp
                                         self._suppressed(f"risk_engine:{reason}", slot.slot_id)
                                         # Only trigger explicit popup for risk-based rejections, not basic RR rejections to avoid spam

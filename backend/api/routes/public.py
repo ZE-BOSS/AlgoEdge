@@ -126,6 +126,10 @@ class Apply(BaseModel):
     date_of_birth: date | None = None
     confirms_18: bool | None = None
     website: str | None = None           # honeypot: people never see this field; bots fill it
+    # The affiliate code from the link they arrived by. Optional, and a code
+    # that does not resolve is recorded rather than refused: refusing an
+    # application over a typo in a referral code would lose the investor.
+    ref: str | None = Field(default=None, max_length=16)
 
 
 # ── the age gate ─────────────────────────────────────────────────────────────
@@ -202,14 +206,61 @@ async def apply(body: Apply, request: Request, db: AsyncSession = Depends(get_db
     _check_age(body)
     if _braked(f"ip:{ip}") or _braked(f"email:{body.email.lower()}"):
         raise HTTPException(status_code=429, detail="too many applications, please try again later")
+    from backend.investor import referrals as refmod
+
+    code = (body.ref or "").strip().upper() or None
+    introducer = await refmod.by_code(db, code) if code else None
     row = Application(name=body.name.strip(), email=body.email.strip().lower(), phone=body.phone,
                       country=body.country, amount_band=body.amount_band, message=body.message, ip=ip,
                       date_of_birth=body.date_of_birth,
-                      age_confirmed_at=datetime.now(timezone.utc))
+                      age_confirmed_at=datetime.now(timezone.utc),
+                      referral_code=code, referred_by=introducer.id if introducer else None)
     db.add(row)
     await db.flush()
     outbox.queue(db, mail.admin_application(row))
     return thanks
+
+
+# ── what an affiliate link means for the person using it ────────────────────
+
+@router.get("/referral/{code}")
+async def referral_disclosure(code: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Whether a code is ours, and what joining through it costs the applicant.
+
+    Shown on the application form BEFORE they submit. Under the
+    INVESTOR_PROFIT model a referred investor pays the introducer out of their
+    own profit, on top of the fund's fees - so they net less than someone who
+    came in without a link, and that has to be said up front, not discovered
+    on a statement.
+
+    Says NOTHING about who owns the code. The applicant was handed the link by
+    someone they know; the endpoint has no reason to confirm an identity to
+    anyone who guesses a code. Rate-limited for the same reason.
+    """
+    from backend.investor import fund as fundmod
+    from backend.investor import referrals as refmod
+
+    ip = request.client.host if request.client else "?"
+    if _braked(f"refcheck:{ip}"):
+        raise HTTPException(status_code=429, detail="too many checks, please try again later")
+    owner = await refmod.by_code(db, code)
+    if owner is None or owner.status == "closed":
+        return {"valid": False}
+    live = await fundmod.current_settings(db)
+    model = str(live.referral_model or refmod.MODEL_OFF).upper()
+    l1 = Decimal(str(live.referral_l1_pct or 0))
+    l2 = Decimal(str(live.referral_l2_pct or 0))
+    disclosure = None
+    if model == refmod.MODEL_INVESTOR_PROFIT and (l1 or l2):
+        # The applicant's worst case: their introducer may themselves have been
+        # introduced, so both levels are disclosed, as a total.
+        disclosure = (f"If you join through this link, up to {l1 + l2}% of each fee "
+                      f"period's profit is paid to the people who introduced you, "
+                      f"in addition to the fund's management and performance fees.")
+    elif model == refmod.MODEL_HOUSE_FEE:
+        disclosure = ("The person who introduced you is paid out of the fund's own fees. "
+                      "Joining through this link costs you nothing extra.")
+    return {"valid": True, "model": model, "disclosure": disclosure}
 
 
 # ── the legal identity, for the published policies ──────────────────────────

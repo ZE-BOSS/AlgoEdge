@@ -32,6 +32,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from backend.data.models import Base
+# Registered on the same Base only when imported. Without these the investor,
+# cash and RL tables are invisible to every check below - which is how a
+# migration naming a table that does not exist went unnoticed (2026-10-16).
+import backend.investor.models  # noqa: E402,F401
+import backend.mt5.cash_models  # noqa: E402,F401
+import backend.rl.models  # noqa: E402,F401
 
 # Columns added to tables that already exist in production. Each one must have
 # an `ALTER TABLE ... ADD COLUMN` line in `database.init_db`, or an upgrade
@@ -40,6 +46,16 @@ from backend.data.models import Base
 # Add to this list whenever you add a column to an EXISTING table.
 NEW_COLUMNS_ON_EXISTING_TABLES = [
     ("trades", "mt5_account"),
+    # the investor referral tree, 2026-10-16
+    ("investors", "referred_by"),
+    ("investors", "referral_code"),
+    ("investors", "referred_at"),
+    ("investors", "referral_source"),
+    ("fund_settings", "referral_model"),
+    ("fund_settings", "referral_l1_pct"),
+    ("fund_settings", "referral_l2_pct"),
+    ("investor_applications", "referral_code"),
+    ("investor_applications", "referred_by"),
 ]
 
 
@@ -81,7 +97,12 @@ def test_every_migration_names_a_column_the_model_still_has():
     for table, column in added_columns():
         known = tables.get(table)
         if known is None:
-            continue           # the table itself may have gone
+            # NOT skipped. A migration naming a table no model declares is far
+            # more likely a wrong name than a dropped table - "applications"
+            # for "investor_applications" - and it raises inside a loop that
+            # tolerates raises, so the column is silently never added.
+            stale.append(f"{table} (no such table)")
+            continue
         if column not in known:
             stale.append(f"{table}.{column}")
     assert not stale, f"migrations add columns no model declares: {stale}"

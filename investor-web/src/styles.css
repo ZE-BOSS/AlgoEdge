@@ -62,7 +62,9 @@ h1, h2 { margin: 0; font-weight: 600; }
 .page { max-width: 1120px; margin: 0 auto; padding: 16px 16px calc(110px + env(safe-area-inset-bottom)); }
 
 .tabbar { position: fixed; z-index: 6; left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom));
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; padding: 6px;
+  /* One equal column per tab, however many there are. This was repeat(5, 1fr),
+     and the sixth tab (Referrals) wrapped onto a second row on phones. */
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding: 6px;
   background: rgba(17, 24, 34, 0.94); backdrop-filter: blur(14px); border: 1px solid var(--line);
   border-radius: 20px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); }
 .tabbar a { display: grid; justify-items: center; gap: 2px; padding: 6px 0 5px; border-radius: 14px;

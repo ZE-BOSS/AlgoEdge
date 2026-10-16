@@ -1801,7 +1801,25 @@ async def run_backtest_endpoint(
             await _save_state(current_state)
             logger.info(f"[BT-TIMING] _save_state took {_time.perf_counter() - _t2:.1f}s")
             await ws_manager.broadcast_to_user(current_user.id, _completion_envelope(sanitized))
-            
+
+            # Why the signals that did not trade did not trade. Sent AFTER the
+            # save and the announcement, and inside its own guard, so a
+            # reporting failure cannot cost the user a finished run.
+            try:
+                from backend.services import rejection_report as _rr
+                _f = (sanitized or {}).get("rejection_funnel") or {}
+                _t = _rr.totals(_f)
+                await _rr.notify(
+                    _f,
+                    title=(f"Backtest finished - {_t['approved']:,} of "
+                           f"{_t['raised']:,} signals taken"),
+                    # No `timeframe` field exists on BacktestRequest, and
+                    # reaching for one raised INSIDE this guard - which swallowed
+                    # the error and meant the report never sent at all.
+                    subtitle=f"{req.symbol} - {req.strategy_id}")
+            except Exception as _exc:                       # noqa: BLE001
+                logger.warning(f"[BT] rejection report not sent: {_exc}")
+
         except Exception as e:
             current_state = await _get_state()
             current_state["status"] = "error"
@@ -2515,6 +2533,21 @@ async def run_portfolio_backtest_endpoint(
             # leg's chart slices included, through one WebSocket frame.
             await _save_state(current_state)
             await ws_manager.broadcast_to_user(current_user.id, _completion_envelope(sanitized))
+
+            # The same report as the single-symbol route: a portfolio run that
+            # takes no trades has to say why just as much as one symbol does.
+            try:
+                from backend.services import rejection_report as _rr
+                _f = (sanitized or {}).get("rejection_funnel") or {}
+                _t = _rr.totals(_f)
+                _syms = ", ".join(getattr(req, "symbols", None) or [])[:120]
+                await _rr.notify(
+                    _f,
+                    title=(f"Portfolio backtest finished - {_t['approved']:,} of "
+                           f"{_t['raised']:,} signals taken"),
+                    subtitle=_syms or "portfolio run")
+            except Exception as _exc:                       # noqa: BLE001
+                logger.warning(f"[PORTFOLIO_BT] rejection report not sent: {_exc}")
 
         except Exception as e:
             import traceback

@@ -161,6 +161,9 @@ class Signup(BaseModel):
     country: str | None = Field(default=None, max_length=80)
     consent: bool
     website: str | None = None           # honeypot: people never see this field; bots fill it
+    # The affiliate code from the link they arrived by. Applied only when this
+    # creates a NEW account - see signup().
+    ref: str | None = Field(default=None, max_length=16)
 
 
 @router.post("/auth/signup", status_code=201)
@@ -204,9 +207,22 @@ async def signup(body: Signup, request: Request, db: AsyncSession = Depends(get_
     inv = Investor(id=str(uuid.uuid4()), name=body.name.strip(), email=email,
                    phone=body.phone, country=body.country, status="pending")
     db.add(inv)
+    await db.flush()
+    # The referral is applied HERE, to the account just created, and never in
+    # the `existing` branch above. Applying it there would let anyone type an
+    # existing investor's email with their own link and move that investor
+    # under themselves - taking a share of someone else's profit by filling in
+    # a form.
+    from backend.investor import referrals as refmod
+    await refmod.ensure_code(db, inv)
+    code = (body.ref or "").strip().upper() or None
+    introducer = await refmod.by_code(db, code) if code else None
+    if introducer is not None and introducer.status != "closed":
+        await refmod.set_referrer(db, inv.id, introducer.id, source="LINK")
     app_row = Application(name=inv.name, email=email, phone=body.phone, country=body.country,
                           message="Signed up in the investor app.", status="accepted",
-                          investor_id=inv.id, ip=ip)
+                          investor_id=inv.id, ip=ip, referral_code=code,
+                          referred_by=introducer.id if introducer else None)
     db.add(app_row)
     await db.flush()
     await fundmod.audit(db, actor_id=None, actor_kind="investor", action="investor.signed_up",
@@ -270,6 +286,110 @@ async def me(inv: Investor = Depends(current_investor), db: AsyncSession = Depen
             "fee_period_months": 2,
             "base_currency": live.base_currency,
         },
+    }
+
+
+@router.get("/referrals")
+async def my_referrals(inv: Investor = Depends(current_investor),
+                       db: AsyncSession = Depends(get_db)):
+    """My affiliate link, the people below me, and what I have earned from them.
+
+    WHAT IS SHOWN AND WHAT IS NOT
+    Downwards, everything I am paid on: each person's deposits, value and
+    profit, at both levels, and what I earned from each. Upwards, NOTHING but
+    the rate: I am told what percentage I pay to whoever introduced me, never
+    who they are or what they hold. That asymmetry is the rule, and this is the
+    only route that applies it - there is no second place to keep in step.
+
+    Level-2 people are shown by first name only. They were introduced by
+    someone I introduced; I may never have met them, and their full name is
+    not mine to be handed.
+    """
+    import os
+
+    from backend.investor import referrals as refmod
+    from backend.investor.models import ReferralEarning
+
+    code = await refmod.ensure_code(db, inv)
+    base = os.getenv("INVESTOR_APP_URL", "http://localhost:5174").rstrip("/")
+
+    earned = (await db.execute(select(ReferralEarning).where(
+        ReferralEarning.earner_id == inv.id))).scalars().all()
+    by_source: dict = {}
+    for e in earned:
+        d = by_source.setdefault(e.source_investor_id,
+                                 {"accrued": Decimal("0"), "settled": Decimal("0")})
+        d["settled" if e.state == "settled" else "accrued"] += Decimal(str(e.amount))
+
+    down = await refmod.downline_ids(db, inv.id)
+    names = {}
+    people = []
+    for lvl in sorted(down):
+        for pid in down[lvl]:
+            other = await db.get(Investor, pid)
+            if other is None:
+                continue
+            names[pid] = other.name
+            st = await recmod.investor_statement(db, pid)
+            mine = by_source.get(pid, {"accrued": Decimal("0"), "settled": Decimal("0")})
+            first = (other.name or "").split(" ")[0]
+            people.append({
+                "level": lvl,
+                "name": other.name if lvl == 1 else first,
+                "introduced_by": None if lvl == 1 else
+                    (names.get(other.referred_by, "") or "").split(" ")[0],
+                "status": other.status,
+                "joined": _iso(other.activated_at or other.created_at),
+                "deposited": st["capital_in"], "withdrawn": st["withdrawn"],
+                "current_value": st["current_value"], "profit": st["profit"],
+                "earned_from_them": _s(mine["accrued"] + mine["settled"]),
+                "earned_settled": _s(mine["settled"]),
+                "earned_pending": _s(mine["accrued"]),
+            })
+
+    def _sum(key):
+        return _s(sum((Decimal(str(p[key])) for p in people), Decimal("0")))
+
+    # What I pay UPWARDS, as a rate and nothing else.
+    terms = await fundmod.terms_for(db, inv.id)
+    model = str(getattr(terms, "referral_model", None) or refmod.MODEL_OFF).upper()
+    above = await refmod.upline(db, inv.id)
+    pays_pct = Decimal("0")
+    if above and model == refmod.MODEL_INVESTOR_PROFIT:
+        pays_pct += Decimal(str(terms.referral_l1_pct or 0))
+        if len(above) > 1:
+            pays_pct += Decimal(str(terms.referral_l2_pct or 0))
+    if not above:
+        upline_note = None
+    elif model == refmod.MODEL_INVESTOR_PROFIT:
+        upline_note = (f"You pay {pays_pct}% of each fee period's profit to the "
+                       f"investor who introduced you.")
+    elif model == refmod.MODEL_HOUSE_FEE:
+        upline_note = ("You were introduced by another investor. They are paid "
+                       "out of the fund's own fees; it costs you nothing.")
+    else:
+        upline_note = None
+
+    return {
+        "code": code,
+        # /signup, not /apply: the investor app has no /apply route, and an
+        # unknown path falls through to its catch-all and redirects to the login
+        # page - dropping the code, so everyone invited would join unattributed.
+        "link": f"{base}/signup?ref={code}",
+        "model": model,
+        "rates": {"level_1_pct": _pct(terms.referral_l1_pct),
+                  "level_2_pct": _pct(terms.referral_l2_pct)},
+        "people": people,
+        "totals": {
+            "direct": sum(1 for p in people if p["level"] == 1),
+            "second_level": sum(1 for p in people if p["level"] == 2),
+            "deposited": _sum("deposited"), "current_value": _sum("current_value"),
+            "profit": _sum("profit"), "earned": _sum("earned_from_them"),
+            "earned_settled": _sum("earned_settled"),
+            "earned_pending": _sum("earned_pending"),
+        },
+        "you_pay_upward_pct": _s(pays_pct) if above else None,
+        "upline_note": upline_note,
     }
 
 

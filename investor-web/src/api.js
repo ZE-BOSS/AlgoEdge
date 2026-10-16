@@ -112,4 +112,12 @@ export const api = {
   withdraw: (amount, justification) =>
     call('/withdrawals', { method: 'POST', body: { amount, justification: justification || null } }),
   requestClosure: (reason) => call('/closure', { method: 'POST', body: { reason: reason || null } }),
+  myReferrals: () => call('/referrals'),
+  // Public, so not under BASE (which is /api/investor). Says whether a code is
+  // ours and what joining through it costs - never who owns it.
+  referralCheck: async (code) => {
+    const root = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+    const r = await fetch(`${root}/api/public/referral/${encodeURIComponent(code)}`);
+    return r.ok ? r.json() : { valid: false };
+  },
 };

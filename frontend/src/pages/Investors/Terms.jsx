@@ -15,7 +15,20 @@ const FIELDS = [
   ['bank_account_number', 'Receiving account number'],
   ['bank_account_name', 'Receiving account name'],
   ['bank_instructions', 'Deposit instructions', 'textarea'],
+  // Who pays an introducer, and how much. Versioned with the rest: an investor
+  // introduced under one arrangement is never moved onto another.
+  ['referral_model', 'Referral: who pays the introducer', 'select', [
+    ['HOUSE_FEE', 'Out of our fee (investor pays nothing extra)'],
+    ['INVESTOR_PROFIT', "Out of the referred investor's profit (must be disclosed)"],
+    ['OFF', 'Off - no referral earnings'],
+  ]],
+  ['referral_l1_pct', 'Referral: direct introducer %', 'number'],
+  ['referral_l2_pct', "Referral: introducer's introducer %", 'number'],
 ];
+
+const MODEL_LABEL = {
+  HOUSE_FEE: 'Out of our fee', INVESTOR_PROFIT: "Out of the investor's profit", OFF: 'Off',
+};
 
 export default function Terms() {
   const q = useQuery({ queryKey: ['inv', 'settings'], queryFn: inv.settings });
@@ -35,8 +48,8 @@ export default function Terms() {
             <div className="card-header">
               <span className="card-title">Current terms · version {d.current.version}</span>
               <ActionForm label="New version" icon={FilePlus} tone="primary" submitLabel="Publish new version"
-                          fields={FIELDS.map(([name, label, type]) => ({
-                            name, label, type, defaultValue: d.current[name] ?? '',
+                          fields={FIELDS.map(([name, label, type, options]) => ({
+                            name, label, type, options, defaultValue: d.current[name] ?? '',
                           }))}
                           onSubmit={(b) => change.mutateAsync(b)} />
             </div>
@@ -87,5 +100,6 @@ function FieldPair({ label, name, value }) {
   if (name.endsWith('_pct') && value != null) shown = `${value}%`;
   if (name === 'min_investment') shown = fmtMoney(value);
   if (name.endsWith('_days') && value != null) shown = `${value} days`;
+  if (name === 'referral_model') shown = MODEL_LABEL[value] || value || '—';
   return <><span>{label}</span><span className={name.includes('pct') || name.includes('days') ? 'num' : ''}>{shown}</span></>;
 }

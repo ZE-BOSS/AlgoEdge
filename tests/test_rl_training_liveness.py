@@ -428,3 +428,111 @@ def test_an_agent_can_be_deleted_but_not_an_approved_one():
     assert "ch.APPROVED" in body, "an approved agent must not be deletable"
     assert "looks_alive" in body, "a running job must not be deleted under itself"
     assert "shutil.rmtree" in body, "the artefacts outlive the row otherwise"
+
+
+# -- training must never run on an empty risk config -------------------------
+# MEASURED 2026-10-11, one policy and one 2,938-bar slice of XAUUSD M15:
+#     risk_config {}                        883 signals ->  0 trades
+#     risk_config default_risk_config(...)  922 signals -> 43 trades
+# With no config the engine refuses every signal. `_evaluate` returns -inf
+# below MIN_EVAL_TRADES, so every candidate of every iteration tied at -inf
+# (0 of 40 scoreable), no policy was ever selected on merit, and the run
+# reported 0 trades / +0.0000R / dispersion 0.00 - which reads as agreement
+# rather than as nothing having been measured. `POST /train` forwards
+# `body.risk_config` untouched and the Agents screen sends none, so this was
+# every run started from the UI.
+
+
+def _tiny_frame(n=6000, seed=4):
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(seed)
+    start = 1735689600
+    t = np.arange(start, start + n * 300, 300, dtype="int64")
+    close = 1.08 + np.cumsum(rng.normal(0, 0.00025, n))
+    return pd.DataFrame({"time": t, "open": close - 0.00001, "high": close + 0.00015,
+                         "low": close - 0.00015, "close": close,
+                         "volume": rng.integers(50, 500, n).astype(float)})
+
+
+def test_an_empty_risk_config_is_replaced_before_any_job_runs(monkeypatch, tmp_path):
+    """The trainer must never be handed {}. Asserted at the trainer boundary
+    rather than by running a real job, so this stays a unit test."""
+    from backend.rl import train as T
+    from backend.rl.spec import AgentSpec
+
+    seen = []
+
+    def fake_trainer(spec, data, risk_config, fold, seed, **kw):
+        seen.append(dict(risk_config or {}))
+        raise RuntimeError("stop here - the config is all this test wants")
+
+    monkeypatch.setattr(T, "train_ppo", fake_trainer)
+    monkeypatch.setattr(T, "train_cem", fake_trainer)
+
+    spec = AgentSpec(name="t", symbols=("EURUSD",), timeframe="M5", iterations=1)
+    T.train_agent(spec, {"EURUSD": _tiny_frame()}, {},      # <- the empty one
+                  agent_id="riskcfg-probe", root=tmp_path)
+
+    assert seen, "the trainer was never reached, so nothing was asserted"
+    assert seen[0], (
+        "train_agent handed the trainer an EMPTY risk config. The engine "
+        "rejects every signal under one, so the run would report zero trades "
+        "without ever saying why.")
+    # Enough of a config to actually trade under, not a one-key placeholder.
+    assert len(seen[0]) > 10, f"only {len(seen[0])} keys: {sorted(seen[0])}"
+
+
+def test_a_supplied_risk_config_is_passed_through_untouched(monkeypatch, tmp_path):
+    """The fallback must not override a caller that did supply one."""
+    from backend.rl import train as T
+    from backend.rl.spec import AgentSpec
+
+    seen = []
+
+    def fake_trainer(spec, data, risk_config, fold, seed, **kw):
+        seen.append(dict(risk_config or {}))
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(T, "train_ppo", fake_trainer)
+    monkeypatch.setattr(T, "train_cem", fake_trainer)
+
+    mine = {"risk_per_trade_pct": 0.37, "spread_pips": 0.2, "marker": "caller's"}
+    spec = AgentSpec(name="t", symbols=("EURUSD",), timeframe="M5", iterations=1)
+    T.train_agent(spec, {"EURUSD": _tiny_frame()}, mine,
+                  agent_id="riskcfg-passthrough", root=tmp_path)
+
+    assert seen and seen[0].get("marker") == "caller's"
+    assert seen[0].get("risk_per_trade_pct") == 0.37
+
+
+def test_the_run_record_on_disk_carries_the_config_and_the_funnel(monkeypatch, tmp_path):
+    """`training.json` is what `/export` and `load_training` read, and it is
+    written by `save_run`. Setting these fields AFTER that call left both
+    empty on disk while looking perfectly correct in memory - so the one
+    artefact a reviewer actually gets would not have said which risk config
+    the run used."""
+    import json
+
+    from backend.rl import train as T
+    from backend.rl.spec import AgentSpec
+
+    def fake_trainer(spec, data, risk_config, fold, seed, **kw):
+        raise RuntimeError("no policy wanted - only the saved record matters")
+
+    monkeypatch.setattr(T, "train_ppo", fake_trainer)
+    monkeypatch.setattr(T, "train_cem", fake_trainer)
+
+    spec = AgentSpec(name="t", symbols=("EURUSD",), timeframe="M5", iterations=1)
+    T.train_agent(spec, {"EURUSD": _tiny_frame()}, {},
+                  agent_id="saved-record", root=tmp_path)
+
+    saved = json.loads((tmp_path / "saved-record" / "training.json")
+                       .read_text(encoding="utf-8"))
+    assert "rejection_funnel" in saved, "the funnel never reached disk"
+    assert saved.get("risk_config"), (
+        "the risk config never reached disk, so the finished run cannot say "
+        "what the engine was given")
+    # And it is the REAL one the fallback built, not a token placeholder.
+    assert len(saved["risk_config"]) > 10, sorted(saved["risk_config"])

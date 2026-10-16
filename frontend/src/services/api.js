@@ -227,6 +227,16 @@ export const getChartData = (symbol, timeframe, count = 500) =>
 // ── Signals ─────────────────────────────────────────────────────────────────
 
 export const getSignals = (params) => api.get('/signals', { params });
+
+// -- learning data: what happened after, and what the gates cost -----------
+// Long timeouts on the measuring calls: each fetches bars from the terminal
+// per trade or signal, and the first read of a symbol can take tens of seconds.
+export const getAftermath = (params) => api.get('/trades/aftermath', { params });
+export const runAftermath = (params) => api.post('/trades/aftermath/run', null, { params, timeout: 600000 });
+export const exportJournal = (params) => api.get('/trades/journal-export', { params, timeout: 300000 });
+export const exportSignals = (params) => api.get('/signals/export', { params, timeout: 300000 });
+export const runSignalOutcomes = (params) => api.post('/signals/outcomes/run', null, { params, timeout: 600000 });
+export const getGateCost = (params) => api.get('/signals/gate-cost', { params });
 export const getSignalDetail = (id) => api.get(`/signals/${id}`);
 
 // ── Backtest ────────────────────────────────────────────────────────────────
@@ -400,6 +410,12 @@ export const inv = {
   correct: (id, data) => api.post(`${INV}/${id}/corrections`, data),
   closureQuote: (id) => api.get(`${INV}/${id}/closure`),
   loginLink: (id, purpose, send = false) => api.post(`${INV}/${id}/login-link`, { purpose, send }),
+  // the referral tree
+  referrals: (id) => api.get(`${INV}/${id}/referrals`),
+  setReferrer: (id, data) => api.post(`${INV}/${id}/referrer`, data),
+  referralEarnings: (params) => api.get(`${INV}/referral-earnings`, { params }),
+  settleEarning: (id, payment_reference) =>
+    api.post(`${INV}/referral-earnings/${id}/settle`, { payment_reference }),
   statementUrl: (id, year, month) => `${INV}/statements/${id}/${year}-${month}.pdf`,
   statementPdf: (id, year, month) => api.get(`${INV}/statements/${id}/${year}-${month}.pdf`, { responseType: 'blob' }),
   sendStatements: (data) => api.post(`${INV}/statements/send`, data),
@@ -479,6 +495,9 @@ export const rl = {
   create: (data) => api.post(`${RL}/agents`, data),
   get: (id) => api.get(`${RL}/agents/${id}`),
   clone: (id, data) => api.post(`${RL}/agents/${id}/clone`, data),
+  // Everything needed to judge a run, as one file. Long timeout: it reads
+  // the worker's training record off disk, which on a 150-job run is large.
+  exportAgent: (id) => api.get(`${RL}/agents/${id}/export`, { timeout: 180000 }),
 
   // A dataset is validated hard on upload: a file whose intervals do not match
   // its timeframe, or whose highs do not contain its closes, comes back as a

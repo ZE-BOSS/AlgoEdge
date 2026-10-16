@@ -5,6 +5,7 @@ import { getTrades, getTradesSummary, analyzeTrade } from '../services/api';
 import { useConnectionStore, useAuthStore } from '../store';
 import AnalyzeButton from '../components/AnalyzeButton';
 import CashLedger from '../components/CashLedger';
+import LearningData from '../components/LearningData';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
 
 function MiniChart({ data }) {
@@ -423,6 +424,12 @@ export default function Journal() {
           <button className={`btn ${viewMode === 'MONEY' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setViewMode('MONEY')}>
             Money In &amp; Out
           </button>
+          {/* What the journal never recorded: how hand-closed trades went on,
+              and whether the signals the gates skipped would have won. The
+              export from here is the training material for the agents. */}
+          <button className={`btn ${viewMode === 'LEARN' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setViewMode('LEARN')}>
+            Learning Data
+          </button>
           {viewMode === 'SUMMARY' && (
             <select value={summaryGrouping} onChange={e => setSummaryGrouping(e.target.value)} style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' }}>
               <option value="Day">Group by Day</option>
@@ -434,7 +441,7 @@ export default function Journal() {
         </div>
       </div>
 
-      {viewMode === 'MONEY' ? <CashLedger /> : (
+      {viewMode === 'LEARN' ? <LearningData /> : viewMode === 'MONEY' ? <CashLedger /> : (
       <div className="card">
         {viewMode === 'SUMMARY' ? (
           <div className="table-wrapper">

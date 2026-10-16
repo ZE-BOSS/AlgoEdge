@@ -46,6 +46,7 @@ from backend.rl import train as trainmod
 from backend.rl.features import FEATURES
 from backend.rl.models import RLAdherence, RLAgent, RLCharter, RLProposal, naive_utc
 from backend.rl.spec import AgentSpec
+from backend.services import rejection_report as rr
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -466,6 +467,270 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
     }
 
 
+def _policy_dict(agent_id: str) -> dict | None:
+    """The trained weights and the scaler, as plain data.
+
+    The weights are what a reviewer needs to see whether the policy learned
+    anything at all (a near-zero W is a policy that never moved off its
+    uniform initialisation), and the scaler is what makes those weights
+    interpretable - they are coefficients on SCALED features, so without the
+    means and scales they cannot be read.
+    """
+    loaded = trainmod.load_policy(agent_id)
+    if not loaded:
+        return None
+    policy, scaler = loaded
+    try:
+        return {"policy": policy.to_dict(), "scaler": scaler.to_dict()}
+    except Exception as exc:                                # noqa: BLE001
+        return {"error": f"could not serialise the policy: {exc}"}
+
+
+def _downsample(history: list, keep: int) -> tuple[list, bool]:
+    """Thin a per-iteration history to at most `keep` records, evenly.
+
+    The ENDS are always kept: the first iteration says where the policy
+    started and the last says where it finished, and those two are most of
+    the diagnosis.
+    """
+    if len(history) <= keep or keep < 3:
+        return history, False
+    step = len(history) / float(keep - 1)
+    picked = [history[int(i * step)] for i in range(keep - 1)]
+    picked.append(history[-1])
+    return picked, True
+
+
+def _export_findings(spec_d: dict, training: dict, funnel: dict,
+                     risk_config: dict) -> list[str]:
+    """The things to look at FIRST, computed here so they cannot be missed.
+
+    Every one of these is a failure this project actually had, stated as the
+    number that would have revealed it on the first screen instead of the
+    fourth day.
+
+    The findings are ORDERED by what they rule out, and each is careful about
+    what it can actually claim. "The risk config is absent from this file" is
+    not the same statement as "the run had no risk config" - runs before
+    2026-10-11 did not record it at all, and reading the first as the second
+    would put a false alarm at the top of every old export.
+    """
+    import math
+
+    out: list[str] = []
+    results = (training or {}).get("results") or []
+    trades = sum(int(r.get("test_trades") or 0) for r in results)
+
+    scoreable = total_iters = 0
+    for r in results:
+        for h in (r.get("history") or []):
+            total_iters += 1
+            e = h.get("eval")
+            if isinstance(e, (int, float)) and math.isfinite(e):
+                scoreable += 1
+
+    if not risk_config:
+        if results and trades == 0:
+            out.append(
+                "NO RISK CONFIG in this file AND no trades taken. That pair is "
+                "the signature of a run given an empty risk config: the engine "
+                "refuses every signal, so the run reports 0 trades and a score "
+                "of exactly 0.0000 with no stated cause. Check "
+                "`rejection_funnel` next.")
+        else:
+            out.append(
+                "The risk config is not in this file. Runs before 2026-10-11 "
+                "did not record it, so this says nothing about what the engine "
+                "was actually given - it only means it cannot be read back.")
+
+    if total_iters:
+        out.append(f"{scoreable:,} of {total_iters:,} iterations produced a "
+                   f"SCOREABLE candidate (a finite eval).")
+        if scoreable == 0:
+            out.append(
+                "NONE of them did, so every candidate tied at -inf, the best "
+                "policy was never replaced on merit, and the reported score is "
+                "not a measurement of anything.")
+
+    out.append(f"{trades:,} test trades across {len(results)} seed/fold jobs.")
+    if results and trades == 0:
+        out.append("ZERO of them traded. Read the rejection funnel before any "
+                   "other number in this file.")
+
+    t = rr.totals(funnel)
+    if t["raised"] or t["rejected"]:
+        out.append(f"signals over the test folds: {t['raised']:,} raised, "
+                   f"{t['approved']:,} taken, {t['rejected']:,} rejected.")
+    elif results:
+        out.append("No rejection funnel in this file (recording one was added "
+                   "2026-10-11)."
+                   + (" With zero trades that is the one thing most worth "
+                      "having, so re-run to get it." if not trades else ""))
+
+    disp = (training or {}).get("sharpe_dispersion")
+    if disp is not None:
+        note = (" - but with zero trades that means the seeds agreed on doing "
+                "nothing, NOT that they agreed on a result" if not trades else "")
+        out.append(f"seed dispersion {disp} (the gate rejects above 1.0){note}.")
+
+    iters = spec_d.get("iterations")
+    secs = [float(r.get("seconds") or 0) for r in results if r.get("seconds")]
+    if secs:
+        per_job = sum(secs) / len(secs)
+        out.append(f"{per_job / 60:.1f} min per job on average"
+                   + (f" at {iters} iterations" if iters else "")
+                   + f"; these {len(results)} jobs took {sum(secs) / 3600:.1f} "
+                     f"hours in total.")
+    if not results:
+        out.append("No training results in this file at all - the run either "
+                   "never started, never finished a single job, or its record "
+                   "was lost with the process that owned it.")
+    return out
+
+
+@router.get("/agents/{agent_id}/export")
+async def export_agent(agent_id: str,
+                       history_points: int = Query(400, ge=20, le=5000),
+                       db: AsyncSession = Depends(get_db)):
+    """Everything needed to judge a run, in one downloadable file.
+
+    WHY THIS EXISTS
+    Diagnosing a run has meant reading four artefacts on the VPS plus the
+    backend log, and the single most important fact - what risk config the
+    engine was handed - was in none of them. One run reported 0 trades,
+    +0.0000R and a seed dispersion of 0.00 for a day before the cause (an
+    empty risk config, under which the engine refuses every signal) was
+    found. This bundles the lot so the question is answerable from a
+    download.
+
+    `findings` at the top is not decoration: it states the handful of numbers
+    that separate "this agent is bad" from "this run never measured
+    anything", which look identical in every other field.
+
+    Per-iteration history is thinned to `history_points` per job, ends always
+    kept, because 300 iterations over 40 jobs is otherwise tens of megabytes
+    of mostly-flat curve.
+    """
+    row = await rlreg.get_agent(db, agent_id)
+    if row is None:
+        raise HTTPException(404, f"no agent {agent_id}")
+
+    spec_d = json.loads(row.spec_json)
+    try:
+        spec_obj = AgentSpec.from_dict(spec_d)
+        mode, learning = spec_obj.mode, describe_learning(spec_obj)
+    except Exception:                                       # noqa: BLE001
+        mode, learning = "?", {}
+
+    # The worker's own record: richer than the DB copy, and it survives an API
+    # restart that the in-memory future does not.
+    training = trainmod.load_training(agent_id) or {}
+    if not training and row.training_json:
+        training = json.loads(row.training_json)
+
+    downsampled = False
+    for r in (training.get("results") or []):
+        h = r.get("history") or []
+        if h:
+            r["history"], cut = _downsample(h, history_points)
+            downsampled = downsampled or cut
+
+    funnel = training.get("rejection_funnel") or {}
+    risk_config = training.get("risk_config") or {}
+
+    charters = await rlreg.list_charters(db, agent_id)
+    props = (await db.execute(
+        select(RLProposal).where(RLProposal.agent_id == agent_id)
+        .order_by(desc(RLProposal.created_at)))).scalars().all()
+
+    # Anything backtested AS this agent. The Backtester records an RL agent as
+    # `RL::<agent_id>`, so its runs are findable without a second join.
+    try:
+        from backend.data.models import BacktestRun
+        rows = (await db.execute(
+            select(BacktestRun).where(BacktestRun.strategy_id == f"RL::{agent_id}")
+            .order_by(desc(BacktestRun.created_at)).limit(25))).scalars().all()
+        bts = [{
+            "id": b.id, "symbol": b.symbol, "title": b.title,
+            "start": b.start_date.isoformat() if b.start_date else None,
+            "end": b.end_date.isoformat() if b.end_date else None,
+            "total_trades": b.total_trades, "win_rate": b.win_rate,
+            "profit_factor": b.profit_factor, "sharpe": b.sharpe_ratio,
+            "sortino": b.sortino_ratio, "expectancy_r": b.expectancy_r,
+            "max_drawdown_pct": b.max_drawdown_pct, "total_pnl": b.total_pnl,
+        } for b in rows]
+    except Exception as exc:                                # noqa: BLE001
+        bts = [{"error": f"could not read backtest runs: {exc}"}]
+
+    env: dict = {}
+    try:
+        from backend.mt5.data_fetcher import server_offset_status, terminal_max_bars
+        env["server_clock"] = server_offset_status()
+        env["terminal_max_bars"] = terminal_max_bars()
+    except Exception:                                       # noqa: BLE001
+        pass
+    try:
+        import platform
+        import subprocess
+        env["python"] = platform.python_version()
+        env["platform"] = platform.platform()
+        env["commit"] = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True,
+            text=True, timeout=5).stdout.strip() or "unknown"
+    except Exception:                                       # noqa: BLE001
+        pass
+
+    payload = {
+        "export_version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "what_this_is": (
+            "One AlgoEdge RL agent: its pre-registration, the data it saw, the "
+            "risk config the engine was given, every phase's event log, the "
+            "per-seed/per-fold training record, why signals did not become "
+            "trades, the distilled charter, the validation gate, and any "
+            "backtests run as this agent. Read `findings` first."),
+        "findings": _export_findings(spec_d, training, funnel, risk_config),
+        "environment": env,
+        "agent": {
+            "agent_id": row.agent_id, "name": row.name, "status": row.status,
+            "mode": mode, "optimiser": row.optimiser,
+            "spec_hash": row.spec_hash, "policy_hash": row.policy_hash,
+            "suspended": bool(row.suspended),
+            "suspended_reason": row.suspended_reason or "",
+            "reject_reason": row.reject_reason or "",
+            "live_adherence": row.live_adherence,
+        },
+        "spec": spec_d,
+        "learning": learning,
+        "trained_on": json.loads(row.trained_on_json or "[]"),
+        "risk_config_used": risk_config,
+        "rejection_funnel": funnel,
+        "rejection_summary": rr.totals(funnel) if funnel else {},
+        "pipeline": trainmod.read_pipeline(agent_id),
+        "progress": trainmod.read_progress(agent_id),
+        "training": training,
+        "history_downsampled": downsampled,
+        # `load_policy` hands back (LinearPolicy, Scaler) OBJECTS, which no
+        # JSON encoder will take - serialising them is the caller's job.
+        "policy": _policy_dict(agent_id),
+        "charters": [c.to_dict() | {"english": c.english()} for c in charters],
+        "proposals": [{
+            "id": p.id, "kind": p.kind, "status": p.status, "why": p.why,
+            "from_version": p.from_version, "reason": p.reason,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "proposed": json.loads(p.proposal_json),
+        } for p in props],
+        "validation": json.loads(row.validation_json) if row.validation_json else None,
+        "backtests": bts,
+    }
+
+    from fastapi.responses import JSONResponse
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+    return JSONResponse(payload, headers={
+        "Content-Disposition":
+            f'attachment; filename="algoedge-agent-{agent_id}-{stamp}.json"'})
+
+
 class CloneIn(BaseModel):
     symbols: list[str]
     name: str | None = None
@@ -589,7 +854,19 @@ async def start_training(agent_id: str, body: TrainIn, db: AsyncSession = Depend
         raise HTTPException(400, f"no data source for {missing} - every PRE-REGISTERED "
                                  f"symbol must be supplied, including the ones you expect "
                                  f"to fail, because the report names every asset attempted")
-    payload = trainmod.job_payload(spec, body.datasets, body.risk_config,
+    # The risk config is built HERE, in the API process, exactly as the two
+    # sibling routes in this module already do (`body.risk_config or
+    # E.default_risk_config(symbol)`). The training worker keeps its own
+    # fallback for direct callers, but it should not normally have to use it:
+    # building this inside the worker drags the whole routes module into the
+    # training subprocess, and an empty one makes the engine refuse every
+    # signal - which is how a run reported 0 trades for a day without saying
+    # why.
+    risk_config = body.risk_config
+    if not risk_config:
+        from backend.rl import env as _E
+        risk_config = _E.default_risk_config(spec.symbols[0] if spec.symbols else "EURUSD")
+    payload = trainmod.job_payload(spec, body.datasets, risk_config,
                                    agent_id=agent_id, optimiser=body.optimiser)
     try:
         trainmod.queue.submit(agent_id, payload)

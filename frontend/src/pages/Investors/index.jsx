@@ -2,6 +2,7 @@ import { NavLink, Routes, Route } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Users, Gauge, Inbox, Eye, LineChart, Scale, FileText, History, Percent, UserPlus, Smartphone,
+  Share2,
 } from 'lucide-react';
 import { inv } from '../../services/api';
 import Overview from './Overview';
@@ -16,6 +17,7 @@ import Audit from './Audit';
 import Fees from './Fees';
 import Applications from './Applications';
 import Releases from './Releases';
+import Referrals from './Referrals';
 
 function SectionNav() {
   const { data } = useQuery({ queryKey: ['inv', 'overview'], queryFn: inv.overview });
@@ -31,6 +33,7 @@ function SectionNav() {
     { to: '/investors/disclosure', label: 'Disclosure', icon: Eye, badge: q.disclosures },
     { to: '/investors/nav', label: 'Valuation', icon: LineChart },
     { to: '/investors/fees', label: 'Fees', icon: Percent },
+    { to: '/investors/referrals', label: 'Referrals', icon: Share2 },
     { to: '/investors/reconciliation', label: 'Reconciliation', icon: Scale },
     { to: '/investors/terms', label: 'Fund terms', icon: FileText },
     { to: '/investors/releases', label: 'App releases', icon: Smartphone },
@@ -69,6 +72,7 @@ export default function InvestorsPage() {
         <Route path="disclosure" element={<Disclosure />} />
         <Route path="nav" element={<Nav />} />
         <Route path="fees" element={<Fees />} />
+        <Route path="referrals" element={<Referrals />} />
         <Route path="reconciliation" element={<Reconciliation />} />
         <Route path="terms" element={<Terms />} />
         <Route path="releases" element={<Releases />} />

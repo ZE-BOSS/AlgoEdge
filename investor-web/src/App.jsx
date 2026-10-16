@@ -15,6 +15,7 @@ import Signup from './pages/Signup';
 import Home from './pages/Home';
 import Money from './pages/Money';
 import Activity from './pages/Activity';
+import Referrals from './pages/Referrals';
 import Trades from './pages/Trades';
 import How from './pages/How';
 import Account from './pages/Account';
@@ -24,6 +25,7 @@ const TABS = [
   { to: '/money', label: 'Money', icon: 'money' },
   { to: '/trades', label: 'Trades', icon: 'trades' },
   { to: '/activity', label: 'Activity', icon: 'activity' },
+  { to: '/referrals', label: 'Referrals', icon: 'user' },
   { to: '/account', label: 'Settings', icon: 'settings' },
 ];
 
@@ -118,6 +120,7 @@ export default function App() {
           <Route path="/" element={guard(<Home />)} />
           <Route path="/money/*" element={guard(<Money />)} />
           <Route path="/activity" element={guard(<Activity />)} />
+          <Route path="/referrals" element={guard(<Referrals />)} />
           <Route path="/trades" element={guard(<Trades />)} />
           <Route path="/how" element={guard(<How />)} />
           <Route path="/account" element={guard(<Account />)} />

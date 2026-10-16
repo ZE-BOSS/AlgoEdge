@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import contextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
@@ -182,6 +182,24 @@ class SettingsChange(BaseModel):
     bank_account_number: str | None = None
     bank_account_name: str | None = None
     bank_instructions: str | None = None
+    # Listed explicitly because this model IS the field list: pydantic drops
+    # any key it does not declare, silently, so leaving these out would let an
+    # admin "save" new referral rates and have nothing happen - the settings
+    # screen would show success and the old rates would stay in force.
+    referral_model: str | None = Field(default=None, pattern="^(HOUSE_FEE|INVESTOR_PROFIT|OFF)$")
+    referral_l1_pct: Decimal | None = Field(default=None, ge=0, le=100)
+    referral_l2_pct: Decimal | None = Field(default=None, ge=0, le=100)
+
+
+class SetReferrer(BaseModel):
+    # One of these. `referral_code` lets an admin place someone under whoever
+    # owns a code without looking the investor up first; neither means detach.
+    referrer_id: str | None = None
+    referral_code: str | None = Field(default=None, max_length=16)
+
+
+class SettleEarning(BaseModel):
+    payment_reference: str = Field(min_length=1, max_length=120)
 
 
 class Publish(BaseModel):
@@ -918,7 +936,10 @@ class ApplicationStatus(BaseModel):
 def _application_row(a) -> dict:
     return {"id": str(a.id), "name": a.name, "email": a.email, "phone": a.phone, "country": a.country,
             "amount_band": a.amount_band, "message": a.message, "status": a.status,
-            "investor_id": a.investor_id, "created_at": _iso(a.created_at)}
+            "investor_id": a.investor_id, "created_at": _iso(a.created_at),
+            # The code they arrived with and who it resolved to. A code that did
+            # not resolve still shows, so the admin can place them by hand.
+            "referral_code": a.referral_code, "referred_by": a.referred_by}
 
 
 @router.get("/applications/list")
@@ -960,9 +981,161 @@ async def application_accept(application_id: int, admin: User = Depends(require_
     db.add(inv)
     a.status, a.investor_id, a.decided_by = "accepted", inv.id, admin.id
     await db.flush()
+    # Every investor gets their own code at creation, and the one they came in
+    # with is applied now - the application was only a request; this is the
+    # account. A referrer who has since closed is not attached, and the audit
+    # entry says so rather than failing the acceptance.
+    from backend.investor import referrals as refmod
+    await refmod.ensure_code(db, inv)
+    ref_note = None
+    if a.referred_by:
+        ref = await db.get(Investor, a.referred_by)
+        if ref is not None and ref.status != "closed":
+            await refmod.set_referrer(db, inv.id, ref.id, source="LINK", actor_id=admin.id)
+            ref_note = ref.id
+        else:
+            ref_note = f"not attached: introducer {a.referred_by} is closed or gone"
     await fundmod.audit(db, actor_id=admin.id, action="application.accepted",
-                        entity_type="application", entity_id=str(a.id), detail={"investor_id": inv.id})
-    return {"investor_id": inv.id, "application": _application_row(a)}
+                        entity_type="application", entity_id=str(a.id),
+                        detail={"investor_id": inv.id, "referred_by": ref_note})
+    return {"investor_id": inv.id, "application": _application_row(a),
+            "referred_by": ref_note}
+
+
+# ── the referral tree ───────────────────────────────────────────────────────
+
+@router.post("/{investor_id}/referrer")
+async def set_investor_referrer(investor_id: str, body: SetReferrer,
+                                admin: User = Depends(require_admin),
+                                db: AsyncSession = Depends(get_db)):
+    """Place an investor under another one, move them, or detach them.
+
+    The reason this exists: people apply without using the link. Earnings
+    already accrued under the old placement stay where they are - they were
+    earned under it - and only future periods follow the new one.
+    """
+    from backend.investor import referrals as refmod
+
+    target = body.referrer_id
+    if not target and body.referral_code:
+        owner = await refmod.by_code(db, body.referral_code)
+        if owner is None:
+            raise HTTPException(status_code=404, detail="no investor has that code")
+        target = owner.id
+    try:
+        out = await refmod.set_referrer(db, investor_id, target, source="ADMIN",
+                                        actor_id=admin.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await fundmod.audit(db, actor_id=admin.id, action="referral.placed",
+                        entity_type="investor", entity_id=investor_id,
+                        detail={"referred_by": target})
+    return out
+
+
+@router.get("/{investor_id}/referrals")
+async def admin_investor_referrals(investor_id: str, db: AsyncSession = Depends(get_db)):
+    """The whole picture for one investor - the admin sees both directions."""
+    from backend.investor import referrals as refmod
+    from backend.investor.models import ReferralEarning
+
+    inv = await db.get(Investor, investor_id)
+    if inv is None:
+        raise HTTPException(status_code=404, detail="investor not found")
+
+    async def brief(pid):
+        o = await db.get(Investor, pid)
+        return None if o is None else {"id": o.id, "name": o.name, "email": o.email,
+                                       "status": o.status,
+                                       "referral_source": o.referral_source}
+
+    up = [{"level": lvl, **(await brief(pid) or {"id": pid})}
+          for lvl, pid in await refmod.upline(db, investor_id)]
+    down = await refmod.downline_ids(db, investor_id)
+    people = []
+    for lvl in sorted(down):
+        for pid in down[lvl]:
+            b = await brief(pid)
+            if b:
+                st = await recmod.investor_statement(db, pid)
+                people.append({"level": lvl, **b, "deposited": st["capital_in"],
+                               "current_value": st["current_value"], "profit": st["profit"]})
+
+    def ledger(rows):
+        return [{"id": str(r.id), "level": r.level, "earner_id": r.earner_id,
+                 "source_investor_id": r.source_investor_id, "model": r.model,
+                 "period_start": _iso(r.period_start), "period_end": _iso(r.period_end),
+                 "basis": _s(r.basis_amount), "rate_pct": _s(r.rate_pct),
+                 "amount": _s(r.amount), "state": r.state,
+                 "settled_at": _iso(r.settled_at), "note": r.note} for r in rows]
+
+    as_earner = (await db.execute(select(ReferralEarning).where(
+        ReferralEarning.earner_id == investor_id))).scalars().all()
+    as_source = (await db.execute(select(ReferralEarning).where(
+        ReferralEarning.source_investor_id == investor_id))).scalars().all()
+    return {
+        "investor_id": investor_id,
+        "referral_code": await refmod.ensure_code(db, inv),
+        "referral_source": inv.referral_source,
+        "upline": up, "downline": people,
+        "earned": ledger(as_earner), "paid_out_of_their_activity": ledger(as_source),
+    }
+
+
+@router.get("/referral-earnings")
+async def referral_earnings(state: str | None = None, db: AsyncSession = Depends(get_db)):
+    """The ledger of what we owe introducers, with totals by state."""
+    from backend.investor.models import ReferralEarning
+
+    q = select(ReferralEarning).order_by(desc(ReferralEarning.created_at))
+    if state:
+        q = q.where(ReferralEarning.state == state)
+    rows = (await db.execute(q.limit(1000))).scalars().all()
+    ids = {r.earner_id for r in rows} | {r.source_investor_id for r in rows}
+    who = {}
+    for i in ids:
+        o = await db.get(Investor, i)
+        who[i] = o.name if o else i
+    totals: dict = {}
+    for r in rows:
+        totals[r.state] = totals.get(r.state, Decimal("0")) + Decimal(str(r.amount))
+    return {
+        "rows": [{"id": str(r.id), "level": r.level, "earner": who.get(r.earner_id),
+                  "earner_id": r.earner_id, "source": who.get(r.source_investor_id),
+                  "source_investor_id": r.source_investor_id, "model": r.model,
+                  "period_start": _iso(r.period_start), "period_end": _iso(r.period_end),
+                  "basis": _s(r.basis_amount), "rate_pct": _s(r.rate_pct),
+                  "amount": _s(r.amount), "state": r.state, "note": r.note,
+                  "settled_at": _iso(r.settled_at)} for r in rows],
+        "totals": {k: _s(v) for k, v in totals.items()},
+    }
+
+
+@router.post("/referral-earnings/{earning_id}/settle")
+async def settle_referral_earning(earning_id: int, body: SettleEarning,
+                                  admin: User = Depends(require_admin),
+                                  db: AsyncSession = Depends(get_db)):
+    """Record that an introducer has been paid.
+
+    An earning is a debt until someone actually sends the money; settling it is
+    that step, with the payment reference, and it can happen once.
+    """
+    from backend.investor.models import ReferralEarning
+
+    row = await db.get(ReferralEarning, earning_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="earning not found")
+    if row.state == "settled":
+        raise HTTPException(status_code=400, detail="already settled")
+    row.state = "settled"
+    row.settled_at = datetime.now(timezone.utc)
+    row.note = ((row.note + " | ") if row.note else "") + f"paid: {body.payment_reference}"
+    await db.flush()
+    await fundmod.audit(db, actor_id=admin.id, action="referral.settled",
+                        entity_type="referral_earning", entity_id=str(earning_id),
+                        detail={"amount": str(row.amount), "earner_id": row.earner_id,
+                                "payment_reference": body.payment_reference})
+    return {"id": str(row.id), "state": row.state, "settled_at": _iso(row.settled_at)}
 
 
 # ── app releases (the Android APK) ──────────────────────────────────────────

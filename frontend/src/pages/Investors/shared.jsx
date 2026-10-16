@@ -88,6 +88,13 @@ export function ActionForm({ label, fields = [], submitLabel, onSubmit, tone = '
           {f.type === 'textarea' ? (
             <textarea rows={2} value={values[f.name] ?? f.defaultValue ?? ''} placeholder={f.placeholder}
                       onChange={e => setValues(v => ({ ...v, [f.name]: e.target.value }))} />
+          ) : f.type === 'select' ? (
+            // For a closed set the server validates (e.g. the referral model):
+            // a free-text box there invites a typo the server then refuses.
+            <select value={values[f.name] ?? f.defaultValue ?? ''}
+                    onChange={e => setValues(v => ({ ...v, [f.name]: e.target.value }))}>
+              {(f.options || []).map(([val, text]) => <option key={val} value={val}>{text}</option>)}
+            </select>
           ) : (
             <input type={f.type === 'number' ? 'text' : (f.type || 'text')}
                    inputMode={f.type === 'number' ? 'decimal' : undefined}

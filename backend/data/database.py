@@ -139,6 +139,29 @@ async def init_db():
             # bot kept scanning while ghost cleanup, position management and
             # the investor live-trade watch all failed every cycle.
             "ALTER TABLE trades ADD COLUMN mt5_account BIGINT;",
+            # The investor referral tree (2026-10-16). Existing tables do not
+            # get new columns from create_all, so without these every query on
+            # an Investor, an Application or the fund terms fails with "no
+            # such column" the moment this is deployed onto a database that
+            # already has investors in it - i.e. the live one.
+            "ALTER TABLE investors ADD COLUMN referred_by VARCHAR(36);",
+            "ALTER TABLE investors ADD COLUMN referral_code VARCHAR(16);",
+            "ALTER TABLE investors ADD COLUMN referred_at TIMESTAMP;",
+            "ALTER TABLE investors ADD COLUMN referral_source VARCHAR(16);",
+            # NOT NULL needs a DEFAULT on ADD COLUMN, and the default is also
+            # the right answer for every version that existed before this:
+            # nobody was ever charged a referral share under them.
+            "ALTER TABLE fund_settings ADD COLUMN referral_model VARCHAR(16) NOT NULL DEFAULT 'HOUSE_FEE';",
+            "ALTER TABLE fund_settings ADD COLUMN referral_l1_pct NUMERIC(9, 4) NOT NULL DEFAULT 0;",
+            "ALTER TABLE fund_settings ADD COLUMN referral_l2_pct NUMERIC(9, 4) NOT NULL DEFAULT 0;",
+            "ALTER TABLE investor_applications ADD COLUMN referral_code VARCHAR(16);",
+            "ALTER TABLE investor_applications ADD COLUMN referred_by VARCHAR(36);",
+            # ADD COLUMN cannot carry UNIQUE in SQLite, so the indexes the
+            # model declares are created separately. IF NOT EXISTS is valid on
+            # both SQLite and Postgres for indexes. Unique still allows many
+            # NULLs, which is every investor until their code is issued.
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_investors_referral_code ON investors (referral_code);",
+            "CREATE INDEX IF NOT EXISTS ix_investors_referred_by ON investors (referred_by);",
         ]
 
         # DROP COLUMN ... IF EXISTS is Postgres syntax — SQLite's ALTER TABLE
