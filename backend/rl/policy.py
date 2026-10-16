@@ -73,6 +73,17 @@ def softmax(x: np.ndarray) -> np.ndarray:
     return e / s if s > 0 else np.full_like(e, 1.0 / len(e))
 
 
+def softmax_rows(X: np.ndarray) -> np.ndarray:
+    """`softmax` applied to every row, in one vectorised pass - the same
+    arithmetic row for row. `np.apply_along_axis(softmax, 1, X)` called the
+    Python function once per bar; profiled 2026-10-16 that was 38% of a
+    training iteration (294,000 calls in two iterations)."""
+    X = np.asarray(X, dtype=float)
+    X = X - X.max(axis=1, keepdims=True)
+    e = np.exp(np.clip(X, -500, 500))
+    return e / e.sum(axis=1, keepdims=True)
+
+
 @dataclass
 class LinearPolicy:
     """Weights, and the two decisions they make.
@@ -104,6 +115,12 @@ class LinearPolicy:
 
     seed: int = 0
     trained_iterations: int = 0
+    # The frozen supervised direction model this policy was trained against,
+    # serialised (`Director.to_dict`). It travels WITH the policy because the
+    # policy's input width includes its two columns: a policy without it cannot
+    # be run at all. Until 2026-10-16 it lived nowhere, so every director run
+    # died on a shape mismatch in the first rollout. None for agents without one.
+    director: dict | None = None
 
     def __post_init__(self) -> None:
         if self.W_entry.size == 0:
@@ -274,8 +291,8 @@ class LinearPolicy:
             return np.zeros(len(Z) if Z.ndim == 2 else 0, dtype=np.int64), \
                 np.zeros(len(Z) if Z.ndim == 2 else 0, dtype=np.int64)
         E = self.encode(Z)
-        PS = np.apply_along_axis(softmax, 1, E @ self.W_stop + self.b_stop)
-        PR = np.apply_along_axis(softmax, 1, E @ self.W_rr + self.b_rr)
+        PS = softmax_rows(E @ self.W_stop + self.b_stop)
+        PR = softmax_rows(E @ self.W_rr + self.b_rr)
         if rng is None:
             return np.argmax(PS, axis=1), np.argmax(PR, axis=1)
         us = rng.random((len(PS), 1))
@@ -355,7 +372,18 @@ class LinearPolicy:
                      "W_stop", "b_stop", "W_rr", "b_rr"):
             arr = getattr(self, name)
             d[name] = {"shape": list(arr.shape), "data": [float(v) for v in arr.ravel()]}
+        # Only when present, so a policy without a director serialises (and
+        # content-hashes) exactly as it did before the field existed.
+        if self.director:
+            d["director"] = dict(self.director)
         return d
+
+    def director_model(self):
+        """The `Director` this policy expects, or None."""
+        if not self.director:
+            return None
+        from backend.rl.director import Director
+        return Director.from_dict(self.director)
 
     @classmethod
     def from_dict(cls, d: dict) -> "LinearPolicy":
@@ -364,6 +392,7 @@ class LinearPolicy:
                 n_stop=int(d.get("n_stop", 0)), n_rr=int(d.get("n_rr", 0)),
                 seed=int(d.get("seed", 0)))
         p.trained_iterations = int(d.get("trained_iterations", 0))
+        p.director = dict(d["director"]) if d.get("director") else None
         for name in ("W_hidden", "b_hidden", "W_entry", "b_entry", "W_exit", "b_exit",
                      "W_stop", "b_stop", "W_rr", "b_rr"):
             blob = d.get(name)

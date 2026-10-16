@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from backend.utils.logger import get_logger
@@ -132,6 +133,15 @@ def generate(symbol: str, timeframe: str, frames_by_tf: dict[str, pd.DataFrame],
     feed.bind(frames_by_tf)
     primary = primary_timeframe(required)
     times = frames_by_tf[primary].index.values
+    # The AGENT's bars, which `bar_index` must index. When the strategy's own
+    # primary timeframe differs (ORB_v1 decides on M15, an agent on M5), bar
+    # `i` of the strategy is not bar `i` of the agent, and keying on it
+    # attached every setup to the wrong M5 bar - three times too early. So the
+    # setup is re-addressed by TIME: the agent bar that opens when the
+    # strategy's bar `i` opens, which is where the engine fills it.
+    agent_times = (frames_by_tf[timeframe].index.values
+                   if timeframe in frames_by_tf else times)
+    remap = timeframe in frames_by_tf and primary != timeframe
 
     out: list[dict] = []
 
@@ -140,12 +150,17 @@ def generate(symbol: str, timeframe: str, frames_by_tf: dict[str, pd.DataFrame],
             sig = await feed.step(i)
             if not sig:
                 continue
+            j = i
+            if remap:
+                j = int(np.searchsorted(agent_times, times[i], side="left"))
+                if j <= 0 or j >= len(agent_times):
+                    continue
             out.append({
                 "symbol": sig.symbol,
                 "direction": sig.direction,
-                # bar i-1, so the engine fills at bar i's open. See the note
+                # bar j-1, so the engine fills at bar j's open. See the note
                 # at the top of this module.
-                "time": int(pd.Timestamp(times[i - 1]).timestamp()),
+                "time": int(pd.Timestamp(agent_times[j - 1]).timestamp()),
                 "entry_price": float(sig.entry_price),
                 "stop_loss": float(sig.stop_loss),
                 "take_profit": float(sig.take_profit),
@@ -153,7 +168,7 @@ def generate(symbol: str, timeframe: str, frames_by_tf: dict[str, pd.DataFrame],
                 "confluence_score": int(sig.confluence_score),
                 "metadata": dict(sig.metadata or {}),
                 "strategy_name": strategy_id,
-                "bar_index": i,
+                "bar_index": j,
             })
             if len(out) >= MAX_BASE_SIGNALS:
                 logger.warning(

@@ -1,0 +1,2263 @@
+{
+ "at": "2026-10-16T17:04:41.382977+00:00",
+ "rows": [
+  {
+   "pool": "D6k6o1WknEwdhktmqgYBs5rqLvTenRRWAmHadyMntfmN",
+   "name": "RRL / SOL",
+   "mint": "62oaBX22Ap4rALQxBAU3wWJs3L2AZhR3YFm17Kfopump",
+   "created": "2026-10-16T16:43:35Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2934.706481",
+   "reserve_usd": "2328.874",
+   "vol_h1": "57541.7340274452",
+   "price_change_h1": "-62.431",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "CJk5FRuwo3fHY88VgtNEgoy7tRovaQuShB2pB5pV7Nxp",
+   "name": "DERP / SOL",
+   "mint": "DCniswd2tepttvdD1P6FhFZhqasNrRZFKskf2UUNpump",
+   "created": "2026-10-16T16:43:23Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2660.642306",
+   "reserve_usd": "1035.1348",
+   "vol_h1": "176.6907775788",
+   "price_change_h1": "-54.507",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 103200,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "50.59%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5058,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1005,
+      "level": "warn"
+     }
+    ],
+    "score": 109264,
+    "score_normalised": 79,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "9eRFtxuRaRTYsWPKvMDq4KE7x3C7cNLT3ji41ZVhM7DG",
+   "name": "MEOWS / SOL",
+   "mint": "FzZqbYUhBhiEr44i2odL3Fg6YEPcHJegUL7WqUoZSmnZ",
+   "created": "2026-10-16T16:43:20Z",
+   "dex": "meteora-dbc",
+   "fdv_usd": "3441.785672",
+   "reserve_usd": "3426.2285",
+   "vol_h1": "10.6913162349",
+   "price_change_h1": "0.206",
+   "rugcheck": {
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "3S4wqQd3Gte9irZ8DVB6g3HmWsSah472DgDufeP5Jcsx",
+   "name": "AI / SOL",
+   "mint": "BjvKv5jc3oPd8iRvFskp5gSZvqgt1twqCnGnwVPqpump",
+   "created": "2026-10-16T16:43:10Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2983.719254",
+   "reserve_usd": "2362.154",
+   "vol_h1": "10806.2764190041",
+   "price_change_h1": "-46.859",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "3EBCYBZH8BqcyWF6i2y5y2bKSD8y2aY7NHRbHFcbk1fr",
+   "name": "AI / SOL",
+   "mint": "6XNVtagH4XhWbgYSNN3v1wQSWMsFd3VHezyYtkvapump",
+   "created": "2026-10-16T16:43:10Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2922.829344",
+   "reserve_usd": "2324.5411",
+   "vol_h1": "30528.8736689149",
+   "price_change_h1": "-49.965",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "DqG3mZtvyeyQsukB7nKXgf4QgTT8AVyfzRhqqefphuBV",
+   "name": "Grok Bot / SOL",
+   "mint": "CMA7N9uYiLmzNHaZXff8AQz8ceXSgpLc8WibQDE3bmeG",
+   "created": "2026-10-16T16:43:09Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2944.371241",
+   "reserve_usd": "2327.8245",
+   "vol_h1": "0.00001021510148",
+   "price_change_h1": "0",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 16800,
+      "level": "danger"
+     }
+    ],
+    "score": 16801,
+    "score_normalised": 57,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "Bifu5pfsrc8NnUdN51bW2QsDaa8T39wyawkHqNxA1Dyk",
+   "name": "OI / SOL",
+   "mint": "DQprBhLBHU61LgvP7bSJots4Cr9NA5tiYmSEam4jpump",
+   "created": "2026-10-16T16:43:08Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2911.036526",
+   "reserve_usd": "2303.4248",
+   "vol_h1": "6620.0528509522",
+   "price_change_h1": "-44.439",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "CHByJLhwSi6bC2HedYhNS7jnsQbKa12N5Hu3vLEUB1u8",
+   "name": "AI / SOL",
+   "mint": "G2Xuk7JBBzY2jNkxk1hfJVBpg95GPWAPD9WrDYs1pump",
+   "created": "2026-10-16T16:42:44Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3069.097822",
+   "reserve_usd": "2448.4921",
+   "vol_h1": "13271.0783756236",
+   "price_change_h1": "-26.928",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "AbRfASP4YB7xrECTcUukdPEFA5VipzjMad4baSWGtkBp",
+   "name": "GOLD / WETH",
+   "mint": "BCKVW3hNdG3HRjKeCA4khZuXmgH8WSQCWndL4CEbpump",
+   "created": "2026-10-16T16:42:43Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3055.695845",
+   "reserve_usd": "2416.4471",
+   "vol_h1": "378.9969452673",
+   "price_change_h1": "-4.529",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "6cXL9QM97vZL6GRdrdp5bvZDQyfdpxCbuU6YNvpVTZ9j",
+   "name": "FASDSDAFAS / SOL",
+   "mint": "8sMRC5du9sDt2QPkJHHmSBbuRcfEnJuYqDQFtUNApump",
+   "created": "2026-10-16T16:42:40Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2915.727137",
+   "reserve_usd": "2304.8299",
+   "vol_h1": "2.0590376416",
+   "price_change_h1": "0.024",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 21600,
+      "level": "danger"
+     }
+    ],
+    "score": 21601,
+    "score_normalised": 61,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "67aXxpkXsRgd7dJQvTAicSeigAmg1MnH2379wg7A1NGE",
+   "name": "CATCYCLE / SOL",
+   "mint": "G2xayJq5nxBgxHsRKZ2mN5pzkN8yrfZntmCjGiAipump",
+   "created": "2026-10-16T16:42:37Z",
+   "dex": "pump-fun",
+   "fdv_usd": "490.0800596",
+   "reserve_usd": "201.1645",
+   "vol_h1": "228.4667041793",
+   "price_change_h1": "-91.613",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 120000,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "48.48%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 4847,
+      "level": "danger"
+     }
+    ],
+    "score": 124848,
+    "score_normalised": 81,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "DsQJnAwyhv1E3wit6negJiL6MQ4eb5GkrSMqmupFyDrP",
+   "name": "ELONGATE / SOL",
+   "mint": "2nNrNvPR6HAxEeXbgtwKyk86UnxcVpfGEVB4aWA3pump",
+   "created": "2026-10-16T16:42:34Z",
+   "dex": "pump-fun",
+   "fdv_usd": "11228.818914",
+   "reserve_usd": "4354.1101",
+   "vol_h1": "260.9957462367",
+   "price_change_h1": "89.434",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Single holder ownership",
+      "value": "50.74%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5074,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1007,
+      "level": "warn"
+     }
+    ],
+    "score": 6082,
+    "score_normalised": 43,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "GQJpeguPoL21znJzUqUN7RDsyT7YfzjWzb8PotfbyKGs",
+   "name": "VIODRG / SOL",
+   "mint": "5vMQzuskUC3uA76zvUdARRPZtqY5bPxvueCkc7WEbonk",
+   "created": "2026-10-16T16:42:32Z",
+   "dex": "pumpswap",
+   "fdv_usd": "79343.35206",
+   "reserve_usd": "0.000213144381598586",
+   "vol_h1": "37153.106213533",
+   "price_change_h1": "47.846",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Top 10 holders high ownership",
+      "value": "",
+      "description": "The top 10 users hold more than 70% token supply",
+      "score": 9831,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "92.26%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 9225,
+      "level": "danger"
+     },
+     {
+      "name": "Low Liquidity",
+      "value": "$0.00",
+      "description": "Low amount of liquidity in the token pool",
+      "score": 2999,
+      "level": "danger"
+     },
+     {
+      "name": "High ownership",
+      "value": "",
+      "description": "The top users hold more than 80% token supply",
+      "score": 1473,
+      "level": "danger"
+     }
+    ],
+    "score": 23529,
+    "score_normalised": 62,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "6Mzp6cWw8m2bsoxvAHmhJp2X4W5YuT1zVB4N6K1XPyFz",
+   "name": "GCAT / SOL",
+   "mint": "6qaYWVnZC8hSqxS7QsW1oocbiH2Q9G3AwkMYV5JyP7j5",
+   "created": "2026-10-16T16:42:30Z",
+   "dex": "pumpswap",
+   "fdv_usd": "26448.0471328961",
+   "reserve_usd": "37027.5996",
+   "vol_h1": "118465.348556027",
+   "price_change_h1": "103.952",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Large Amount of LP Unlocked",
+      "value": "100.00%",
+      "description": "A large amount of LP tokens are unlocked, allowing the owner to remove liquidity at any point.",
+      "score": 10999,
+      "level": "danger"
+     },
+     {
+      "name": "Low amount of LP Providers",
+      "value": "",
+      "description": "Only a few users are providing liquidity",
+      "score": 400,
+      "level": "warn"
+     }
+    ],
+    "score": 11400,
+    "score_normalised": 52,
+    "lpLockedPct": 9.070799297922924e-10
+   }
+  },
+  {
+   "pool": "HsfqZwSVgAA8wbMnNmYMnjcYBNegPnhasYbdbxQM83bw",
+   "name": "AI / SOL",
+   "mint": "b7aDzDKkB5EzJWU3LFtaxgh1XLcDsPZuqo1swebpump",
+   "created": "2026-10-16T16:42:29Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2981.765824",
+   "reserve_usd": "2356.4406",
+   "vol_h1": "5502.9324679966",
+   "price_change_h1": "-41.41",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "Evjrv3NUPNUXUqqPjz3NyJ6pKtV6HKe6AWoxDn9vxr1o",
+   "name": "SATOSHI / SOL",
+   "mint": "EUgcmqrFdYLaBiyeuH454fS36LH2XwqXpU9AEGRmpump",
+   "created": "2026-10-16T16:42:29Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3123.7548836296",
+   "reserve_usd": "2463.8911",
+   "vol_h1": "369.8673811687",
+   "price_change_h1": "0.415",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "3YP1UqeaWrLz3zzPksfZEhmEiZ5iSqXyprFF7LAbfXsT",
+   "name": "ChaseCat / SOL",
+   "mint": "vx17c42Chs38b3VhdrP8DHvAbw4Rhajy9FA4wZupump",
+   "created": "2026-10-16T16:42:28Z",
+   "dex": "pump-fun",
+   "fdv_usd": "731.3584256",
+   "reserve_usd": "257.7732",
+   "vol_h1": "122.446373748",
+   "price_change_h1": "-87.476",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 120000,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "49.90%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 4989,
+      "level": "danger"
+     }
+    ],
+    "score": 124990,
+    "score_normalised": 81,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "5Y2atfFBCUHG61sjbZ5Q4GNn7ZChDUR5B3J7qwuf6kiM",
+   "name": "CLEAN / SOL",
+   "mint": "2cbfbf1wS9898xJemx4TidNwa6T1Fycg9vdNypdy7HfH",
+   "created": "2026-10-16T16:42:19Z",
+   "dex": "meteora-damm-v2",
+   "fdv_usd": "0.4090042648",
+   "reserve_usd": "0.4884",
+   "vol_h1": "19868.6107483041",
+   "price_change_h1": "-100",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Low Liquidity",
+      "value": "$2.29",
+      "description": "Low amount of liquidity in the token pool",
+      "score": 2997,
+      "level": "danger"
+     }
+    ],
+    "score": 2998,
+    "score_normalised": 34,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "F2d4VN92Voi8nfZRPffBKTAQaVcXPBdGk9Gr8G7YQj9E",
+   "name": "101 / SOL",
+   "mint": "G7ai1oBbFkpfV69MQa7G7AQbxXwEagyiUqXB98yRpump",
+   "created": "2026-10-16T16:42:15Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2918.415819",
+   "reserve_usd": "2307.3029",
+   "vol_h1": "630.7228655657",
+   "price_change_h1": "-3.068",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "65HBjDDzQzSgadqtzciQEwQB4HeqQoHD7JuNvBBMU3rV",
+   "name": "KAYLUB / SOL",
+   "mint": "E416wJCtCgjVPeRirpHd1qDvKRUy5oW6dnNhWQuxpump",
+   "created": "2026-10-16T16:42:12Z",
+   "dex": "pumpswap",
+   "fdv_usd": "104740.198",
+   "reserve_usd": "26239.6025",
+   "vol_h1": "258783.637032264",
+   "price_change_h1": "149.839",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "9EAoNBTqiLURuXKUi585b1cj9gbU125x3kbkJ8xijzum",
+   "name": "FRY / TSLAx",
+   "mint": "RoAdaz3uoPXa8A5acyoqAjyusyBXuGiqdDi4aLDStER",
+   "created": "2026-10-16T16:41:51Z",
+   "dex": "pump-fun",
+   "fdv_usd": "4899.262577",
+   "reserve_usd": "3645.3998",
+   "vol_h1": "16189.5806769002",
+   "price_change_h1": "23.416",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "Cyo327xjiPYtp7AQbZxiZEkg6c1nUhmgD9z9FdGzi1Da",
+   "name": "Audipurre / SOL",
+   "mint": "2mvrbQLveETx6nzmbagMwuxmNWSuLwieNJEB8aUA9dC3",
+   "created": "2026-10-16T16:41:47Z",
+   "dex": "meteora-damm-v2",
+   "fdv_usd": "6700.897219",
+   "reserve_usd": "0.0000252301115597637",
+   "vol_h1": "74027.5561233307",
+   "price_change_h1": "-9.469",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Large Amount of LP Unlocked",
+      "value": "100.00%",
+      "description": "A large amount of LP tokens are unlocked, allowing the owner to remove liquidity at any point.",
+      "score": 11000,
+      "level": "danger"
+     },
+     {
+      "name": "Top 10 holders high ownership",
+      "value": "",
+      "description": "The top 10 users hold more than 70% token supply",
+      "score": 8687,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "54.44%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5444,
+      "level": "danger"
+     },
+     {
+      "name": "Low Liquidity",
+      "value": "$0.00",
+      "description": "Low amount of liquidity in the token pool",
+      "score": 2999,
+      "level": "danger"
+     },
+     {
+      "name": "High ownership",
+      "value": "",
+      "description": "The top users hold more than 80% token supply",
+      "score": 1358,
+      "level": "danger"
+     },
+     {
+      "name": "Low amount of LP Providers",
+      "value": "",
+      "description": "Only a few users are providing liquidity",
+      "score": 500,
+      "level": "warn"
+     }
+    ],
+    "score": 29989,
+    "score_normalised": 65,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "F48XWDDEkzWUzYR5DJm4mBxct5TgofhzkPHbv8kiUmHt",
+   "name": "DUO / SOL",
+   "mint": "ADkd6izPxJtKueHAzKsDEnGRNEq5ERu1g3ses1wKpump",
+   "created": "2026-10-16T16:41:44Z",
+   "dex": "meteora",
+   "fdv_usd": "746521.0127",
+   "reserve_usd": "50340.0625",
+   "vol_h1": "16745.737750638",
+   "price_change_h1": "20.189",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 62.401914521731115
+   }
+  },
+  {
+   "pool": "2abB8QgSR6GJ8TvxAgUUBqeT2CwLbVtQQcz21Gr6TG7A",
+   "name": "INTELLIFUCK / SOL",
+   "mint": "6Lhjx2NGdpGHj3PKoYp4tXKZTrptFpBG5d4P1DhNpump",
+   "created": "2026-10-16T16:41:44Z",
+   "dex": "pumpswap",
+   "fdv_usd": "110414.160565373",
+   "reserve_usd": "27269.0542",
+   "vol_h1": "107612.761412752",
+   "price_change_h1": "164.711",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "qLQ6duoSCN7HPN1LLBJPyzhtrf6pL6BxiAMa1mtT2pE",
+   "name": "h1tcoin / TSLAx",
+   "mint": "3JYQsCcmdHAr8DfrCgrTjpJtL48BHjCNgAGRxsdUpump",
+   "created": "2026-10-16T16:41:42Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3062.4227552009",
+   "reserve_usd": "2430.7899",
+   "vol_h1": "2422.3055972499",
+   "price_change_h1": "0.444",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "GcvxmQ62gqoBSW8FxDLmJGZ6aHjYLmE316cuo5yh7Rth",
+   "name": "Roadster / SOL",
+   "mint": "HA2CE6AmvsK3k3mgfYu9JGGkP2J7cMwnEYQaThS5pump",
+   "created": "2026-10-16T16:41:38Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3179.324514",
+   "reserve_usd": "2503.9682",
+   "vol_h1": "18511.5011369193",
+   "price_change_h1": "-13.588",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "7Y4onsXhsCt4jMZ5Jc7KDWRWPgrJPLBByUHG7uHT5ZBw",
+   "name": "Grok / SOL",
+   "mint": "Ff6t6jvddcoGDvKB78mPJYdLiTZFD5L6URR1gWXTbwMf",
+   "created": "2026-10-16T16:41:36Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2945.275703",
+   "reserve_usd": "2327.8245",
+   "vol_h1": "0.00001021823938",
+   "price_change_h1": "0",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 16800,
+      "level": "danger"
+     }
+    ],
+    "score": 16801,
+    "score_normalised": 57,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "1YP65Be5sBTCjdjYHL3BH3oQ31iKidYy3yt7zxcQmmR",
+   "name": "LAVA / SOL",
+   "mint": "Eno4EetpfGJwBXSKbFE1TX1Zv8f7K2bU3x8Gu8HPpump",
+   "created": "2026-10-16T16:41:35Z",
+   "dex": "pump-fun",
+   "fdv_usd": "4.941417628",
+   "reserve_usd": "4.3433",
+   "vol_h1": "382.3840321467",
+   "price_change_h1": "-99.915",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 120000,
+      "level": "danger"
+     }
+    ],
+    "score": 120001,
+    "score_normalised": 80,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "7fmPY9EDMTYmJkjBuvmebAvCGaNP9tSZ988EVwbZY1mJ",
+   "name": "SCRVAN / SOL",
+   "mint": "2KqGvMyhy9FdkS4rWxc5Q7ypdQXtULA37UAbJDRipump",
+   "created": "2026-10-16T16:41:34Z",
+   "dex": "pump-fun",
+   "fdv_usd": "7741.272608",
+   "reserve_usd": "3012.1475",
+   "vol_h1": "264.7913972602",
+   "price_change_h1": "31.367",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 31200,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "50.62%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5062,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1006,
+      "level": "warn"
+     }
+    ],
+    "score": 37269,
+    "score_normalised": 68,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "EMrtgpPETVuTrBsUcgd9NT5WYRx6eAPHcb1QteJcg2qu",
+   "name": "GROKBOT / SOL",
+   "mint": "Dby6chcM1KWJohRzJ6rM6mvHaW2QngA3qpqgSKmXpump",
+   "created": "2026-10-16T16:41:33Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2915.628176",
+   "reserve_usd": "2304.7467",
+   "vol_h1": "4227.972515547",
+   "price_change_h1": "-37.78",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "HQBYquba7gqfbrqgE3mgcJ1XpEfTK2xvjgwxoUq2oqww",
+   "name": "L\u0410MA / SOL",
+   "mint": "8CNAVcsFpa4HsS75mcFvAUYQfUTC5VmrhSj1fTmukqtd",
+   "created": "2026-10-16T16:41:32Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3011.515219",
+   "reserve_usd": "2382.3967",
+   "vol_h1": "212.5658030255",
+   "price_change_h1": "-0.093",
+   "rugcheck": {
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "FmMFkJT8ruhBoZWZ5b5GFcw8LczA6yQaDfxqLQoiiqEz",
+   "name": "PACKPIC / SOL",
+   "mint": "5Y3GSjK4LsRp9posgyACcCXBy8zKhaeKSEevD5xwpump",
+   "created": "2026-10-16T16:41:30Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2484.550596",
+   "reserve_usd": "982.4226",
+   "vol_h1": "263.3523912802",
+   "price_change_h1": "-58.21",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 115200,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "50.18%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5018,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1001,
+      "level": "warn"
+     }
+    ],
+    "score": 121220,
+    "score_normalised": 80,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "6jbohyrWSNyu1Zo33eVn9YCD3yP8PihoCjrEVB8Gm2RN",
+   "name": "DERP / SOL",
+   "mint": "CftVukcpTbbtzrbBTrjY75UM9W38iPjBmarMCYBbpump",
+   "created": "2026-10-16T16:41:30Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3996.594162",
+   "reserve_usd": "1744.6241",
+   "vol_h1": "186.3653841657",
+   "price_change_h1": "-32.006",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 103200,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "50.41%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5041,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1004,
+      "level": "warn"
+     }
+    ],
+    "score": 109246,
+    "score_normalised": 79,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "FJBChkkbdoq38ugPc5cGSsvoRyyiqWsxaPZxk3GtBC3v",
+   "name": "pygmy / USDC",
+   "mint": "FP1ZDiSuNGCeQN9fPoYCg8GDmQbcume6z2TFJNTVpump",
+   "created": "2026-10-16T16:41:29Z",
+   "dex": "pump-fun",
+   "fdv_usd": "4013.025516",
+   "reserve_usd": "3183.2605",
+   "vol_h1": "107.4099131304",
+   "price_change_h1": "0.174",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "9bNp8R84K7HfH7n3geALMuN8kqG2rWtQX7oweLEYr9F7",
+   "name": "JPHILIPINO / SOL",
+   "mint": "88XCR3sA7ALkDE8xEJBtxLVandkMWYEZHmmkDdjbpump",
+   "created": "2026-10-16T16:41:15Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3310.774872",
+   "reserve_usd": "2722.6099",
+   "vol_h1": "1751.2488342864",
+   "price_change_h1": "4.07",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "4hnwF6Ai8DodMfrMiVVBVx5H5g8kffSQcXEZGt8wo1Zt",
+   "name": "FRIENDS / SOL",
+   "mint": "B28Bte8e6w3Wjbu4cLoxtVQvT5GWxHTwWS2YKNVVz6iJ",
+   "created": "2026-10-16T16:40:59Z",
+   "dex": "meteora-damm-v2",
+   "fdv_usd": "0.9554373543",
+   "reserve_usd": "1.2573",
+   "vol_h1": "14884.1963576928",
+   "price_change_h1": "-99.998",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Low Liquidity",
+      "value": "$2.22",
+      "description": "Low amount of liquidity in the token pool",
+      "score": 2997,
+      "level": "danger"
+     }
+    ],
+    "score": 2998,
+    "score_normalised": 34,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "EyR5LMZr9WPp611q4HuDqmaKjVyvzHQTHLSim14V82N2",
+   "name": "SRSWAP / SOL",
+   "mint": "CkSHa2h1v4iAJG9nbU48kPowGWamKBdLvpWs7xZ8pump",
+   "created": "2026-10-16T16:40:57Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2902.788127",
+   "reserve_usd": "2304.8299",
+   "vol_h1": "1670.9915023338",
+   "price_change_h1": "-6.033",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Missing file metadata",
+      "value": "",
+      "description": "No file metadata found associated to this token",
+      "score": 500,
+      "level": "warn"
+     }
+    ],
+    "score": 501,
+    "score_normalised": 16,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "BTr3oYy3m4yEND26TuTvTPUH9qMSzHDA37Dr4WpEodtM",
+   "name": "buddy / SOL",
+   "mint": "288CWnm7MGz4ESseGZohatZmzGDFG94geArcfbtbpump",
+   "created": "2026-10-16T16:40:55Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2963.220104",
+   "reserve_usd": "2348.6293",
+   "vol_h1": "2264.4207143829",
+   "price_change_h1": "-38.458",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "EC4pxTe11TParnUqsAWK5C7RKqBFAxef3eWfAFthT3CJ",
+   "name": "iif / SOL",
+   "mint": "H4tfnBoX8JCdU8mVHCFwarxqfPEUbYHDtCSMNkcWpump",
+   "created": "2026-10-16T16:40:51Z",
+   "dex": "pump-fun",
+   "fdv_usd": "867.8029036",
+   "reserve_usd": "306.381",
+   "vol_h1": "330.1827409869",
+   "price_change_h1": "-85.164",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 120000,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "54.21%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5420,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1042,
+      "level": "warn"
+     }
+    ],
+    "score": 126463,
+    "score_normalised": 81,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "2wRPDC3rqY2rjyHrqPGdZEHb32P9oVcQ5edJS75tuMwo",
+   "name": "MSB / SOL",
+   "mint": "8uzxewAGm1xDWkBCuHyUme6SDNCkCN7eZi7VELnFpump",
+   "created": "2026-10-16T16:40:50Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2931.572674",
+   "reserve_usd": "2315.5843",
+   "vol_h1": "31.307321656",
+   "price_change_h1": "-0.051",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "HoxuGAGaHLzyXxfK9sDRBqP2oWNyexZuyM2Dth6FaVqQ",
+   "name": "ARGON / SOL",
+   "mint": "8YGACxUKx4nuwhemMXNWjjDyEWBoDb5zm5gj3xh6pump",
+   "created": "2026-10-16T16:40:48Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2983.262068",
+   "reserve_usd": "2356.4406",
+   "vol_h1": "3706.8131219051",
+   "price_change_h1": "-38.691",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "D7LyuzAPe4VZmU9mckuDdzm15iNvfzrX648rM4VTdyKH",
+   "name": "NULLCAT / HIMS",
+   "mint": "9h8bhvPuQwSmEYyrzoC6MFMNJVWRH1ezaQZRAPxEMqnS",
+   "created": "2026-10-16T16:40:48Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3024.912451",
+   "reserve_usd": "2380.8588",
+   "vol_h1": "0.02013880842",
+   "price_change_h1": "0.304",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "CU6McWzFvdjAtTBmEsDTMsXc3hTFQzF2bKhcMhcJvrVM",
+   "name": "ryok.net / SOL",
+   "mint": "7oFnZxmTvMr9H3vVwNuynqNwcRqsU7MdBjq2DUFspump",
+   "created": "2026-10-16T16:40:42Z",
+   "dex": "pump-fun",
+   "fdv_usd": "58.8352402",
+   "reserve_usd": "20.7815",
+   "vol_h1": "308.3180374364",
+   "price_change_h1": "-98.994",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 115200,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "54.45%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5445,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1051,
+      "level": "warn"
+     }
+    ],
+    "score": 121697,
+    "score_normalised": 80,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "FVUBi51ijhJdoGHRkfQ8L4fL4cocNU1f74CSg2Ty9usG",
+   "name": "Audipurre / SOL",
+   "mint": "8jdHSCJRer9j6LWsYpBeo3BgmZz3cfAqYn8rqiZcpump",
+   "created": "2026-10-16T16:40:39Z",
+   "dex": "pumpswap",
+   "fdv_usd": "21007.8198877221",
+   "reserve_usd": "10510.0142",
+   "vol_h1": "60074.8624511079",
+   "price_change_h1": "-50.058",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "2zJWzVJVSxLXzAuSt2ceAGUmGHQ26xy67JFPdDb1sT37",
+   "name": "NOVA / SOL",
+   "mint": "FWm1pknvTJzYgux6GCcZutN8SdRLxrKPYcjwsiFMpump",
+   "created": "2026-10-16T16:40:34Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2804.438998",
+   "reserve_usd": "1052.6535",
+   "vol_h1": "664.3228720932",
+   "price_change_h1": "-52.039",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 120000,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "51.96%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5195,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1019,
+      "level": "warn"
+     }
+    ],
+    "score": 126215,
+    "score_normalised": 81,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "8L7bSmp59kDxcmEBKezuSqpurGjBCDt7CzuYW42Nkyue",
+   "name": "DANGR / SOL",
+   "mint": "Snce4a58JcDYHmkVqX2RDKym29XSYQqA7NGwsPepump",
+   "created": "2026-10-16T16:40:32Z",
+   "dex": "pumpswap",
+   "fdv_usd": "5831465.32411265",
+   "reserve_usd": "204151.6018",
+   "vol_h1": "93589.9221097549",
+   "price_change_h1": "1071.48",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "High holder correlation",
+      "value": "(18)",
+      "description": "The top users hold similar supply amounts",
+      "score": 2800,
+      "level": "warn"
+     }
+    ],
+    "score": 2801,
+    "score_normalised": 33,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "GEBYhBZej5oStyrZJqs31R4LApLgQouj3LoXK2CnMYw4",
+   "name": "HOID / SOL",
+   "mint": "6MZasSvrCFjZCu6UMkEQZiGHp5UD7NkKPkhafqcwDC9N",
+   "created": "2026-10-16T16:40:31Z",
+   "dex": "meteora-damm-v2",
+   "fdv_usd": "10.9585968337",
+   "reserve_usd": "0.00001220086762",
+   "vol_h1": "29466.8054527617",
+   "price_change_h1": "23.388",
+   "rugcheck": {
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Large Amount of LP Unlocked",
+      "value": "100.00%",
+      "description": "A large amount of LP tokens are unlocked, allowing the owner to remove liquidity at any point.",
+      "score": 11000,
+      "level": "danger"
+     },
+     {
+      "name": "Top 10 holders high ownership",
+      "value": "",
+      "description": "The top 10 users hold more than 70% token supply",
+      "score": 9549,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "94.49%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 9449,
+      "level": "danger"
+     },
+     {
+      "name": "Low Liquidity",
+      "value": "$0.00",
+      "description": "Low amount of liquidity in the token pool",
+      "score": 2999,
+      "level": "danger"
+     },
+     {
+      "name": "High ownership",
+      "value": "",
+      "description": "The top users hold more than 80% token supply",
+      "score": 1444,
+      "level": "danger"
+     },
+     {
+      "name": "Low amount of LP Providers",
+      "value": "",
+      "description": "Only a few users are providing liquidity",
+      "score": 500,
+      "level": "warn"
+     }
+    ],
+    "score": 34942,
+    "score_normalised": 67,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "CT1pt9rbHf1ymX1MGWxbrTJ3pQVMwt94dXkqXrezUBtu",
+   "name": "HOID / BOT",
+   "mint": "2XKdV1Lg4C3cyGkgJFPsoGFRGac1rFnaedEAu3kXpump",
+   "created": "2026-10-16T16:40:28Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3252.90878",
+   "reserve_usd": "2568.079",
+   "vol_h1": "499.8194611464",
+   "price_change_h1": "-7.465",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "4WYmbrunqLRZmwJGk3vRzD3rzWSrUYs4pVoBkB7zgiQW",
+   "name": "NULLCAT / SOL",
+   "mint": "HKeCM7JPnrckjfvrifai3tfWWxNJ9T4HSiAfrBbtpump",
+   "created": "2026-10-16T16:40:28Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3283.011416",
+   "reserve_usd": "2581.4414",
+   "vol_h1": "190.6300717399",
+   "price_change_h1": "7.394",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 19200,
+      "level": "danger"
+     }
+    ],
+    "score": 19201,
+    "score_normalised": 59,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "Aimv2oPsk4mqA97vnsZADi8FrZspu3CMjFWDkLfPtvpb",
+   "name": "10GW COIN / SOL",
+   "mint": "9N6sTmgVjHFDeXfCBhai97R7hbQEbYU82jt2Wtpgpump",
+   "created": "2026-10-16T16:40:26Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2920.585181",
+   "reserve_usd": "2304.6428",
+   "vol_h1": "0.78601711",
+   "price_change_h1": "0",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "9hRdyYcdyLbzLZo8SP6QF99TR66j62imu5sCAbwHSYwh",
+   "name": "HOID / SOL",
+   "mint": "9e2HfuaWAhaV3Ctu3t2WMu5bhXawVz7t5TuEW8T9pump",
+   "created": "2026-10-16T16:40:25Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3073.123167",
+   "reserve_usd": "2424.0323",
+   "vol_h1": "2848.805219309",
+   "price_change_h1": "-35.643",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "9eX32WKcMLi2fRe1uz4A4iapSLc7G2QE7g5SBFnPs63",
+   "name": "HOID / SOL",
+   "mint": "32m3gLs7wA7Z5oSGNKKSQrTEeRELA2oHrddK8L4Rpump",
+   "created": "2026-10-16T16:40:23Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2962.463322",
+   "reserve_usd": "2348.1458",
+   "vol_h1": "788.6925532901",
+   "price_change_h1": "0.688",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "8dE381WxJRzEkESRT1kR4HGFgdZ1Rx5yLKvfa5GTW9sY",
+   "name": "admin12312 / SOL",
+   "mint": "F68Z1z5GWkwWsEfo9KzgLsgKTPB3fVxGCxCS2jztpump",
+   "created": "2026-10-16T16:40:18Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2915.974458",
+   "reserve_usd": "2304.8299",
+   "vol_h1": "2.0610962109",
+   "price_change_h1": "-0.158",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 21600,
+      "level": "danger"
+     }
+    ],
+    "score": 21601,
+    "score_normalised": 61,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "P5pNwsJus2FHaYLE6UDqoJ78eHfYYi5PGyF44Ewb9tT",
+   "name": "BCAT / SOL",
+   "mint": "CsV92cfe5Acn9gkZewEyfzyAj4B9UrK38FcheDy5pump",
+   "created": "2026-10-16T16:40:18Z",
+   "dex": "pump-fun",
+   "fdv_usd": "179.09608068",
+   "reserve_usd": "65.181",
+   "vol_h1": "623.6475797025",
+   "price_change_h1": "-96.942",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 52800,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "52.96%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5295,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1041,
+      "level": "warn"
+     }
+    ],
+    "score": 59137,
+    "score_normalised": 73,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "5kbus4DeH3753Ew8PSo9ZSaAR6bfc1uKs1kLkzSvKyU4",
+   "name": "DUOLIPA / AAPLx",
+   "mint": "Fj4ti7sPWydpHinrMY8Ar9RVozaGRAWPh4sRVNX8pump",
+   "created": "2026-10-16T16:40:16Z",
+   "dex": "pump-fun",
+   "fdv_usd": "6465.479819",
+   "reserve_usd": "4445.6231",
+   "vol_h1": "17352.7469204969",
+   "price_change_h1": "53.885",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "EG5xzfSna4WrTGpEHhqbNZgKRWqubpCpdUzUB81KGA7F",
+   "name": "\ud83d\ude80 / SOL",
+   "mint": "B5Wd3ZFycRukqVTh7YQjBKh7vjv5GyLwKk7Tj9cPpump",
+   "created": "2026-10-16T16:40:16Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2919.936562",
+   "reserve_usd": "2304.4558",
+   "vol_h1": "4297.3799177025",
+   "price_change_h1": "-43.205",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "EiqkR8XLVXShc2WEer5CJuYPFvLtdQscEUzK5mbJkK4T",
+   "name": "TEST / SOL",
+   "mint": "DsursrEAn4ZdAEumjLrvkrE9G14abusYmVp9qgBRUDj6",
+   "created": "2026-10-16T16:40:14Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3032.118779",
+   "reserve_usd": "2401.923",
+   "vol_h1": "1627.239660929",
+   "price_change_h1": "3.715",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "EjvKMT63pUfwPZpZ9qLqUsar6GY8gYCrbTfVGK6RW6wC",
+   "name": "BOUNCE / SOL",
+   "mint": "7uhW9289MEFvkx3f2d9aAt7LZWDMxjDMYk3Ex761pump",
+   "created": "2026-10-16T16:40:01Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3128.9913",
+   "reserve_usd": "2469.367",
+   "vol_h1": "937.3367312332",
+   "price_change_h1": "-11.013",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "8YqULee6hzNsd9o3apqQqHGChPY3kB87cCBuctzqqmec",
+   "name": "Pyramel / SOL",
+   "mint": "HvDb1q3y3f9TCE1xsaW2jXCnHTABZnMgutqzP4sbpump",
+   "created": "2026-10-16T16:40:01Z",
+   "dex": "pump-fun",
+   "fdv_usd": "1985.3310528",
+   "reserve_usd": "777.1538",
+   "vol_h1": "247.9789920999",
+   "price_change_h1": "-66.07",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 120000,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "50.30%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5029,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1003,
+      "level": "warn"
+     }
+    ],
+    "score": 126033,
+    "score_normalised": 81,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "DbKW39jYMTqnwAdaoAHBsvPoG3JNuipYnwj1MmqBswuv",
+   "name": "INUPRENEUR / SOL",
+   "mint": "5QU7BxAArvDrgC9kHfhyYCTKGcv2dNvdXRuksGntZakS",
+   "created": "2026-10-16T16:39:55Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2915.012402",
+   "reserve_usd": "2304.248",
+   "vol_h1": "0.5008555642",
+   "price_change_h1": "-0.178",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 115200,
+      "level": "danger"
+     }
+    ],
+    "score": 115201,
+    "score_normalised": 80,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "FCru5AmG7rR6zW78mokJgAsAHKv1bvfAJfhRx1zKkMfP",
+   "name": "TRC / SOL",
+   "mint": "7QRzND1VeyxCEgrsguepGwnSCJAQGP7naSGsY5sypump",
+   "created": "2026-10-16T16:39:47Z",
+   "dex": "pumpswap",
+   "fdv_usd": "287990.391876837",
+   "reserve_usd": "45185.5371",
+   "vol_h1": "500925.11640011",
+   "price_change_h1": "465.722",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "G5TiY7bhSMuHevypXkY58tAF9jnpnE74AqvCrizxhs6v",
+   "name": "alieninu / SPCX",
+   "mint": "GqkgWMePfGwrV33pYyM7VVH3HaNZivo69JyhPYempump",
+   "created": "2026-10-16T16:39:47Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3345.876281",
+   "reserve_usd": "2639.7023",
+   "vol_h1": "307.3686933517",
+   "price_change_h1": "0",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "DxJQsjnJV15hPN4MiooBzAJ4dZoGLbLG1uL8xhRwozP9",
+   "name": "Macca / SOL",
+   "mint": "HvvAwrdwWrXbnM2mgb5rMzDTTvvD79cTUnX3KUyqpump",
+   "created": "2026-10-16T16:39:45Z",
+   "dex": "pumpswap",
+   "fdv_usd": "600058.894386133",
+   "reserve_usd": "64529.5302",
+   "vol_h1": "46119.6124135498",
+   "price_change_h1": "58.981",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "High holder correlation",
+      "value": "(17)",
+      "description": "The top users hold similar supply amounts",
+      "score": 2700,
+      "level": "warn"
+     }
+    ],
+    "score": 2701,
+    "score_normalised": 32,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "9PUqE5Cef2yjmMPe6FnheUZnZXTexEb27uFaxzBTBCe5",
+   "name": "PC / SOL",
+   "mint": "12gMNVmdfMpJXX64dGgFkQfqNaMEsB37xNgFtLK7pump",
+   "created": "2026-10-16T16:39:44Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3015.279558",
+   "reserve_usd": "2380.8692",
+   "vol_h1": "208.8225980615",
+   "price_change_h1": "-0.084",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "FPygcfbNddru66eZDXeLdpXhRBLoLrMwr7ixxipZ4x5m",
+   "name": "test / TSLAx",
+   "mint": "HD6k6qxVc7HEsAjDdWfivje8whotwbn2Hc5G4CFjpump",
+   "created": "2026-10-16T16:39:43Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3332.848265",
+   "reserve_usd": "2623.1394",
+   "vol_h1": "830.4496831917",
+   "price_change_h1": "2.616",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "9s1Xcj5gk1KXvF8HFH3sBpZy2wgAFdKRM5Q7SHkjU7pr",
+   "name": "CRIMECAT / wXMR",
+   "mint": "BjyTcHa9yfsC6rBVE6ejzunNcoY1AqyPnnNiPcTBrA7V",
+   "created": "2026-10-16T16:39:41Z",
+   "dex": "stonkfun",
+   "fdv_usd": "2916.164633",
+   "reserve_usd": "2915.8228",
+   "vol_h1": "1430.5241140317",
+   "price_change_h1": "-12.01",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Fee config enabled",
+      "value": "",
+      "description": "The owner can change the fees at any time",
+      "score": 200,
+      "level": "warn"
+     }
+    ],
+    "score": 201,
+    "score_normalised": 10,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "6h7ccju8VK6YXWuxyJZcHTwdFXqXUz5YmgDfgjo1V5St",
+   "name": "ALIENLON / SPCX",
+   "mint": "DmBSmozK9NpC2gmFvZws3wk9pUoW5A3Egyp6c5DE4Q3x",
+   "created": "2026-10-16T16:39:40Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3044.829424",
+   "reserve_usd": "2402.8144",
+   "vol_h1": "0.955287386",
+   "price_change_h1": "0",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "57Z5Jy3pTYhFooP5CeUjjo9QtgAdyhAKfwmgvuRrgm2w",
+   "name": "ALIENLON / SPCX",
+   "mint": "9sXqVaA11mYgwhSdde1YBtmzfEL8ctFK96KAPdMopump",
+   "created": "2026-10-16T16:39:39Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3048.712584",
+   "reserve_usd": "2531.8361",
+   "vol_h1": "3335.3319049693",
+   "price_change_h1": "-43.273",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "Yv7LTdyXzNGqTme9oPoBV3SjD8b5uvTxaQu7k95vEg8",
+   "name": "ryok.net / SOL",
+   "mint": "9kS6Fc1bZtizhooJF8Az3u636aSj7sizHMQ4mdUvpump",
+   "created": "2026-10-16T16:39:38Z",
+   "dex": "pump-fun",
+   "fdv_usd": "10666.588872",
+   "reserve_usd": "4195.5788",
+   "vol_h1": "27.866359757",
+   "price_change_h1": "82.269",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 115200,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "50.09%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5008,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1000,
+      "level": "warn"
+     }
+    ],
+    "score": 121209,
+    "score_normalised": 80,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "DJNukMgt1EqnkFCzmNyxHY9gZkrWkbfRXYbkkg96SqyL",
+   "name": "admin123ad / SOL",
+   "mint": "AShsQH6ZHdZByJdF7mzxDpzsXFKKU9MPNc7D1CzZpump",
+   "created": "2026-10-16T16:39:36Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2916.574209",
+   "reserve_usd": "2304.8299",
+   "vol_h1": "2.0620103397",
+   "price_change_h1": "-0.206",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 21600,
+      "level": "danger"
+     }
+    ],
+    "score": 21601,
+    "score_normalised": 61,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "b5ct55Gvd2oxphtwPTQuFvFzAUW6VSavBnsUBQCXdi9",
+   "name": "AMN / SOL",
+   "mint": "4NstCuuSSj759pzZVqH1nnQYxGeWL5TZya36dp8Hpump",
+   "created": "2026-10-16T16:39:34Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3014.50323",
+   "reserve_usd": "2378.8015",
+   "vol_h1": "203.2524859955",
+   "price_change_h1": "0",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "8m9iEBhG1jtmqr2u2v3C3hLJFAWBKzTwG6Um9kMsSD6z",
+   "name": "ALIENS / SPCX",
+   "mint": "BzgCJ68YyesiVzqxm6PURuwv1d2Jt5G8PaqKAdffpump",
+   "created": "2026-10-16T16:39:33Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3342.990731",
+   "reserve_usd": "2638.019",
+   "vol_h1": "614.3112520407",
+   "price_change_h1": "-0.06",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "8MGsqYmHZMDi77rmPq5G2nHg9m6aok6WBbhwNMzko2sL",
+   "name": "INUPRENEUR / SOL",
+   "mint": "ESqM3d4138VPduJJ4on5cu3yBQ6UVdGeGQA54L3xpump",
+   "created": "2026-10-16T16:39:33Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3276.222921",
+   "reserve_usd": "2588.2889",
+   "vol_h1": "11453.4196229894",
+   "price_change_h1": "-37.914",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "7xS32Wa3dJ97HLM9FwyS5jGxv3TXMb7qoKFnvAnFApUw",
+   "name": "Goldcoin / SOL",
+   "mint": "7TT1DvkiFgfhdCNSKAeF1Av1TTNDmCkG98Ag14sepump",
+   "created": "2026-10-16T16:39:24Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2907.894896",
+   "reserve_usd": "2353.2507",
+   "vol_h1": "21638.7398194338",
+   "price_change_h1": "-59.982",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "APqhBQ88Jc2DvCMbRuZswjQk3jEUN7CNqhjrrT6cxX2i",
+   "name": "STARGPS / SOL",
+   "mint": "CMPnHRgCxPgHkvmpmcd9bxPdD5SK1UXPWMNbv2ird1Ss",
+   "created": "2026-10-16T16:39:24Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2933.808441",
+   "reserve_usd": "2331.4925",
+   "vol_h1": "42.1888915918",
+   "price_change_h1": "0.308",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 48000,
+      "level": "danger"
+     }
+    ],
+    "score": 48001,
+    "score_normalised": 71,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "DtqDj2WJaapgs3Vh3eQCWjgYyaeLEYnY1vUMsdZXJYks",
+   "name": "$BWIZ / SOL",
+   "mint": "H3iTqWiBVff6CAyHdW3f4QW4q65Q3WUpmdPkG25Qpump",
+   "created": "2026-10-16T16:39:22Z",
+   "dex": "pump-fun",
+   "fdv_usd": "4037.198052",
+   "reserve_usd": "1571.525",
+   "vol_h1": "249.7599389841",
+   "price_change_h1": "-31.34",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 112800,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "50.59%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5059,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1005,
+      "level": "warn"
+     }
+    ],
+    "score": 118865,
+    "score_normalised": 80,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "nASw7sL788ZHB3mFrdrtDE3a4h4m9T7EPGwpCoH6PXQ",
+   "name": "HOOKCAT / SOL",
+   "mint": "SjhrB9ob2usvnx9zLAHE9fmwHf5zYTtADFjLnss4o7e",
+   "created": "2026-10-16T16:39:11Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2922.475532",
+   "reserve_usd": "2309.8278",
+   "vol_h1": "1434.5610471212",
+   "price_change_h1": "-2.502",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "6M9FB1tTbhwRth7GCgFLanYnogsmmUxdiKMTXKxjheVu",
+   "name": "FAGGOTJACK / SOL",
+   "mint": "26vmQPuZmwa3FSrcMDcA1RwoKdGnjxLkkb7ENDxYpump",
+   "created": "2026-10-16T16:39:11Z",
+   "dex": "pump-fun",
+   "fdv_usd": "10530.356388",
+   "reserve_usd": "4074.3917",
+   "vol_h1": "440.9420760482",
+   "price_change_h1": "79.571",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Single holder ownership",
+      "value": "50.76%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5076,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1007,
+      "level": "warn"
+     }
+    ],
+    "score": 6084,
+    "score_normalised": 43,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "6o2GidujiSkfaR6A84MqS4kX6fN33RY2xc5FM6456X3M",
+   "name": "fun / SOL",
+   "mint": "funwAm6m2MVbQuzreeDhJYVkNSLYZb7eSjWRpbcN8mw",
+   "created": "2026-10-16T16:39:00Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2964.379229",
+   "reserve_usd": "2343.2236",
+   "vol_h1": "4131.3883126086",
+   "price_change_h1": "-15.007",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "FmeGBrrxzjc49aQYCjw7eCaQami9jeLAkiL2QgryofE9",
+   "name": "RAO / SOL",
+   "mint": "Ghw2EUcSfMyn3Qvf58sePMS9asuaGi3bH8Ls3ssvpump",
+   "created": "2026-10-16T16:38:57Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3306.135403",
+   "reserve_usd": "2417.8498",
+   "vol_h1": "2661.6942849543",
+   "price_change_h1": "-10.437",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "MP8qY4tedr4ebLsNjSyCMSnH3ezhnvXYRgUvVHrSDo4",
+   "name": "QCAT / SOL",
+   "mint": "FueFX4qZxX9Yp3GeD1jWTWAJqkGnsKbUCL5ib3WCBkEL",
+   "created": "2026-10-16T16:38:57Z",
+   "dex": "meteora-dbc",
+   "fdv_usd": "3295.589214",
+   "reserve_usd": "3280.3738",
+   "vol_h1": "626.9910744053",
+   "price_change_h1": "0.065",
+   "rugcheck": {
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Low Liquidity",
+      "value": "$0.00",
+      "description": "Low amount of liquidity in the token pool",
+      "score": 3000,
+      "level": "danger"
+     }
+    ],
+    "score": 3001,
+    "score_normalised": 34,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "BarTciDRh3VxVWf8S34NF84b1x8gXcGMrBJtJJrQsNc1",
+   "name": "FTR / PUMP",
+   "mint": "DPiCNKddQMU2WCuo6RMQu8aRCYnZR3snkDW4biuspump",
+   "created": "2026-10-16T16:38:50Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3095.315774",
+   "reserve_usd": "2441.3121",
+   "vol_h1": "0.959222674",
+   "price_change_h1": "0",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "7FC3Qvorsg1iCUq3TCenpHiGU7nCX2vnMvgKKbBNrBFa",
+   "name": "COCKROACH / SOL",
+   "mint": "8J7wvHsh5wFKqXywpotYFt36CHayYeDFkXFULyUP9T9",
+   "created": "2026-10-16T16:38:49Z",
+   "dex": "meteora-dbc",
+   "fdv_usd": "36868.48249",
+   "reserve_usd": "39161.0674",
+   "vol_h1": "741.247264079",
+   "price_change_h1": "9.073",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "3SzspdnNTjYmZTXamDQdgYthVFoCRDPNiWQXTYnqXw1u",
+   "name": "FlyingT / SOL",
+   "mint": "AQWsHdmeFSL6D2aXz1Gvz1hB38GxocTT6iXv5pKpump",
+   "created": "2026-10-16T16:38:49Z",
+   "dex": "pump-fun",
+   "fdv_usd": "3723.859858",
+   "reserve_usd": "1686.4153",
+   "vol_h1": "348.3364015901",
+   "price_change_h1": "-36.796",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 52800,
+      "level": "danger"
+     },
+     {
+      "name": "Single holder ownership",
+      "value": "50.04%",
+      "description": "One user holds a large amount of the token supply",
+      "score": 5003,
+      "level": "danger"
+     },
+     {
+      "name": "High holder concentration",
+      "value": "",
+      "description": "The top 10 users hold more than 50% token supply",
+      "score": 1000,
+      "level": "warn"
+     }
+    ],
+    "score": 58804,
+    "score_normalised": 73,
+    "lpLockedPct": 0
+   }
+  },
+  {
+   "pool": "HkSr5RNHg5qreaL13jT4mxVinnfw85iCa7jVy4zgcw5u",
+   "name": "FTR / SOL",
+   "mint": "Gkwf1JC2xeQfUrZGZQPQn3hg7VfCSBm175sVy18gpump",
+   "created": "2026-10-16T16:38:49Z",
+   "dex": "pumpswap",
+   "fdv_usd": "207980.043647589",
+   "reserve_usd": "38068.7189",
+   "vol_h1": "343322.022909181",
+   "price_change_h1": "22.446",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [],
+    "score": 1,
+    "score_normalised": 1,
+    "lpLockedPct": 100
+   }
+  },
+  {
+   "pool": "3GYG6f3wLknTAYmmHm4n9d2YBGC8XjHBADCMRhQuLDiY",
+   "name": "FRIENDS / SOL",
+   "mint": "8GNS13RdgApHL8UhbxKHwhRKXnZ5aBa7MfyCGF9LoENm",
+   "created": "2026-10-16T16:38:47Z",
+   "dex": "pumpswap",
+   "fdv_usd": "24411.30095",
+   "reserve_usd": "40475.0407",
+   "vol_h1": "903144.25944161",
+   "price_change_h1": "142.778",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Large Amount of LP Unlocked",
+      "value": "100.00%",
+      "description": "A large amount of LP tokens are unlocked, allowing the owner to remove liquidity at any point.",
+      "score": 10999,
+      "level": "danger"
+     },
+     {
+      "name": "Low amount of LP Providers",
+      "value": "",
+      "description": "Only a few users are providing liquidity",
+      "score": 400,
+      "level": "warn"
+     }
+    ],
+    "score": 11400,
+    "score_normalised": 52,
+    "lpLockedPct": 1.0891743352848428e-09
+   }
+  },
+  {
+   "pool": "HcT93gqU9CCQuLRg6fHnwhUB1JwNzSMrnWEHakf1R9Jc",
+   "name": "TRIO / SOL",
+   "mint": "6rvcyfZgkx7ZaUVUkLheSUmC4rzR9RdChaUuCu3cpump",
+   "created": "2026-10-16T16:38:47Z",
+   "dex": "pump-fun",
+   "fdv_usd": "2920.88977",
+   "reserve_usd": "2304.8299",
+   "vol_h1": "1.0294228752",
+   "price_change_h1": "0",
+   "rugcheck": {
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "tokenType": "",
+    "risks": [
+     {
+      "name": "Creator history of rugged tokens",
+      "value": "",
+      "description": "Creator has a history of rugging tokens.",
+      "score": 12000,
+      "level": "danger"
+     }
+    ],
+    "score": 12001,
+    "score_normalised": 53,
+    "lpLockedPct": 0
+   }
+  }
+ ]
+}

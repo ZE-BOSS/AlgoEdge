@@ -129,6 +129,21 @@ class EpisodeData:
     def times(self) -> np.ndarray:
         return self.frame["time"].to_numpy(dtype=np.int64)
 
+    def coverage(self) -> dict:
+        """The same record `datasets.Dataset.coverage` writes - symbol,
+        timeframe, first and last bar, and the bars' content hash - which
+        `trained_on_json` stores and the overlap check reads.
+
+        The distil route called this on an EpisodeData, which never had it, so
+        every Distil failed with AttributeError once it got past loading bars
+        (found by the end-to-end audit on 2026-10-16)."""
+        from backend.rl.datasets import content_hash
+
+        t = self.times
+        return {"symbol": self.symbol, "timeframe": self.timeframe,
+                "start": int(t[0]) if len(t) else 0, "end": int(t[-1]) if len(t) else 0,
+                "hash": content_hash(self.frame)}
+
     def slice(self, start: int, end: int) -> "EpisodeData":
         """A fold. The features are SLICED, not recomputed.
 
@@ -425,6 +440,35 @@ class TradingEnv:
         self._Z = None
         return self.director
 
+    def _adopt_director(self, policy: pol.LinearPolicy) -> None:
+        """Use the director the POLICY was trained against.
+
+        The policy's input width includes the director's two columns, so the
+        two cannot be separated: every env that runs a director policy - the
+        trainer's windows, its evaluation, the test fold, the gate, distill -
+        has to see the same director. Taking it from the policy means none of
+        them can forget to, which is how every director run used to die.
+        """
+        model = getattr(policy, "director_model", None)
+        d = model() if callable(model) else None
+        if d is None:
+            return
+        if self.director is None or self.director.content_hash != d.content_hash:
+            self.director = d
+            self._Z = None
+
+    def observations_for(self, policy: pol.LinearPolicy) -> np.ndarray:
+        """`Z` as THIS policy sees it - with its director's columns when it has one.
+
+        Use this, not `.Z`, anywhere a policy is applied to observations
+        outside `rollout` (charter fidelity, distillation). A fresh env's `.Z`
+        has no director until a rollout adopts one, so the gate's fidelity
+        check fed a director policy 25 columns instead of 27 and died on the
+        matmul (end-to-end audit, 2026-10-16).
+        """
+        self._adopt_director(policy)
+        return self.Z
+
     @property
     def Z(self) -> np.ndarray:
         if self._Z is None:
@@ -465,6 +509,7 @@ class TradingEnv:
         if n < 60:
             return ep
 
+        self._adopt_director(policy)
         Z = self.Z
         if shuffle_features:
             # The env control. Permute WHICH bar each observation describes and
@@ -497,6 +542,8 @@ class TradingEnv:
         risk_config = stress_costs(self.risk_config, data.symbol, cost_multiplier)
 
         engine = BacktestEngine(risk_config)
+        # Trades are scored, never drawn: skip the trade viewer's chart slices.
+        engine.group_chart_data = False
         strategy = RLPositionStrategy(
             config=risk_config, policy=policy, Z=Z, times=data.times, atr=data.atr,
             spec=self.spec, charter=self.charter, enabled=bool(exit_head and self.spec.exit_head),
@@ -648,7 +695,11 @@ class TradingEnv:
                                     "rl_rr": round(rr, 4)}
             if charter is not None:
                 from backend.rl.adherence import observation_dict, score_decision
-                obs = observation_dict(names, Zr[j])
+                # Market columns only - see `observation_dict`'s callers in
+                # exit_policy: the director's two columns sit after them, and
+                # the full row made every charter-scored rollout of a director
+                # agent raise (the gate failed on it, 2026-10-16).
+                obs = observation_dict(names, Zr[j][:len(names)])
                 score = score_decision(charter, obs, direction)
                 meta.update({
                     "passed_gates": True,
@@ -767,7 +818,9 @@ class TradingEnv:
             return ep
         ep.n_signals = len(signals)
         cfg = stress_costs(self.risk_config, data.symbol, cost_multiplier)
-        res = BacktestEngine(cfg).run(data.frame, signals, self.initial_balance,
+        _eng = BacktestEngine(cfg)
+        _eng.group_chart_data = False
+        res = _eng.run(data.frame, signals, self.initial_balance,
                                       None, None, None, None, None)
         ep.trades = res.get("grouped_trades") or []
         ep.cost_model = res.get("cost_model") or {}
@@ -1064,6 +1117,7 @@ def supervise_run(env: TradingEnv, owner: BaseStrategy, signals: list[dict],
 
     def run(strategy) -> Episode:
         engine = BacktestEngine(dict(risk_config))
+        engine.group_chart_data = False
         res = engine.run(data.frame, [dict(s) for s in signals], env.initial_balance,
                          None, None, strategy, None, None)
         ep = Episode(symbol=data.symbol, n_bars=len(data), n_signals=len(signals),

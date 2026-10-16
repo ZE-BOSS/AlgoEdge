@@ -97,7 +97,10 @@ class RLStrategy(BaseStrategy):
         self.policy = self.agent.policy
         self.scaler = self.agent.scaler
         self.charter = self.agent.charter
-        self.director = getattr(self.agent, "director", None)
+        # The director rides inside the policy (see `LinearPolicy.director`):
+        # its two columns are part of the policy's input width.
+        self.director = (getattr(self.agent, "director", None)
+                         or self.policy.director_model())
         self.SUPERVISES_OTHER_STRATEGIES = bool(self.spec.supervises)
         self._last_signal_bar: dict[str, int] = {}
         # Live adherence is recorded per closed trade by `notify_outcome`; the

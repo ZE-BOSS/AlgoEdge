@@ -3,3 +3,5 @@ git pull origin dev
 powershell -ExecutionPolicy Bypass -File scripts\build-sites.ps1
 pm2 restart all
 pm2 logs
+
+Crash 1000 Index, Vol over Crash 750, Vol over Crash 550 drift-alpha-agent

@@ -36,7 +36,7 @@
  *    still an agent whose charter no longer describes it.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity, AlertTriangle, Ban, Brain, Check, ChevronRight, Copy, Database,
@@ -246,7 +246,13 @@ function lifecycle(agent) {
   // attach data while the data was being read in front of them.
   const hasData = (agent.trained_on || []).length > 0 || training
     || (agent.progress?.datasets || []).length > 0;
-  const trained = Boolean(agent.training?.best);
+  // `agent.training` is the DATABASE copy, and only Collect writes it - so on
+  // its own this kept the Collect button disabled after every fresh run, on
+  // the grounds that nothing had been collected. A run that ended with a best
+  // fold on disk (`progress.best`) is trained, collected or not.
+  const ranStage = String(agent.progress?.stage || '');
+  const trained = Boolean(agent.training?.best)
+    || (['complete', 'cancelled'].includes(ranStage) && agent.progress?.best != null);
   const collected = Boolean(agent.policy_hash);
   const hasCharter = charters.length > 0;
   const validated = Boolean(agent.validation);
@@ -456,9 +462,27 @@ function TrainingMonitor({ agent, busy, onCancel }) {
       )}
       {uncollected && (
         <p style={{ fontSize: 11.5, color: C.dim, marginTop: 6, lineHeight: 1.55 }}>
-          All {total || '—'} jobs ran and the run ended normally. The agent still
-          says TRAINING because <b>Collect</b> is what stores the result &mdash;
-          that is step 2 below, and nothing is lost until you run it.
+          {/* Said from the stage, not assumed. A cancelled run used to read
+              "All 50 jobs ran and the run ended normally" at job 2 of 50. */}
+          {stage === 'cancelled' ? (
+            <>Cancelled after {done} of {total || '—'} jobs. </>
+          ) : stage === 'failed' ? (
+            <b style={{ color: C.red }}>The run failed: {p.error || 'no reason recorded'}. </b>
+          ) : (
+            <>All {total || '—'} jobs ran and the run ended normally. </>
+          )}
+          {p.jobs_failed > 0 && stage !== 'failed' && (
+            <b style={{ color: C.amber }}>
+              {p.jobs_failed} of them crashed - the event log names the first. {' '}
+            </b>
+          )}
+          {stage !== 'failed' && (
+            <>
+              The agent still says TRAINING because <b>Collect</b> is what stores
+              the result &mdash; that is step 2 below, and nothing is lost until
+              you run it.
+            </>
+          )}
           {p.no_trades && (
             <b style={{ color: C.amber }}>
               {' '}There is nothing worth collecting from this one, though: no
@@ -1707,7 +1731,10 @@ function TrainingTab({ agent, busy, life, step }) {
     {
       n: 1, label: 'Collect', icon: <Check size={14} />,
       run: () => rl.collect(agent.agent_id), done: life.collected,
-      blocked: !life.trained && 'Nothing to collect until a run has finished',
+      blocked: !life.trained && (
+        ['complete', 'cancelled', 'failed'].includes(String(agent.progress?.stage || ''))
+          ? 'The run produced no policy - nothing to collect'
+          : 'Nothing to collect until a run has finished'),
       what: 'Takes the best fold\'s weights and scaler and stores them as this '
         + 'agent. Nothing before this point is an agent.',
     },
@@ -2226,6 +2253,13 @@ export default function Agents() {
   const [exporting, setExporting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState('');
+  // A notice is about the action that just happened. "Deleting done" sat on
+  // screen across agents and tabs for as long as the page stayed open.
+  useEffect(() => {
+    if (!notice) return undefined;
+    const t = setTimeout(() => setNotice(''), 8000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const { data: list, refetch } = useQuery({
     queryKey: qk('rl-agents'),
@@ -2282,7 +2316,13 @@ export default function Agents() {
   // Covers both "the backend restarted under it" and "the worker raised on
   // its first line", which look identical from the status column and need
   // very different things said about them.
-  const stuck = claimsTraining && !alive;
+  // ...but NOT a run whose own progress says it ended. That one is shown by
+  // the training panel ("finished / cancelled / failed - not collected yet"),
+  // and putting "nothing is running - did the backend restart?" above it
+  // contradicted the panel directly below.
+  const runEnded = ['complete', 'scored', 'failed', 'cancelled']
+    .includes(String(agent?.progress?.stage || ''));
+  const stuck = claimsTraining && !alive && !runEnded;
   const life = agent ? lifecycle(agent) : null;
 
   const jump = (key) => setTab(

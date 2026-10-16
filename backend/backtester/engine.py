@@ -986,8 +986,11 @@ class BacktestEngine(CostModelMixin):
                 time_arr = pd.to_datetime(time_series).astype('int64').values / 10**9
                 
         dt_series = pd.to_datetime(time_series, unit='s' if not pd.api.types.is_datetime64_any_dtype(time_series) else None, utc=True)
-        dt_arr = dt_series.dt.to_pydatetime()
-        
+        # Through a DatetimeIndex: the Series accessor's `to_pydatetime` warns
+        # (FutureWarning, once per process) that it will start returning a
+        # Series - and every RL job worker is a new process. Same ndarray.
+        dt_arr = pd.DatetimeIndex(dt_series).to_pydatetime()
+
         # ── Pre-compute OHLC arrays (vectorized, O(n)) ──
         opens_arr = candles["open"].values.astype(float)
         highs_arr = candles["high"].values.astype(float)
@@ -1678,7 +1681,8 @@ class BacktestEngine(CostModelMixin):
         self.equity_curve.append(balance)
 
         # Group trades by group_id for combined P&L display
-        grouped_trades = group_trades(self.trades, candles, candles_m15, candles_m5, candles_h1)
+        grouped_trades = group_trades(self.trades, candles, candles_m15, candles_m5, candles_h1,
+                                      chart_data=getattr(self, "group_chart_data", True))
 
         # ── [T1.3] Merge strategy-side gate telemetry into the funnel ──────
         # `rejection_funnel["strategy_rejections"]` is populated from

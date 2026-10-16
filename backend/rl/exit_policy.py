@@ -185,7 +185,12 @@ def decide(policy: pol.LinearPolicy, z, position: dict, *, price: float,
         # evaluated on the same bar, so the Journal can say WHY it closed.
         from backend.rl.adherence import observation_dict, score_decision
         try:
-            obs = observation_dict(charter_feature_names(charter, z), z)
+            names = charter_feature_names(charter, z)
+            # The market columns only: a director agent's observation carries
+            # its two director columns at the end, and the charter names
+            # market features. The full row raised here - silently, inside
+            # this try - so every exit of a director agent scored 0 adherence.
+            obs = observation_dict(names, np.asarray(z, dtype=float).ravel()[:len(names)])
             score = score_decision(charter, obs, position.get("direction"))
             gates, adherence = tuple(score.gates_held), score.adherence
         except Exception:

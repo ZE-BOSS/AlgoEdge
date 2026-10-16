@@ -1,0 +1,922 @@
+{
+ "checked_at": "2026-10-16T18:01:03.823052+00:00",
+ "pilot_at": "2026-10-16T17:04:41.382977+00:00",
+ "flagged_danger": {
+  "n": 34,
+  "measured": 34,
+  "median_fdv_change": 0.0,
+  "down_80pct_or_more": 0,
+  "doubled_or_more": 1
+ },
+ "clean": {
+  "n": 53,
+  "measured": 53,
+  "median_fdv_change": 0.0,
+  "down_80pct_or_more": 2,
+  "doubled_or_more": 0
+ },
+ "rows": [
+  {
+   "mint": "62oaBX22Ap4rALQxBAU3wWJs3L2AZhR3YFm17Kfopump",
+   "name": "RRL / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.006584218260020314,
+   "liq_change": -0.007130441578204749,
+   "found": true
+  },
+  {
+   "mint": "DCniswd2tepttvdD1P6FhFZhqasNrRZFKskf2UUNpump",
+   "name": "DERP / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.0013098777086810731,
+   "found": true
+  },
+  {
+   "mint": "FzZqbYUhBhiEr44i2odL3Fg6YEPcHJegUL7WqUoZSmnZ",
+   "name": "MEOWS / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.0014970980481889828,
+   "found": true
+  },
+  {
+   "mint": "BjvKv5jc3oPd8iRvFskp5gSZvqgt1twqCnGnwVPqpump",
+   "name": "AI / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": -0.0020948253162156316,
+   "found": true
+  },
+  {
+   "mint": "6XNVtagH4XhWbgYSNN3v1wQSWMsFd3VHezyYtkvapump",
+   "name": "AI / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.0061866123101301795,
+   "liq_change": -0.005238152166894383,
+   "found": true
+  },
+  {
+   "mint": "CMA7N9uYiLmzNHaZXff8AQz8ceXSgpLc8WibQDE3bmeG",
+   "name": "Grok Bot / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128951946334448,
+   "found": true
+  },
+  {
+   "mint": "DQprBhLBHU61LgvP7bSJots4Cr9NA5tiYmSEam4jpump",
+   "name": "OI / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.0016496739984741549,
+   "found": true
+  },
+  {
+   "mint": "G2Xuk7JBBzY2jNkxk1hfJVBpg95GPWAPD9WrDYs1pump",
+   "name": "AI / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.03567834697710737,
+   "liq_change": -0.03800661639872149,
+   "found": true
+  },
+  {
+   "mint": "BCKVW3hNdG3HRjKeCA4khZuXmgH8WSQCWndL4CEbpump",
+   "name": "GOLD / WETH",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.0051289349557870345,
+   "found": true
+  },
+  {
+   "mint": "8sMRC5du9sDt2QPkJHHmSBbuRcfEnJuYqDQFtUNApump",
+   "name": "FASDSDAFAS / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128925132392492,
+   "found": true
+  },
+  {
+   "mint": "G2xayJq5nxBgxHsRKZ2mN5pzkN8yrfZntmCjGiAipump",
+   "name": "CATCYCLE / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.00512913560792283,
+   "found": true
+  },
+  {
+   "mint": "2nNrNvPR6HAxEeXbgtwKyk86UnxcVpfGEVB4aWA3pump",
+   "name": "ELONGATE / SOL",
+   "danger": true,
+   "risk_names": [
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128969981719189,
+   "found": true
+  },
+  {
+   "mint": "5vMQzuskUC3uA76zvUdARRPZtqY5bPxvueCkc7WEbonk",
+   "name": "VIODRG / SOL",
+   "danger": true,
+   "risk_names": [
+    "Top 10 holders high ownership",
+    "Single holder ownership",
+    "Low Liquidity",
+    "High ownership"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.0,
+   "found": true
+  },
+  {
+   "mint": "6qaYWVnZC8hSqxS7QsW1oocbiH2Q9G3AwkMYV5JyP7j5",
+   "name": "GCAT / SOL",
+   "danger": true,
+   "risk_names": [
+    "Large Amount of LP Unlocked",
+    "Low amount of LP Providers"
+   ],
+   "fdv_change": -0.004094005113970178,
+   "liq_change": -0.9999999999898097,
+   "found": true
+  },
+  {
+   "mint": "b7aDzDKkB5EzJWU3LFtaxgh1XLcDsPZuqo1swebpump",
+   "name": "AI / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.0013098993456488461,
+   "found": true
+  },
+  {
+   "mint": "EUgcmqrFdYLaBiyeuH454fS36LH2XwqXpU9AEGRmpump",
+   "name": "SATOSHI / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.0013099199067685419,
+   "found": true
+  },
+  {
+   "mint": "vx17c42Chs38b3VhdrP8DHvAbw4Rhajy9FA4wZupump",
+   "name": "ChaseCat / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128927289570928,
+   "found": true
+  },
+  {
+   "mint": "2cbfbf1wS9898xJemx4TidNwa6T1Fycg9vdNypdy7HfH",
+   "name": "CLEAN / SOL",
+   "danger": true,
+   "risk_names": [
+    "Low Liquidity"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.0012285012285011554,
+   "found": true
+  },
+  {
+   "mint": "G7ai1oBbFkpfV69MQa7G7AQbxXwEagyiUqXB98yRpump",
+   "name": "101 / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.00512893213977228,
+   "found": true
+  },
+  {
+   "mint": "E416wJCtCgjVPeRirpHd1qDvKRUy5oW6dnNhWQuxpump",
+   "name": "KAYLUB / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.25904030179511395,
+   "liq_change": 0.14731502887667602,
+   "found": true
+  },
+  {
+   "mint": "RoAdaz3uoPXa8A5acyoqAjyusyBXuGiqdDi4aLDStER",
+   "name": "FRY / TSLAx",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.056321879397810415,
+   "liq_change": -0.034474819469732854,
+   "found": true
+  },
+  {
+   "mint": "2mvrbQLveETx6nzmbagMwuxmNWSuLwieNJEB8aUA9dC3",
+   "name": "Audipurre / SOL",
+   "danger": true,
+   "risk_names": [
+    "Large Amount of LP Unlocked",
+    "Top 10 holders high ownership",
+    "Single holder ownership",
+    "Low Liquidity",
+    "High ownership",
+    "Low amount of LP Providers"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.0,
+   "found": true
+  },
+  {
+   "mint": "ADkd6izPxJtKueHAzKsDEnGRNEq5ERu1g3ses1wKpump",
+   "name": "DUO / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.4719549121942619,
+   "liq_change": -0.6793660436953173,
+   "found": true
+  },
+  {
+   "mint": "6Lhjx2NGdpGHj3PKoYp4tXKZTrptFpBG5d4P1DhNpump",
+   "name": "INTELLIFUCK / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.0075783959559658776,
+   "liq_change": 0.03448162862942272,
+   "found": true
+  },
+  {
+   "mint": "3JYQsCcmdHAr8DfrCgrTjpJtL48BHjCNgAGRxsdUpump",
+   "name": "h1tcoin / TSLAx",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": -0.002242933459613461,
+   "found": true
+  },
+  {
+   "mint": "HA2CE6AmvsK3k3mgfYu9JGGkP2J7cMwnEYQaThS5pump",
+   "name": "Roadster / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.001309880852320644,
+   "found": true
+  },
+  {
+   "mint": "Ff6t6jvddcoGDvKB78mPJYdLiTZFD5L6URR1gWXTbwMf",
+   "name": "Grok / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128951946334448,
+   "found": true
+  },
+  {
+   "mint": "Eno4EetpfGJwBXSKbFE1TX1Zv8f7K2bU3x8Gu8HPpump",
+   "name": "LAVA / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens"
+   ],
+   "fdv_change": -0.23624743988143637,
+   "liq_change": -0.22676306034582006,
+   "found": true
+  },
+  {
+   "mint": "2KqGvMyhy9FdkS4rWxc5Q7ypdQXtULA37UAbJDRipump",
+   "name": "SCRVAN / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.00512896529801421,
+   "found": true
+  },
+  {
+   "mint": "Dby6chcM1KWJohRzJ6rM6mvHaW2QngA3qpqgSKmXpump",
+   "name": "GROKBOT / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128980117424575,
+   "found": true
+  },
+  {
+   "mint": "8CNAVcsFpa4HsS75mcFvAUYQfUTC5VmrhSj1fTmukqtd",
+   "name": "L\u0410MA / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128952705483414,
+   "found": true
+  },
+  {
+   "mint": "5Y3GSjK4LsRp9posgyACcCXBy8zKhaeKSEevD5xwpump",
+   "name": "PACKPIC / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.0051289536702434635,
+   "found": true
+  },
+  {
+   "mint": "CftVukcpTbbtzrbBTrjY75UM9W38iPjBmarMCYBbpump",
+   "name": "DERP / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.0051289558593166085,
+   "found": true
+  },
+  {
+   "mint": "FP1ZDiSuNGCeQN9fPoYCg8GDmQbcume6z2TFJNTVpump",
+   "name": "pygmy / USDC",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": -0.002436118564597467,
+   "found": true
+  },
+  {
+   "mint": "88XCR3sA7ALkDE8xEJBtxLVandkMWYEZHmmkDdjbpump",
+   "name": "JPHILIPINO / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": -0.0024333636632996036,
+   "found": true
+  },
+  {
+   "mint": "B28Bte8e6w3Wjbu4cLoxtVQvT5GWxHTwWS2YKNVVz6iJ",
+   "name": "FRIENDS / SOL",
+   "danger": true,
+   "risk_names": [
+    "Low Liquidity"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.0012725682017018514,
+   "found": true
+  },
+  {
+   "mint": "CkSHa2h1v4iAJG9nbU48kPowGWamKBdLvpWs7xZ8pump",
+   "name": "SRSWAP / SOL",
+   "danger": false,
+   "risk_names": [
+    "Missing file metadata"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": -0.002433368293252469,
+   "found": true
+  },
+  {
+   "mint": "288CWnm7MGz4ESseGZohatZmzGDFG94geArcfbtbpump",
+   "name": "buddy / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": -0.0013928549728984274,
+   "found": true
+  },
+  {
+   "mint": "H4tfnBoX8JCdU8mVHCFwarxqfPEUbYHDtCSMNkcWpump",
+   "name": "iif / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128908124198528,
+   "found": true
+  },
+  {
+   "mint": "8uzxewAGm1xDWkBCuHyUme6SDNCkCN7eZi7VELnFpump",
+   "name": "MSB / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.0051289430490610854,
+   "found": true
+  },
+  {
+   "mint": "8YGACxUKx4nuwhemMXNWjjDyEWBoDb5zm5gj3xh6pump",
+   "name": "ARGON / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.0013098993456488461,
+   "found": true
+  },
+  {
+   "mint": "9h8bhvPuQwSmEYyrzoC6MFMNJVWRH1ezaQZRAPxEMqnS",
+   "name": "NULLCAT / HIMS",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128947588155963,
+   "found": true
+  },
+  {
+   "mint": "7oFnZxmTvMr9H3vVwNuynqNwcRqsU7MdBjq2DUFspump",
+   "name": "ryok.net / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": -0.04008165296824939,
+   "liq_change": -0.028371388013377352,
+   "found": true
+  },
+  {
+   "mint": "8jdHSCJRer9j6LWsYpBeo3BgmZz3cfAqYn8rqiZcpump",
+   "name": "Audipurre / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.1613434709007744,
+   "liq_change": 0.11152815568983732,
+   "found": true
+  },
+  {
+   "mint": "FWm1pknvTJzYgux6GCcZutN8SdRLxrKPYcjwsiFMpump",
+   "name": "NOVA / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005129038187779766,
+   "found": true
+  },
+  {
+   "mint": "Snce4a58JcDYHmkVqX2RDKym29XSYQqA7NGwsPepump",
+   "name": "DANGR / SOL",
+   "danger": false,
+   "risk_names": [
+    "High holder correlation"
+   ],
+   "fdv_change": 0.007068293038040574,
+   "liq_change": 0.00122782333221938,
+   "found": true
+  },
+  {
+   "mint": "6MZasSvrCFjZCu6UMkEQZiGHp5UD7NkKPkhafqcwDC9N",
+   "name": "HOID / SOL",
+   "danger": true,
+   "risk_names": [
+    "Large Amount of LP Unlocked",
+    "Top 10 holders high ownership",
+    "Single holder ownership",
+    "Low Liquidity",
+    "High ownership",
+    "Low amount of LP Providers"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.0,
+   "found": true
+  },
+  {
+   "mint": "2XKdV1Lg4C3cyGkgJFPsoGFRGac1rFnaedEAu3kXpump",
+   "name": "HOID / BOT",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128931002511994,
+   "found": true
+  },
+  {
+   "mint": "HKeCM7JPnrckjfvrifai3tfWWxNJ9T4HSiAfrBbtpump",
+   "name": "NULLCAT / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens"
+   ],
+   "fdv_change": -0.0691921596412749,
+   "liq_change": -0.055460333130165296,
+   "found": true
+  },
+  {
+   "mint": "9N6sTmgVjHFDeXfCBhai97R7hbQEbYU82jt2Wtpgpump",
+   "name": "10GW COIN / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128951002732363,
+   "found": true
+  },
+  {
+   "mint": "9e2HfuaWAhaV3Ctu3t2WMu5bhXawVz7t5TuEW8T9pump",
+   "name": "HOID / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.03637264435096432,
+   "liq_change": -0.0024333421629735286,
+   "found": true
+  },
+  {
+   "mint": "32m3gLs7wA7Z5oSGNKKSQrTEeRELA2oHrddK8L4Rpump",
+   "name": "HOID / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": -0.0019509010045286601,
+   "found": true
+  },
+  {
+   "mint": "F68Z1z5GWkwWsEfo9KzgLsgKTPB3fVxGCxCS2jztpump",
+   "name": "admin12312 / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128925132392492,
+   "found": true
+  },
+  {
+   "mint": "CsV92cfe5Acn9gkZewEyfzyAj4B9UrK38FcheDy5pump",
+   "name": "BCAT / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005130329390466537,
+   "found": true
+  },
+  {
+   "mint": "Fj4ti7sPWydpHinrMY8Ar9RVozaGRAWPh4sRVNX8pump",
+   "name": "DUOLIPA / AAPLx",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.5223297729699402,
+   "liq_change": -0.44659782337373577,
+   "found": true
+  },
+  {
+   "mint": "B5Wd3ZFycRukqVTh7YQjBKh7vjv5GyLwKk7Tj9cPpump",
+   "name": "\ud83d\ude80 / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.001309897113235925,
+   "found": true
+  },
+  {
+   "mint": "DsursrEAn4ZdAEumjLrvkrE9G14abusYmVp9qgBRUDj6",
+   "name": "TEST / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.04313027177752249,
+   "liq_change": -0.03483055035486127,
+   "found": true
+  },
+  {
+   "mint": "7uhW9289MEFvkx3f2d9aAt7LZWDMxjDMYk3Ex761pump",
+   "name": "BOUNCE / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.05282548820126154,
+   "liq_change": -0.046239623352867354,
+   "found": true
+  },
+  {
+   "mint": "HvDb1q3y3f9TCE1xsaW2jXCnHTABZnMgutqzP4sbpump",
+   "name": "Pyramel / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128971897197188,
+   "found": true
+  },
+  {
+   "mint": "5QU7BxAArvDrgC9kHfhyYCTKGcv2dNvdXRuksGntZakS",
+   "name": "INUPRENEUR / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128961813138266,
+   "found": true
+  },
+  {
+   "mint": "7QRzND1VeyxCEgrsguepGwnSCJAQGP7naSGsY5sypump",
+   "name": "TRC / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.6032639995707278,
+   "liq_change": 0.3639787718712322,
+   "found": true
+  },
+  {
+   "mint": "GqkgWMePfGwrV33pYyM7VVH3HaNZivo69JyhPYempump",
+   "name": "alieninu / SPCX",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128949578897535,
+   "found": true
+  },
+  {
+   "mint": "HvvAwrdwWrXbnM2mgb5rMzDTTvvD79cTUnX3KUyqpump",
+   "name": "Macca / SOL",
+   "danger": false,
+   "risk_names": [
+    "High holder correlation"
+   ],
+   "fdv_change": -0.9969231365197402,
+   "liq_change": -0.9709542174847571,
+   "found": true
+  },
+  {
+   "mint": "12gMNVmdfMpJXX64dGgFkQfqNaMEsB37xNgFtLK7pump",
+   "name": "PC / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128967185597411,
+   "found": true
+  },
+  {
+   "mint": "HD6k6qxVc7HEsAjDdWfivje8whotwbn2Hc5G4CFjpump",
+   "name": "test / TSLAx",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.048738366131408584,
+   "liq_change": -0.08579898574967082,
+   "found": true
+  },
+  {
+   "mint": "BjyTcHa9yfsC6rBVE6ejzunNcoY1AqyPnnNiPcTBrA7V",
+   "name": "CRIMECAT / wXMR",
+   "danger": false,
+   "risk_names": [
+    "Fee config enabled"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": -0.002094708910294507,
+   "found": true
+  },
+  {
+   "mint": "DmBSmozK9NpC2gmFvZws3wk9pUoW5A3Egyp6c5DE4Q3x",
+   "name": "ALIENLON / SPCX",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 4.3699328097446255e-05,
+   "liq_change": 0.002609606468148229,
+   "found": true
+  },
+  {
+   "mint": "9sXqVaA11mYgwhSdde1YBtmzfEL8ctFK96KAPdMopump",
+   "name": "ALIENLON / SPCX",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.0051289654966213405,
+   "found": true
+  },
+  {
+   "mint": "9kS6Fc1bZtizhooJF8Az3u636aSj7sizHMQ4mdUvpump",
+   "name": "ryok.net / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128946690263536,
+   "found": true
+  },
+  {
+   "mint": "AShsQH6ZHdZByJdF7mzxDpzsXFKKU9MPNc7D1CzZpump",
+   "name": "admin123ad / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128925132392492,
+   "found": true
+  },
+  {
+   "mint": "4NstCuuSSj759pzZVqH1nnQYxGeWL5TZya36dp8Hpump",
+   "name": "AMN / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.0051289273190722184,
+   "found": true
+  },
+  {
+   "mint": "BzgCJ68YyesiVzqxm6PURuwv1d2Jt5G8PaqKAdffpump",
+   "name": "ALIENS / SPCX",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128924393645429,
+   "found": true
+  },
+  {
+   "mint": "ESqM3d4138VPduJJ4on5cu3yBQ6UVdGeGQA54L3xpump",
+   "name": "INUPRENEUR / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.10119319228094736,
+   "liq_change": -0.09909593167903319,
+   "found": true
+  },
+  {
+   "mint": "7TT1DvkiFgfhdCNSKAeF1Av1TTNDmCkG98Ag14sepump",
+   "name": "Goldcoin / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.0011343694039757102,
+   "liq_change": -0.022633457625233055,
+   "found": true
+  },
+  {
+   "mint": "CMPnHRgCxPgHkvmpmcd9bxPdD5SK1UXPWMNbv2ird1Ss",
+   "name": "STARGPS / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.00512894637233452,
+   "found": true
+  },
+  {
+   "mint": "H3iTqWiBVff6CAyHdW3f4QW4q65Q3WUpmdPkG25Qpump",
+   "name": "$BWIZ / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.00512890345365169,
+   "found": true
+  },
+  {
+   "mint": "SjhrB9ob2usvnx9zLAHE9fmwHf5zYTtADFjLnss4o7e",
+   "name": "HOOKCAT / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.0013099244887433414,
+   "found": true
+  },
+  {
+   "mint": "26vmQPuZmwa3FSrcMDcA1RwoKdGnjxLkkb7ENDxYpump",
+   "name": "FAGGOTJACK / SOL",
+   "danger": true,
+   "risk_names": [
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128961950320088,
+   "found": true
+  },
+  {
+   "mint": "funwAm6m2MVbQuzreeDhJYVkNSLYZb7eSjWRpbcN8mw",
+   "name": "fun / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128959950727818,
+   "found": true
+  },
+  {
+   "mint": "Ghw2EUcSfMyn3Qvf58sePMS9asuaGi3bH8Ls3ssvpump",
+   "name": "RAO / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.0,
+   "liq_change": 0.001309924214481839,
+   "found": true
+  },
+  {
+   "mint": "FueFX4qZxX9Yp3GeD1jWTWAJqkGnsKbUCL5ib3WCBkEL",
+   "name": "QCAT / SOL",
+   "danger": true,
+   "risk_names": [
+    "Low Liquidity"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128958169340336,
+   "found": true
+  },
+  {
+   "mint": "DPiCNKddQMU2WCuo6RMQu8aRCYnZR3snkDW4biuspump",
+   "name": "FTR / PUMP",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.00801778875307746,
+   "liq_change": -0.004925670912785063,
+   "found": true
+  },
+  {
+   "mint": "8J7wvHsh5wFKqXywpotYFt36CHayYeDFkXFULyUP9T9",
+   "name": "COCKROACH / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": 0.3893602407935721,
+   "liq_change": -1.0,
+   "found": true
+  },
+  {
+   "mint": "AQWsHdmeFSL6D2aXz1Gvz1hB38GxocTT6iXv5pKpump",
+   "name": "FlyingT / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens",
+    "Single holder ownership",
+    "High holder concentration"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.00512892642755336,
+   "found": true
+  },
+  {
+   "mint": "Gkwf1JC2xeQfUrZGZQPQn3hg7VfCSBm175sVy18gpump",
+   "name": "FTR / SOL",
+   "danger": false,
+   "risk_names": [],
+   "fdv_change": -0.9903347135266167,
+   "liq_change": -0.9415632318533315,
+   "found": true
+  },
+  {
+   "mint": "8GNS13RdgApHL8UhbxKHwhRKXnZ5aBa7MfyCGF9LoENm",
+   "name": "FRIENDS / SOL",
+   "danger": true,
+   "risk_names": [
+    "Large Amount of LP Unlocked",
+    "Low amount of LP Providers"
+   ],
+   "fdv_change": 39621.28623870208,
+   "liq_change": -0.9999999999900883,
+   "found": true
+  },
+  {
+   "mint": "6rvcyfZgkx7ZaUVUkLheSUmC4rzR9RdChaUuCu3cpump",
+   "name": "TRIO / SOL",
+   "danger": true,
+   "risk_names": [
+    "Creator history of rugged tokens"
+   ],
+   "fdv_change": 0.0,
+   "liq_change": 0.005128925132392492,
+   "found": true
+  }
+ ]
+}

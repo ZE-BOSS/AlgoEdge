@@ -183,6 +183,7 @@ class MultiTPManager:
         strategy_id: str = "UNKNOWN",
         max_risk_cap_dollars: float = 0.0,  # 2% of balance; 0 = no cap
         use_live_mt5: bool = True,
+        signal_tp1_rr: float | None = None,
     ) -> list[TPLevel]:
         """
         Calculates prices and volumes for up to 5 TP levels.
@@ -215,6 +216,13 @@ class MultiTPManager:
         # target wins over a per-strategy one. `symbol` was already a parameter
         # here; only the lookup changed.
         tp1_rr_used = self.resolve_tp1_rr(symbol, strategy_id)
+        # A target the SIGNAL chose, as one TP. An RL agent picks its own
+        # reward:risk from the menu the admin pre-registered and sends it as
+        # metadata.rl_rr; until 2026-10-16 this function replaced it with the
+        # slot's tp1_rr, so the agent's target choice was ignored everywhere -
+        # training, the gate and live - and its risk head learned from noise.
+        if signal_tp1_rr is not None and signal_tp1_rr > 0:
+            tp1_rr_used = float(signal_tp1_rr)
 
         rr_multipliers = [tp1_rr_used, self.tp2_rr, self.tp3_rr, self.tp4_rr, self.tp5_rr]
         tp_prices = [entry + (risk * rr * sign) for rr in rr_multipliers]
@@ -223,8 +231,10 @@ class MultiTPManager:
         if liquidity_target is not None:
             tp_prices[4] = liquidity_target
 
-        # How many TPs the user wants (clamped 1–5)
-        active_count = max(1, min(self.resolve_tp_count(symbol, strategy_id), 5))
+        # How many TPs the user wants (clamped 1–5) - one, when the signal set
+        # its own target: the remaining rungs would be the slot's ladder again.
+        active_count = (1 if signal_tp1_rr else
+                        max(1, min(self.resolve_tp_count(symbol, strategy_id), 5)))
         # [2.13] default; overwritten on every success path below, left as-is
         # (0 placed) if the function returns [] for any reason.
         self.last_tp_levels_requested = active_count

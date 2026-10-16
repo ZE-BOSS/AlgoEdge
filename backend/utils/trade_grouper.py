@@ -71,8 +71,15 @@ def _resolve_symbol_candles(candles: Any, symbol: str):
         return candles.get(symbol)
     return candles
 
-def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = None, candles_m5: Any = None, candles_h1: Any = None) -> list[dict]:
-    """Group trades by group_id for combined P&L display, extracting chart data for frontend."""
+def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = None, candles_m5: Any = None, candles_h1: Any = None,
+                 *, chart_data: bool = True) -> list[dict]:
+    """Group trades by group_id for combined P&L display, extracting chart data for frontend.
+
+    `chart_data=False` skips the per-trade candle slices and chart markings,
+    which only the trade viewer reads. An RL training rollout groups trades
+    thousands of times and never draws one: profiled 2026-10-16, the slices
+    (built with `iterrows`) were 24% of a training iteration.
+    """
     from collections import OrderedDict
     groups = OrderedDict()
     for t in trades:
@@ -387,6 +394,8 @@ def group_trades(trades: list[dict], candles: Any = None, candles_m15: Any = Non
         # Resolve the right candle set for THIS group's symbol. For a
         # single-symbol backtest `candles` is already the one DataFrame we
         # need; for a portfolio backtest it's a {symbol: DataFrame} dict.
+        if not chart_data:
+            continue
         group_candles = _resolve_symbol_candles(candles, g.get("symbol"))
         group_candles_m15 = _resolve_symbol_candles(candles_m15, g.get("symbol"))
         group_candles_m5 = _resolve_symbol_candles(candles_m5, g.get("symbol"))

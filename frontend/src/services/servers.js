@@ -127,7 +127,12 @@ export function clearServerAuth(id) {
   window.dispatchEvent(new CustomEvent('servers-changed'));
 }
 
-export const isSignedIn = (id) => !!getServerToken(id);
+// The same rule requests use (`getServerToken(id) || getToken()` in api.js):
+// the plain login stores the un-namespaced token, and requests to the active
+// server send it. Checking only the namespaced key put "signed out" beside a
+// server the page was successfully talking to.
+export const isSignedIn = (id) => !!getServerToken(id)
+  || (id === activeServerId() && !!localStorage.getItem('algoedge_token'));
 
 // ── query keys ─────────────────────────────────────────────────────────────
 

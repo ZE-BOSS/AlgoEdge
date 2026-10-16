@@ -568,7 +568,8 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
     if charter is not None:
         from backend.rl.distill import fidelity
         env = E.TradingEnv(spec, data, risk_config, scaler=scaler, charter=charter)
-        fid = fidelity(charter, policy, env.Z, data.names, spec.min_confidence)
+        fid = fidelity(charter, policy, env.observations_for(policy), data.names,
+                       spec.min_confidence)
         executable = all(g.feature in set(data.names) for g in charter.gates) and bool(charter.gates)
         rep.add(Check("charter fidelity",
                       executable and fid["balanced"] >= BARS["min_charter_fidelity"],

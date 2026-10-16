@@ -1,4 +1,4 @@
-{
+﻿{
   "version": "0.0.1",
   "configurations": [
     {
@@ -7,6 +7,13 @@
       "runtimeArgs": ["-m", "uvicorn", "backend.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
       "cwd": ".",
       "port": 8000
+    },
+    {
+      "name": "algoedge-audit",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-3.12", ".claude/audit_server.py"],
+      "cwd": ".",
+      "port": 8011
     },
     {
       "name": "algoedge-frontend",

@@ -30,6 +30,7 @@ so it is visible instead of silent.
 """
 
 import asyncio
+import os
 import ssl
 from datetime import datetime, timezone
 
@@ -134,6 +135,11 @@ class TelegramService:
         Returns a result dict rather than None, so callers (and the test
         endpoint) can tell "sent" from "silently dropped". Never raises.
         """
+        if os.getenv("ALGOEDGE_AUDIT") == "1":
+            # An audit server runs on a COPY of the database, which carries the
+            # real bot token and chat ids. Nothing from it reaches a phone.
+            logger.info(f"[Telegram] audit server - not sent: {str(message)[:80]}")
+            return {"ok": False, "reason": "audit server", "results": []}
         if not self.configured:
             reason = "no bot token configured" if not self.bot_token else "no chat id configured"
             self.last_error = f"Not sent — {reason}"

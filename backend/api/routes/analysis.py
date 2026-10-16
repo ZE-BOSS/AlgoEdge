@@ -118,13 +118,22 @@ async def run_analysis(
     # Falling back to the env var keeps a single-user local setup working with
     # no UI step.
     service = LLMService(await _user_api_keys(current_user.id))
-    answer = await service._call_provider(
-        req.provider, model, prompt,
-        system=SYSTEM_PROMPT,
-        # None -> the model's own ceiling. See llm_service.resolve_max_tokens.
-        max_tokens=req.max_tokens,
-        effort=req.effort,
-    )
+    from backend.services.llm_service import LLMUnavailable
+    try:
+        answer = await service._call_provider(
+            req.provider, model, prompt,
+            system=SYSTEM_PROMPT,
+            # None -> the model's own ceiling. See llm_service.resolve_max_tokens.
+            max_tokens=req.max_tokens,
+            effort=req.effort,
+            strict=True,
+        )
+    except LLMUnavailable as exc:
+        # A real error, not a 200 whose "analysis" is the error text. That was
+        # what the Backtester and Journal panels rendered - and saved to the
+        # history as if Claude had said it (measured 2026-10-16: "Provider
+        # 'anthropic' not available" stored as a BACKTEST analysis).
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     record_id = None
     if req.save:
@@ -496,19 +505,57 @@ async def _load_backtest(target_id: str | None, user: User, db: AsyncSession) ->
         run = row.scalar_one_or_none()
         if run is None:
             return None
-        # Rebuild enough of the result shape for the context builder. Trades are
-        # loaded through the saved-run endpoint's own accessor rather than
-        # duplicated here.
+        # Rebuild the result shape the context builder reads.
+        #
+        # This used to read `run.report`, `run.initial_balance` and
+        # `run.final_balance` - none of which are columns on backtest_runs - and
+        # hard-coded `grouped_trades: []`. So every SAVED run reached Claude with
+        # no metrics and no trades, and it answered "zero trades executed" about
+        # a run with 81 (measured 2026-10-16). The metrics are columns, the
+        # balances are in params_snapshot, the trades are backtest_trades rows.
         from backend.api.routes.backtest import safe_json_loads
+        from backend.data.models import BacktestTrade
+
+        snap = safe_json_loads(getattr(run, "params_snapshot", None), {}) or {}
+        trows = (await db.execute(
+            select(BacktestTrade.symbol, BacktestTrade.direction, BacktestTrade.entry_price,
+                   BacktestTrade.exit_price, BacktestTrade.stop_loss, BacktestTrade.entry_time,
+                   BacktestTrade.exit_time, BacktestTrade.exit_reason, BacktestTrade.pnl,
+                   BacktestTrade.pnl_r, BacktestTrade.planned_rr, BacktestTrade.realized_rr,
+                   BacktestTrade.tp_level_hit, BacktestTrade.session,
+                   BacktestTrade.confluence_score, BacktestTrade.mae_r, BacktestTrade.mfe_r,
+                   BacktestTrade.balance_after, BacktestTrade.strategy_id)
+            .where(BacktestTrade.backtest_id == run.id)
+            .order_by(BacktestTrade.entry_time))).all()
+        trades = []
+        for r in trows:
+            t = dict(r._mapping)
+            # The live-result shape the context builder reads: a group with
+            # `combined_pnl` and its legs under `sub_trades`.
+            t["combined_pnl"] = t.get("pnl")
+            t["sub_trades"] = [{"entry_price": t.get("entry_price"),
+                                "exit_reason": t.get("exit_reason")}]
+            trades.append(t)
+        initial = snap.get("initial_balance")
+        final = trades[-1].get("balance_after") if trades else None
         return {
             "symbol": run.symbol,
             "strategy_id": run.strategy_id,
             "start_date": str(getattr(run, "start_date", "") or ""),
             "end_date": str(getattr(run, "end_date", "") or ""),
-            "initial_balance": getattr(run, "initial_balance", None),
-            "final_balance": getattr(run, "final_balance", None),
-            "report": safe_json_loads(getattr(run, "report", None), {}) or {},
-            "grouped_trades": [],
+            "initial_balance": initial,
+            "final_balance": final,
+            "risk_per_trade_pct": snap.get("risk_per_trade_pct"),
+            "params_snapshot": snap,
+            "report": {
+                "total_trades": run.total_trades, "win_rate": run.win_rate,
+                "profit_factor": run.profit_factor, "sharpe_ratio": run.sharpe_ratio,
+                "sortino_ratio": run.sortino_ratio, "expectancy_r": run.expectancy_r,
+                "max_drawdown_pct": run.max_drawdown_pct, "total_pnl": run.total_pnl,
+                "tp1_hit_rate": run.tp1_hit_rate, "sl_hit_rate": run.sl_hit_rate,
+                "be_hit_rate": run.be_hit_rate, "trail_hit_rate": run.trail_hit_rate,
+            },
+            "grouped_trades": trades,
             "rejection_funnel": safe_json_loads(getattr(run, "rejection_funnel", None), {}) or {},
         }
 

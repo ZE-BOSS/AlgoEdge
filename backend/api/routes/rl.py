@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -50,7 +51,26 @@ from backend.services import rejection_report as rr
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/api/rl", tags=["rl"], dependencies=[Depends(require_admin)])
+from fastapi.responses import JSONResponse as _JSONResponse  # noqa: E402
+
+
+class _SafeJSONResponse(_JSONResponse):
+    """Every RL response, with non-finite floats written as strings.
+
+    An RL record legitimately holds -inf: `_evaluate` returns it for an
+    evaluation with too few trades, and it lands in the training history.
+    Once Collect stored that history, `GET /agents/{id}` - the endpoint the
+    Agents page polls every two seconds - 500'd on every call, so a collected
+    agent's page could never load again (found by the end-to-end audit,
+    2026-10-16). Set as the router default so no RL route can regress.
+    """
+
+    def render(self, content) -> bytes:
+        return super().render(_json_safe(content))
+
+
+router = APIRouter(prefix="/api/rl", tags=["rl"], dependencies=[Depends(require_admin)],
+                   default_response_class=_SafeJSONResponse)
 
 UPLOADS = Path("data/rl/uploads")
 # An upload is bars, and bars are small per row. 400,000 M5 bars of OHLCV CSV is
@@ -521,6 +541,16 @@ def _export_findings(spec_d: dict, training: dict, funnel: dict,
     results = (training or {}).get("results") or []
     trades = sum(int(r.get("test_trades") or 0) for r in results)
 
+    # First, because it overrules everything below: a job that CRASHED is not
+    # a policy that chose to stay flat, and the two used to read identically.
+    job_errors = (training or {}).get("job_errors") or []
+    if job_errors:
+        first = job_errors[0]
+        out.append(
+            f"{len(job_errors)} training job(s) CRASHED. First: seed "
+            f"{first.get('seed')} path {first.get('fold')} - {first.get('error')}. "
+            "Nothing else in this file describes a policy until that is fixed.")
+
     scoreable = total_iters = 0
     for r in results:
         for h in (r.get("history") or []):
@@ -588,6 +618,21 @@ def _export_findings(spec_d: dict, training: dict, funnel: dict,
     return out
 
 
+def _json_safe(obj):
+    """Non-finite floats as strings ("-inf", "inf", "nan"), everything else as
+    is. Strings rather than null so a reader can still see WHY a value is
+    missing - an unmeasurable evaluation is not a zero."""
+    import math
+
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else str(obj)
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
 @router.get("/agents/{agent_id}/export")
 async def export_agent(agent_id: str,
                        history_points: int = Query(400, ge=20, le=5000),
@@ -643,12 +688,14 @@ async def export_agent(agent_id: str,
         select(RLProposal).where(RLProposal.agent_id == agent_id)
         .order_by(desc(RLProposal.created_at)))).scalars().all()
 
-    # Anything backtested AS this agent. The Backtester records an RL agent as
-    # `RL::<agent_id>`, so its runs are findable without a second join.
+    # Anything backtested AS this agent: the Backtester records the strategy id
+    # it ran, `RL::<name>@<version>`. This matched `RL::<agent_id>` exactly,
+    # which no run is ever saved under, so the export never listed a backtest.
     try:
         from backend.data.models import BacktestRun
         rows = (await db.execute(
-            select(BacktestRun).where(BacktestRun.strategy_id == f"RL::{agent_id}")
+            select(BacktestRun).where(
+                BacktestRun.strategy_id.like(f"{rlreg.PREFIX}{row.name}@%"))
             .order_by(desc(BacktestRun.created_at)).limit(25))).scalars().all()
         bts = [{
             "id": b.id, "symbol": b.symbol, "title": b.title,
@@ -674,6 +721,8 @@ async def export_agent(agent_id: str,
         import subprocess
         env["python"] = platform.python_version()
         env["platform"] = platform.platform()
+        env["cpu_count"] = os.cpu_count()
+        env["training_capacity"] = trainmod.capacity()
         env["commit"] = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"], capture_output=True,
             text=True, timeout=5).stdout.strip() or "unknown"
@@ -726,7 +775,11 @@ async def export_agent(agent_id: str,
 
     from fastapi.responses import JSONResponse
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
-    return JSONResponse(payload, headers={
+    # The training history legitimately holds -inf: `_evaluate` returns it for
+    # an evaluation with too few trades to count. Python's json writes that as
+    # -Infinity, but a JSONResponse refuses it, so the export 500'd on every
+    # run that had such an iteration (VPS log, 2026-10-16).
+    return JSONResponse(_json_safe(payload), headers={
         "Content-Disposition":
             f'attachment; filename="algoedge-agent-{agent_id}-{stamp}.json"'})
 
@@ -830,6 +883,68 @@ async def check_overlap(body: OverlapIn, db: AsyncSession = Depends(get_db)):
 # -- training ---------------------------------------------------------------
 
 
+def _sources_path(agent_id: str) -> Path:
+    return trainmod.ARTEFACT_ROOT / agent_id / "sources.json"
+
+
+def _save_sources(agent_id: str, datasets: dict) -> None:
+    try:
+        p = _sources_path(agent_id)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(datasets or {}), encoding="utf-8")
+    except Exception as exc:                            # noqa: BLE001
+        logger.warning(f"[RL] could not record data sources for {agent_id}: {exc}")
+
+
+def _sources_for(agent_id: str, supplied: dict | None) -> dict:
+    """The bars to distil or validate on: the caller's, else training's own.
+
+    The Training tab sends `{datasets: {}}` for Distil and Run the gate - it
+    has no data form of its own - and both routes passed that straight to
+    `load_frames`, so from the UI each failed with "no bars" every time.
+    The sources a run trained on are recorded when it is queued.
+    """
+    if supplied:
+        return supplied
+    try:
+        return json.loads(_sources_path(agent_id).read_text(encoding="utf-8")) or {}
+    except Exception:                                   # noqa: BLE001
+        return {}
+
+
+def _one_episode(spec: AgentSpec, symbol: str, frame, blocks: dict, risk_config: dict,
+                 prog=None):
+    """One symbol's EpisodeData through the trainer's own builder, so distill
+    and the gate see the base strategy's setups exactly as training did. They
+    used to build it without them, which made the gate's "beats its base
+    strategy" check skip every fold."""
+    one = AgentSpec.from_dict(spec.to_dict() | {"symbols": [symbol]})
+    eps = trainmod.build_episodes(one, {symbol: frame}, strategy_blocks=blocks,
+                                  risk_config=risk_config, progress=prog)
+    if not eps:
+        raise ValueError(f"no bars for {symbol}")
+    return eps[0]
+
+
+async def _strategy_blocks(spec: AgentSpec, admin) -> dict:
+    """The admin's saved strategy blocks, for a mode-B agent's base strategy.
+
+    Read here, in the API process, because the training worker has no
+    database session. Without them the base strategy runs dataclass defaults -
+    a different strategy from the one trading live.
+    """
+    if not spec.base_strategy or admin is None:
+        return {}
+    from backend.api.routes.backtest import load_saved_strategy_blocks
+    return await load_saved_strategy_blocks(getattr(admin, "id", None))
+
+
+@router.get("/capacity")
+async def training_capacity():
+    """How many agents train at once on this machine, and how many jobs each."""
+    return trainmod.capacity() | {"pending": trainmod.queue.pending}
+
+
 class TrainIn(BaseModel):
     # {symbol: "mt5" | "<path>" | {path, timeframe, time_is, timezone, broker}}
     datasets: dict = Field(default_factory=dict)
@@ -838,12 +953,13 @@ class TrainIn(BaseModel):
 
 
 @router.post("/agents/{agent_id}/train")
-async def start_training(agent_id: str, body: TrainIn, db: AsyncSession = Depends(get_db)):
+async def start_training(agent_id: str, body: TrainIn, db: AsyncSession = Depends(get_db),
+                         admin=Depends(require_admin)):
     """Queue a training job. Returns immediately.
 
-    The job runs in a separate process behind a queue that is bounded at four:
-    a deeper queue just moves the wait somewhere nobody can see it, and two
-    jobs on the same cores finish later than two jobs in sequence.
+    The job runs in a separate process behind a bounded queue - a deeper
+    queue just moves the wait somewhere nobody can see it. How many run at
+    once, and how many jobs each spreads over, is `trainmod.capacity()`.
     """
     row = await rlreg.get_agent(db, agent_id)
     if row is None:
@@ -867,11 +983,13 @@ async def start_training(agent_id: str, body: TrainIn, db: AsyncSession = Depend
         from backend.rl import env as _E
         risk_config = _E.default_risk_config(spec.symbols[0] if spec.symbols else "EURUSD")
     payload = trainmod.job_payload(spec, body.datasets, risk_config,
-                                   agent_id=agent_id, optimiser=body.optimiser)
+                                   agent_id=agent_id, optimiser=body.optimiser,
+                                   strategy_blocks=await _strategy_blocks(spec, admin))
     try:
         trainmod.queue.submit(agent_id, payload)
     except RuntimeError as exc:
         raise HTTPException(429, str(exc)) from exc
+    _save_sources(agent_id, body.datasets)
     row.status = "TRAINING"
     row.optimiser = trainmod.available_optimiser(body.optimiser)
     await db.commit()
@@ -1029,7 +1147,8 @@ class RunIn(BaseModel):
 
 
 @router.post("/agents/{agent_id}/distil")
-async def distil_charter(agent_id: str, body: RunIn, db: AsyncSession = Depends(get_db)):
+async def distil_charter(agent_id: str, body: RunIn, db: AsyncSession = Depends(get_db),
+                         admin=Depends(require_admin)):
     """Turn the trained policy into a readable, executable charter.
 
     The gates are thresholds on named features, so "did it follow its strategy"
@@ -1046,28 +1165,29 @@ async def distil_charter(agent_id: str, body: RunIn, db: AsyncSession = Depends(
     policy, scaler = loaded
     spec = AgentSpec.from_dict(json.loads(row.spec_json))
     prog = trainmod.phase_progress(agent_id, "distil")
+    blocks = await _strategy_blocks(spec, admin)
 
     def work():
         from backend.rl import distill
         from backend.rl import env as E
         prog.set(stage="loading", pct=5.0, stage_detail="reading the bars")
         prog.event("loading bars")
-        frames = dsmod.load_frames(body.datasets, spec)
+        frames = dsmod.load_frames(_sources_for(agent_id, body.datasets), spec)
         if not frames:
             raise ValueError("no bars - supply a dataset per pre-registered symbol")
         symbol = next(iter(frames))
         prog.set(stage="replaying", pct=25.0,
                  stage_detail="replaying the policy to collect its decisions")
         prog.event(f"{symbol}: {len(frames[symbol]):,} bars - replaying the policy")
-        data = E.EpisodeData.build(symbol, spec.timeframe, frames[symbol], spec.features)
-        env = E.TradingEnv(spec, data, body.risk_config or
-                           E.default_risk_config(symbol), scaler=scaler)
+        rc = body.risk_config or E.default_risk_config(symbol)
+        data = _one_episode(spec, symbol, frames[symbol], blocks, rc, prog)
+        env = E.TradingEnv(spec, data, rc, scaler=scaler)
         ep = env.rollout(policy, transitions=True)
         prog.set(stage="distilling", pct=75.0,
                  stage_detail="turning the weights into readable gates")
         prog.event(f"{ep.breakdown.n_trades} trades replayed - fitting the gates")
         return distill.distil(
-            policy, env.Z, data.names, spec, agent_id=agent_id,
+            policy, env.observations_for(policy), data.names, spec, agent_id=agent_id,
             trade_bars=distill.trade_bars_from([ep]),
             n_trades=ep.breakdown.n_trades, mean_r=ep.breakdown.mean_r or None,
             scaler_note=scaler.fitted_on), [d for d in (data.coverage(),)]
@@ -1110,7 +1230,8 @@ _BACKGROUND: set = set()
 
 
 @router.post("/agents/{agent_id}/validate")
-async def run_gate(agent_id: str, body: RunIn, db: AsyncSession = Depends(get_db)):
+async def run_gate(agent_id: str, body: RunIn, db: AsyncSession = Depends(get_db),
+                   admin=Depends(require_admin)):
     """Start the validation gate. Returns at once; watch the phase progress.
 
     NOT a request that waits for the answer. The §6.9 run took 32 minutes on
@@ -1147,21 +1268,22 @@ async def run_gate(agent_id: str, body: RunIn, db: AsyncSession = Depends(get_db
         raise HTTPException(409, "the gate is already running for this agent")
 
     optimiser = row.optimiser or ""
+    blocks = await _strategy_blocks(spec, admin)
 
     def work():
         from backend.rl import env as E
         from backend.rl import validate as V
         prog.set(stage="loading", stage_detail="reading the bars", pct=0.0)
         prog.event("loading bars")
-        frames = dsmod.load_frames(body.datasets, spec)
+        frames = dsmod.load_frames(_sources_for(agent_id, body.datasets), spec)
         if not frames:
             raise ValueError("no bars - supply a dataset per pre-registered symbol")
         symbol = next(iter(frames))
         prog.event(f"{symbol}: {len(frames[symbol]):,} bars")
-        data = E.EpisodeData.build(symbol, spec.timeframe, frames[symbol], spec.features)
+        rc = body.risk_config or E.default_risk_config(symbol)
+        data = _one_episode(spec, symbol, frames[symbol], blocks, rc, prog)
         run = _rehydrate_run(training)
-        return V.validate(spec, policy, scaler, data,
-                          body.risk_config or E.default_risk_config(symbol),
+        return V.validate(spec, policy, scaler, data, rc,
                           agent_id=agent_id, training_run=run, charter=charter,
                           optimiser=optimiser, progress=prog)
 
@@ -1310,7 +1432,7 @@ async def approve_charter(agent_id: str, body: ApproveIn,
     await db.commit()
     registered = await rlreg.register_approved(db)
     return {"charter": charter.to_dict(), "registered": registered,
-            "strategy_id": rlreg.strategy_id_for(charter.agent_id, charter.version)}
+            "strategy_id": await _registered_id(db, charter.agent_id, charter.version)}
 
 
 @router.post("/agents/{agent_id}/charter/reject")
@@ -1339,9 +1461,23 @@ async def reject_charter(agent_id: str, body: RejectIn,
         agent_row.status = rlreg.REJECTED
         agent_row.reject_reason = body.reason.strip()
     rlreg.cache_clear(agent_id)
-    rlreg.unregister(rlreg.strategy_id_for(agent_id, charter.version))
+    rlreg.unregister(await _registered_id(db, agent_id, charter.version))
     await db.commit()
     return charter.to_dict()
+
+
+async def _registered_id(db: AsyncSession, agent_id: str, version: int) -> str:
+    """The id an agent is REGISTERED under: `RL::<name>@<version>`.
+
+    By NAME, as `register_approved` and the registry's own `strategy_id` do.
+    Approve, reject and supersede built it from the agent_id instead
+    (`RL::name-8d4c3d48@1`), so approve returned an id the Backtester could
+    not find, and reject/supersede unregistered nothing - a rejected agent
+    stayed selectable for a live slot until the next restart (end-to-end
+    audit, 2026-10-16).
+    """
+    row = await rlreg.get_agent(db, agent_id)
+    return rlreg.strategy_id_for(row.name if row is not None else agent_id, version)
 
 
 # -- proposals --------------------------------------------------------------
@@ -1379,7 +1515,7 @@ async def approve_proposal(proposal_id: int, db: AsyncSession = Depends(get_db),
     row.decided_by = str(getattr(admin, "email", "") or "admin")
     row.decided_at = naive_utc()
     rlreg.cache_clear(row.agent_id)
-    rlreg.unregister(rlreg.strategy_id_for(row.agent_id, old.version))
+    rlreg.unregister(await _registered_id(db, row.agent_id, old.version))
     await db.commit()
     registered = await rlreg.register_approved(db)
     return {"charter": new.to_dict(), "superseded": old.version, "registered": registered}

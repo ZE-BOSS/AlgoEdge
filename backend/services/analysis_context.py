@@ -153,12 +153,24 @@ def build_backtest_context(result: dict) -> tuple[str, dict]:
     funnel = result.get("rejection_funnel") or {}
     if funnel:
         lines.append(_section("Rejection funnel — where signals died"))
-        total = sum(v for v in funnel.values() if isinstance(v, (int, float)))
-        for gate, count in sorted(
-            ((k, v) for k, v in funnel.items() if isinstance(v, (int, float))),
-            key=lambda kv: -kv[1],
-        ):
-            share = f" ({count / total * 100:.0f}%)" if total else ""
+        # The engine's funnel nests its causes ({"risk_rejections": {reason: n}}).
+        # Only top-level numbers were read, so every named cause - the part
+        # that explains a run - was dropped. Flattened as "bucket / reason".
+        flat: dict[str, float] = {}
+        for k, v in funnel.items():
+            if isinstance(v, (int, float)):
+                flat[k] = v
+            elif isinstance(v, dict):
+                for reason, n in v.items():
+                    if isinstance(n, (int, float)) and n:
+                        flat[f"{k} / {reason}"] = n
+        causes = {k: v for k, v in flat.items() if " / " in k}
+        total = sum(causes.values()) or sum(flat.values())
+        for gate, count in sorted(flat.items(), key=lambda kv: -kv[1])[:40]:
+            # A share only for the named causes; a counter such as raw_signals
+            # is not a slice of the rejections.
+            share = (f" ({count / total * 100:.0f}% of rejections)"
+                     if total and " / " in gate else "")
             lines.append(f"- {gate}: {count}{share}")
         digest["rejection_funnel"] = funnel
 

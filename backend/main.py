@@ -101,11 +101,17 @@ async def lifespan(app: FastAPI):
 
     # Investor platform scheduled jobs: nightly ledger check, daily digest.
     investor_jobs = None
-    try:
-        from backend.investor import jobs as investor_jobs_mod
-        investor_jobs = investor_jobs_mod.start()
-    except Exception as e:
-        logger.warning(f"Investor jobs not started: {e}")
+    # An audit server runs the real app against a COPY of the database (see
+    # .claude/audit_server.py); it must never send investors a notice or
+    # close a fee period from that copy.
+    if os.getenv("ALGOEDGE_AUDIT") == "1":
+        logger.warning("[AUDIT] investor jobs disabled on this server")
+    else:
+        try:
+            from backend.investor import jobs as investor_jobs_mod
+            investor_jobs = investor_jobs_mod.start()
+        except Exception as e:
+            logger.warning(f"Investor jobs not started: {e}")
 
     # Clean up ghost manual trades on boot
     try:

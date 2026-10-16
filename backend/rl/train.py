@@ -140,6 +140,10 @@ class TrainingRun:
     # every signal get refused, and on 2026-10-11 there was no way to tell
     # from any artefact which config a finished run had used.
     risk_config: dict = field(default_factory=dict)
+    # Jobs that CRASHED, each {symbol, seed, fold, error}. Kept apart from
+    # `results` because a crashed job is not a policy that chose not to trade,
+    # and the two used to be reported identically.
+    job_errors: list = field(default_factory=list)
 
     @property
     def sharpe_dispersion(self) -> float:
@@ -169,6 +173,7 @@ class TrainingRun:
             "seconds": round(self.seconds, 1), "error": self.error,
             "rejection_funnel": self.rejection_funnel or {},
             "risk_config": self.risk_config or {},
+            "job_errors": list(self.job_errors or []),
         }
 
 
@@ -269,6 +274,27 @@ def _sample_windows(spans, rng: np.random.Generator, count: int, width: int
     return out
 
 
+def _fit_director(spec: AgentSpec, data: E.EpisodeData, scaler: feat.Scaler,
+                  train_rows: np.ndarray, fold: E.Fold) -> dict | None:
+    """The frozen direction model for this fold, or None without one.
+
+    Fitted on the fold's TRAINING rows - the same rows as the scaler - and
+    returned serialised so it can ride inside the policy. The spec has
+    counted its two columns into `observation_width` all along; nothing ever
+    fitted it here, so every director run died on its first matmul (27 vs 25)
+    and the swallowed error read as "the policy learned to stay flat".
+    """
+    if not spec.director:
+        return None
+    from backend.rl.director import Director
+
+    close = data.frame["close"].to_numpy(dtype=float)
+    d = Director(horizon=int(spec.director_horizon)).fit(
+        scaler.transform(data.X), close, data.atr, train_rows, names=data.names,
+        fitted_on=f"fold {fold.path} train rows ({len(train_rows)})")
+    return d.to_dict()
+
+
 def _score(env: E.TradingEnv, policy: pol.LinearPolicy, *, exit_head: bool = True,
            seed: int = 0) -> E.Episode:
     return env.rollout(policy, exit_head=exit_head, seed=seed)
@@ -299,6 +325,7 @@ def train_cem(spec: AgentSpec, data: E.EpisodeData, risk_config: dict, fold: E.F
                                 exit_head=spec.exit_head, seed=seed,
                                 n_stop=len(spec.stop_atr_choices) if spec.risk_head else 0,
                                 n_rr=len(spec.rr_choices) if spec.risk_head else 0)
+    template.director = _fit_director(spec, data, scaler, train_rows, fold)
     n = template.n_params
     mu = np.zeros(n)
     sigma = np.full(n, float(spec.init_sigma))
@@ -412,6 +439,7 @@ def train_ppo(spec: AgentSpec, data: E.EpisodeData, risk_config: dict, fold: E.F
                               exit_head=spec.exit_head, seed=seed,
                               n_stop=len(spec.stop_atr_choices) if spec.risk_head else 0,
                               n_rr=len(spec.rr_choices) if spec.risk_head else 0)
+    policy.director = _fit_director(spec, data, scaler, train_rows, fold)
     history: list[dict] = []
     best_policy, best_score = policy.copy(), (-np.inf, -np.inf)
 
@@ -480,11 +508,15 @@ def train_ppo(spec: AgentSpec, data: E.EpisodeData, risk_config: dict, fold: E.F
             policy.b_entry += lr * dlogits.mean(axis=0)
 
         if spec.exit_head or spec.risk_head:
-            policy = _improve_exit_head(policy, spec, data, risk_config, fold, rng,
-                                        scaler, charter, seed * 7919 + it,
-                                        tries=spec.exit_tries)
-
-        eval_score = _evaluate(policy, spec, data, risk_config, fold, scaler, charter, seed)
+            # It already scores whatever it returns on the same fixed slice,
+            # so that score is reused rather than paid for a second time -
+            # one full evaluation rollout per iteration.
+            policy, eval_score = _improve_exit_head(
+                policy, spec, data, risk_config, fold, rng, scaler, charter,
+                seed * 7919 + it, tries=spec.exit_tries, eval_seed=seed)
+        else:
+            eval_score = _evaluate(policy, spec, data, risk_config, fold, scaler,
+                                   charter, seed)
         batch_score = score_sum / max(1, n_eps)
         # Ranked on the held-out evaluation first, with the on-policy batch as
         # the tie-break. Early iterations legitimately score 0.0 on evaluation
@@ -536,6 +568,8 @@ def _evaluate(policy: pol.LinearPolicy, spec: AgentSpec, data: E.EpisodeData,
     spans = [s for s in fold.train if s[1] - s[0] >= 500]
     if not spans:
         return float("-inf")
+    if spec.base_strategy:
+        return _evaluate_mode_b(policy, spec, data, risk_config, spans, scaler, charter, seed)
     a, b = max(spans, key=lambda s: s[1] - s[0])
     b = min(b, a + max(2000, spec.eval_window_bars // 2))
     env = E.TradingEnv(spec, data.slice(a, b), risk_config, scaler=scaler, charter=charter)
@@ -545,16 +579,63 @@ def _evaluate(policy: pol.LinearPolicy, spec: AgentSpec, data: E.EpisodeData,
     return ep.score
 
 
+# How many base-strategy setups a mode-B evaluation should contain.
+MODE_B_EVAL_SETUPS = 40
+
+
+def _evaluate_mode_b(policy, spec, data, risk_config, spans, scaler, charter,
+                     seed: int) -> float:
+    """Mode B's fixed evaluation: enough of the base strategy's SETUPS, not bars.
+
+    A mode-B agent can only trade its base strategy's setups, and ORB raises a
+    handful a day. The 10,000-bar slice mode A uses held fewer than 20 of them,
+    so every mode-B evaluation was -inf and no mode-B policy was ever selected
+    on merit (end-to-end audit, 2026-10-16: 0 of 120 iterations scoreable).
+
+    So: training spans, longest first, until they hold MODE_B_EVAL_SETUPS
+    setups or the fold runs out - the SAME spans every iteration, so scores
+    stay comparable. The trade floor is half the setups actually covered,
+    between 5 and MIN_EVAL_TRADES.
+    """
+    chosen, setups = [], 0
+    for a, b in sorted(spans, key=lambda s: s[0] - s[1]):
+        n = sum(1 for k in (data.base_signals or {}) if a <= k < b)
+        if not n:
+            continue
+        chosen.append((a, b))
+        setups += n
+        if setups >= MODE_B_EVAL_SETUPS:
+            break
+    if not chosen:
+        return float("-inf")
+    trades, weighted = 0, 0.0
+    for a, b in chosen:
+        ep = E.TradingEnv(spec, data.slice(a, b), risk_config, scaler=scaler,
+                          charter=charter).rollout(policy, seed=seed)
+        trades += ep.breakdown.n_trades
+        weighted += ep.score * max(1, ep.breakdown.n_trades)
+    if trades < min(MIN_EVAL_TRADES, max(5, setups // 2)):
+        return float("-inf")
+    return weighted / max(1, trades)
+
+
 def _improve_exit_head(policy: pol.LinearPolicy, spec: AgentSpec, data: E.EpisodeData,
                        risk_config: dict, fold: E.Fold, rng, scaler, charter,
-                       seed: int, tries: int = 6) -> pol.LinearPolicy:
+                       seed: int, tries: int = 6, eval_seed: int | None = None
+                       ) -> tuple[pol.LinearPolicy, float]:
     """A few perturbations of the exit and risk weights, kept only if they help.
 
     Only if they HELP, on the same window - an accept-if-not-worse rule drifts
     upward on noise. The exit head is the most overfit-prone component in W4
     and the real test is the ablation in `validate.py`, which runs the same
     agent with the head switched off.
+
+    Returns the kept policy AND its score. Every candidate is scored with the
+    trainer's fixed evaluation seed, so that score is the same number
+    `_evaluate` would give the kept policy and the caller need not pay for it
+    again.
     """
+    seed = seed if eval_seed is None else eval_seed
     # An unmeasurable base (-inf) means the first candidate that produces
     # enough trades wins, which is the right behaviour: it is the first one
     # that can be compared at all.
@@ -577,7 +658,234 @@ def _improve_exit_head(policy: pol.LinearPolicy, spec: AgentSpec, data: E.Episod
         score = _evaluate(cand, spec, data, risk_config, fold, scaler, charter, seed)
         if score > best_score:
             best, best_score = cand, score
-    return best
+    return best, best_score
+
+
+# -- capacity ---------------------------------------------------------------
+
+
+def capacity() -> dict:
+    """How much training this machine runs at once, and why.
+
+    Two numbers, both overridable from the environment:
+
+      RL_MAX_AGENTS         agents that train AT THE SAME TIME (default 1).
+                            Up to MAX_QUEUED more wait behind them.
+      RL_JOB_WORKERS        seed x fold jobs one agent runs in parallel.
+                            Default: the cores left after RL_RESERVED_CORES
+                            (default 2 - the live bot, MT5 and the API live on
+                            this machine too), split between the agents, max 8.
+
+    The jobs of one run are independent - each is one seed on one purged path,
+    with its own RNG - so running them side by side changes nothing about the
+    result, only how long it takes. Two agents at once share the same cores,
+    so they each get half: it is a way to keep a queue moving, not to make
+    either one finish sooner.
+    """
+    cpu = os.cpu_count() or 2
+    agents = max(1, _env_int("RL_MAX_AGENTS", 1))
+    reserved = max(0, _env_int("RL_RESERVED_CORES", 2))
+    workers = _env_int("RL_JOB_WORKERS", 0)
+    if workers <= 0:
+        workers = max(1, min(8, (cpu - reserved) // agents))
+    return {"cpu_count": cpu, "max_agents": agents, "reserved_cores": reserved,
+            "job_workers_per_agent": workers, "max_queued": MAX_QUEUED}
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
+# -- what a training rollout is allowed to see --------------------------------
+
+# Account-level brakes switched OFF in the training windows, and ONLY there.
+#
+# Measured 2026-10-16 on the XAUUSD run: 1,584 raw signals, 303 approved. The
+# top refusals were "Daily max trades limit reached (5/5)" and "Daily drawdown
+# limit reached" - the slot's live limits. None of them is in the policy's
+# observation, so it was being charged for refusals it had no way to see or
+# learn from: an exploring policy blew the day's budget in its first trades
+# and every decision after that scored zero for a reason outside the policy.
+# The TEST folds, the evaluation the run reports and the gate all keep the
+# real limits - this changes what the policy learns from, not what it is
+# measured on.
+TRAINING_UNGATED = {"max_daily_trades": 0, "max_daily_drawdown_pct": 0.0,
+                    "max_weekly_drawdown_pct": 0.0}
+
+
+def training_risk_config(risk_config: dict) -> dict:
+    return {**dict(risk_config or {}), **TRAINING_UNGATED}
+
+
+# -- episodes ---------------------------------------------------------------
+
+
+def strategy_config(spec: AgentSpec, symbol: str, strategy_blocks: dict | None = None,
+                    risk_config: dict | None = None):
+    """The config a mode-B agent's base strategy is built with.
+
+    Seeded from the user's SAVED strategy blocks, exactly as a backtest is: a
+    fresh `UserConfigV2` runs dataclass defaults, which is a different
+    strategy from the one trading live (measured on this project twice).
+    """
+    from backend.api.routes.backtest import seed_strategy_blocks
+    from backend.core.config_schema import InstrumentSettings, UserConfigV2
+
+    cfg = UserConfigV2()
+    rc = risk_config or {}
+    for key in ("min_rr", "risk_per_trade_pct"):
+        if rc.get(key) is not None and hasattr(cfg.risk, key):
+            try:
+                setattr(cfg.risk, key, rc[key])
+            except Exception:                           # noqa: BLE001
+                pass
+    seed_strategy_blocks(cfg, strategy_blocks or {})
+    cfg.instrument_settings = [InstrumentSettings(symbol=symbol,
+                                                  strategy_id=spec.base_strategy)]
+    return cfg
+
+
+def build_episodes(spec: AgentSpec, datasets: dict[str, pd.DataFrame], *,
+                   strategy_blocks: dict | None = None, risk_config: dict | None = None,
+                   progress: "Progress | None" = None) -> list[E.EpisodeData]:
+    """One `EpisodeData` per pre-registered symbol that has bars.
+
+    The ONE place an agent's data is built, for training, distill and the
+    gate alike. Mode B needs its base strategy's setups generated here, and
+    until 2026-10-16 training built every episode without them - so every
+    mode-B agent reported "0 base signals" on every symbol and had nothing to
+    choose from. The gate and distill had the same omission.
+    """
+    out: list[E.EpisodeData] = []
+    for symbol in spec.symbols:
+        frame = (datasets or {}).get(symbol)
+        if frame is None or not len(frame):
+            logger.warning(f"[RL] {symbol}: no data - skipped, and recorded as attempted")
+            continue
+        if spec.base_strategy:
+            if progress is not None:
+                progress.set(stage="loading", stage_detail=(
+                    f"{symbol}: generating {spec.base_strategy} setups over "
+                    f"{len(frame):,} bars"))
+                progress.event(f"{symbol}: generating {spec.base_strategy} setups over "
+                               f"{len(frame):,} bars - the strategy runs once, here")
+            t = time.time()
+            data = E.EpisodeData.build(
+                symbol, spec.timeframe, frame, spec.features,
+                base_strategy=spec.base_strategy,
+                config=strategy_config(spec, symbol, strategy_blocks, risk_config))
+            if progress is not None:
+                progress.event(f"{symbol}: {len(data.base_signals or {}):,} "
+                               f"{spec.base_strategy} setups in {time.time() - t:.0f}s")
+        else:
+            data = E.EpisodeData.build(symbol, spec.timeframe, frame, spec.features)
+        out.append(data)
+    return out
+
+
+# -- one job ----------------------------------------------------------------
+
+
+class _ShardProgress(Progress):
+    """A parallel job's own progress file, cancelled by the RUN's cancel file."""
+
+    def __init__(self, path: Path, cancel_file: Path):
+        super().__init__(path)
+        self._cancel_file = Path(cancel_file)
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancel_file.exists()
+
+
+def run_fold_job(spec: AgentSpec, data: E.EpisodeData, risk_config: dict,
+                 fold: E.Fold, seed: int, *, optimiser: str, charter=None,
+                 progress: Progress | None = None, pct_from: float = 0.0,
+                 pct_to: float = 100.0) -> dict:
+    """Train one seed on one purged path, then score it on that path's test fold.
+
+    Self-contained so the SAME code runs in-process or in a job worker. It
+    never raises: a crash comes back as `{"error": ...}` so the run can say
+    which job died and why. Swallowing it into the log was how 50 crashed
+    jobs out of 50 were reported as "the policy learned to stay flat".
+    """
+    trainer = train_ppo if optimiser == PPO else train_cem
+    started = time.time()
+    try:
+        policy, scaler, history = trainer(
+            spec, data, training_risk_config(risk_config), fold, seed,
+            progress=progress, pct_from=pct_from, pct_to=pct_to, charter=charter)
+    except Exception as exc:                            # noqa: BLE001
+        logger.error(f"[RL] {data.symbol} seed {seed} fold {fold.path} failed: {exc}")
+        return {"symbol": data.symbol, "seed": seed, "fold": fold.path,
+                "error": f"{type(exc).__name__}: {exc}"}
+    if progress is not None and progress.cancelled:
+        # Stopped part-way: a half-trained policy scored on its test fold
+        # would be a number that looks like a result and is not one.
+        return {"symbol": data.symbol, "seed": seed, "fold": fold.path, "cancelled": True}
+
+    in_sample = [h.get("eval") for h in history
+                 if isinstance(h.get("eval"), (int, float)) and np.isfinite(h.get("eval"))]
+    if not in_sample:
+        in_sample = [h.get("best") for h in history
+                     if isinstance(h.get("best"), (int, float)) and np.isfinite(h.get("best"))]
+    res = SeedResult(seed=seed, fold=fold.path, symbol=data.symbol,
+                     policy=policy.to_dict(), scaler=scaler.to_dict(), history=history,
+                     train_score=float(max(in_sample)) if in_sample else 0.0,
+                     train_rows=fold.train_rows, test_rows=fold.test_rows)
+    # The TEST fold, whole - never a sample - and under the REAL risk config.
+    funnel = rr.empty_funnel()
+    test_eps = []
+    for a, b in fold.test:
+        env = E.TradingEnv(spec, data.slice(a, b), risk_config, scaler=scaler,
+                           charter=charter)
+        tep = env.rollout(policy, seed=seed, label=f"test {a}-{b}")
+        # The TEST folds only: these are the rollouts whose numbers the run
+        # reports, so this explains the number on screen rather than some
+        # interior search statistic.
+        rr.merge(funnel, tep.rejection_funnel)
+        test_eps.append(tep)
+    rs = [t.r_net for ep in test_eps for t in ep.rewards]
+    res.test_trades = len(rs)
+    res.test_mean_r = float(np.mean(rs)) if rs else 0.0
+    res.sharpe = sharpe_of(rs)
+    res.test_adherence = float(np.mean(
+        [t.adherence for ep in test_eps for t in ep.rewards])) if rs else 0.0
+    res.score = float(np.mean([ep.score for ep in test_eps])) if test_eps else 0.0
+    res.seconds = round(time.time() - started, 1)
+    return {"symbol": data.symbol, "seed": seed, "fold": fold.path,
+            "result": res, "funnel": funnel}
+
+
+# Job-worker state, set once per worker by `_job_init` so the bars are
+# pickled to each worker once rather than once per job.
+_JOB: dict = {}
+
+
+def _job_init(state: dict) -> None:
+    from backend.utils.logger import configure_worker
+    configure_worker("rl-job")
+    _JOB.clear()
+    _JOB.update(state)
+
+
+def _job_entry(sym_idx: int, seed: int, fold_idx: int, key: str) -> dict:
+    st = _JOB
+    spec = AgentSpec.from_dict(st["spec"])
+    charter = None
+    if st.get("charter"):
+        from backend.rl.charter import StrategyCharter
+        charter = StrategyCharter.from_dict(st["charter"])
+    agent_dir = Path(st["agent_dir"])
+    prog = _ShardProgress(agent_dir / "jobs" / f"{key}.json", agent_dir / "cancel")
+    prog.set(stage="training", seed=seed, fold=st["folds"][fold_idx].path,
+             symbol=st["episodes"][sym_idx].symbol, pct=0.0)
+    return run_fold_job(spec, st["episodes"][sym_idx], st["risk_config"],
+                        st["folds"][fold_idx], seed, optimiser=st["optimiser"],
+                        charter=charter, progress=prog)
 
 
 # -- the run ----------------------------------------------------------------
@@ -586,12 +894,18 @@ def _improve_exit_head(policy: pol.LinearPolicy, spec: AgentSpec, data: E.Episod
 def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config: dict,
                 *, agent_id: str | None = None, root: Path | None = None,
                 optimiser: str | None = None, charter=None,
-                progress: Progress | None = None) -> TrainingRun:
+                progress: Progress | None = None, strategy_blocks: dict | None = None,
+                workers: int | None = None) -> TrainingRun:
     """Seeds x folds, on the pre-registered symbols.
 
     Every symbol in `spec.symbols` is trained and REPORTED, including the ones
     that turn out badly. Reporting only the ones that worked is survivorship
     bias in the experiment rather than in the code, which no probe catches.
+
+    `workers` > 1 runs that many jobs side by side in separate processes (see
+    `capacity`). The jobs are independent and seeded, and results are
+    assembled in the same order either way, so the run is identical - only
+    faster.
     """
     root = Path(root or ARTEFACT_ROOT)
     agent_id = agent_id or f"{spec.name}-{uuid.uuid4().hex[:8]}"
@@ -603,57 +917,46 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
     progress = progress or Progress(root / agent_id / "progress.json")
     clear_cancel(agent_id, root)
 
-    trainer = train_ppo if run.optimiser == PPO else train_cem
-
-    episodes: list[E.EpisodeData] = []
-    for symbol in spec.symbols:
-        frame = datasets.get(symbol)
-        if frame is None or not len(frame):
-            logger.warning(f"[RL] {symbol}: no data - skipped, and recorded as attempted")
-            continue
-        episodes.append(E.EpisodeData.build(symbol, spec.timeframe, frame, spec.features))
-    if not episodes:
-        run.error = "no data for any pre-registered symbol"
-        run.finished_at = datetime.now(timezone.utc).isoformat()
-        return run
-
     # An empty risk config is NOT a harmless default - it is a run that cannot
     # produce a single trade, and it fails silently.
     #
     # MEASURED 2026-10-11, same policy and same 2,938-bar slice of XAUUSD M15:
     #     risk_config {}                        883 signals ->  0 trades
     #     risk_config default_risk_config(...)  922 signals -> 43 trades
-    # With no config the engine rejects every signal it is handed. `_evaluate`
-    # needs MIN_EVAL_TRADES before it will return anything but -inf, so EVERY
-    # candidate of every iteration scored -inf (measured: 0 of 40 iterations
-    # scoreable), `best_score` never rose above -inf, no policy was ever
-    # selected on merit, and the run finished reporting 0 trades, +0.0000R and
-    # a seed dispersion of 0.00 - which reads as "the seeds agreed" rather
-    # than "nothing was ever measured".
-    #
-    # `POST /train` passes `body.risk_config` straight through and the Agents
-    # screen sends none, so this was EVERY run started from the UI. The two
-    # sibling routes in the same module already do
-    # `body.risk_config or E.default_risk_config(symbol)`; the fallback lives
-    # here instead so a script or a test cannot reintroduce it either.
+    # With no config the engine rejects every signal it is handed, every
+    # candidate scored -inf, and the run finished reporting 0 trades, +0.0000R
+    # and a seed dispersion of 0.00 - which reads as "the seeds agreed" rather
+    # than "nothing was ever measured". The fallback lives here so a script or
+    # a test cannot reintroduce it either.
     if not risk_config:
-        risk_config = E.default_risk_config(episodes[0].symbol)
+        first = next((s for s in spec.symbols if s in (datasets or {})), "EURUSD")
+        risk_config = E.default_risk_config(first)
         logger.warning(f"[RL] no risk config supplied - falling back to the "
-                       f"Backtester's own defaults for {episodes[0].symbol}")
+                       f"Backtester's own defaults for {first}")
         progress.event(
             f"no risk config was supplied, so the Backtester's defaults for "
-            f"{episodes[0].symbol} are being used - an empty one rejects every "
+            f"{first} are being used - an empty one rejects every "
             f"trade and the run would report zero without saying why")
+
+    episodes = build_episodes(spec, datasets, strategy_blocks=strategy_blocks,
+                              risk_config=risk_config, progress=progress)
+    if not episodes:
+        run.error = "no data for any pre-registered symbol"
+        run.finished_at = datetime.now(timezone.utc).isoformat()
+        progress.set(stage="failed", error=run.error)
+        return run
 
     all_folds = E.cpcv_folds(min(len(d) for d in episodes), spec.cpcv_groups,
                              spec.cpcv_test_groups, spec.embargo_bars)
     folds = all_folds[:int(spec.max_cpcv_paths)]
-    total = len(spec.seeds) * len(folds) * len(episodes)
-    done = 0
+    jobs = [(i, seed, j) for i in range(len(episodes))
+            for seed in spec.seeds for j in range(len(folds))]
+    total = len(jobs)
+    workers = max(1, min(int(workers or 1), total))
 
     progress.set(stage="starting", pct=0.0, optimiser=run.optimiser,
                  seeds=len(spec.seeds), folds=len(folds), symbols=len(episodes),
-                 total_jobs=total, jobs_done=0, mode=spec.mode,
+                 total_jobs=total, jobs_done=0, mode=spec.mode, workers=workers,
                  base_strategy=spec.base_strategy, director=spec.director,
                  datasets=[{"symbol": d.symbol, "bars": len(d),
                             "start": int(d.times[0]), "end": int(d.times[-1]),
@@ -663,75 +966,80 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
         f"{len(episodes)} symbol(s), {len(spec.seeds)} seeds x {len(folds)} purged "
         f"paths = {total} training jobs, optimiser {run.optimiser}"
         + (f", base strategy {spec.base_strategy}" if spec.base_strategy else "")
-        + (", with a supervised direction model" if spec.director else ""))
+        + (", with a supervised direction model" if spec.director else "")
+        + (f", {workers} at a time" if workers > 1 else ""))
+    empty = [d.symbol for d in episodes if spec.base_strategy and not d.base_signals]
+    if empty:
+        progress.event(f"WARNING: {spec.base_strategy} found no setups on "
+                       f"{', '.join(empty)} - a mode-B agent has nothing to learn there")
 
-    run_funnel = rr.empty_funnel()
-    for data in episodes:
-        for seed in spec.seeds:
-            for fold in folds:
-                if progress.cancelled:
-                    run.error = "cancelled"
-                    break
-                span = (100.0 * done / total, 100.0 * (done + 1) / total)
-                started = time.time()
-                try:
-                    policy, scaler, history = trainer(
-                        spec, data, risk_config, fold, seed, progress=progress,
-                        pct_from=span[0], pct_to=span[1], charter=charter)
-                except Exception as exc:                # noqa: BLE001
-                    logger.error(f"[RL] seed {seed} fold {fold.path} failed: {exc}")
-                    done += 1
-                    continue
+    outcomes: dict[tuple, dict] = {}
+    state = {"done": 0, "best": None}
 
-                in_sample = [h.get("eval") for h in history
-                             if isinstance(h.get("eval"), (int, float))]
-                if not in_sample:
-                    in_sample = [h.get("best") for h in history
-                                 if isinstance(h.get("best"), (int, float))]
-                progress.event(
-                    f"{data.symbol} seed {seed} path {fold.path}: trained on "
-                    f"{fold.train_rows:,} bars, testing on {fold.test_rows:,}")
-                res = SeedResult(seed=seed, fold=fold.path, symbol=data.symbol,
-                                 policy=policy.to_dict(),
-                                 scaler=scaler.to_dict(), history=history,
-                                 train_score=float(max(in_sample)) if in_sample else 0.0,
-                                 train_rows=fold.train_rows, test_rows=fold.test_rows,
-                                 seconds=round(time.time() - started, 1))
-                # The TEST fold, whole - never a sample.
-                test_eps = []
-                for a, b in fold.test:
-                    sub = data.slice(a, b)
-                    env = E.TradingEnv(spec, sub, risk_config, scaler=scaler, charter=charter)
-                    tep = env.rollout(policy, seed=seed, label=f"test {a}-{b}")
-                    # The TEST folds only: these are the rollouts whose numbers
-                    # the run reports, so this explains the number on screen
-                    # rather than some interior search statistic.
-                    rr.merge(run_funnel, tep.rejection_funnel)
-                    test_eps.append(tep)
-                rs = [t.r_net for ep in test_eps for t in ep.rewards]
-                res.test_trades = len(rs)
-                res.test_mean_r = float(np.mean(rs)) if rs else 0.0
-                res.sharpe = sharpe_of(rs)
-                res.test_adherence = float(np.mean(
-                    [t.adherence for ep in test_eps for t in ep.rewards])) if rs else 0.0
-                res.score = float(np.mean([ep.score for ep in test_eps])) if test_eps else 0.0
-                run.results.append(res)
-                if run.best is None or res.score > run.best.score:
-                    run.best = res
-                done += 1
-                progress.set(stage="fold complete", pct=round(100.0 * done / total, 2),
-                             seed=seed, fold=fold.path, trades=res.test_trades,
-                             mean_r=round(res.test_mean_r, 5),
-                             jobs_done=done, total_jobs=total, symbol=data.symbol,
-                             best_so_far=round(run.best.score, 6) if run.best else None)
-                progress.event(
-                    f"{data.symbol} seed {seed} path {fold.path} done: "
-                    f"{res.test_trades} test trades at {res.test_mean_r:+.4f}R "
-                    f"(Sharpe {res.sharpe:+.2f}) in {res.seconds:.0f}s")
-            if run.error == "cancelled":
+    def record(key: tuple, out: dict) -> None:
+        outcomes[key] = out
+        state["done"] += 1
+        done = state["done"]
+        if out.get("error"):
+            progress.event(f"{out['symbol']} seed {out['seed']} path {out['fold']} "
+                           f"CRASHED: {out['error']}")
+            progress.set(jobs_done=done, pct=round(100.0 * done / total, 2))
+            return
+        if out.get("cancelled"):
+            return
+        res = out["result"]
+        if state["best"] is None or res.score > state["best"].score:
+            state["best"] = res
+        progress.set(stage="fold complete", pct=round(100.0 * done / total, 2),
+                     seed=res.seed, fold=res.fold, trades=res.test_trades,
+                     mean_r=round(res.test_mean_r, 5), jobs_done=done,
+                     total_jobs=total, symbol=res.symbol,
+                     best_so_far=round(state["best"].score, 6))
+        progress.event(
+            f"{res.symbol} seed {res.seed} path {res.fold} done: "
+            f"{res.test_trades} test trades at {res.test_mean_r:+.4f}R "
+            f"(Sharpe {res.sharpe:+.2f}) in {res.seconds:.0f}s")
+
+    if workers == 1:
+        for i, seed, j in jobs:
+            if progress.cancelled:
+                run.error = "cancelled"
                 break
-        if run.error == "cancelled":
-            break
+            done = state["done"]
+            out = run_fold_job(spec, episodes[i], risk_config, folds[j], seed,
+                               optimiser=run.optimiser, charter=charter,
+                               progress=progress, pct_from=100.0 * done / total,
+                               pct_to=100.0 * (done + 1) / total)
+            if out.get("cancelled"):
+                run.error = "cancelled"
+                break
+            record((i, seed, j), out)
+    else:
+        _run_parallel(spec, episodes, folds, jobs, risk_config, run, charter,
+                      progress, root / agent_id, workers, record)
+
+    # Canonical order, whichever order the jobs finished in, so a parallel run
+    # picks the same `best` as a sequential one.
+    run.job_errors = []
+    run_funnel = rr.empty_funnel()
+    for key in jobs:
+        out = outcomes.get(key)
+        if not out or out.get("cancelled"):
+            continue
+        if out.get("error"):
+            run.job_errors.append({k: out[k] for k in ("symbol", "seed", "fold", "error")})
+            continue
+        res = out["result"]
+        rr.merge(run_funnel, out.get("funnel"))
+        run.results.append(res)
+        if run.best is None or res.score > run.best.score:
+            run.best = res
+    if progress.cancelled:
+        run.error = "cancelled"
+    elif run.job_errors and not run.results:
+        first = run.job_errors[0]
+        run.error = (f"all {len(run.job_errors)} jobs failed - first: seed {first['seed']} "
+                     f"path {first['fold']}: {first['error']}")
 
     run.seconds = time.time() - t0
     run.finished_at = datetime.now(timezone.utc).isoformat()
@@ -742,11 +1050,26 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
     run.rejection_funnel = run_funnel
     run.risk_config = dict(risk_config or {})
     save_run(run, root)
-    progress.set(stage="complete", pct=100.0,
+    done = state["done"]
+    final_stage = ("cancelled" if run.error == "cancelled"
+                   else "failed" if run.error else "complete")
+    progress.set(stage=final_stage, pct=100.0 if final_stage == "complete"
+                 else round(100.0 * done / total, 2),
                  seeds=len(spec.seeds), folds=len(folds), jobs_done=done,
+                 jobs_failed=len(run.job_errors), error=run.error or "",
                  best=round(run.best.score, 6) if run.best else None,
                  dispersion=(None if run.sharpe_dispersion == float("inf")
                              else round(run.sharpe_dispersion, 3)))
+    if final_stage == "cancelled":
+        progress.event(f"Cancelled after {done} of {total} jobs. Nothing from the "
+                       f"unfinished jobs is kept; Collect uses the finished ones.")
+        return run
+    if final_stage == "failed":
+        progress.event(f"FAILED: {run.error}")
+        return run
+    if run.job_errors:
+        progress.event(f"WARNING: {len(run.job_errors)} of {total} jobs crashed - "
+                       f"first: {run.job_errors[0]['error']}")
     if run.best:
         progress.event(
             f"Finished in {run.seconds / 60:.0f} min. Best: seed {run.best.seed} "
@@ -760,13 +1083,11 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
     # A run where nothing ever traded is a FAILURE wearing a completion's
     # clothes. It reports 100%, a seed dispersion of 0.00 (because every seed
     # agreed on doing nothing) and a best score of +0.0000R, and an admin
-    # watching the bar fill up has no reason to think anything is wrong. It
-    # is also the most common way a short run ends: too few iterations and
-    # the policy never learns to take a trade at all.
+    # watching the bar fill up has no reason to think anything is wrong.
     _report_rejections(run, run_funnel, progress)
 
     total_trades = sum(int(r.test_trades) for r in run.results)
-    if total_trades == 0:
+    if run.results and total_trades == 0:
         progress.set(no_trades=True)
         progress.event(
             "WARNING: not one fold took a single trade. The policy learned to "
@@ -781,6 +1102,79 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
             f"so this run will be rejected on arrival.")
     progress.event("Next: Collect, then Distil the charter, then Run the gate.")
     return run
+
+
+def _run_parallel(spec, episodes, folds, jobs, risk_config, run, charter, progress,
+                  agent_dir: Path, workers: int, record) -> None:
+    """The jobs, `workers` at a time, each in its own process.
+
+    Each job writes its own shard under `jobs/`; this loop folds the shards
+    into the run's one progress file every few seconds, so the screen still
+    shows an iteration count and an ETA rather than a bar that only moves when
+    a whole job lands.
+    """
+    import multiprocessing
+    import shutil
+    from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+
+    shard_dir = agent_dir / "jobs"
+    shutil.rmtree(shard_dir, ignore_errors=True)
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    state = {"spec": spec.to_dict(), "episodes": episodes, "folds": folds,
+             "risk_config": risk_config, "optimiser": run.optimiser,
+             "charter": charter.to_dict() if charter is not None else None,
+             "agent_dir": str(agent_dir)}
+    keys = {job: f"{job[0]}-{job[1]}-{job[2]}" for job in jobs}
+    total = len(jobs)
+    with ProcessPoolExecutor(max_workers=workers,
+                             mp_context=multiprocessing.get_context("spawn"),
+                             initializer=_job_init, initargs=(state,)) as ex:
+        futures = {ex.submit(_job_entry, i, seed, j, keys[(i, seed, j)]): (i, seed, j)
+                   for i, seed, j in jobs}
+        pending = set(futures)
+        cancel_sent = False
+        while pending:
+            finished, pending = wait(pending, timeout=5, return_when=FIRST_COMPLETED)
+            for f in finished:
+                job = futures[f]
+                try:
+                    out = f.result()
+                except Exception as exc:                # noqa: BLE001 (incl. cancelled)
+                    if f.cancelled():
+                        continue
+                    out = {"symbol": episodes[job[0]].symbol, "seed": job[1],
+                           "fold": folds[job[2]].path,
+                           "error": f"{type(exc).__name__}: {exc}"}
+                record(job, out)
+                (shard_dir / f"{keys[job]}.json").unlink(missing_ok=True)
+            if progress.cancelled and not cancel_sent:
+                # Queued jobs are dropped; running ones read the same cancel
+                # file and stop at their next iteration.
+                for f in pending:
+                    f.cancel()
+                cancel_sent = True
+            _merge_shards(progress, shard_dir, total)
+    shutil.rmtree(shard_dir, ignore_errors=True)
+
+
+def _merge_shards(progress: Progress, shard_dir: Path, total: int) -> None:
+    shards = []
+    for f in shard_dir.glob("*.json"):
+        try:
+            shards.append(json.loads(f.read_text(encoding="utf-8")))
+        except Exception:                               # noqa: BLE001 (mid-write)
+            continue
+    done = int(progress.state.get("jobs_done") or 0)
+    running = sum(float(s.get("pct") or 0.0) / 100.0 for s in shards)
+    lead = max(shards, key=lambda s: float(s.get("pct") or 0.0), default=None)
+    upd = {"running_jobs": len(shards),
+           "pct": round(100.0 * (done + running) / max(1, total), 2)}
+    if lead:
+        upd.update({k: lead[k] for k in ("seed", "fold", "symbol", "iteration",
+                                         "iterations", "decisions", "entropy",
+                                         "optimiser") if k in lead})
+        upd["stage"] = "training"
+    progress.set(**upd)
 
 
 def _report_rejections(run: "TrainingRun", funnel: dict,
@@ -846,6 +1240,11 @@ def save_run(run: TrainingRun, root: Path | None = None) -> Path:
     if run.best:
         (d / "policy.json").write_text(json.dumps(run.best.policy), encoding="utf-8")
         (d / "scaler.json").write_text(json.dumps(run.best.scaler), encoding="utf-8")
+    else:
+        # A run with no policy must not leave the PREVIOUS run's on disk for
+        # Collect to pick up and store as this one.
+        for name in ("policy.json", "scaler.json"):
+            (d / name).unlink(missing_ok=True)
     return d
 
 
@@ -967,7 +1366,10 @@ def read_progress(agent_id: str, root: Path | None = None) -> dict:
     try:
         age = max(0.0, time.time() - f.stat().st_mtime)
         state["age_s"] = round(age, 1)
-        state["stale"] = age > STALE_AFTER_S and state.get("stage") != "complete"
+        # Every terminal stage, not just "complete": a cancelled or failed run
+        # that has stopped writing has ENDED, and calling it stale put the
+        # "nothing is running - did the backend restart?" banner over it.
+        state["stale"] = age > STALE_AFTER_S and state.get("stage") not in TERMINAL_STAGES
     except OSError:
         pass
     return state
@@ -980,12 +1382,13 @@ MAX_QUEUED = 4
 
 
 class TrainingQueue:
-    """One training job at a time, in a separate process, with a bounded backlog.
+    """Training runs in separate processes, with a bounded backlog.
 
     Bounded because an unbounded queue is a way to run out of memory slowly.
-    One at a time because training is CPU-bound and two jobs on the same cores
-    finish later than two jobs in sequence - and because the API has to stay
-    answerable, which this project has already lost once to work on the loop.
+    `capacity()["max_agents"]` runs at once (default one) - training is
+    CPU-bound, and the API has to stay answerable, which this project has
+    already lost once to work on the loop. Each run then spreads its own
+    seed x fold jobs over `job_workers_per_agent` processes.
     """
 
     def __init__(self, max_queued: int = MAX_QUEUED):
@@ -995,8 +1398,17 @@ class TrainingQueue:
 
     def _ensure(self):
         if self._executor is None:
+            import multiprocessing
             from concurrent.futures import ProcessPoolExecutor
-            self._executor = ProcessPoolExecutor(max_workers=1)
+
+            from backend.utils.logger import configure_worker
+            # `configure_worker` first in every child: without it the child
+            # held its own handles on backend.log/trades.log and Windows could
+            # never rotate either file again.
+            self._executor = ProcessPoolExecutor(
+                max_workers=capacity()["max_agents"],
+                mp_context=multiprocessing.get_context("spawn"),
+                initializer=configure_worker, initargs=("rl-train",))
         return self._executor
 
     @property
@@ -1120,16 +1532,23 @@ def _run_job_inner(payload: dict, prog: "Progress | None" = None) -> dict:
     if payload.get("charter"):
         from backend.rl.charter import StrategyCharter
         charter = StrategyCharter.from_dict(payload["charter"])
+    # The SAME progress object, not a fresh one: `train_agent` used to build
+    # its own on the same file, and its first write erased the "starting" and
+    # "bars loaded" lines above - the exact loss `_run_job` warns about.
     run = train_agent(spec, frames, risk_config, agent_id=payload.get("agent_id"),
-                      optimiser=payload.get("optimiser"), charter=charter)
+                      optimiser=payload.get("optimiser"), charter=charter,
+                      progress=prog, strategy_blocks=payload.get("strategy_blocks"),
+                      workers=payload.get("workers") or capacity()["job_workers_per_agent"])
     return run.to_dict()
 
 
 def job_payload(spec: AgentSpec, datasets: dict, risk_config: dict, *,
-                agent_id: str, optimiser: str | None = None, charter=None) -> dict:
+                agent_id: str, optimiser: str | None = None, charter=None,
+                strategy_blocks: dict | None = None) -> dict:
     return {"spec": spec.to_dict(), "datasets": datasets, "risk_config": risk_config,
             "agent_id": agent_id, "optimiser": optimiser,
-            "charter": charter.to_dict() if charter is not None else None}
+            "charter": charter.to_dict() if charter is not None else None,
+            "strategy_blocks": strategy_blocks or {}}
 
 
 def progress_callback(agent_id: str) -> Callable[[dict], None]:

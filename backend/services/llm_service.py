@@ -11,23 +11,62 @@ from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Why an SDK did not load, kept so "not available" can say so. "Install the
+# SDK" was the only message, and the measured cause on 2026-10-16 was an SDK
+# that WAS installed with a compiled dependency (`jiter`) stripped out of the
+# venv by Windows Application Control.
+IMPORT_ERRORS: dict[str, str] = {}
+
 try:
     import anthropic
     HAS_ANTHROPIC = True
-except ImportError:
+except ImportError as _e:
     HAS_ANTHROPIC = False
+    IMPORT_ERRORS["anthropic"] = f"{type(_e).__name__}: {_e}"
 
 try:
     import openai
     HAS_OPENAI = True
-except ImportError:
+except ImportError as _e:
     HAS_OPENAI = False
+    IMPORT_ERRORS["openai"] = f"{type(_e).__name__}: {_e}"
 
 try:
     from google import genai
     HAS_GEMINI = True
-except ImportError:
+except ImportError as _e:
     HAS_GEMINI = False
+    IMPORT_ERRORS["gemini"] = f"{type(_e).__name__}: {_e}"
+
+
+# The longest a provider call may hold a request before it is abandoned.
+LLM_CALL_TIMEOUT_S = 900
+
+
+async def _off_loop(coro):
+    """Run a provider coroutine on its OWN event loop in a worker thread.
+
+    The Anthropic SDK verifies TLS with `truststore`, which on Windows builds
+    the certificate chain through a BLOCKING CryptoAPI call inside the async
+    handshake - on the caller's event loop. Measured 2026-10-16: one analysis
+    request sat in `_get_and_verify_cert_chain` for 12+ minutes, and because it
+    was the API's loop, every endpoint (health included) hung with it. On the
+    VPS that loop also serves the live dashboard. A worker thread with its own
+    loop confines a slow handshake to the one request that caused it; the
+    timeout stops that request from waiting forever.
+    """
+    import asyncio
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(asyncio.run, coro),
+                                      timeout=LLM_CALL_TIMEOUT_S)
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError(f"the provider did not answer within {LLM_CALL_TIMEOUT_S}s") from exc
+
+
+class LLMUnavailable(RuntimeError):
+    """The provider could not produce an answer: missing SDK or key, budget
+    refusal, or an API error. Raised only in `strict` mode, so a caller that
+    shows or STORES the result never mistakes an error message for analysis."""
 
 
 # Default models per provider.
@@ -221,6 +260,7 @@ class LLMService:
         return {
             name: {
                 "installed": ok,
+                "import_error": IMPORT_ERRORS.get(name, ""),
                 "configured": bool(self.resolve_key(name)),
                 "default_model": DEFAULT_MODELS[name],
                 "fast_model": FAST_MODELS[name],
@@ -338,24 +378,46 @@ Provide:
         system: str | None = None,
         max_tokens: int | None = None,
         effort: str | None = None,
+        strict: bool = False,
     ) -> str:
-        """Route to the correct LLM provider."""
+        """Route to the correct LLM provider.
+
+        Without `strict`, a failure comes back as a sentence, which is what the
+        older callers display. With it, the failure RAISES `LLMUnavailable`:
+        the analysis route used to return that sentence as HTTP 200 and save
+        it to the history as if it were an answer.
+        """
+        def fail(msg: str) -> str:
+            if strict:
+                raise LLMUnavailable(msg)
+            return msg
+
+        self._last_refusal = False
         try:
             if provider == "anthropic" and HAS_ANTHROPIC:
-                return await self._call_anthropic(
+                out = await _off_loop(self._call_anthropic(
                     model, prompt, system=system, max_tokens=max_tokens, effort=effort
-                )
+                ))
+                if strict and self._last_refusal:
+                    raise LLMUnavailable(out)
+                return out
             # OpenAI/Gemini keep their existing single-prompt shape; `system`
             # is prepended rather than sent as a separate field.
             elif provider == "openai" and HAS_OPENAI:
-                return await self._call_openai(model, _join(system, prompt), max_tokens=max_tokens)
+                return await _off_loop(self._call_openai(
+                    model, _join(system, prompt), max_tokens=max_tokens))
             elif provider == "gemini" and HAS_GEMINI:
-                return await self._call_gemini(model, _join(system, prompt))
+                return await _off_loop(self._call_gemini(model, _join(system, prompt)))
             else:
-                return f"Provider '{provider}' not available. Install the SDK."
+                why = IMPORT_ERRORS.get(provider)
+                return fail(f"Provider '{provider}' is not available"
+                            + (f" - its SDK failed to import ({why})." if why
+                               else ". Install the SDK."))
+        except LLMUnavailable:
+            raise
         except Exception as e:
             logger.error(f"LLM call failed ({provider}): {e}")
-            return f"Analysis failed: {e!s}"
+            return fail(f"Analysis failed: {e!s}")
 
     async def _call_anthropic(
         self,
@@ -377,6 +439,9 @@ Provide:
         Adaptive thinking is on because these are genuinely analytical questions
         — "why is this strategy's expectancy negative" is not a lookup.
         """
+        # Set while the return value is an explanation rather than an answer,
+        # so `_call_provider(strict=True)` raises instead of passing it on.
+        self._last_refusal = True
         key = self.resolve_key("anthropic")
         if not key:
             return (
@@ -442,6 +507,7 @@ Provide:
             detail = getattr(message, "stop_details", None)
             return f"The model declined this request ({getattr(detail, 'category', 'unspecified')})."
 
+        self._last_refusal = False
         return "".join(b.text for b in message.content if b.type == "text")
 
     async def _call_openai(self, model: str, prompt: str, max_tokens: int | None = None) -> str:

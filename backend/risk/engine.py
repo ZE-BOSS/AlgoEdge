@@ -554,9 +554,15 @@ class RiskEngine:
         max_risk_cap_dollars = requested_risk_dollars * (1.0 + self.post_split_risk_tolerance_pct / 100.0)
         liquidity_target = signal_data.get("liquidity_target")
         strategy_id = strategy_id_for_cb
+        # An RL agent's chosen target (see `MultiTPManager.calculate_tp_levels`).
+        _rl_rr = (signal_data.get("metadata") or {}).get("rl_rr")
+        try:
+            _rl_rr = float(_rl_rr) if _rl_rr is not None else None
+        except (TypeError, ValueError):
+            _rl_rr = None
         tp_levels = self.multi_tp.calculate_tp_levels(
             entry, sl, direction, total_lots, symbol, liquidity_target, strategy_id,
-            max_risk_cap_dollars=max_risk_cap_dollars,
+            max_risk_cap_dollars=max_risk_cap_dollars, signal_tp1_rr=_rl_rr,
         )
         # [2.13] requested vs. placed TP count — read back immediately, same
         # pattern as sizer_diag above, so a caller can tell "the risk cap
@@ -682,6 +688,12 @@ class RiskEngine:
                    else signal_data.get("strategy_name") or signal_data.get("strategy_id"))
         if _rr_sid in self.min_rr_by_strategy:
             min_rr = min(min_rr, self.min_rr_by_strategy[_rr_sid])
+        if _rl_rr is not None:
+            # An RL agent's target comes from the R:R menu the admin froze at
+            # pre-registration, and the validation gate is what judges it. The
+            # slot's min_rr (3 by default) would otherwise refuse every 1/1.5/2R
+            # choice now that the agent's choice is actually honoured.
+            min_rr = min(min_rr, _rl_rr)
         if blended_rr < min_rr:
             self._signal_log({
                 "event": "risk_rejected",

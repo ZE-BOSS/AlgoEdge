@@ -222,17 +222,30 @@ def test_htf_merge_is_prefix_stable():
 
 # ── the counterfactual is not in the observation ───────────────────────────
 
-def test_the_observation_is_identical_with_and_without_the_reward_module(bars):
+def test_the_observation_is_identical_with_and_without_the_reward_module(bars, monkeypatch):
     """The structural separation the plan asks for, as an assertion.
 
     `reward.py` computes `exit_quality` and `saved_R` from bars AFTER the
     decision. Legitimate in a reward, fatal in an observation - so importing it
     must not be able to change what the agent sees.
+
+    Through `monkeypatch`, so the ORIGINAL modules are put back afterwards.
+    A bare `sys.modules.pop` left a second copy of `backend.rl.env` behind,
+    and any later test that pickles an `EpisodeData` (the parallel trainer)
+    failed with "it's not the same object as backend.rl.env.EpisodeData".
     """
     import sys
 
+    import backend.rl as pkg
+
     for mod in ("backend.rl.reward", "backend.rl.env"):
-        sys.modules.pop(mod, None)
+        monkeypatch.delitem(sys.modules, mod, raising=False)
+        # The re-import below also rebinds the PACKAGE attribute
+        # (`backend.rl.env`), which sys.modules alone does not restore - so
+        # `from backend.rl import env` kept returning the second copy.
+        attr = mod.rsplit(".", 1)[1]
+        if hasattr(pkg, attr):
+            monkeypatch.setattr(pkg, attr, getattr(pkg, attr))
     before = F.matrix(bars)
     import backend.rl.reward  # noqa: F401
     import backend.rl.env     # noqa: F401
