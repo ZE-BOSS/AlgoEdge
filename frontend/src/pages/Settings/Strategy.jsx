@@ -9,6 +9,7 @@ import SymbolPicker from '../../components/SymbolPicker';
 import { useSymbolOptions } from '../../hooks/useSymbolOptions';
 import { getStrategyDefaults } from '../../services/api';
 import { STRATEGY_GROUP, STRATEGY_OPTIONS } from '../../components/slotSpec';
+import { isAgentStrategy, useStrategyOptions } from '../../hooks/useAgents';
 
 /**
  * The trading book: one row per symbol + strategy, each with its OWN strategy
@@ -31,6 +32,7 @@ export default function StrategySettings() {
   const [saved, setSaved] = useState(false);
   const [newSymbol, setNewSymbol] = useState('XAUUSD');
   const [newStrategy, setNewStrategy] = useState('ORB_v1');
+  const agentOptions = useStrategyOptions().filter(([id]) => isAgentStrategy(id));
 
   const [config, setConfig] = useState({
     // [per-slot] Read-only here: the account defaults a slot inherits when it
@@ -393,7 +395,16 @@ export default function StrategySettings() {
             placeholder="Symbol"
           />
           <select className="input input-sm" value={newStrategy} onChange={e => setNewStrategy(e.target.value)}>
-            {STRATEGY_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            <optgroup label="Strategies">
+              {STRATEGY_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </optgroup>
+            {/* An approved agent trades a live slot exactly like a strategy:
+                the bot builds it from the same registry. */}
+            {agentOptions.length > 0 && (
+              <optgroup label="Approved agents">
+                {agentOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+              </optgroup>
+            )}
           </select>
           <button className="btn btn-primary btn-sm" onClick={addSlot}>
             <Plus size={13} /> Add slot

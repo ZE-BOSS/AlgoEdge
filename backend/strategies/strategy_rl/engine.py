@@ -101,8 +101,26 @@ class RLStrategy(BaseStrategy):
         # its two columns are part of the policy's input width.
         self.director = (getattr(self.agent, "director", None)
                          or self.policy.director_model())
+        # A multi-pair agent trades each pair with THAT pair's policy, scaler
+        # and director - never gold's weights on EURUSD's prices.
+        self._models: dict[str, tuple] = {}
         self.SUPERVISES_OTHER_STRATEGIES = bool(self.spec.supervises)
         self._last_signal_bar: dict[str, int] = {}
+        # MODE B: the base strategies run INSIDE this one, on the same bars, so
+        # the agent is offered exactly the setups it was trained on. Built as
+        # training builds them (`base_signals.build_strategy`): from the same
+        # saved config, with `is_backtesting` on - which is also what keeps a
+        # base strategy from announcing setups the agent then declines.
+        self.bases: dict[str, Any] = {}
+        if self.spec.bases:
+            from backend.rl.base_signals import build_strategy
+            self.bases = {sid: build_strategy(sid, config) for sid in self.spec.bases}
+        # Per symbol: this step's windows by timeframe (replayed to each base in
+        # ITS OWN timeframe order once the agent's bar arrives) and each
+        # strategy's latest setup as (decision-bar epoch, direction), for the
+        # confluence inputs.
+        self._step_windows: dict[str, dict[str, pd.DataFrame]] = {}
+        self._latest_setup: dict[str, dict[str, tuple[int, str]]] = {}
         # Live adherence is recorded per closed trade by `notify_outcome`; the
         # per-decision scores are held here until then.
         self._pending: dict[str, adh.DecisionScore] = {}
@@ -110,11 +128,32 @@ class RLStrategy(BaseStrategy):
     # -- plumbing -----------------------------------------------------------
 
     def get_required_timeframes(self) -> list[str]:
-        return [self.spec.timeframe]
+        """The agent's timeframe LAST, after every base strategy's.
+
+        `BarFeed.step` calls `on_bar` per timeframe in this order, so by the
+        time the agent's bar arrives every base strategy's new bars of this
+        step have been collected and can be replayed - in each strategy's own
+        order - before the agent decides. The clock is still the fastest
+        timeframe (`primary_timeframe` sorts), which is the agent's: training
+        refuses a base strategy that needs anything faster.
+        """
+        tfs: list[str] = []
+        for engine in self.bases.values():
+            for tf in engine.get_required_timeframes():
+                if tf not in tfs and tf != self.spec.timeframe:
+                    tfs.append(tf)
+        return tfs + [self.spec.timeframe]
 
     @property
     def WINDOW_BARS(self) -> dict[str, int]:  # noqa: N802 — read by strategies.windows
-        return {self.spec.timeframe: PARITY_WINDOW_BARS}
+        """Enough history for the agent's features AND every base strategy's
+        own windows; each base is then handed exactly its own length."""
+        from backend.strategies.windows import window_bars
+        out = {self.spec.timeframe: PARITY_WINDOW_BARS}
+        for engine in self.bases.values():
+            for tf in engine.get_required_timeframes():
+                out[tf] = max(out.get(tf, 0), window_bars(tf, engine))
+        return out
 
     async def initialize(self):
         return None
@@ -124,7 +163,21 @@ class RLStrategy(BaseStrategy):
 
     # -- observation --------------------------------------------------------
 
-    def _observe(self, candles: pd.DataFrame) -> tuple[np.ndarray, dict[str, float]] | None:
+    def _model(self, symbol: str) -> tuple:
+        """(policy, scaler, director) for this symbol."""
+        hit = self._models.get(symbol)
+        if hit is None:
+            model_for = getattr(self.agent, "model_for", None)
+            own = model_for(symbol) if callable(model_for) else None
+            if own is None or own[0] is self.policy:
+                hit = (self.policy, self.scaler, self.director)
+            else:
+                hit = (own[0], own[1], own[0].director_model())
+            self._models[symbol] = hit
+        return hit
+
+    def _observe(self, candles: pd.DataFrame, symbol: str = ""
+                 ) -> tuple[np.ndarray, dict[str, float]] | None:
         """The scaled observation for the LAST bar of this window.
 
         The scaler is the agent's own, fitted on its training fold and frozen.
@@ -137,15 +190,56 @@ class RLStrategy(BaseStrategy):
         X = feat.matrix(candles, self.spec.features)
         if not len(X):
             return None
-        scaled = self.scaler.transform(X[-1:])
+        _policy, scaler, director = self._model(symbol)
+        scaled = scaler.transform(X[-1:])
         # The charter's gates are named for MARKET features, so adherence is
         # scored on those columns alone - the director's two columns are an
         # input to the policy, not a condition anyone approved.
         obs = adh.observation_dict(list(self.spec.features), scaled[0])
-        if self.director is not None:
+        if director is not None:
             from backend.rl.director import augment
-            scaled = augment(scaled, self.director, self.spec.min_confidence)
+            scaled = augment(scaled, director, self.spec.min_confidence)
+        if self.spec.multi_base:
+            scaled = np.hstack([scaled, self._setup_flags(symbol, candles)[None, :]])
         return scaled[0], obs
+
+    def _setup_flags(self, symbol: str, candles: pd.DataFrame) -> np.ndarray:
+        """The confluence inputs for the window's last bar: `confluence.flags_now`
+        with each setup's age counted in THIS window's bars, which is what
+        training counts (rows, weekends and gaps included)."""
+        from backend.rl import confluence as cf
+        times = (candles["time"].to_numpy(dtype="int64") if "time" in candles.columns
+                 else pd.DatetimeIndex(candles.index).as_unit("s").asi8)
+        latest = {}
+        for sid, (t, direction) in (self._latest_setup.get(symbol) or {}).items():
+            k = int(np.searchsorted(times, int(t), side="left"))
+            if k < len(times) and int(times[k]) == int(t):
+                latest[sid] = (k, direction)
+        return cf.flags_now(latest, self.spec.bases, len(times) - 1)
+
+    async def _run_bases(self, symbol: str, decision_time: int) -> list[dict]:
+        """Replay this step's windows to every base strategy, each in its own
+        timeframe order and at its own window length, as its own `BarFeed`
+        would. Returns this step's setups in spec order, which is the order
+        training offers them in (`confluence.merge`)."""
+        from backend.strategies.windows import window_bars
+        windows = self._step_windows.pop(symbol, {})
+        found = []
+        for sid, engine in self.bases.items():
+            sig = None
+            for tf in engine.get_required_timeframes():
+                w = windows.get(tf)
+                if w is None:
+                    continue
+                s = await engine.on_bar(symbol, tf, w.iloc[-window_bars(tf, engine):])
+                if s:
+                    sig = s      # the last one, as `BarFeed.step` returns it
+            if sig:
+                self._latest_setup.setdefault(symbol, {})[sid] = (decision_time, sig.direction)
+                found.append({"strategy_name": sid, "direction": str(sig.direction).upper(),
+                              "confluence_score": getattr(sig, "confluence_score", None),
+                              "metadata": dict(getattr(sig, "metadata", None) or {})})
+        return found
 
     # -- the entry decision -------------------------------------------------
 
@@ -154,21 +248,41 @@ class RLStrategy(BaseStrategy):
         self.begin_candidate(symbol, timeframe,
                              bar_time=candles.index[-1] if candles is not None
                              and len(candles) else None)
+        if self.bases:
+            # Collected, not acted on: replayed to the base strategies when the
+            # agent's own bar, always last in a step, arrives.
+            self._step_windows.setdefault(symbol, {})[timeframe] = candles
         if timeframe != self.spec.timeframe:
             return None
         if not self.gate("symbol_permitted", symbol in self.spec.symbols,
                          f"{symbol} is not an instrument this charter covers"):
             return None
-        observed = self._observe(candles)
+        setups: list[dict] = []
+        if self.bases:
+            setups = await self._run_bases(symbol, int(last_epoch(candles)))
+        observed = self._observe(candles, symbol)
         if not self.gate("enough_history", observed is not None):
             return None
         z, obs = observed
+        if self.bases and not self.gate("base_setup", bool(setups),
+                                        f"no {self.spec.base_label} setup on this bar"):
+            return None
 
-        direction, confidence, _probs = self.policy.act_entry(z, self.spec.min_confidence)
+        policy = self._model(symbol)[0]
+        direction, confidence, _probs = policy.act_entry(z, self.spec.min_confidence)
         if not self.gate("policy_wants_a_trade", direction is not None,
                          f"confidence {confidence:.3f} against "
                          f"{self.spec.min_confidence:.2f}"):
             return None
+        base_sig = None
+        if self.bases:
+            # Agree with a setup or skip, never reverse it: in mode B the base
+            # strategy owns the direction (see `TradingEnv._build_signals`).
+            base_sig = next((b for b in setups if b["direction"] == direction), None)
+            if not self.gate("agrees_with_base", base_sig is not None,
+                             f"agent {direction}; setups " + ", ".join(
+                                 f"{b['strategy_name']} {b['direction']}" for b in setups)):
+                return None
 
         score = adh.score_decision(self.charter, obs, direction)
         # The charter decides whether this setup is one the admin approved. A
@@ -197,7 +311,7 @@ class RLStrategy(BaseStrategy):
         # risk decisions, each an index into the menu the admin pre-registered
         # on the spec. With no risk head the slot's own settings apply.
         if self.spec.risk_head:
-            si, ri = self.policy.risk_choice(z)
+            si, ri = policy.risk_choice(z)
             menu_stop = tuple(self.spec.stop_atr_choices)
             menu_rr = tuple(self.spec.rr_choices)
             stop_mult = float(menu_stop[si % len(menu_stop)])
@@ -225,6 +339,12 @@ class RLStrategy(BaseStrategy):
                 "rl_rr": round(min_rr, 4),
                 "rl_gates_held": list(score.gates_held),
                 "rl_gates_skipped": list(score.gates_skipped),
+                **({} if base_sig is None else {
+                    "base_strategy": base_sig["strategy_name"],
+                    "base_gate_vector": base_sig["metadata"].get("gate_vector"),
+                    "base_confluence_tags": base_sig["metadata"].get("confluence_tags"),
+                    "base_confluence_score": base_sig["confluence_score"],
+                }),
             },
         )
         self._pending[f"{symbol}:{int(last_epoch(candles))}"] = score
@@ -262,14 +382,14 @@ class RLStrategy(BaseStrategy):
                         position: dict) -> TradeAction | None:
         if not self.spec.exit_head:
             return None
-        observed = self._observe(candles)
+        observed = self._observe(candles, symbol)
         if observed is None:
             return None
         z, _obs = observed
         price = float(candles["close"].iloc[-1])
         atr = float(feat.atr(candles, 14).iloc[-1])
         decision = xp.decide(
-            self.policy, z, position, price=price,
+            self._model(symbol)[0], z, position, price=price,
             bars_held=self._bars_held(candles, position),
             max_hold_bars=self.spec.max_hold_bars,
             min_confidence=self.spec.min_confidence,

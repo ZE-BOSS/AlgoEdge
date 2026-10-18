@@ -7,8 +7,41 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
+import { STRATEGY_OPTIONS } from '../components/slotSpec';
 import { rl } from '../services/api';
 import { qk } from '../services/servers';
+
+/** The schema group an approved agent sits under in a strategy list. */
+export const AGENT_GROUP = 'rl';
+
+/**
+ * Every strategy that can be RUN: the rule-based list plus each approved agent.
+ *
+ * Same `[id, label, group]` shape as `STRATEGY_OPTIONS`, so every picker - the
+ * Backtester, a portfolio row, a live slot, Compare - lists agents exactly
+ * where it lists strategies. Until 2026-10-17 the pickers read the static list
+ * only: an approved agent could be added as a SUPERVISOR but never selected to
+ * trade on its own, and the Backtester quietly swapped an unknown id for
+ * ORB_v1. The backend always accepted it - approved agents are registered in
+ * the same strategy registry the engine and the live bot read.
+ *
+ * Agents that failed the validation gate are still listed (the admin approved
+ * them deliberately) but labelled, because "approved" and "passed" are not the
+ * same thing and a picker should not hide the difference.
+ */
+export function useStrategyOptions() {
+  const { data: agents = [] } = useApprovedAgents();
+  const agentOptions = agents.map((a) => [
+    a.strategy_id,
+    `Agent: ${a.name} v${a.charter_version ?? '?'}`
+      + (a.validation_passed === false ? ' (failed gate)' : ''),
+    AGENT_GROUP,
+  ]);
+  return [...STRATEGY_OPTIONS, ...agentOptions];
+}
+
+/** `RL::name@3` is an agent's strategy id; everything else is rule-based. */
+export const isAgentStrategy = (id) => String(id || '').startsWith('RL::');
 
 /**
  * Agents that can actually be selected: an APPROVED charter and a strategy id.

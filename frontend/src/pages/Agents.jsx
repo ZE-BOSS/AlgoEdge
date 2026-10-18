@@ -782,6 +782,10 @@ function FoldResults({ training }) {
               <th style={{ textAlign: 'right' }}>Mean R</th>
               <th style={{ textAlign: 'right' }}>Sharpe</th>
               <th style={{ textAlign: 'right' }}>Adherence</th>
+              <th style={{ textAlign: 'right' }}
+                  title="Early exits of trades that would have hit their stop (right) vs trades that would not have (wrong)">
+                Exit calls ✓/✗
+              </th>
               <th style={{ textAlign: 'right' }}>Took</th>
             </tr>
           </thead>
@@ -810,6 +814,14 @@ function FoldResults({ training }) {
                     {r.test_adherence === undefined || r.test_adherence === null ? '—'
                       : Number(r.test_adherence).toFixed(2)}
                   </td>
+                  <td style={{
+                    textAlign: 'right',
+                    color: (r.exit_calls_right ?? 0) > (r.exit_calls_wrong ?? 0) ? C.green
+                      : (r.exit_calls_wrong ?? 0) > 0 ? C.red : C.dim,
+                  }}>
+                    {r.exit_calls_right === undefined ? '—'
+                      : `${r.exit_calls_right} / ${r.exit_calls_wrong}`}
+                  </td>
                   <td style={{ textAlign: 'right', color: C.faint }}>
                     {r.seconds ? `${Math.round(r.seconds)}s` : '—'}
                   </td>
@@ -833,11 +845,15 @@ function FoldResults({ training }) {
 
 const DEFAULT_FORM = {
   name: '', symbols: '', timeframe: 'M5', seeds: '1,2,3,4,5',
-  base_strategy: '', director: false, director_horizon: 12,
+  // Mode B's strategies - one or several. Several means one agent offered
+  // every setup any of them finds, which sees which of them fired recently
+  // and in which direction, so it can learn which combinations pay.
+  base_strategies: [], director: false, director_horizon: 12,
   exit_head: true, exit_timeframe: '',
   risk_head: true, stop_atr_choices: '0.75,1,1.5,2,3', rr_choices: '1,1.5,2,3,5',
   htf: '', iterations: 40, population: 24, cpcv_groups: 8, cpcv_test_groups: 2,
   max_cpcv_paths: 10, embargo_bars: 288, max_hold_bars: 288,
+  min_confidence: 0.55,
   money_weight: 0.7, adherence_weight: 0.3, downside_penalty: 1,
   elite_frac: 0.25, init_sigma: 0.5, notes: '',
 };
@@ -845,15 +861,46 @@ const DEFAULT_FORM = {
 const nums = (s) => String(s).split(',').map((x) => parseFloat(x.trim()))
   .filter((n) => !Number.isNaN(n));
 const strs = (s) => String(s).split(',').map((x) => x.trim()).filter(Boolean);
+// Mode B's strategies however the spec stored them: several, or the one.
+const specBases = (s) => ((s?.base_strategies && s.base_strategies.length)
+  ? s.base_strategies : (s?.base_strategy ? [s.base_strategy] : []));
+const csv = (v) => (Array.isArray(v) ? v.join(', ') : (v ?? ''));
 
-function CreatePanel({ features, onCreated, onCancel }) {
-  const [f, setF] = useState(DEFAULT_FORM);
-  // Held separately from `base_strategy` rather than derived from it: the
+// "xau-rl-agent" -> "xau-rl-agent-r2", "xau-rl-agent-r2" -> "xau-rl-agent-r3".
+// A retrain gets its own name because a live slot refers to an agent as
+// RL::<name>@<version>: two agents sharing a name would share that id.
+const nextName = (name) => {
+  const m = /^(.*)-r(\d+)$/.exec(name || '');
+  return m ? `${m[1]}-r${Number(m[2]) + 1}` : `${name || 'agent'}-r2`;
+};
+
+// A saved spec back into the form, every field, so "Edit & retrain" opens the
+// whole creation form as it was filled in - editable - rather than Clone's
+// copy that only lets the symbols change.
+function specToForm(spec, name) {
+  const s = spec || {};
+  const bases = specBases(s);
+  return {
+    ...DEFAULT_FORM,
+    ...Object.fromEntries(Object.keys(DEFAULT_FORM)
+      .filter((k) => s[k] !== undefined && s[k] !== null).map((k) => [k, s[k]])),
+    name,
+    symbols: csv(s.symbols), seeds: csv(s.seeds), htf: csv(s.htf),
+    stop_atr_choices: csv(s.stop_atr_choices), rr_choices: csv(s.rr_choices),
+    base_strategies: bases,
+  };
+}
+
+function CreatePanel({ features, onCreated, onCancel, initial, retrainOf }) {
+  const [f, setF] = useState(() => (initial
+    ? specToForm(initial, nextName(initial.name)) : DEFAULT_FORM));
+  // Held separately from `base_strategies` rather than derived from it: the
   // strategy list arrives over the network, so deriving the radio from
   // "is a strategy chosen" meant clicking mode B before the list loaded
   // selected nothing and looked broken.
-  const [mode, setMode] = useState('A');
-  const [chosen, setChosen] = useState([]);
+  const [mode, setMode] = useState(() => (
+    specBases(initial).length ? 'B' : 'A'));
+  const [chosen, setChosen] = useState(() => (initial?.features ? [...initial.features] : []));
   const [error, setError] = useState('');
   const strategies = useBaseStrategies();
   const set = (k) => (v) => setF((prev) => ({ ...prev, [k]: v }));
@@ -866,7 +913,10 @@ function CreatePanel({ features, onCreated, onCancel }) {
     htf: strs(f.htf),
     features: chosen.length ? chosen : null,
     seeds: nums(f.seeds).map((n) => Math.round(n)),
-    base_strategy: mode === 'B' ? f.base_strategy : '',
+    // One strategy is stored server-side exactly as a single base_strategy,
+    // so an old-style agent and a one-item list are the same agent.
+    base_strategy: '',
+    base_strategies: mode === 'B' ? f.base_strategies : [],
     director: f.director,
     director_horizon: Number(f.director_horizon) || 12,
     exit_head: f.exit_head,
@@ -881,13 +931,15 @@ function CreatePanel({ features, onCreated, onCancel }) {
     max_cpcv_paths: Number(f.max_cpcv_paths) || 10,
     embargo_bars: Number(f.embargo_bars) || 288,
     max_hold_bars: Number(f.max_hold_bars) || 288,
+    min_confidence: Number(f.min_confidence) || 0.55,
     money_weight: Number(f.money_weight),
     adherence_weight: Number(f.adherence_weight),
     downside_penalty: Number(f.downside_penalty),
     elite_frac: Number(f.elite_frac),
     init_sigma: Number(f.init_sigma),
-    notes: f.notes,
-  }), [f, chosen, mode]);
+    notes: retrainOf && !f.notes.includes(retrainOf)
+      ? `${f.notes ? `${f.notes} · ` : ''}retrained from ${retrainOf}` : f.notes,
+  }), [f, chosen, mode, retrainOf]);
 
   // The read-back comes from the server, on a spec it has not saved. One
   // source of wording for the form and for the saved agent: a second copy
@@ -916,7 +968,13 @@ function CreatePanel({ features, onCreated, onCancel }) {
   // Mode B with nothing chosen is the one half-filled state that would
   // otherwise reach the server, where it silently becomes a mode-A agent.
   const ready = f.name.trim() && strs(f.symbols).length > 0
-    && (mode === 'A' || strategies.includes(f.base_strategy));
+    && (mode === 'A' || (f.base_strategies.length > 0
+      && f.base_strategies.every((s) => strategies.includes(s))));
+  const toggleBase = (s) => setF((prev) => ({
+    ...prev,
+    base_strategies: prev.base_strategies.includes(s)
+      ? prev.base_strategies.filter((x) => x !== s) : [...prev.base_strategies, s],
+  }));
 
   return (
     <div style={{
@@ -947,14 +1005,34 @@ function CreatePanel({ features, onCreated, onCancel }) {
             you can see whether the agent actually added anything.
           </Choice>
           {mode === 'B' && (
-            <Field label="Strategy to optimise"
-                   hint={`The agent sees this strategy's signals as candidates. It cannot
-                     invent an entry the strategy did not offer, so its ceiling is
-                     "this strategy, better selected and better exited".`.replace(/\s+/g, ' ')}>
-              <select value={f.base_strategy} onChange={(e) => set('base_strategy')(e.target.value)}>
-                <option value="">— choose —</option>
-                {strategies.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
+            <Field label="Strategies to optimise — one or several"
+                   hint={`The agent sees these strategies' signals as candidates. It cannot
+                     invent an entry none of them offered, so its ceiling is "these
+                     strategies, better selected and better exited". With two or more it
+                     is offered every setup any of them finds, and sees which of them
+                     fired in the last 24 bars and in which direction, plus how many
+                     agree - so it can learn which COMBINATIONS pay. The baseline it must
+                     beat is all of them traded side by side.`.replace(/\s+/g, ' ')}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {strategies.map((s) => (
+                  <label key={s} style={{
+                    display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
+                    padding: '3px 8px', borderRadius: 6, cursor: 'pointer',
+                    border: `1px solid ${f.base_strategies.includes(s) ? C.purple : C.line}`,
+                  }}>
+                    <input type="checkbox" checked={f.base_strategies.includes(s)}
+                           onChange={() => toggleBase(s)} />
+                    {s}
+                  </label>
+                ))}
+              </div>
+              {f.base_strategies.length > 1 && (
+                <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>
+                  {f.base_strategies.length} strategies → {f.base_strategies.length + 1} extra
+                  inputs ({f.base_strategies.join(', ')}, and their agreement). If two fire
+                  on the same bar the agent may take the one it agrees with, in this order.
+                </div>
+              )}
             </Field>
           )}
         </Section>
@@ -1126,6 +1204,13 @@ function CreatePanel({ features, onCreated, onCancel }) {
             <Field label="Iterations" hint="Per seed, per path.">
               <input type="number" value={f.iterations}
                      onChange={(e) => set('iterations')(e.target.value)} />
+            </Field>
+            <Field label="Min confidence"
+                   hint="How sure the policy must be before it acts - entries and exits.
+                     Chance is 0.33 with three actions. Higher takes fewer, better-filtered
+                     trades; too high with short training takes none.">
+              <input type="number" step="0.01" min="0.34" max="0.95" value={f.min_confidence}
+                     onChange={(e) => set('min_confidence')(e.target.value)} />
             </Field>
             <Field label="Population" hint="Candidates per iteration, CEM only.">
               <input type="number" value={f.population}
@@ -1648,16 +1733,16 @@ function DataTab({ agent, busy, onStarted }) {
                     {new Date(d.end * 1000).toISOString().slice(0, 10)}
                   </td>
                   <td style={{ textAlign: 'right', color: d.base_signals ? 'inherit' : C.faint }}>
-                    {agent.spec?.base_strategy ? (d.base_signals || 0).toLocaleString() : '—'}
+                    {specBases(agent.spec).length ? (d.base_signals || 0).toLocaleString() : '—'}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {agent.spec?.base_strategy && progressed.some((d) => !d.base_signals) && (
+          {specBases(agent.spec).length > 0 && progressed.some((d) => !d.base_signals) && (
             <div style={{ color: C.red, fontSize: 12, marginTop: 8 }}>
               <AlertTriangle size={13} /> A symbol produced no{' '}
-              <code>{agent.spec.base_strategy}</code> signals at all. A mode-B
+              <code>{specBases(agent.spec).join(' + ')}</code> signals at all. A mode-B
               agent can only choose among that strategy&rsquo;s setups, so there
               was nothing for it to learn on that instrument.
             </div>
@@ -1855,6 +1940,11 @@ function CharterTab({ agent, busy, onChanged }) {
     || charters.find((c) => c.status === 'PROPOSED')
     || charters[0];
   const hasReport = Boolean(agent.validation);
+  // "Has a report" is not "passed": the gate's verdict, and which checks
+  // failed, so the Approve button can say what is being signed over.
+  const gateFailed = hasReport && agent.validation?.passed === false;
+  const failedChecks = (agent.validation?.checks || [])
+    .filter((c) => !c.passed && !c.skipped).map((c) => c.name);
 
   const act = (fn) => async () => {
     setError('');
@@ -1947,6 +2037,16 @@ function CharterTab({ agent, busy, onChanged }) {
         </div>
       )}
 
+      {gateFailed && (
+        <div style={{ color: C.red, fontSize: 12, marginBottom: 8, lineHeight: 1.55 }}>
+          <AlertTriangle size={13} /> <b>This agent FAILED the validation gate</b>
+          {failedChecks.length ? ` (${failedChecks.join(', ')})` : ''}. Approving it
+          anyway makes it selectable for backtests AND live slots. The gate exists
+          because a result that fails these checks is usually luck - backtest it on
+          bars it never saw before letting it near a live account.
+        </div>
+      )}
+
       {error && <div style={{ color: C.red, fontSize: 12 }}>{error}</div>}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
@@ -1959,8 +2059,18 @@ function CharterTab({ agent, busy, onChanged }) {
         {current.status === 'PROPOSED' && (
           <button className="btn btn-primary" disabled={!hasReport || busy}
                   title={!hasReport ? 'Run the gate first' : ''}
-                  onClick={act(() => rl.approveCharter(agent.agent_id))}>
-            <ShieldCheck size={14} /> Approve
+                  onClick={() => {
+                    // A failed gate is approvable - it is the admin's call - but
+                    // never by an accidental click. The xau-rl-agent of
+                    // 2026-10-17 was approved over five failed checks.
+                    if (gateFailed && !window.confirm(
+                      `This agent FAILED the gate: ${failedChecks.join(', ') || 'see Validation'}.\n\n`
+                      + 'Approve it anyway? It becomes selectable for backtests and LIVE slots.')) {
+                      return;
+                    }
+                    act(() => rl.approveCharter(agent.agent_id))();
+                  }}>
+            <ShieldCheck size={14} /> {gateFailed ? 'Approve despite failed gate' : 'Approve'}
           </button>
         )}
         {['DRAFT', 'PROPOSED'].includes(current.status) && (
@@ -2192,7 +2302,7 @@ function OverviewTab({ agent, busy, step }) {
           <KV k="Symbols">{(s.symbols || []).join(', ') || '—'}</KV>
           <KV k="Entry timeframe">{s.timeframe}</KV>
           <KV k="Base strategy">
-            {s.base_strategy || <span style={{ color: C.faint }}>none — finds its own</span>}
+            {specBases(s).join(' + ') || <span style={{ color: C.faint }}>none — finds its own</span>}
           </KV>
           <KV k="Supervised director">
             {s.director ? `yes, ${s.director_horizon}-bar horizon`
@@ -2235,9 +2345,96 @@ function OverviewTab({ agent, busy, step }) {
         )}
       </Section>
 
+      <ContributionsPanel agent={agent} busy={busy} />
+
       <TrainingMonitor agent={agent} busy={busy}
                        onCancel={() => step(() => rl.cancel(agent.agent_id), 'Cancelling')} />
     </>
+  );
+}
+
+const fmtDate = (t) => (t ? new Date(t * 1000).toISOString().slice(0, 10) : '—');
+
+// What each input is worth. Two numbers per column, answering different
+// questions: does it move the DECISION (sensitivity), and does it carry
+// PROFIT (shuffle it, re-run the engine, see what is lost).
+function ContributionsPanel({ agent, busy }) {
+  const qc = useQueryClient();
+  const [maxBars, setMaxBars] = useState(20000);
+  const [start, setStart] = useState('');
+  const [error, setError] = useState('');
+  const saved = agent.contributions;
+  const run = useMutation({
+    mutationFn: () => {
+      // A start date makes it measure on bars after training - what still
+      // pays, rather than what the agent learned to lean on.
+      const datasets = start ? Object.fromEntries((agent.spec?.symbols || [])
+        .map((sym) => [sym, { source: 'mt5', start }])) : {};
+      return rl.contributions(agent.agent_id, { max_bars: Number(maxBars) || 20000, datasets });
+    },
+    onSuccess: () => { setError(''); qc.invalidateQueries({ queryKey: qk('rl-agent', agent.agent_id) }); },
+    onError: (e) => setError(apiError(e)),
+  });
+  const kindColour = { market: C.blue, director: C.green, setup: C.purple };
+  return (
+    <Section icon={<FlaskConical size={15} />} title="What each input contributes"
+             why="The weights alone do not say this: a big weight on an input that is
+               almost always near zero does nothing. Sensitivity is how much nudging
+               the input moves the decision; R contribution is how much total R is
+               lost when the input is shuffled across bars and the whole run is
+               replayed through the real engine. Negative means the agent does better
+               without it - a candidate to drop on the next retrain.">
+      <div style={{ display: 'flex', gap: 10, alignItems: 'end', flexWrap: 'wrap' }}>
+        <Field label="Most recent bars">
+          <input type="number" value={maxBars} onChange={(e) => setMaxBars(e.target.value)} />
+        </Field>
+        <Field label="From (optional, MT5)"
+               hint="Pick a date after the training window to measure out of sample.">
+          <input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+        </Field>
+        <button className="btn btn-sm" disabled={busy || run.isPending || !agent.policy_hash}
+                title={agent.policy_hash ? '' : 'Collect the training run first'}
+                onClick={() => run.mutate()}>
+          {run.isPending ? 'Measuring… (one engine run per input)' : 'Measure contributions'}
+        </button>
+      </div>
+      {error && <p style={{ color: C.red, fontSize: 12 }}>{error}</p>}
+      {saved && Object.entries(saved.by_symbol || {}).map(([sym, res]) => (
+        <div key={sym} style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 12, color: C.dim, marginBottom: 6 }}>
+            <b style={{ color: 'inherit' }}>{sym}</b> · {res.bars?.n?.toLocaleString()} bars,
+            {' '}{fmtDate(res.bars?.start)} → {fmtDate(res.bars?.end)} · measured{' '}
+            {String(saved.computed_at || '').slice(0, 16).replace('T', ' ')}
+          </div>
+          {(res.sentences || []).map((t) => (
+            <p key={t} style={{ fontSize: 12, margin: '2px 0' }}>{t}</p>
+          ))}
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table" style={{ fontSize: 12, marginTop: 6 }}>
+              <thead>
+                <tr><th>Input</th><th>R contribution</th><th>Trades without</th>
+                  <th>Δ P(trade)</th><th>Δ long vs short</th></tr>
+              </thead>
+              <tbody>
+                {(res.rows || []).map((r) => (
+                  <tr key={r.column}>
+                    <td><span style={{ color: kindColour[r.kind] || 'inherit' }}>{r.column}</span></td>
+                    <td style={{ color: r.r_contribution > 0 ? C.green
+                      : r.r_contribution < 0 ? C.red : C.dim }}>
+                      {r.r_contribution == null ? '—'
+                        : `${r.r_contribution > 0 ? '+' : ''}${r.r_contribution.toFixed(2)}R`}
+                    </td>
+                    <td>{r.trades_without ?? '—'}</td>
+                    <td>{r.d_trade == null ? '—' : r.d_trade.toFixed(3)}</td>
+                    <td>{r.d_long == null ? '—' : r.d_long.toFixed(3)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+    </Section>
   );
 }
 
@@ -2252,6 +2449,9 @@ export default function Agents() {
   const [tab, setTab] = useState('Overview');
   const [exporting, setExporting] = useState(false);
   const [creating, setCreating] = useState(false);
+  // The agent an "Edit & retrain" form was opened from: its whole spec
+  // pre-fills the creation form, every field editable.
+  const [retrainFrom, setRetrainFrom] = useState(null);
   const [notice, setNotice] = useState('');
   // A notice is about the action that just happened. "Deleting done" sat on
   // screen across agents and tabs for as long as the page stayed open.
@@ -2357,7 +2557,7 @@ export default function Agents() {
         <div className="card" style={{ padding: 8 }}>
           <button className="btn btn-primary btn-sm"
                   style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }}
-                  onClick={() => setCreating(true)}>
+                  onClick={() => { setRetrainFrom(null); setCreating(true); }}>
             <Plus size={13} /> New agent
           </button>
           {(list?.agents || []).map((a) => (
@@ -2388,10 +2588,31 @@ export default function Agents() {
         </div>
 
         <div>
+          {creating && retrainFrom && (
+            <div className="card" style={{ padding: 10, marginBottom: 12, fontSize: 12,
+                                           borderColor: C.purple }}>
+              <b>Retraining {retrainFrom.name}</b> — every setting it was created with is
+              filled in below and can be changed. It is saved as a new agent
+              (<code>{nextName(retrainFrom.name)}</code>) so the old one, its charter and
+              any live slot pointing at it stay exactly as they are. Weights are not
+              carried over: training starts fresh on the data you pick next.
+            </div>
+          )}
           {creating && (
-            <CreatePanel features={feats?.features} onCancel={() => setCreating(false)}
+            <CreatePanel key={retrainFrom?.agent_id || 'new'}
+                         features={feats?.features}
+                         initial={retrainFrom ? { ...retrainFrom.spec, name: retrainFrom.name } : null}
+                         retrainOf={retrainFrom?.agent_id || ''}
+                         onCancel={() => { setCreating(false); setRetrainFrom(null); }}
                          onCreated={(a) => {
-                           setPicked(a.agent_id); setCreating(false);
+                           // The Data tab's sources and window come along too,
+                           // so the retrain starts from everything chosen last
+                           // time - still editable before Train is pressed.
+                           if (retrainFrom) {
+                             const prev = loadChoices(retrainFrom.agent_id);
+                             if (prev) saveChoices(a.agent_id, prev);
+                           }
+                           setPicked(a.agent_id); setCreating(false); setRetrainFrom(null);
                            setTab('Data'); refetch();
                          }} />
           )}
@@ -2412,6 +2633,13 @@ export default function Agents() {
                           () => rl.clone(agent.agent_id, { symbols: agent.spec.symbols }),
                           'Cloning')}>
                   <Copy size={12} /> Clone
+                </button>
+                <button className="btn btn-sm" disabled={busy}
+                        title={busy ? 'Training is running'
+                          : 'Open the full creation form with every setting this agent used, '
+                            + 'change anything, and train it again as a new version'}
+                        onClick={() => { setRetrainFrom(agent); setCreating(true); }}>
+                  <RefreshCw size={12} /> Edit &amp; retrain
                 </button>
                 {agent.suspended && (
                   <button className="btn btn-sm" disabled={busy}

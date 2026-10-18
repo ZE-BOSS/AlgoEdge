@@ -103,6 +103,11 @@ class SeedResult:
     test_mean_r: float = 0.0
     test_trades: int = 0
     test_adherence: float = 0.0
+    # The exit head's calls on the test fold (reward.exit_call): early closes
+    # of trades that WOULD have hit their stop, and of trades that would not.
+    # Right <= wrong means the head has no skill on this fold.
+    exit_calls_right: int = 0
+    exit_calls_wrong: int = 0
     sharpe: float = 0.0
     policy: dict = field(default_factory=dict)
     scaler: dict = field(default_factory=dict)
@@ -568,7 +573,7 @@ def _evaluate(policy: pol.LinearPolicy, spec: AgentSpec, data: E.EpisodeData,
     spans = [s for s in fold.train if s[1] - s[0] >= 500]
     if not spans:
         return float("-inf")
-    if spec.base_strategy:
+    if spec.bases:
         return _evaluate_mode_b(policy, spec, data, risk_config, spans, scaler, charter, seed)
     a, b = max(spans, key=lambda s: s[1] - s[0])
     b = min(b, a + max(2000, spec.eval_window_bars // 2))
@@ -724,7 +729,7 @@ def training_risk_config(risk_config: dict) -> dict:
 
 
 def strategy_config(spec: AgentSpec, symbol: str, strategy_blocks: dict | None = None,
-                    risk_config: dict | None = None):
+                    risk_config: dict | None = None, strategy_id: str = ""):
     """The config a mode-B agent's base strategy is built with.
 
     Seeded from the user's SAVED strategy blocks, exactly as a backtest is: a
@@ -744,7 +749,7 @@ def strategy_config(spec: AgentSpec, symbol: str, strategy_blocks: dict | None =
                 pass
     seed_strategy_blocks(cfg, strategy_blocks or {})
     cfg.instrument_settings = [InstrumentSettings(symbol=symbol,
-                                                  strategy_id=spec.base_strategy)]
+                                                  strategy_id=strategy_id or spec.base_strategy)]
     return cfg
 
 
@@ -765,21 +770,34 @@ def build_episodes(spec: AgentSpec, datasets: dict[str, pd.DataFrame], *,
         if frame is None or not len(frame):
             logger.warning(f"[RL] {symbol}: no data - skipped, and recorded as attempted")
             continue
-        if spec.base_strategy:
+        if spec.bases:
             if progress is not None:
                 progress.set(stage="loading", stage_detail=(
-                    f"{symbol}: generating {spec.base_strategy} setups over "
+                    f"{symbol}: generating {spec.base_label} setups over "
                     f"{len(frame):,} bars"))
-                progress.event(f"{symbol}: generating {spec.base_strategy} setups over "
-                               f"{len(frame):,} bars - the strategy runs once, here")
+                progress.event(f"{symbol}: generating {spec.base_label} setups over "
+                               f"{len(frame):,} bars - each strategy runs once, here")
             t = time.time()
-            data = E.EpisodeData.build(
-                symbol, spec.timeframe, frame, spec.features,
-                base_strategy=spec.base_strategy,
-                config=strategy_config(spec, symbol, strategy_blocks, risk_config))
+            if spec.multi_base:
+                # Every base strategy built from the user's saved blocks, each
+                # under its own id - the same config a backtest of it runs.
+                data = E.EpisodeData.build(
+                    symbol, spec.timeframe, frame, spec.features,
+                    base_strategies=spec.bases,
+                    configs={sid: strategy_config(spec, symbol, strategy_blocks,
+                                                  risk_config, sid)
+                             for sid in spec.bases})
+            else:
+                data = E.EpisodeData.build(
+                    symbol, spec.timeframe, frame, spec.features,
+                    base_strategy=spec.bases[0],
+                    config=strategy_config(spec, symbol, strategy_blocks, risk_config,
+                                           spec.bases[0]))
             if progress is not None:
-                progress.event(f"{symbol}: {len(data.base_signals or {}):,} "
-                               f"{spec.base_strategy} setups in {time.time() - t:.0f}s")
+                n_setups = (sum(len(v) for v in data.base_multi.values())
+                            if data.base_multi else len(data.base_signals or {}))
+                progress.event(f"{symbol}: {n_setups:,} {spec.base_label} setups "
+                               f"in {time.time() - t:.0f}s")
         else:
             data = E.EpisodeData.build(symbol, spec.timeframe, frame, spec.features)
         out.append(data)
@@ -854,6 +872,9 @@ def run_fold_job(spec: AgentSpec, data: E.EpisodeData, risk_config: dict,
     res.sharpe = sharpe_of(rs)
     res.test_adherence = float(np.mean(
         [t.adherence for ep in test_eps for t in ep.rewards])) if rs else 0.0
+    calls = [t.exit_call for ep in test_eps for t in ep.rewards]
+    res.exit_calls_right = int(sum(1 for c in calls if c > 0))
+    res.exit_calls_wrong = int(sum(1 for c in calls if c < 0))
     res.score = float(np.mean([ep.score for ep in test_eps])) if test_eps else 0.0
     res.seconds = round(time.time() - started, 1)
     return {"symbol": data.symbol, "seed": seed, "fold": fold.path,
@@ -957,7 +978,7 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
     progress.set(stage="starting", pct=0.0, optimiser=run.optimiser,
                  seeds=len(spec.seeds), folds=len(folds), symbols=len(episodes),
                  total_jobs=total, jobs_done=0, mode=spec.mode, workers=workers,
-                 base_strategy=spec.base_strategy, director=spec.director,
+                 base_strategy=spec.base_label, director=spec.director,
                  datasets=[{"symbol": d.symbol, "bars": len(d),
                             "start": int(d.times[0]), "end": int(d.times[-1]),
                             "base_signals": len(d.base_signals or {})}
@@ -965,12 +986,20 @@ def train_agent(spec: AgentSpec, datasets: dict[str, pd.DataFrame], risk_config:
     progress.event(
         f"{len(episodes)} symbol(s), {len(spec.seeds)} seeds x {len(folds)} purged "
         f"paths = {total} training jobs, optimiser {run.optimiser}"
-        + (f", base strategy {spec.base_strategy}" if spec.base_strategy else "")
+        + (f", base strateg{'ies' if spec.multi_base else 'y'} {spec.base_label}"
+           if spec.bases else "")
         + (", with a supervised direction model" if spec.director else "")
         + (f", {workers} at a time" if workers > 1 else ""))
-    empty = [d.symbol for d in episodes if spec.base_strategy and not d.base_signals]
+    if len(episodes) > 1:
+        # Jobs are per symbol, and each symbol keeps ITS OWN best policy and
+        # scaler (`best_per_symbol`): one agent, one policy per pair. They do
+        # not share what they learn - a pooled policy is not built.
+        progress.event(
+            f"{len(episodes)} symbols: each trains separately and keeps its own best "
+            f"policy and scaler; the agent trades each pair with that pair's policy.")
+    empty = [d.symbol for d in episodes if spec.bases and not d.base_signals]
     if empty:
-        progress.event(f"WARNING: {spec.base_strategy} found no setups on "
+        progress.event(f"WARNING: {spec.base_label} found no setups on "
                        f"{', '.join(empty)} - a mode-B agent has nothing to learn there")
 
     outcomes: dict[tuple, dict] = {}
@@ -1126,35 +1155,69 @@ def _run_parallel(spec, episodes, folds, jobs, risk_config, run, charter, progre
              "agent_dir": str(agent_dir)}
     keys = {job: f"{job[0]}-{job[1]}-{job[2]}" for job in jobs}
     total = len(jobs)
-    with ProcessPoolExecutor(max_workers=workers,
-                             mp_context=multiprocessing.get_context("spawn"),
-                             initializer=_job_init, initargs=(state,)) as ex:
-        futures = {ex.submit(_job_entry, i, seed, j, keys[(i, seed, j)]): (i, seed, j)
-                   for i, seed, j in jobs}
-        pending = set(futures)
-        cancel_sent = False
-        while pending:
-            finished, pending = wait(pending, timeout=5, return_when=FIRST_COMPLETED)
-            for f in finished:
-                job = futures[f]
-                try:
-                    out = f.result()
-                except Exception as exc:                # noqa: BLE001 (incl. cancelled)
-                    if f.cancelled():
-                        continue
-                    out = {"symbol": episodes[job[0]].symbol, "seed": job[1],
-                           "fold": folds[job[2]].path,
-                           "error": f"{type(exc).__name__}: {exc}"}
-                record(job, out)
+    from concurrent.futures.process import BrokenProcessPool
+
+    # One worker dying (out of memory, or Windows' "WinError 6 the handle is
+    # invalid" in the pool's own queue - measured 2026-10-18) breaks the WHOLE
+    # pool, and every queued job then fails with BrokenProcessPool: 38 of 40
+    # jobs lost to one crash. So the pool is rebuilt and only the jobs that
+    # never produced a result are resubmitted, a bounded number of times.
+    todo = list(jobs)
+    restarts = 0
+    while todo:
+        broken: list[tuple] = []
+        with ProcessPoolExecutor(max_workers=workers,
+                                 mp_context=multiprocessing.get_context("spawn"),
+                                 initializer=_job_init, initargs=(state,)) as ex:
+            futures = {ex.submit(_job_entry, i, seed, j, keys[(i, seed, j)]): (i, seed, j)
+                       for i, seed, j in todo}
+            pending = set(futures)
+            cancel_sent = False
+            while pending:
+                finished, pending = wait(pending, timeout=5, return_when=FIRST_COMPLETED)
+                for f in finished:
+                    job = futures[f]
+                    try:
+                        out = f.result()
+                    except BrokenProcessPool:
+                        if restarts < MAX_POOL_RESTARTS and not progress.cancelled:
+                            broken.append(job)
+                            continue
+                        out = {"symbol": episodes[job[0]].symbol, "seed": job[1],
+                               "fold": folds[job[2]].path,
+                               "error": "BrokenProcessPool: a worker process died "
+                                        f"and the pool was restarted {restarts} times"}
+                    except Exception as exc:            # noqa: BLE001 (incl. cancelled)
+                        if f.cancelled():
+                            continue
+                        out = {"symbol": episodes[job[0]].symbol, "seed": job[1],
+                               "fold": folds[job[2]].path,
+                               "error": f"{type(exc).__name__}: {exc}"}
+                    record(job, out)
+                    (shard_dir / f"{keys[job]}.json").unlink(missing_ok=True)
+                if progress.cancelled and not cancel_sent:
+                    # Queued jobs are dropped; running ones read the same cancel
+                    # file and stop at their next iteration.
+                    for f in pending:
+                        f.cancel()
+                    cancel_sent = True
+                _merge_shards(progress, shard_dir, total)
+        todo = broken
+        if todo:
+            restarts += 1
+            for job in todo:
                 (shard_dir / f"{keys[job]}.json").unlink(missing_ok=True)
-            if progress.cancelled and not cancel_sent:
-                # Queued jobs are dropped; running ones read the same cancel
-                # file and stop at their next iteration.
-                for f in pending:
-                    f.cancel()
-                cancel_sent = True
-            _merge_shards(progress, shard_dir, total)
+            progress.event(f"A training worker died; restarting the pool and re-running "
+                           f"{len(todo)} unfinished job(s) (restart {restarts} of "
+                           f"{MAX_POOL_RESTARTS})")
+            logger.warning(f"[RL] worker pool broke - resubmitting {len(todo)} jobs "
+                           f"(restart {restarts})")
     shutil.rmtree(shard_dir, ignore_errors=True)
+
+
+# How many times a broken worker pool is rebuilt before the remaining jobs are
+# recorded as failed. A crash that repeats three times is not transient.
+MAX_POOL_RESTARTS = 3
 
 
 def _merge_shards(progress: Progress, shard_dir: Path, total: int) -> None:
@@ -1245,11 +1308,55 @@ def save_run(run: TrainingRun, root: Path | None = None) -> Path:
         # Collect to pick up and store as this one.
         for name in ("policy.json", "scaler.json"):
             (d / name).unlink(missing_ok=True)
+    per = best_per_symbol(run.results)
+    if len(per) > 1:
+        (d / "per_symbol.json").write_text(json.dumps(
+            {sym: {"policy": r.policy, "scaler": r.scaler, "seed": r.seed, "fold": r.fold,
+                   "score": r.score, "test_trades": r.test_trades,
+                   "test_mean_r": r.test_mean_r}
+             for sym, r in per.items()}), encoding="utf-8")
+    else:
+        (d / "per_symbol.json").unlink(missing_ok=True)
     return d
 
 
-def load_policy(agent_id: str, root: Path | None = None
+def best_per_symbol(results) -> dict:
+    """The best fold result FOR EACH symbol, in first-seen order.
+
+    A multi-pair agent keeps one policy per pair. Jobs already train per
+    symbol; what used to happen is that ONE best policy - with a scaler fitted
+    to that symbol's prices - was kept and then run on every pair, so an agent
+    fitted to gold's scale traded EURUSD (found 2026-10-18).
+    """
+    out: dict = {}
+    for r in results or []:
+        if not r.policy:
+            continue
+        cur = out.get(r.symbol)
+        if cur is None or r.score > cur.score:
+            out[r.symbol] = r
+    return out
+
+
+def load_per_symbol(agent_id: str, root: Path | None = None
+                    ) -> dict[str, tuple[pol.LinearPolicy, feat.Scaler]]:
+    """{symbol: (policy, scaler)} for a multi-pair run; {} for a single pair."""
+    d = Path(root or ARTEFACT_ROOT) / agent_id
+    try:
+        raw = json.loads((d / "per_symbol.json").read_text(encoding="utf-8"))
+    except Exception:                                   # noqa: BLE001
+        return {}
+    return {sym: (pol.LinearPolicy.from_dict(v["policy"]), feat.Scaler.from_dict(v["scaler"]))
+            for sym, v in raw.items()}
+
+
+def load_policy(agent_id: str, root: Path | None = None, symbol: str | None = None
                 ) -> tuple[pol.LinearPolicy, feat.Scaler] | None:
+    """The run's policy and scaler - `symbol`'s own on a multi-pair run."""
+    if symbol:
+        own = load_per_symbol(agent_id, root).get(symbol)
+        if own is not None:
+            return own
     d = Path(root or ARTEFACT_ROOT) / agent_id
     try:
         p = pol.LinearPolicy.from_dict(json.loads((d / "policy.json").read_text(encoding="utf-8")))

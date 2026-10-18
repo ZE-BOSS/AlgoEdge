@@ -192,7 +192,10 @@ def test_backtester_runs_the_saved_slots_parameters_not_form_defaults():
     assert "savedSlot?.strategy_params_override" in js,         "the slot editor must start from the saved slot's parameters"
     assert "const savedSlot = findLiveSlot(userCfg?.config, form.symbol, form.strategy_id);" in js
     # and the run sends that slot, not a global block
-    assert "const sp = singleSlot.strategy_params || {};" in js
+    # The run's strategy params come from the slot editor for the strategy it
+    # was edited for (`buildPayload` gives a Compare leg for ANOTHER strategy
+    # no params rather than the wrong strategy's).
+    assert "(singleSlot.strategy_params || {})" in js
     assert "slot_risk: singleSlot.risk || {}," in js
     # every portfolio row carries its own parameters and its own risk
     assert "strategy_params: s.strategy_params ??" in js

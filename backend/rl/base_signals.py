@@ -168,7 +168,16 @@ def generate(symbol: str, timeframe: str, frames_by_tf: dict[str, pd.DataFrame],
                 "confluence_score": int(sig.confluence_score),
                 "metadata": dict(sig.metadata or {}),
                 "strategy_name": strategy_id,
-                "bar_index": j,
+                # The agent's DECISION row: the last bar that had CLOSED when the
+                # strategy decided (j-1), the same bar the signal is stamped
+                # with. The env decides on this row and stamps it, so the agent
+                # fills at bar j's open - the bar the strategy itself fills on.
+                # It used to be j, so the agent decided a bar later and filled
+                # one bar AFTER its base strategy - not look-ahead, but the same
+                # one-bar-late error that cost GBPJPY 10R in September, and it
+                # did not match how live decides (found 2026-10-18, building
+                # live mode B).
+                "bar_index": j - 1,
             })
             if len(out) >= MAX_BASE_SIGNALS:
                 logger.warning(

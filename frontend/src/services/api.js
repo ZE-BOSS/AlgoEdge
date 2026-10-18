@@ -247,10 +247,13 @@ export const getSignalDetail = (id) => api.get(`/signals/${id}`);
 export const runBacktest = (data, serverId = null) =>
   api.post('/backtest', data, { timeout: 300000, ...(serverId ? { serverId } : {}) });
 export const runPortfolioBacktest = (data) => api.post('/portfolio_backtest', data, { timeout: 300000 });
-export const getBacktestStatus = () => api.get('/backtest_status');
+// `serverId` as for runBacktest: Compare polls the server the run went to.
+export const getBacktestStatus = (serverId = null) =>
+  api.get('/backtest_status', serverId ? { serverId } : {});
 export const getLatestBacktestResult = () => api.get('/latest_result');
 // Paged delivery of a finished run — see utils/progressiveResult.js.
-export const getLatestResultSummary = () => api.get('/latest_result/summary');
+export const getLatestResultSummary = (serverId = null) =>
+  api.get('/latest_result/summary', serverId ? { serverId } : {});
 export const getLatestResultTrades = (offset, limit) => api.get('/latest_result/trades', { params: { offset, limit }, timeout: 30000 });
 // `tf` asks for one timeframe, trimmed around the trade; omitted = legacy all-timeframes shape.
 export const getUnsavedTradeChart = (groupId, tf) => api.get(`/backtest_result/trade/${groupId}/chart`, { params: tf ? { tf } : {} });
@@ -495,6 +498,9 @@ export const rl = {
   create: (data) => api.post(`${RL}/agents`, data),
   get: (id) => api.get(`${RL}/agents/${id}`),
   clone: (id, data) => api.post(`${RL}/agents/${id}/clone`, data),
+  // One full engine re-run per input, so it can take minutes.
+  contributions: (id, data) => api.post(`${RL}/agents/${id}/contributions`, data,
+    { timeout: 1800000 }),
   // Everything needed to judge a run, as one file. Long timeout: it reads
   // the worker's training record off disk, which on a 150-job run is large.
   exportAgent: (id) => api.get(`${RL}/agents/${id}/export`, { timeout: 180000 }),

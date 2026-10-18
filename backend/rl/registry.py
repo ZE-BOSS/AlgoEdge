@@ -29,7 +29,7 @@ the training artefacts that are too big to want in a row.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -95,6 +95,12 @@ class LoadedAgent:
     scaler: feat.Scaler
     charter: ch.StrategyCharter
     trained_on: list
+    # A multi-pair agent's own policy and scaler per symbol. Empty for one
+    # pair; `model_for` falls back to the main policy for any symbol missing.
+    per_symbol: dict = field(default_factory=dict)
+
+    def model_for(self, symbol: str) -> tuple[pol.LinearPolicy, feat.Scaler]:
+        return self.per_symbol.get(symbol) or (self.policy, self.scaler)
 
     @property
     def strategy_id(self) -> str:
@@ -190,8 +196,12 @@ async def load(session, agent_id: str, *, for_live: bool = False,
     if not row.policy_json:
         raise LookupError(f"{agent_id} has no stored policy")
     spec = AgentSpec.from_dict(json.loads(row.spec_json))
-    policy = pol.LinearPolicy.from_dict(json.loads(row.policy_json))
+    policy_d = json.loads(row.policy_json)
+    policy = pol.LinearPolicy.from_dict(policy_d)
     scaler = feat.Scaler.from_dict(json.loads(row.scaler_json or "{}"))
+    per_symbol = {sym: (pol.LinearPolicy.from_dict(v["policy"]),
+                        feat.Scaler.from_dict(v["scaler"]))
+                  for sym, v in (policy_d.get("per_symbol") or {}).items()}
     if not scaler.fitted:
         raise LookupError(
             f"{agent_id} has no fitted scaler - an agent whose scaler was not stored "
@@ -199,7 +209,8 @@ async def load(session, agent_id: str, *, for_live: bool = False,
             "from the one it was trained on")
     return LoadedAgent(agent_id=agent_id, spec=spec, policy=policy, scaler=scaler,
                        charter=charter,
-                       trained_on=json.loads(row.trained_on_json or "[]"))
+                       trained_on=json.loads(row.trained_on_json or "[]"),
+                       per_symbol=per_symbol)
 
 
 # -- writing ----------------------------------------------------------------
@@ -208,7 +219,8 @@ async def load(session, agent_id: str, *, for_live: bool = False,
 async def save_agent(session, *, agent_id: str, spec: AgentSpec, policy: pol.LinearPolicy,
                      scaler: feat.Scaler, trained_on: list, training: dict | None = None,
                      validation: dict | None = None, optimiser: str = "",
-                     created_by: str = "", status: str = TRAINED) -> RLAgent:
+                     created_by: str = "", status: str = TRAINED,
+                     per_symbol: dict | None = None) -> RLAgent:
     row = await get_agent(session, agent_id)
     if row is None:
         row = RLAgent(agent_id=agent_id, name=spec.name)
@@ -218,8 +230,18 @@ async def save_agent(session, *, agent_id: str, spec: AgentSpec, policy: pol.Lin
     row.spec_json = json.dumps(spec.to_dict())
     row.spec_hash = spec.content_hash
     row.optimiser = optimiser or row.optimiser or ""
-    row.policy_json = json.dumps(policy.to_dict())
+    policy_d = policy.to_dict()
     row.policy_hash = policy.content_hash
+    if per_symbol:
+        # Each pair's own policy rides in the same blob (no schema change), and
+        # the stored hash covers all of them, so a change to any pair's weights
+        # is a different policy.
+        policy_d["per_symbol"] = {sym: {"policy": p.to_dict(), "scaler": sc.to_dict()}
+                                  for sym, (p, sc) in per_symbol.items()}
+        import hashlib
+        row.policy_hash = hashlib.sha256(json.dumps(
+            policy_d, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    row.policy_json = json.dumps(policy_d)
     row.scaler_json = json.dumps(scaler.to_dict())
     row.trained_on_json = json.dumps(trained_on or [])
     if training is not None:

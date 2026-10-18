@@ -71,6 +71,15 @@ async def require_strategy_factory() -> None:
 
 router = APIRouter(prefix="/api/strategy-factory", tags=["strategy-factory"], dependencies=[Depends(require_strategy_factory)])
 
+# Read-only routes that live under the same URL prefix but are NOT the factory.
+# `/strategy-defaults` was on `router`, behind the factory's opt-in gate, so on
+# every server without STRATEGY_FACTORY enabled it was a 404 - and the Trading
+# Book and the Backtester's slot editor, which read it for the measured exits
+# and the "no measured target" warning, silently showed neither (found
+# 2026-10-17). The gate exists because the factory runs git and opens pull
+# requests; reading a table of defaults does neither.
+read_router = APIRouter(prefix="/api/strategy-factory", tags=["strategy-factory"])
+
 # ── Repo root (two levels up from this file) ──────────────────────────────────
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -190,7 +199,7 @@ async def list_strategies(current_user: User = Depends(get_current_user)):
     return {"strategies": items, "total": len(items)}
 
 
-@router.get("/strategy-defaults")
+@read_router.get("/strategy-defaults")
 async def get_all_strategy_defaults(current_user: User = Depends(get_current_user)):
     """
     Per-strategy exit/session defaults, with the measurement behind each.

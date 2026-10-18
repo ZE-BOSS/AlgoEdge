@@ -211,7 +211,7 @@ def test_the_estimate_needs_no_bars():
 #   population            CEM-only, and shown
 #   min_confidence        a live-execution threshold, set on the slot
 NOT_ON_THE_CREATE_SCREEN = {
-    "attempted_symbols", "supervises", "supervise_symbols", "min_confidence",
+    "attempted_symbols", "supervises", "supervise_symbols",
     "eval_windows", "eval_window_bars", "exit_tries",
 }
 

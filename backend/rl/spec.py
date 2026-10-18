@@ -56,6 +56,12 @@ class AgentSpec:
     # engine untouched, which is the strategy as it trades today. That is a far
     # sharper test than "did it make money".
     base_strategy: str = ""
+    # MODE B over SEVERAL strategies (2026-10-18): every one of them finds
+    # setups, the agent is offered all of them, and it sees which strategies
+    # fired recently and in which direction (`rl/confluence.py`) - so it can
+    # learn which COMBINATIONS pay. Takes precedence over `base_strategy`; an
+    # empty tuple leaves an old single-strategy spec exactly as it was.
+    base_strategies: tuple[str, ...] = ()
     timeframe: str = "M5"
     htf: tuple[str, ...] = ()
     features: tuple[str, ...] = DEFAULT_FEATURES
@@ -147,16 +153,39 @@ class AgentSpec:
     # market features almost never reaches: measured, a policy trained for six
     # iterations took ZERO trades at 0.55 while scoring positively on its own
     # sampled batches - the floor, not the policy, was the constraint.
-    min_confidence: float = 0.40
+    #
+    # Re-measured 2026-10-18 at a REAL training length (XAUUSD M5 Jan-Jul 2026,
+    # 40 iterations, 5 seeds x 8 paths): 0.55 took 2,090 test trades against
+    # 1,618 at 0.40, no job took zero, median test R +0.040 against -0.011, and
+    # 22 of 40 jobs positive against 19. The zero-trade problem was a six-
+    # iteration artefact, so 0.55 is the default now.
+    min_confidence: float = 0.55
     max_hold_bars: int = 288
 
     notes: str = ""
     attempted_symbols: tuple[str, ...] = ()   # every asset tried, incl. discarded
 
     @property
+    def bases(self) -> tuple[str, ...]:
+        """The base strategies, however the spec named them."""
+        if self.base_strategies:
+            return tuple(self.base_strategies)
+        return (self.base_strategy,) if self.base_strategy else ()
+
+    @property
+    def base_label(self) -> str:
+        """The base strategies for a sentence: "ORB_v1" or "ORB_v1 + TrendBreakout_v1"."""
+        return " + ".join(self.bases)
+
+    @property
+    def multi_base(self) -> bool:
+        """Two or more base strategies: the confluence inputs are on."""
+        return len(self.bases) >= 2
+
+    @property
     def mode(self) -> str:
-        """A: its own strategy. B: optimising an existing one. C: supervisor."""
-        if self.base_strategy:
+        """A: its own strategy. B: optimising existing ones. C: supervisor."""
+        if self.bases:
             return "B"
         return "C" if (self.supervises and not self.exit_head) else "A"
 
@@ -192,13 +221,17 @@ class AgentSpec:
                     f"the exit timeframe {self.exit_timeframe} is SLOWER than the "
                     f"entry timeframe {self.timeframe} - an exit head exists to "
                     f"react sooner, not later")
-        if self.base_strategy:
+        if self.bases:
             from backend.strategies.registry import list_strategies
             known = list_strategies()
-            if self.base_strategy not in known:
-                raise ValueError(
-                    f"base_strategy {self.base_strategy!r} is not registered. "
-                    f"Known: {sorted(known)}")
+            for sid in self.bases:
+                if sid not in known:
+                    raise ValueError(
+                        f"base strategy {sid!r} is not registered. Known: {sorted(known)}")
+                if str(sid).startswith("RL::"):
+                    raise ValueError("an agent cannot be another agent's base strategy")
+            if len(set(self.bases)) != len(self.bases):
+                raise ValueError("a base strategy is listed twice")
         if self.risk_head:
             if not self.stop_atr_choices or not self.rr_choices:
                 raise ValueError("a risk head needs a menu to choose from")
@@ -225,7 +258,9 @@ class AgentSpec:
         """What the POLICY actually sees: the market features, plus the
         director's call and confidence when there is one."""
         from backend.rl.director import DIRECTOR_FEATURES
-        return self.n_features + (len(DIRECTOR_FEATURES) if self.director else 0)
+        return (self.n_features
+                + (len(DIRECTOR_FEATURES) if self.director else 0)
+                + (len(self.bases) + 1 if self.multi_base else 0))
 
     @property
     def supervises_all(self) -> bool:
@@ -246,6 +281,10 @@ class AgentSpec:
 
     def to_dict(self) -> dict:
         d = asdict(self)
+        # Left out when empty so every spec saved before the field existed keeps
+        # the same dict - and therefore the same content hash.
+        if not d.get("base_strategies"):
+            d.pop("base_strategies", None)
         return {k: (list(v) if isinstance(v, tuple) else v) for k, v in d.items()}
 
     @classmethod

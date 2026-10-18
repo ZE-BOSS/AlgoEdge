@@ -391,7 +391,7 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
     the other and the report says which it is.
     """
     rep = Report(agent_id=agent_id, spec_hash=spec.content_hash, optimiser=optimiser,
-                 mode=spec.mode, base_strategy=spec.base_strategy,
+                 mode=spec.mode, base_strategy=spec.base_label,
                  symbols_attempted=list(spec.attempted_symbols or spec.symbols))
 
     if progress is not None:
@@ -582,7 +582,7 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
         rep.add(Check("charter fidelity", False, skipped=True, detail="no charter supplied"))
 
     # -- mode B: beat the rule you were built on ---------------------------
-    if spec.base_strategy:
+    if spec.bases:
         base_rs, agent_rs = [], []
         for f in folds:
             for a, b in f.test:
@@ -599,7 +599,7 @@ def validate(spec: AgentSpec, policy: pol.LinearPolicy, scaler, data: E.EpisodeD
         rep.add(Check("beats its base strategy",
                       delta is not None and delta > BARS["min_base_improvement"],
                       delta, BARS["min_base_improvement"],
-                      f"{spec.base_strategy} alone "
+                      f"{spec.base_label} alone "
                       f"{'n/a' if base_mean is None else f'{base_mean:+.4f}'}R over "
                       f"{len(base_rs)} trades against the agent's "
                       f"{'n/a' if agent_mean is None else f'{agent_mean:+.4f}'}R over "

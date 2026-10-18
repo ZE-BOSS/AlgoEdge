@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Copy, Trash2 } from 'lucide-react';
 import SchemaForm from './SchemaForm';
-import { useApprovedAgents } from '../hooks/useAgents';
+import { isAgentStrategy, useApprovedAgents, useStrategyOptions } from '../hooks/useAgents';
 import { ACCOUNT_ONLY_KEYS, SLOT_RISK_KEYS, SLOT_RISK_SECTIONS, STRATEGY_GROUP, STRATEGY_LABEL, STRATEGY_OPTIONS, TP_LEVEL_OF, slotSummary } from './slotSpec';
 import SymbolPicker from './SymbolPicker';
 
@@ -49,7 +49,11 @@ export default function SlotEditor({
   // A book of slots stays readable when each is one line until you open it.
   const [open, setOpen] = useState(defaultOpen);
   const isOpen = collapsible ? open : true;
-  const group = STRATEGY_GROUP[slot.strategy_id] || 'orb';
+  // An agent has no strategy parameters: its decisions are its frozen policy
+  // and approved charter. Falling back to 'orb' showed ORB's fields for it.
+  const isAgent = isAgentStrategy(slot.strategy_id);
+  const group = isAgent ? null : (STRATEGY_GROUP[slot.strategy_id] || 'orb');
+  const strategyOptions = useStrategyOptions();
   const set = (patch) => onChange({ ...slot, ...patch });
 
   // Strategy rows for THIS strategy only, re-based on the saved account value
@@ -188,7 +192,20 @@ export default function SlotEditor({
           />
         )}
         <select className="input input-sm slot-editor__strategy" value={slot.strategy_id} onChange={e => set({ strategy_id: e.target.value })}>
-          {STRATEGY_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          <optgroup label="Strategies">
+            {STRATEGY_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </optgroup>
+          {strategyOptions.some(([id]) => isAgentStrategy(id)) && (
+            <optgroup label="Approved agents">
+              {strategyOptions.filter(([id]) => isAgentStrategy(id))
+                .map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </optgroup>
+          )}
+          {/* A slot saved with an agent that is no longer approved still shows
+              what it holds, rather than appearing to have changed strategy. */}
+          {isAgent && !strategyOptions.some(([id]) => id === slot.strategy_id) && (
+            <option value={slot.strategy_id}>{slot.strategy_id} (not approved)</option>
+          )}
         </select>
         <span className="slot-editor__summary">{slotSummary(slot, accountRisk)}</span>
         {blockers.length > 0 && (
@@ -234,7 +251,15 @@ export default function SlotEditor({
         {targetNote && (
           <p className="slot-editor__warn"><AlertTriangle size={12} /> {targetNote}</p>
         )}
-        {tab === 'strategy' ? (
+        {tab === 'strategy' && isAgent ? (
+          <p className="slot-editor__note">
+            <b>{slot.strategy_id}</b> is a trained agent. It has no parameters to
+            edit here: its entries, stops and targets come from its frozen policy
+            and the charter you approved. To change how it trades, train a new
+            version on the Agents page. This slot&apos;s risk (Risk &amp; exits tab)
+            still decides how much each trade risks.
+          </p>
+        ) : tab === 'strategy' ? (
           <>
             <label className="slot-editor__measured" title="On: this slot runs the settings measured for this symbol. Off: the parameters below apply exactly as entered.">
               <input

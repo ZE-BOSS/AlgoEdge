@@ -164,6 +164,9 @@ class SpecIn(BaseModel):
     #                the RL policy decides. Off = reinforcement only.
     # exit_timeframe a faster timeframe for the exit head alone.
     base_strategy: str = ""
+    # Several base strategies at once (mode B over a book of strategies). One
+    # entry is the same agent as `base_strategy` alone, and is stored that way.
+    base_strategies: list[str] = Field(default_factory=list)
     director: bool = False
     director_horizon: int = 12
     exit_head: bool = True
@@ -189,7 +192,7 @@ class SpecIn(BaseModel):
     max_cpcv_paths: int = 10
     embargo_bars: int = 288
     max_hold_bars: int = 288
-    min_confidence: float = 0.40
+    min_confidence: float = 0.55
     # How much more a loss counts than a gain of the same size. 1.0 is
     # symmetric; above it the reward is Sortino-flavoured.
     downside_penalty: float = 1.0
@@ -212,6 +215,11 @@ class SpecIn(BaseModel):
                     "attempted_symbols", "htf"):
             if d.get(key) is not None:
                 d[key] = tuple(d[key])
+        bases = [x for x in dict.fromkeys(d.pop("base_strategies", None) or []) if x]
+        if len(bases) == 1:
+            d["base_strategy"], bases = bases[0], []
+        if bases:
+            d["base_strategies"], d["base_strategy"] = tuple(bases), ""
         d = {k: v for k, v in d.items() if v is not None}
         try:
             return AgentSpec.from_dict(d)
@@ -233,9 +241,14 @@ def describe_learning(spec: AgentSpec) -> dict:
     rather than each inventing its own wording.
     """
     parts = []
-    if spec.base_strategy:
+    if spec.multi_base:
         parts.append(
-            f"It does not look for its own entries. {spec.base_strategy} finds "
+            f"It does not look for its own entries. {spec.base_label} each find "
+            f"setups; this agent sees which of them fired recently and in which "
+            f"direction, and decides which setups - and which combinations - to take.")
+    elif spec.bases:
+        parts.append(
+            f"It does not look for its own entries. {spec.base_label} finds "
             f"the setups and this agent decides which of them to take.")
     else:
         parts.append("It looks for its own entries, on every bar.")
@@ -275,11 +288,12 @@ def describe_learning(spec: AgentSpec) -> dict:
 
     return {
         "mode": spec.mode,
-        "mode_label": {"A": "Its own strategy", "B": f"Optimising {spec.base_strategy}",
+        "mode_label": {"A": "Its own strategy", "B": f"Optimising {spec.base_label}",
                        "C": "Supervisor only"}.get(spec.mode, spec.mode),
         "reinforcement": True,
         "supervised": bool(spec.director),
-        "base_strategy": spec.base_strategy,
+        "base_strategy": spec.base_label,
+        "base_strategies": list(spec.bases),
         "sentences": parts,
         "never": ["size a position", "set a risk percentage",
                   "widen a stop", "override a circuit-breaker halt"],
@@ -466,6 +480,7 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
         "trained_on": json.loads(row.trained_on_json or "[]"),
         "training": json.loads(row.training_json) if row.training_json else None,
         "validation": json.loads(row.validation_json) if row.validation_json else None,
+        "contributions": _read_contributions(agent_id),
         "suspended": bool(row.suspended), "suspended_reason": row.suspended_reason or "",
         "live_adherence": row.live_adherence,
         "reject_reason": row.reject_reason or "",
@@ -770,6 +785,8 @@ async def export_agent(agent_id: str,
             "proposed": json.loads(p.proposal_json),
         } for p in props],
         "validation": json.loads(row.validation_json) if row.validation_json else None,
+        # What each input is worth (see rl/contributions.py), when it has been run.
+        "contributions": _read_contributions(agent_id),
         "backtests": bts,
     }
 
@@ -933,7 +950,7 @@ async def _strategy_blocks(spec: AgentSpec, admin) -> dict:
     database session. Without them the base strategy runs dataclass defaults -
     a different strategy from the one trading live.
     """
-    if not spec.base_strategy or admin is None:
+    if not spec.bases or admin is None:
         return {}
     from backend.api.routes.backtest import load_saved_strategy_blocks
     return await load_saved_strategy_blocks(getattr(admin, "id", None))
@@ -1123,19 +1140,24 @@ async def collect_training(agent_id: str, db: AsyncSession = Depends(get_db)):
     # would overwrite a good run's record with `{}`.
     result = trainmod.queue.result(agent_id) or trainmod.load_training(agent_id) or {}
     trained_on = result.get("trained_on") or json.loads(row.trained_on_json or "[]")
-    await rlreg.save_agent(db, agent_id=agent_id, spec=spec, policy=policy, scaler=scaler,
-                           trained_on=trained_on, training=result,
-                           optimiser=row.optimiser or "", status="TRAINED")
+    per_symbol = trainmod.load_per_symbol(agent_id)
+    saved = await rlreg.save_agent(db, agent_id=agent_id, spec=spec, policy=policy,
+                                   scaler=scaler, trained_on=trained_on, training=result,
+                                   optimiser=row.optimiser or "", status="TRAINED",
+                                   per_symbol=per_symbol)
     await db.commit()
-    prog.set(stage="complete", pct=100.0, policy_hash=policy.content_hash,
+    if per_symbol:
+        prog.event(f"one policy per pair: {', '.join(per_symbol)}")
+    prog.set(stage="complete", pct=100.0, policy_hash=saved.policy_hash,
              folds=len((result or {}).get("results") or []),
              recovered_from_disk=not bool(trainmod.queue.result(agent_id)))
     prog.event(
-        f"stored policy {policy.content_hash} with "
+        f"stored policy {saved.policy_hash} with "
         f"{len((result or {}).get('results') or [])} fold result(s)"
         + ("" if trainmod.queue.result(agent_id)
            else " - recovered from disk, this process did not run the job"))
-    return {"agent_id": agent_id, "policy_hash": policy.content_hash,
+    return {"agent_id": agent_id, "policy_hash": saved.policy_hash,
+            "per_symbol": list(per_symbol),
             "scaler_fitted_on": scaler.fitted_on,
             "note": "call /distil to build the charter, then /validate to run the gate"}
 
@@ -1144,6 +1166,75 @@ class RunIn(BaseModel):
     """Which bars to distil or validate against."""
     datasets: dict = Field(default_factory=dict)
     risk_config: dict = Field(default_factory=dict)
+
+
+def _contributions_path(agent_id: str) -> Path:
+    return trainmod.ARTEFACT_ROOT / agent_id / "contributions.json"
+
+
+def _read_contributions(agent_id: str) -> dict | None:
+    try:
+        return json.loads(_contributions_path(agent_id).read_text(encoding="utf-8"))
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+class ContributionsIn(RunIn):
+    # The most recent N bars of the agent's data. Every input costs one full
+    # re-run through the engine, so this is the dial between minutes and
+    # precision. Choose bars AFTER the training window (datasets with a later
+    # start) to see what still pays rather than what the agent leaned on.
+    max_bars: int = 20_000
+    permute: bool = True
+
+
+@router.post("/agents/{agent_id}/contributions")
+async def feature_contributions(agent_id: str, body: ContributionsIn,
+                                db: AsyncSession = Depends(get_db),
+                                admin=Depends(require_admin)):
+    """How each input - EMA, ATR ratio, director, base-strategy setup flags -
+    moves the agent's decisions and how much R it is worth. Saved with the
+    agent and included in its export."""
+    row = await rlreg.get_agent(db, agent_id)
+    if row is None:
+        raise HTTPException(404, f"no agent {agent_id}")
+    loaded = trainmod.load_policy(agent_id)
+    if loaded is None:
+        raise HTTPException(409, "train the agent first")
+    policy, scaler = loaded
+    spec = AgentSpec.from_dict(json.loads(row.spec_json))
+    blocks = await _strategy_blocks(spec, admin)
+
+    def work():
+        from backend.rl import contributions as cb
+        from backend.rl import env as E
+        frames = dsmod.load_frames(_sources_for(agent_id, body.datasets), spec)
+        if not frames:
+            raise ValueError("no bars - supply a dataset per pre-registered symbol")
+        out = {}
+        for symbol, frame in frames.items():
+            frame = frame.iloc[-max(2000, int(body.max_bars)):]
+            rc = body.risk_config or E.default_risk_config(symbol)
+            data = _one_episode(spec, symbol, frame, blocks, rc)
+            # Each pair with its own policy on a multi-pair agent.
+            p_sym, s_sym = trainmod.load_policy(agent_id, symbol=symbol) or (policy, scaler)
+            env = E.TradingEnv(spec, data, rc, scaler=s_sym)
+            res = cb.explain(env, p_sym, spec, data.names, permute=body.permute)
+            res["bars"] = {"n": len(data), "start": int(data.times[0]),
+                           "end": int(data.times[-1])}
+            out[symbol] = res
+        return out
+
+    try:
+        result = await asyncio.to_thread(work)
+    except Exception as exc:                            # noqa: BLE001
+        raise HTTPException(400, f"{type(exc).__name__}: {exc}") from exc
+    payload = _json_safe({"computed_at": datetime.now(timezone.utc).isoformat(),
+                          "max_bars": int(body.max_bars), "by_symbol": result})
+    p = _contributions_path(agent_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(payload), encoding="utf-8")
+    return payload
 
 
 @router.post("/agents/{agent_id}/distil")
@@ -1162,7 +1253,7 @@ async def distil_charter(agent_id: str, body: RunIn, db: AsyncSession = Depends(
     loaded = trainmod.load_policy(agent_id)
     if loaded is None:
         raise HTTPException(409, "train the agent first")
-    policy, scaler = loaded
+    policy0, scaler0 = loaded
     spec = AgentSpec.from_dict(json.loads(row.spec_json))
     prog = trainmod.phase_progress(agent_id, "distil")
     blocks = await _strategy_blocks(spec, admin)
@@ -1181,6 +1272,8 @@ async def distil_charter(agent_id: str, body: RunIn, db: AsyncSession = Depends(
         prog.event(f"{symbol}: {len(frames[symbol]):,} bars - replaying the policy")
         rc = body.risk_config or E.default_risk_config(symbol)
         data = _one_episode(spec, symbol, frames[symbol], blocks, rc, prog)
+        # The pair's OWN policy on a multi-pair run - the one live will trade.
+        policy, scaler = trainmod.load_policy(agent_id, symbol=symbol) or (policy0, scaler0)
         env = E.TradingEnv(spec, data, rc, scaler=scaler)
         ep = env.rollout(policy, transitions=True)
         prog.set(stage="distilling", pct=75.0,
@@ -1283,7 +1376,13 @@ async def run_gate(agent_id: str, body: RunIn, db: AsyncSession = Depends(get_db
         rc = body.risk_config or E.default_risk_config(symbol)
         data = _one_episode(spec, symbol, frames[symbol], blocks, rc, prog)
         run = _rehydrate_run(training)
-        return V.validate(spec, policy, scaler, data, rc,
+        # The gate measures the FIRST pair, with that pair's own policy on a
+        # multi-pair agent - the policy live would trade there.
+        p_sym, s_sym = trainmod.load_policy(agent_id, symbol=symbol) or (policy, scaler)
+        if len(frames) > 1:
+            prog.event(f"the gate measures {symbol} only; the other pairs "
+                       f"({', '.join(list(frames)[1:])}) are not gated by this run")
+        return V.validate(spec, p_sym, s_sym, data, rc,
                           agent_id=agent_id, training_run=run, charter=charter,
                           optimiser=optimiser, progress=prog)
 

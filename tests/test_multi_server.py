@@ -245,7 +245,8 @@ def test_a_backtest_can_be_aimed_at_a_named_server():
     api = read(API)
     assert "export const runBacktest = (data, serverId = null)" in api
     page = read(Path("frontend/src/pages/Backtester.jsx"))
-    assert "runBacktest(payload, runServer)" in page
+    # Built by the shared `buildPayload` (single run and Compare legs alike).
+    assert "runBacktest(buildPayload(form.strategy_id), runServer)" in page
     assert "setRunServer" in page
     assert "runServer !== activeServerId()" in page, (
         "running somewhere other than the screen you are on must be visible")

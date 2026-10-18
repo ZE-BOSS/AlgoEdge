@@ -83,6 +83,18 @@ import numpy as np
 
 CAPTURE_WEIGHT = 0.35       # paid for taking what was on offer
 CUT_WEIGHT = 0.50           # paid for cutting a loser short
+# The exit CALL - the user's rule (2026-10-18): an early close of a trade that
+# WOULD have gone on to its stop earns +1; an early close of a trade that would
+# NOT have hit its stop costs -1. Symmetric on purpose, and that is what makes
+# it an anti-overfitting term: `loss_avoided` alone pays for good cuts and
+# charges nothing for needless ones, so a head that cuts everything at the
+# first wobble collects the good cuts for free. Measured on the 2026-10-17
+# gold agent, the head added exactly +0.000R - it had nothing to lose by
+# acting at random. With this term every early exit is a bet with a price.
+EXIT_CALL_WEIGHT = 0.30
+# A counterfactual at or below this R is "would have hit the stop". The
+# counterfactual returns exactly -1.0 on a stop; the margin absorbs float noise.
+STOP_HIT_R = -0.999
 
 # "Substantial" - either of these earns the full capture credit on its own.
 FULL_CREDIT_R = 1.5         # an exit at or above +1.5R is a good exit, full stop
@@ -182,10 +194,17 @@ class TradeReward:
         return float(self.r_net) - float(self.counterfactual_r)
 
     @property
+    def exit_call(self) -> float:
+        """+1 if this early exit dodged a trade bound for its stop, -1 if the
+        trade would have survived, 0 when the trade was not exited early."""
+        return exit_call(self.counterfactual_r)
+
+    @property
     def money(self) -> float:
         return (self.realised
                 + CAPTURE_WEIGHT * self.capture
-                + CUT_WEIGHT * self.loss_avoided)
+                + CUT_WEIGHT * self.loss_avoided
+                + EXIT_CALL_WEIGHT * self.exit_call)
 
     @property
     def adherence_score(self) -> float:
@@ -214,6 +233,7 @@ class TradeReward:
         d = asdict(self)
         d.update(money=self.money, total=self.total, realised=self.realised,
                  capture=self.capture, loss_avoided=self.loss_avoided,
+                 exit_call=self.exit_call,
                  left_on_table=self.left_on_table, exit_quality=self.exit_quality,
                  adherence_score=self.adherence_score, penalty=self.penalty,
                  penalties=list(self.penalties))
@@ -284,6 +304,21 @@ def loss_avoided(actual_r: float, counterfactual_r: float | None) -> float:
     if c >= 0:
         return 0.0        # holding was not a loss; nothing was avoided
     return max(0.0, a - c)
+
+
+def exit_call(counterfactual_r: float | None) -> float:
+    """Was the early exit RIGHT about the stop? +1 yes, -1 no, 0 not an exit.
+
+    "Right" means holding would have hit the original stop. A trade that would
+    have reached its target, or merely drifted, was cut needlessly - that is the
+    -1, and it is what stops an exit head from closing everything early.
+    """
+    if counterfactual_r is None:
+        return 0.0
+    c = float(counterfactual_r)
+    if not np.isfinite(c):
+        return 0.0
+    return 1.0 if c <= STOP_HIT_R else -1.0
 
 
 def adherence_score(adherence: float, floor: float = 0.6) -> float:
@@ -369,6 +404,12 @@ class RewardBreakdown:
     worst_r: float = 0.0
     saved_r: float = 0.0
     early_exits: int = 0
+    # The exit head's calls: right = the trade it closed would have hit its
+    # stop; wrong = it would have survived. The hit rate is what says whether
+    # the head is reading the market or just closing trades.
+    exit_call: float = 0.0
+    exit_calls_right: int = 0
+    exit_calls_wrong: int = 0
     adherence_score: float = 0.0
     penalty: float = 0.0
     penalties: dict = field(default_factory=dict)
@@ -438,6 +479,10 @@ def aggregate(rewards, *, keep_per_trade: bool = False) -> RewardBreakdown:
     out.win_rate = float(np.mean(r_net > 0))
     out.worst_r = float(np.min(r_net))
     out.early_exits = int(sum(1 for r in rewards if r.counterfactual_r is not None))
+    calls = [r.exit_call for r in rewards]
+    out.exit_call = float(np.mean(calls))
+    out.exit_calls_right = int(sum(1 for c in calls if c > 0))
+    out.exit_calls_wrong = int(sum(1 for c in calls if c < 0))
     out.adherence_score = float(np.mean([r.adherence_score for r in rewards]))
     out.penalty = float(np.mean([r.penalty for r in rewards]))
     for r in rewards:

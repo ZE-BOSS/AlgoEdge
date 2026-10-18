@@ -328,6 +328,9 @@ app.include_router(broker.router)
 app.include_router(mt5_test.router)
 app.include_router(dashboard.router)
 app.include_router(strategy_factory.router)  # [Phase 14 Stream 3]
+# Its read-only routes (the measured defaults table), NOT behind the factory's
+# opt-in gate - the Trading Book and the Backtester read them on every server.
+app.include_router(strategy_factory.read_router)
 app.include_router(system.router)  # Telegram status/test, live account, state reset
 # What the ACCOUNT did, as opposed to what the bot did: deposits,
 # withdrawals, costs, and whether the journal adds up to the balance.

@@ -238,9 +238,11 @@ def test_base_signals_index_the_agents_bars_not_the_strategys():
     data = T.build_episodes(spec, {"EURUSD": _tiny_frame(n=12000)})[0]
     times = data.times
     for j, sig in data.base_signals.items():
-        assert 0 < j < len(times)
-        # Stamped with the agent bar before the fill bar, as everywhere else.
-        assert int(times[j - 1]) == int(sig["time"]), (j, sig["time"])
+        assert 0 <= j < len(times) - 1
+        # Keyed by the DECISION row, which is the bar the signal is stamped
+        # with - the agent fills at bar j+1's open, the bar its base strategy
+        # fills on. Keying one bar later made mode B fill one bar late.
+        assert int(times[j]) == int(sig["time"]), (j, sig["time"])
 
 
 # -- training sees its own decisions, the test fold sees the real limits ------
@@ -305,6 +307,24 @@ def test_a_worker_never_holds_the_shared_log_files(tmp_path):
                          cwd=str(__import__("pathlib").Path(__file__).parent.parent),
                          timeout=120)
     assert out.stdout.strip().endswith("OK"), out.stdout + out.stderr
+
+
+def test_importing_the_logger_does_not_open_the_shared_files():
+    """A spawned worker re-imports the logger before `configure_worker` runs.
+    If the shared sinks opened their files at import, a rotation in the API
+    process failed during that window (seen 2026-10-17)."""
+    import subprocess
+    import sys
+
+    code = (
+        "from backend.utils.logger import logger\n"
+        "open_ = [str(getattr(h._sink, '_path', '')) for h in logger._core.handlers.values()\n"
+        "         if getattr(h._sink, '_file', None) is not None]\n"
+        "print('OPEN' if any(p.endswith(('backend.log','trades.log')) for p in open_) else 'CLOSED')\n")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         cwd=str(__import__("pathlib").Path(__file__).parent.parent),
+                         timeout=120)
+    assert out.stdout.strip().endswith("CLOSED"), out.stdout + out.stderr
 
 
 def test_the_api_process_still_writes_the_shared_files():

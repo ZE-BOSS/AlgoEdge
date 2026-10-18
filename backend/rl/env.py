@@ -101,11 +101,19 @@ class EpisodeData:
     # evaluates hundreds of policies against the same ones.
     base_signals: dict = field(default_factory=dict)
     base_strategy: str = ""
+    # MODE B over several strategies (see `rl/confluence.py`): every setup by
+    # decision row - several strategies can fire on the same bar - and the
+    # per-strategy inputs the policy reads. Empty / None for one strategy, so a
+    # single-strategy agent is exactly what it was.
+    base_strategies: tuple = ()
+    base_multi: dict = field(default_factory=dict)
+    base_flags: np.ndarray | None = None
 
     @classmethod
     def build(cls, symbol: str, timeframe: str, frame: pd.DataFrame,
               names=None, *, broker: str = "", base_strategy: str = "",
-              config=None, frames_by_tf: dict | None = None) -> "EpisodeData":
+              config=None, frames_by_tf: dict | None = None,
+              base_strategies: tuple = (), configs: dict | None = None) -> "EpisodeData":
         frame = frame.copy()
         if "time" not in frame.columns:
             frame["time"] = pd.DatetimeIndex(frame.index).as_unit("s").asi8
@@ -114,9 +122,24 @@ class EpisodeData:
                    X=feat.matrix(frame, names), names=names,
                    atr=feat.atr(frame, 14).to_numpy(), broker=broker,
                    base_strategy=base_strategy)
-        if base_strategy:
-            from backend.rl import base_signals as bs
+        from backend.rl import base_signals as bs
 
+        if len(base_strategies) >= 2:
+            from backend.rl import confluence as cf
+
+            frames = bs.index_frames(frames_by_tf or {timeframe: frame})
+            by_strategy = {
+                sid: bs.by_bar(bs.generate(symbol, timeframe, frames, sid,
+                                           (configs or {}).get(sid)))
+                for sid in base_strategies}
+            data.base_strategies = tuple(base_strategies)
+            data.base_multi = cf.merge(by_strategy)
+            # `base_signals` keeps one setup per row for everything that only
+            # needs to know WHERE setups are (the folds, the empty check).
+            data.base_signals = {r: sigs[0] for r, sigs in data.base_multi.items()}
+            data.base_flags = cf.setup_flags(by_strategy, base_strategies, len(frame))
+            data.base_strategy = "+".join(base_strategies)
+        elif base_strategy:
             frames = bs.index_frames(frames_by_tf or {timeframe: frame})
             data.base_signals = bs.by_bar(
                 bs.generate(symbol, timeframe, frames, base_strategy, config))
@@ -162,11 +185,16 @@ class EpisodeData:
         rebased = {j - start: dict(sig, bar_index=j - start)
                    for j, sig in (self.base_signals or {}).items()
                    if start <= j < end}
+        multi = {j - start: [dict(s, bar_index=j - start) for s in sigs]
+                 for j, sigs in (self.base_multi or {}).items() if start <= j < end}
         return EpisodeData(symbol=self.symbol, timeframe=self.timeframe,
                            frame=self.frame.iloc[start:end].copy(),
                            X=self.X[start:end].copy(), names=self.names,
                            atr=self.atr[start:end].copy(), broker=self.broker,
-                           base_signals=rebased, base_strategy=self.base_strategy)
+                           base_signals=rebased, base_strategy=self.base_strategy,
+                           base_strategies=self.base_strategies, base_multi=multi,
+                           base_flags=(None if self.base_flags is None
+                                       else self.base_flags[start:end].copy()))
 
 
 # -- the exit-head strategy the engine calls --------------------------------
@@ -482,8 +510,17 @@ class TradingEnv:
             # feature rather than replacing any, so the policy can learn where
             # to believe it - which is the point of a controller on top of a
             # predictor rather than simply trading the predictor's output.
-            self._Z = augment(self.scaler.transform(self.data.X), self.director,
-                              self.spec.min_confidence)
+            Z = augment(self.scaler.transform(self.data.X), self.director,
+                        self.spec.min_confidence)
+            # Multi-strategy mode B: each base strategy's latest setup and their
+            # agreement, LAST - after the director - so the column order matches
+            # `spec.observation_width` and the live engine. Already in [-1, 1]
+            # per strategy, so they are not scaled (a scaler fitted on a fold
+            # with few setups would blow them up).
+            flags = self.data.base_flags
+            if self.spec.multi_base and flags is not None:
+                Z = np.hstack([Z, flags])
+            self._Z = Z
         return self._Z
 
     # -- the episode --------------------------------------------------------
@@ -649,7 +686,7 @@ class TradingEnv:
         # every bar, and the direction is the strategy's rather than the
         # policy's - the agent is optimising the rule, not replacing it.
         base = data.base_signals or {}
-        mode_b = bool(self.spec.base_strategy and base)
+        mode_b = bool((self.spec.base_strategy or self.spec.multi_base) and base)
         candidates = sorted(base) if mode_b else range(warmup, len(side) - 1)
 
         for j in candidates:
@@ -663,9 +700,17 @@ class TradingEnv:
                 # Disagreeing is a skip, not a reversal: in mode B the
                 # strategy owns the direction and the agent owns the
                 # selection, the trade shape and the exit.
-                base_sig = base[j]
-                base_side = 1 if str(base_sig.get("direction", "BUY")).upper() == "BUY" else -1
-                if s != base_side:
+                #
+                # Several strategies can fire on one row (multi-strategy mode
+                # B); the agent takes the first whose direction it agrees with,
+                # in the spec's strategy order, so the choice is deterministic.
+                base_sig = None
+                for cand in (data.base_multi.get(j) if data.base_multi else None) or [base[j]]:
+                    cand_side = 1 if str(cand.get("direction", "BUY")).upper() == "BUY" else -1
+                    if cand_side == s:
+                        base_sig = cand
+                        break
+                if base_sig is None:
                     continue
             if min_gap and (j - last_bar) < min_gap:
                 continue
@@ -737,12 +782,12 @@ class TradingEnv:
                 # The base strategy's own confluences, AS IT RECORDED THEM.
                 # `GateRecorder` already stamps these; re-deriving them would
                 # read today's parameters onto a past setup.
-                bm = base[j].get("metadata") or {}
+                bm = base_sig.get("metadata") or {}
                 meta.update({
-                    "base_strategy": self.spec.base_strategy,
+                    "base_strategy": base_sig.get("strategy_name") or self.spec.base_strategy,
                     "base_gate_vector": bm.get("gate_vector"),
                     "base_confluence_tags": bm.get("confluence_tags"),
-                    "base_confluence_score": base[j].get("confluence_score"),
+                    "base_confluence_score": base_sig.get("confluence_score"),
                 })
             signals.append({
                 "symbol": data.symbol,
@@ -813,7 +858,14 @@ class TradingEnv:
         data = self.data
         ep = Episode(symbol=data.symbol, n_bars=len(data), label=label,
                      initial_balance=self.initial_balance)
-        signals = [dict(sig) for _, sig in sorted((data.base_signals or {}).items())]
+        if data.base_multi:
+            # Every strategy's setups - the book of base strategies traded side
+            # by side, untouched. That is what an agent picking among them has
+            # to beat, not any single one of them.
+            signals = [dict(sig) for _, sigs in sorted(data.base_multi.items())
+                       for sig in sigs]
+        else:
+            signals = [dict(sig) for _, sig in sorted((data.base_signals or {}).items())]
         if not signals:
             return ep
         ep.n_signals = len(signals)

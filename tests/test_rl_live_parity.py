@@ -196,4 +196,4 @@ def test_the_exit_head_sees_the_same_observation_as_the_entry_head(bars):
     from backend.strategies.strategy_rl.engine import RLStrategy
 
     src = inspect.getsource(RLStrategy)
-    assert src.count("self._observe(candles)") >= 2
+    assert src.count("self._observe(candles, symbol)") >= 2

@@ -207,11 +207,14 @@ def test_more_return_is_always_more_reward():
         assert hi.money > lo.money
 
 
-def test_money_left_on_the_table_costs_the_bonus_and_not_the_balance():
-    """"It doesn't get deducted - it doesn't get the reward." """
+def test_money_left_on_the_table_costs_the_bonus_and_a_wrong_call():
+    """The capture bonus is still withheld rather than charged. Since
+    2026-10-18 the EXIT CALL is charged: this trade would have reached 3R, not
+    its stop, so closing it was a wrong call (-1 x EXIT_CALL_WEIGHT)."""
     poor = rw.TradeReward(r_net=0.3, adherence=1.0, counterfactual_r=3.0)
     assert poor.capture == 0.0, "10% of what was available earns no bonus"
-    assert poor.money == pytest.approx(0.3), "and is not charged for the rest"
+    assert poor.exit_call == -1.0
+    assert poor.money == pytest.approx(0.3 - rw.EXIT_CALL_WEIGHT)
     assert poor.left_on_table == pytest.approx(2.7)
 
 
@@ -242,12 +245,40 @@ def test_cutting_a_loser_is_paid_for():
     assert cut.money > held.money
 
 
-def test_cutting_a_winner_earns_no_bonus_at_all():
-    """Not charged, but it gets nothing: no capture credit and nothing for a
-    loss it did not avoid."""
+def test_cutting_a_winner_is_a_wrong_call():
+    """No capture credit, nothing for a loss it did not avoid, and the exit
+    call is charged: the trade was going to its target, not its stop."""
     cut = rw.TradeReward(r_net=0.4, adherence=1.0, counterfactual_r=3.0)
     assert cut.capture == 0.0 and cut.loss_avoided == 0.0
-    assert cut.money == pytest.approx(0.4)
+    assert cut.money == pytest.approx(0.4 - rw.EXIT_CALL_WEIGHT)
+
+
+def test_closing_a_trade_bound_for_its_stop_earns_the_call():
+    """The user's rule: an early close that dodged the stop gets a point."""
+    dodge = rw.TradeReward(r_net=-0.3, adherence=1.0, counterfactual_r=-1.0)
+    assert dodge.exit_call == 1.0
+    assert dodge.money == pytest.approx(
+        -0.3 + rw.CUT_WEIGHT * 0.7 + rw.EXIT_CALL_WEIGHT)
+    # ...and it beats sitting through to the stop by more than the R saved.
+    held = rw.TradeReward(r_net=-1.0, adherence=1.0, counterfactual_r=None)
+    assert dodge.money - held.money > 0.7
+
+
+def test_a_needless_close_costs_even_when_the_trade_drifted():
+    """Would not have hit the stop -> wrong call, even if it also would not
+    have hit the target. Closing early must be a judgement, not a habit."""
+    assert rw.exit_call(-0.4) == -1.0
+    assert rw.exit_call(0.1) == -1.0
+    assert rw.exit_call(-1.0) == 1.0
+    assert rw.exit_call(None) == 0.0
+
+
+def test_the_breakdown_counts_right_and_wrong_calls():
+    out = rw.aggregate([rw.TradeReward(r_net=-0.2, adherence=1.0, counterfactual_r=-1.0),
+                        rw.TradeReward(r_net=-0.2, adherence=1.0, counterfactual_r=-1.0),
+                        rw.TradeReward(r_net=0.5, adherence=1.0, counterfactual_r=2.0),
+                        rw.TradeReward(r_net=1.0, adherence=1.0)])
+    assert (out.exit_calls_right, out.exit_calls_wrong) == (2, 1)
 
 
 def test_loss_avoided_is_one_sided():
@@ -263,12 +294,12 @@ def test_exit_quality_survives_as_a_diagnostic():
     knowing - but no longer inside the money term."""
     t = rw.TradeReward(r_net=0.5, adherence=0.0, counterfactual_r=2.0)
     assert t.exit_quality == pytest.approx(-1.5)
-    # The money is the return plus whatever bonus was earned - never less than
-    # the return. However much was left behind, it is withheld, not charged.
-    assert t.money >= t.r_net
+    # HOW MUCH was left behind is withheld (capture bonus), not charged: the
+    # only charge is the fixed exit-call penalty, the same for 2R or 50R left.
+    assert t.money >= t.r_net - rw.EXIT_CALL_WEIGHT
     worse = rw.TradeReward(r_net=0.5, adherence=0.0, counterfactual_r=50.0)
-    assert worse.money >= worse.r_net
-    assert worse.money <= t.money, "a worse capture earns less bonus, never a charge"
+    assert worse.money >= worse.r_net - rw.EXIT_CALL_WEIGHT
+    assert worse.money <= t.money, "a worse capture earns less bonus, never a bigger charge"
 
 
 def test_the_breakdown_flags_an_exit_head_that_cut_winners():
@@ -303,7 +334,8 @@ def test_the_total_is_the_weighted_sum_of_its_parts():
     t = rw.TradeReward(r_net=1.0, adherence=1.0, counterfactual_r=1.2,
                        money_weight=0.70, adherence_weight=0.30)
     expected_money = (t.realised + rw.CAPTURE_WEIGHT * t.capture
-                      + rw.CUT_WEIGHT * t.loss_avoided)
+                      + rw.CUT_WEIGHT * t.loss_avoided
+                      + rw.EXIT_CALL_WEIGHT * t.exit_call)
     assert t.money == pytest.approx(expected_money)
     assert t.total == pytest.approx(0.70 * t.money + 0.30 * 1.0)
 

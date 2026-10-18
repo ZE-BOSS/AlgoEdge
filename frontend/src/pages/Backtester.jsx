@@ -44,11 +44,12 @@ import RunReport from '../components/RunReport';
 import {
   InSampleGuard, SupervisingAgents, SupervisionReport,
 } from '../components/SupervisingAgents';
-import { useAgentIdLookup, useOverlap } from '../hooks/useAgents';
+import { isAgentStrategy, useAgentIdLookup, useOverlap, useStrategyOptions } from '../hooks/useAgents';
+import CompareStrategies from '../components/CompareStrategies';
 import AnalyzeButton from '../components/AnalyzeButton';
 import ParamsPanel from '../components/ParamsPanel';
 import SlotEditor from '../components/SlotEditor';
-import { STRATEGY_GROUP, STRATEGY_OPTIONS as SLOT_STRATEGY_OPTIONS } from '../components/slotSpec';
+import { STRATEGY_GROUP } from '../components/slotSpec';
 import { useConnectionStore, useAuthStore } from '../store';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
 import * as summaryEngine from '../utils/summaryEngine';
@@ -1275,8 +1276,9 @@ function findLiveSlot(config, symbol, strategyId) {
 
 
 // One list, shared with Settings' trading book (components/slotSpec.js).
-const STRATEGY_OPTIONS = SLOT_STRATEGY_OPTIONS.map(([id, label]) => [id, label]);
-const VALID_STRATEGIES = STRATEGY_OPTIONS.map(([id]) => id);
+// The strategy list (rule-based + approved agents) is built inside the
+// component by `useStrategyOptions` - agents come from the server, not from a
+// constant.
 
 // Builds the backend strategy_params payload for one portfolio symbol/strategy
 // pairing. Portfolio backtests previously only forwarded tuned params for
@@ -1612,6 +1614,9 @@ export default function Backtester() {
   // `const` is in its temporal dead zone until its own declaration runs, and
   // hook arguments are evaluated immediately.
   const agentIdForStrategy = useAgentIdLookup();
+  // Rule-based strategies AND approved agents, one list for every picker here.
+  const strategyOptions = useStrategyOptions();
+  const validStrategies = strategyOptions.map(([id]) => id);
   const overlap = useOverlap({
     agentId: agentIdForStrategy(form.strategy_id),
     symbol: form.symbol,
@@ -2032,15 +2037,21 @@ export default function Backtester() {
 
   const { data: backtests, refetch } = useQuery({ queryKey: ['backtests'], queryFn: () => getBacktests().then(r => r.data), enabled: status === 'ONLINE' && isAuth });
 
-  const mutation = useMutation({
-    mutationFn: () => {
-      cancelResultLoad();
-      setResult(null);
-      setEvents([]);
-      setBtError(null);
-      const validStrats = VALID_STRATEGIES;
-      const payload_strategy = validStrats.includes(form.strategy_id) ? form.strategy_id : 'ORB_v1';
-      const sp = singleSlot.strategy_params || {};
+  // One request builder for a single run AND for each leg of Compare, so a
+  // compared strategy is run on exactly the settings a single run would use.
+  // `strategyId` overrides the form's strategy; the slot's own parameters
+  // only apply to the strategy they were edited for.
+  const buildPayload = (strategyId = form.strategy_id) => {
+      // An id the server does not know (a deleted agent, say) is refused
+      // rather than silently swapped for another strategy: running ORB_v1
+      // and labelling it as the agent was the old behaviour.
+      if (!validStrategies.includes(strategyId)) {
+        throw new Error(`"${strategyId}" is not an available strategy on this server - `
+          + 'an agent is listed only once its charter is APPROVED.');
+      }
+      const payload_strategy = strategyId;
+      const sameAsForm = payload_strategy === form.strategy_id;
+      const sp = sameAsForm ? (singleSlot.strategy_params || {}) : {};
 
       // Account-level risk defaults come from Settings, not from this page: the
       // slot's own values (slot_risk) are layered on top by the backend.
@@ -2067,7 +2078,9 @@ export default function Backtester() {
         },
         strategy_params: sp,
         // This slot's own risk: what the editor shows, which starts from the slot
-        // saved in Settings for this symbol + strategy.
+        // saved in Settings for this symbol + strategy. A Compare leg for a
+        // DIFFERENT strategy keeps the same risk, so the comparison is about
+        // the strategy and not about two different risk settings.
         slot_risk: singleSlot.risk || {},
         // Same switch live uses, so a slot's exits are the slot's exits on both.
         use_strategy_exit_defaults: exitDefaultsForRun(),
@@ -2091,9 +2104,17 @@ export default function Backtester() {
       payload.commission_per_lot = costOrAuto(form.commission_per_lot);
       payload.spread_pips = costOrAuto(form.spread_pips);
       payload.simulate_wicks = form.simulate_wicks ?? true;
+      return payload;
+  };
 
+  const mutation = useMutation({
+    mutationFn: () => {
+      cancelResultLoad();
+      setResult(null);
+      setEvents([]);
+      setBtError(null);
       // Aimed at the chosen box, which may not be the active one.
-      return runBacktest(payload, runServer);
+      return runBacktest(buildPayload(form.strategy_id), runServer);
     },
     onSuccess: res => {
       // Background task started, result will be pushed via WebSocket or polling
@@ -2210,7 +2231,16 @@ export default function Backtester() {
           {activeTab === 'single' ? (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div><label>Strategy Engine</label><select value={VALID_STRATEGIES.includes(form.strategy_id) ? form.strategy_id : 'ORB_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}>{STRATEGY_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></div>
+                <div><label>Strategy Engine</label><select value={validStrategies.includes(form.strategy_id) ? form.strategy_id : 'ORB_v1'} onChange={e => setForm({ ...form, strategy_id: e.target.value })}>
+                  <optgroup label="Strategies">
+                    {strategyOptions.filter(([id]) => !isAgentStrategy(id)).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                  </optgroup>
+                  {strategyOptions.some(([id]) => isAgentStrategy(id)) && (
+                    <optgroup label="Approved agents">
+                      {strategyOptions.filter(([id]) => isAgentStrategy(id)).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                    </optgroup>
+                  )}
+                </select></div>
                 {/* Which box runs it. A backtest reads that server's own MT5
                     terminal, so the broker — and therefore the spread, the
                     swap and the fills — comes from the server you pick here,
@@ -2502,6 +2532,17 @@ export default function Backtester() {
                 </div>
               )}
             </div>
+          )}
+          {/* Strategies and approved agents on the same symbol, window and
+              risk, side by side. Single mode only: it reuses that form. */}
+          {activeTab === 'single' && (
+            <CompareStrategies
+              options={strategyOptions}
+              buildPayload={buildPayload}
+              runServer={runServer}
+              current={form.strategy_id}
+              disabled={status !== 'ONLINE' || isRunning}
+            />
           )}
         </div>
       </div>

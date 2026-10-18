@@ -55,6 +55,36 @@ def _worker_filter(record) -> bool:
     return True
 
 
+def disable_wmi() -> None:
+    """Stop `platform` querying WMI in this process.
+
+    CPython 3.12 on Windows answers `platform.system()` / `uname()` with a WMI
+    query (`_wmi`), and in a SPAWNED pool worker that query invalidates the
+    pool's own queue semaphore: the worker's next `call_queue.get()` dies with
+    "OSError: [WinError 6] The handle is invalid", the pool is marked broken,
+    and every queued job fails with BrokenProcessPool. `truststore` calls
+    `platform.system()` on import, and `aiohttp` / the Telegram service pull it
+    in, so any training job that touched them took the run down - 38 of 40
+    jobs lost (measured 2026-10-18; reproduced with a bare
+    `platform.system()` in an initializer, no project code).
+
+    `_wmi_query` raising OSError is the "WMI not available" path `platform`
+    already handles: it falls back to the `ver` command, slower once and
+    harmless. (Setting `platform._wmi = None` does NOT work - the query then
+    raises AttributeError, which `platform` does not catch.) Called first in
+    every worker initializer.
+    """
+    try:
+        import platform
+
+        def _no_wmi(*_args):
+            raise OSError("WMI disabled in worker processes (see logger.disable_wmi)")
+
+        platform._wmi_query = _no_wmi             # type: ignore[attr-defined]
+    except Exception:                                 # noqa: BLE001
+        pass
+
+
 def configure_worker(role: str = "worker") -> None:
     """Re-point logging for a child process. The process pools pass this as
     their `initializer`, so it runs first in every child.
@@ -72,6 +102,7 @@ def configure_worker(role: str = "worker") -> None:
     """
     global IS_WORKER
     IS_WORKER = True
+    disable_wmi()
     logger.remove()
     logger.add(sys.stderr, level="WARNING", filter=_worker_filter, colorize=True,
                format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | "
@@ -110,7 +141,15 @@ def _install_ws_sink() -> None:
 
 def _install_shared_file_sinks() -> None:
     """backend.log and trades.log. The API process owns these - see
-    `_is_worker_process` for what happened when a child opened them too."""
+    `configure_worker` for what happened when a child held them too.
+
+    `delay=True`: the file is opened on the first write, not when the sink is
+    added. A spawned worker re-imports this module, and without the delay it
+    opened both files for the moment between import and `configure_worker` -
+    long enough for a rotation in the API process to fail (seen 2026-10-17
+    while a training worker was starting). A worker never writes before
+    `configure_worker` runs, so now it never opens them at all.
+    """
     logger.add(
         _LOG_DIR / "backend.log",
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function} | {message}",
@@ -119,6 +158,7 @@ def _install_shared_file_sinks() -> None:
         retention="30 days",
         enqueue=True,
         encoding="utf-8",
+        delay=True,
     )
     # High-value trade/risk events only
     logger.add(
@@ -130,6 +170,7 @@ def _install_shared_file_sinks() -> None:
         filter=lambda rec: any(k in rec["message"] for k in ("[SIZER]", "[ENGINE]", "[MultiTP]", "[RISK]", "Opened", "Closed", "TP", "SL")),
         enqueue=True,
         encoding="utf-8",
+        delay=True,
     )
 
 
