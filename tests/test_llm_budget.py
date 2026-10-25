@@ -8,6 +8,8 @@ context builder that stops truncating.
 """
 
 import json
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -169,3 +171,16 @@ def test_refusal_is_a_message_not_an_exception_to_the_caller():
 
     src = inspect.getsource(llm_service.LLMService._call_anthropic)
     assert "LLM call refused" in src
+
+
+def test_a_default_request_is_one_the_budget_accepts():
+    """The Journal/Backtester "Analyse" asks without a max_tokens; that resolved
+    to the model's 128K ceiling and the budget's 32K per-call guard refused EVERY
+    such call ("requested max_tokens=128,000 exceeds the per-call ceiling")."""
+    from backend.services.llm_budget import LLMBudget, llm_budget
+    from backend.services.llm_service import ANTHROPIC_MODELS, resolve_max_tokens
+    for model in ANTHROPIC_MODELS:
+        n = resolve_max_tokens("anthropic", model)
+        assert n <= llm_budget.max_tokens_per_call
+        LLMBudget(state_path=Path(tempfile.mkdtemp()) / "s.json").check("anthropic", model, n)
+    assert resolve_max_tokens("anthropic", next(iter(ANTHROPIC_MODELS)), 1000) == 1000

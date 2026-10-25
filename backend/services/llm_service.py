@@ -209,6 +209,13 @@ def resolve_max_tokens(provider: str, model: str, requested: int | None = None) 
         ceiling = ANTHROPIC_MODELS.get(model, {}).get("max_output", FALLBACK_MAX_TOKENS)
     else:
         ceiling = FALLBACK_MAX_TOKENS
+    # ...and never above the budget's per-call ceiling. The model ceiling (128K)
+    # predates llm_budget (32K per call), and the budget REFUSES a request over
+    # its ceiling - so every call that did not name a smaller max_tokens (the
+    # Journal and Backtester "Analyse") was refused outright. Capping here keeps
+    # the guard and makes the default request one it accepts.
+    from backend.services.llm_budget import llm_budget
+    ceiling = min(ceiling, int(llm_budget.max_tokens_per_call))
     if requested and requested > 0:
         return min(requested, ceiling)
     return ceiling
