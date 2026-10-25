@@ -1,0 +1,17 @@
+# Instance %i's MT5 screen as VNC, for the browser viewer (deploy/linux/mt5_web_view.sh).
+# LOCALHOST ONLY and no VNC password: the only way in is Caddy's password-protected
+# /mt5/%i/ page. Display :91 -> port 5911, :92 -> 5912.
+[Unit]
+Description=AlgoEdge MT5 screen for the browser (%i)
+After=algoedge-xvfb@%i.service
+Requires=algoedge-xvfb@%i.service
+
+[Service]
+User=algoedge
+EnvironmentFile=/opt/algoedge/%i/instance.env
+ExecStart=/bin/bash -c 'n=$${DISPLAY#:}; exec /usr/bin/x11vnc -display "$DISPLAY" -localhost -rfbport $$((5820 + n)) -forever -shared -nopw -quiet'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

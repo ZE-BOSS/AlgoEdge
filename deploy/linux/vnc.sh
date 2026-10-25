@@ -8,5 +8,6 @@ NAME="${1:?which instance? e.g. demo or live}"
 . "/opt/algoedge/$NAME/instance.env"
 echo "Showing the $NAME MT5 terminal (display $DISPLAY)"
 # A viewer session from before (closed SSH window) may still hold the port.
-pkill -x x11vnc 2>/dev/null && sleep 1
+# Only THIS script's x11vnc (port 5900) - not the browser viewer's ones.
+pkill -f "x11vnc.*-rfbport 5900" 2>/dev/null && sleep 1
 exec sudo -u algoedge x11vnc -display "$DISPLAY" -localhost -rfbport 5900 -forever -shared -nopw

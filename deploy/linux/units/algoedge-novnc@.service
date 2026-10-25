@@ -1,0 +1,17 @@
+# noVNC for instance %i: serves the browser viewer and bridges it to the local
+# VNC screen (algoedge-vncview@%i). Localhost only - Caddy puts it behind a
+# password at https://admin.alphavantiqcapital.com/mt5/%i/. :91 -> 6091, :92 -> 6092.
+[Unit]
+Description=AlgoEdge MT5 browser viewer (%i)
+After=algoedge-vncview@%i.service
+Requires=algoedge-vncview@%i.service
+
+[Service]
+User=algoedge
+EnvironmentFile=/opt/algoedge/%i/instance.env
+ExecStart=/bin/bash -c 'n=$${DISPLAY#:}; exec /usr/bin/websockify --web /usr/share/novnc 127.0.0.1:$$((6000 + n)) 127.0.0.1:$$((5820 + n))'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
