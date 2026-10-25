@@ -1036,6 +1036,10 @@ class BotService:
                             config = UserConfigV2()
                     else:
                         config = UserConfigV2()
+                # What the RUNNING bot scans this cycle - /slot-diagnostics reads
+                # it. Never set before, so that panel saw no slots at all and
+                # called every scanning slot "running but not in the saved config".
+                self.config = config
 
                 from backend.risk.prop_firm_validator import PropFirmValidator
                 from backend.strategies.registry import get_strategy

@@ -189,3 +189,16 @@ def test_the_dashboard_shows_it():
     assert "qk(" in panel, (
         "the query key must carry the server id, or switching boxes shows the "
         "previous one's answer under the new one's name")
+
+
+def test_the_scan_loop_records_the_config_the_endpoint_reads():
+    """/slot-diagnostics reads `bot_service.config`. The scan loop never set it,
+    so the endpoint saw no slots and listed every SCANNING slot as "running but
+    not in the saved config" (live dashboard, 2026-10-25). The loop must record
+    the config it loaded each cycle."""
+    import inspect
+    from backend.services.bot_service import BotService
+    src = inspect.getsource(BotService)
+    loop = src[src.index("while self.running:"):]
+    loaded = loop.index("config = UserConfigV2()")
+    assert "self.config = config" in loop[loaded:loaded + 2000]
