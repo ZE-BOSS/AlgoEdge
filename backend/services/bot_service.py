@@ -1506,6 +1506,10 @@ class BotService:
                                     # $700 account with the $10,000 account's
                                     # balance — over-risking by 14x.
                                     try:
+                                        # Never connected (or dropped): connect before
+                                        # sizing rather than refuse the trade.
+                                        if not getattr(broker, "connected", True) and hasattr(broker, "ensure_connected"):
+                                            await broker.ensure_connected()
                                         if hasattr(broker, "get_live_account_info"):
                                             await broker.get_live_account_info()
                                     except Exception as _acc_err:

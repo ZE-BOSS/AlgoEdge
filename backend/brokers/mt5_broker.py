@@ -415,8 +415,26 @@ class MT5Broker(BaseBroker):
 
 
     # --- BaseBroker Interface Implementation ---
-    
+
     async def initialize(self) -> bool:
+        return await self.connect()
+
+    async def ensure_connected(self) -> bool:
+        """Connect if this broker never has, the way this platform needs.
+
+        On the Linux VPS (MetaTrader5 is the Wine bridge) the terminal is logged
+        in by hand through VNC and keeps its own saved login, so this only
+        ATTACHES to it - no `mt5.login()` with whatever credentials .env holds,
+        which could move a working terminal onto a stale account. Startup used
+        to connect on Windows only, so on Linux the broker was never connected
+        and every trade was refused "broker not connected" (2026-10-25).
+        """
+        if self.connected:
+            return True
+        if mt5 is not None and hasattr(mt5, "bridge_ping"):
+            from types import SimpleNamespace
+            attach_only = SimpleNamespace(path=settings.mt5.path, account=None, password=None, server=None)
+            return await self.connect(config_override=attach_only)
         return await self.connect()
 
     async def shutdown(self):

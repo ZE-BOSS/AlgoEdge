@@ -179,15 +179,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis not available — skipping: {e}")
 
-    # 3. Connect MT5 (only on Windows)
+    # 3. Connect MT5 - on Windows, or on Linux through the Wine bridge
+    # (ALGOEDGE_MT5_BRIDGE; backend/__init__.py installs it as MetaTrader5).
+    # Windows-only here left the VPS broker never connected: every trade was
+    # refused "No MT5 account info available - broker not connected".
     mt5_ok = False
-    if os.name == "nt":
+    if os.name == "nt" or os.environ.get("ALGOEDGE_MT5_BRIDGE"):
         try:
             from backend.brokers.factory import broker_factory
             broker = broker_factory.get_broker("MT5")
-            await broker.connect()
-            mt5_ok = True
-            logger.info("MT5 connected")
+            mt5_ok = bool(await broker.ensure_connected())
+            logger.info("MT5 connected" if mt5_ok else "MT5 connect failed - will retry on the next trade")
         except Exception as e:
             logger.warning(f"MT5 not available — running in mock mode: {e}")
     else:

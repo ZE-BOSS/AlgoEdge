@@ -151,3 +151,45 @@ def test_dotenv_fills_the_key_file_when_only_the_address_is_in_the_environment(t
     import os
     assert os.environ["ALGOEDGE_MT5_BRIDGE"] == "127.0.0.1:18812"      # the environment wins
     assert os.environ["ALGOEDGE_MT5_BRIDGE_KEY_FILE"] == "/k/bridge.key"
+
+
+def test_on_the_bridge_the_broker_attaches_without_logging_in(monkeypatch):
+    """Linux VPS: the terminal is logged in by hand (VNC). The broker must attach
+    and read the account - never mt5.login() with .env credentials, which could
+    move a working terminal onto a stale account. Startup used to skip connecting
+    on Linux entirely, so every trade was refused 'broker not connected'."""
+    import asyncio
+    from backend.brokers import mt5_broker as mb
+    from backend.config import settings
+
+    calls = []
+    acct = collections.namedtuple("AccountInfo", "balance equity margin free_margin leverage login")
+
+    class FakeBridge:
+        def bridge_ping(self): return True
+        def initialize(self, path=None, **k): calls.append(("initialize", path)); return True
+        def login(self, *a, **k): calls.append(("login",)); return True
+        def account_info(self): return acct(1000.0, 1000.0, 0.0, 1000.0, 100, 32283616)
+
+    monkeypatch.setattr(mb, "mt5", FakeBridge())
+    monkeypatch.setattr(settings.mt5, "account", 999, raising=False)
+    monkeypatch.setattr(settings.mt5, "password", "stale", raising=False)
+    monkeypatch.setattr(settings.mt5, "server", "Somewhere", raising=False)
+    broker = mb.MT5Broker()
+    monkeypatch.setattr(broker, "_reconnect_loop", lambda: asyncio.sleep(0))
+
+    async def go():
+        ok = await broker.ensure_connected()
+        assert ok and broker.connected and broker.account_info.balance == 1000.0
+        assert await broker.ensure_connected()            # already connected: no second initialize
+    asyncio.run(go())
+    assert ("login",) not in calls
+    assert [c for c in calls if c[0] == "initialize"].__len__() == 1
+
+
+def test_startup_connects_the_broker_on_the_linux_bridge_too():
+    import inspect
+    import backend.main as m
+    src = inspect.getsource(m)
+    assert 'os.name == "nt" or os.environ.get("ALGOEDGE_MT5_BRIDGE")' in src
+    assert "ensure_connected()" in src
