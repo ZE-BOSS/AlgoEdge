@@ -1,0 +1,15 @@
+# Kronos forecast service - OPTIONAL. Not in requirements.txt on purpose: the
+# trading stack must start without torch. Install into a separate folder:
+#   py -3.12 -m pip install --target .kronos_deps -r requirements-kronos.txt
+# and put .kronos_deps first on PYTHONPATH for the kronos process only.
+# On Windows the PyPI torch wheel is the CPU-only build (~200 MB).
+torch==2.5.1
+einops==0.8.1
+huggingface_hub==0.33.1
+safetensors==0.6.2
+sympy==1.13.1
+networkx==3.4.2
+jinja2==3.1.4
+mpmath==1.3.0
+filelock
+fsspec

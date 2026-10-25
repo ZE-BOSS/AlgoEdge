@@ -78,6 +78,23 @@ MAX_SIGNALS_PER_EPISODE = 5000
 # -- the data an episode runs on --------------------------------------------
 
 
+def _setup_progress(progress, symbol: str, sid: str, k: int, total: int):
+    """A progress callback for one strategy's setup generation, or None.
+
+    Generating setups over 282k bars takes tens of minutes on a 2-core VPS and
+    used to write nothing until every strategy was done - "loading 0.0%, last
+    wrote 4 min ago" looked exactly like a hang (2026-10-19)."""
+    if progress is None:
+        return None
+
+    def cb(frac: float, found: int) -> None:
+        overall = ((k - 1) + frac) / max(1, total)
+        progress.set(stage="loading", stage_detail=(
+            f"{symbol}: {sid} ({k}/{total}) {frac:.0%} through the bars, "
+            f"{found:,} setups so far - {overall:.0%} of setup generation"))
+    return cb
+
+
 @dataclass
 class EpisodeData:
     """One symbol's bars, and the raw features over them.
@@ -113,7 +130,8 @@ class EpisodeData:
     def build(cls, symbol: str, timeframe: str, frame: pd.DataFrame,
               names=None, *, broker: str = "", base_strategy: str = "",
               config=None, frames_by_tf: dict | None = None,
-              base_strategies: tuple = (), configs: dict | None = None) -> "EpisodeData":
+              base_strategies: tuple = (), configs: dict | None = None,
+              progress=None) -> "EpisodeData":
         frame = frame.copy()
         if "time" not in frame.columns:
             frame["time"] = pd.DatetimeIndex(frame.index).as_unit("s").asi8
@@ -128,10 +146,15 @@ class EpisodeData:
             from backend.rl import confluence as cf
 
             frames = bs.index_frames(frames_by_tf or {timeframe: frame})
-            by_strategy = {
-                sid: bs.by_bar(bs.generate(symbol, timeframe, frames, sid,
-                                           (configs or {}).get(sid)))
-                for sid in base_strategies}
+            by_strategy = {}
+            for k, sid in enumerate(base_strategies, 1):
+                by_strategy[sid] = bs.by_bar(bs.generate(
+                    symbol, timeframe, frames, sid, (configs or {}).get(sid),
+                    on_progress=_setup_progress(progress, symbol, sid, k,
+                                                len(base_strategies))))
+                if progress is not None:
+                    progress.event(f"{symbol}: {sid} ({k}/{len(base_strategies)}) found "
+                                   f"{len(by_strategy[sid]):,} setups")
             data.base_strategies = tuple(base_strategies)
             data.base_multi = cf.merge(by_strategy)
             # `base_signals` keeps one setup per row for everything that only
@@ -142,7 +165,9 @@ class EpisodeData:
         elif base_strategy:
             frames = bs.index_frames(frames_by_tf or {timeframe: frame})
             data.base_signals = bs.by_bar(
-                bs.generate(symbol, timeframe, frames, base_strategy, config))
+                bs.generate(symbol, timeframe, frames, base_strategy, config,
+                            on_progress=_setup_progress(progress, symbol, base_strategy,
+                                                        1, 1)))
         return data
 
     def __len__(self) -> int:
@@ -1046,7 +1071,9 @@ def default_risk_config(symbol: str, **overrides) -> dict:
     """
     from backend.api.routes.backtest import BacktestRequest, build_merged_risk_config
 
-    req = BacktestRequest(symbol=symbol, strategy_id="ORB_v1", **{
+    overrides = dict(overrides)
+    sid = overrides.pop("strategy_id", None) or "ORB_v1"
+    req = BacktestRequest(symbol=symbol, strategy_id=sid, **{
         k: v for k, v in overrides.items() if k in BacktestRequest.model_fields})
     cfg = build_merged_risk_config(req)
     cfg.update({k: v for k, v in overrides.items()

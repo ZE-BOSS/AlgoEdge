@@ -187,11 +187,15 @@ class RLStrategy(BaseStrategy):
         """
         if candles is None or len(candles) < 60:
             return None
-        X = feat.matrix(candles, self.spec.features)
-        if not len(X):
-            return None
         _policy, scaler, director = self._model(symbol)
-        scaled = scaler.transform(X[-1:])
+        pre = self._precomputed_row(symbol, candles)
+        if pre is not None:
+            scaled = pre
+        else:
+            X = feat.matrix(candles, self.spec.features)
+            if not len(X):
+                return None
+            scaled = scaler.transform(X[-1:])
         # The charter's gates are named for MARKET features, so adherence is
         # scored on those columns alone - the director's two columns are an
         # input to the policy, not a condition anyone approved.
@@ -202,6 +206,52 @@ class RLStrategy(BaseStrategy):
         if self.spec.multi_base:
             scaled = np.hstack([scaled, self._setup_flags(symbol, candles)[None, :]])
         return scaled[0], obs
+
+    # -- backtest fast path ----------------------------------------------------
+    #
+    # `feat.matrix` over a 1,200-bar window costs ~80 ms, and a backtest called
+    # it on EVERY bar - plus again per open position for the exit head: an
+    # agent backtest over 100k M5 bars needed over two hours and sat at "15%".
+    # In a backtest the whole history is known up front (`BarFeed.bind` calls
+    # this), so the features are computed ONCE over it - which is also exactly
+    # how training computes them - and each bar looks its row up by time.
+    # The window and the full history agree to < 1e-9 at PARITY_WINDOW_BARS
+    # (tests/test_rl_live_parity.py); tests/test_rl_backtest_speed.py checks
+    # the cached and per-bar paths make the same decisions.
+
+    def prepare_backtest(self, symbol: str, frames_by_tf: dict) -> None:
+        frame = (frames_by_tf or {}).get(self.spec.timeframe)
+        if frame is None or len(frame) < 60:
+            return
+        X = feat.matrix(frame, self.spec.features)
+        if len(X) != len(frame):
+            return
+        _policy, scaler, _director = self._model(symbol)
+        times = pd.DatetimeIndex(frame.index).as_unit("s").asi8
+        cache = getattr(self, "_feature_cache", None) or {}
+        cache[symbol] = {"times": times, "scaled": scaler.transform(X),
+                         "atr": feat.atr(frame, 14).to_numpy()}
+        self._feature_cache = cache
+
+    def _cache_index(self, symbol: str, candles: pd.DataFrame) -> int | None:
+        c = (getattr(self, "_feature_cache", None) or {}).get(symbol)
+        if c is None:
+            return None
+        t = int(last_epoch(candles))
+        k = int(np.searchsorted(c["times"], t))
+        return k if k < len(c["times"]) and int(c["times"][k]) == t else None
+
+    def _precomputed_row(self, symbol: str, candles: pd.DataFrame):
+        k = self._cache_index(symbol, candles)
+        if k is None:
+            return None
+        return self._feature_cache[symbol]["scaled"][k:k + 1]
+
+    def _atr_now(self, symbol: str, candles: pd.DataFrame) -> float:
+        k = self._cache_index(symbol, candles)
+        if k is not None:
+            return float(self._feature_cache[symbol]["atr"][k])
+        return float(feat.atr(candles, 14).iloc[-1])
 
     def _setup_flags(self, symbol: str, candles: pd.DataFrame) -> np.ndarray:
         """The confluence inputs for the window's last bar: `confluence.flags_now`
@@ -304,7 +354,7 @@ class RLStrategy(BaseStrategy):
             return None
 
         entry = float(candles["close"].iloc[-1])
-        atr = float(feat.atr(candles, 14).iloc[-1])
+        atr = self._atr_now(symbol, candles)
         if not self.gate("atr_available", np.isfinite(atr) and atr > 0):
             return None
         # Where the stop goes and what the trade is aiming at: the agent's two
@@ -387,7 +437,7 @@ class RLStrategy(BaseStrategy):
             return None
         z, _obs = observed
         price = float(candles["close"].iloc[-1])
-        atr = float(feat.atr(candles, 14).iloc[-1])
+        atr = self._atr_now(symbol, candles)
         decision = xp.decide(
             self._model(symbol)[0], z, position, price=price,
             bars_held=self._bars_held(candles, position),

@@ -544,3 +544,17 @@ export const rl = {
   unsuspend: (id) => api.post(`${RL}/agents/${id}/unsuspend`),
   suspensions: () => api.get(`${RL}/suspensions`),
 };
+
+// ── Kronos (forecast model) ────────────────────────────────────────────────
+//
+// Every model run is a job in its own low-priority server process; these
+// calls only start, poll and cancel jobs and read results.
+const KRONOS = '/kronos';
+export const kronos = {
+  status: () => api.get(`${KRONOS}/status`),
+  jobs: () => api.get(`${KRONOS}/jobs`),
+  job: (id) => api.get(`${KRONOS}/jobs/${id}`),
+  start: (data) => api.post(`${KRONOS}/jobs`, data),
+  cancel: (id) => api.post(`${KRONOS}/jobs/${id}/cancel`),
+  results: () => api.get(`${KRONOS}/results`),
+};

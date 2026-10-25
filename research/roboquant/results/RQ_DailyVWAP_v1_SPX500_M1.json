@@ -1,0 +1,153 @@
+{
+ "strategy": "RQ_DailyVWAP_v1",
+ "symbol": "SPX500",
+ "timeframe": "M1",
+ "claim": "+299.9% | 56.6% win | DD 22.0% | PF 1.84",
+ "server": "FundedNext-Server",
+ "start_requested": "2023-01-01",
+ "real_costs": {
+  "bars": 1221105,
+  "first": "2023-01-02 22:00:00",
+  "last": "2026-10-19 20:57:00",
+  "signals": 334,
+  "all": {
+   "trades": 327,
+   "win_rate": 0.5657,
+   "mean_r": -0.0001,
+   "total_r": -0.04,
+   "profit_factor": 0.998,
+   "max_dd_r": 7.63,
+   "t": -0.01,
+   "return_pct_at_1pct": -0.2,
+   "max_dd_pct_at_1pct": 7.4
+  },
+  "by_year": {
+   "2023": {
+    "trades": 75,
+    "win_rate": 0.5467,
+    "mean_r": -0.0022,
+    "total_r": -0.16,
+    "profit_factor": 0.968,
+    "max_dd_r": 1.91,
+    "t": -0.08,
+    "return_pct_at_1pct": -0.2,
+    "max_dd_pct_at_1pct": 1.9
+   },
+   "2024": {
+    "trades": 98,
+    "win_rate": 0.5204,
+    "mean_r": -0.0473,
+    "total_r": -4.63,
+    "profit_factor": 0.572,
+    "max_dd_r": 5.55,
+    "t": -1.5,
+    "return_pct_at_1pct": -4.6,
+    "max_dd_pct_at_1pct": 5.4
+   },
+   "2025": {
+    "trades": 82,
+    "win_rate": 0.6341,
+    "mean_r": 0.0122,
+    "total_r": 1.0,
+    "profit_factor": 1.182,
+    "max_dd_r": 1.74,
+    "t": 0.39,
+    "return_pct_at_1pct": 1.0,
+    "max_dd_pct_at_1pct": 1.7
+   },
+   "2026": {
+    "trades": 72,
+    "win_rate": 0.5694,
+    "mean_r": 0.0521,
+    "total_r": 3.75,
+    "profit_factor": 1.676,
+    "max_dd_r": 1.9,
+    "t": 1.08,
+    "return_pct_at_1pct": 3.8,
+    "max_dd_pct_at_1pct": 1.9
+   }
+  },
+  "exit_reasons": {
+   "RQ_EMA_EXIT": 315,
+   "SL": 12
+  },
+  "top_blocks": {
+   "same_direction_already_open": 5,
+   "Max positions reached for SPX500 (1/1)": 2
+  },
+  "final_balance": 96093.16665099772
+ },
+ "zero_costs": {
+  "bars": 1221105,
+  "first": "2023-01-02 22:00:00",
+  "last": "2026-10-19 20:57:00",
+  "signals": 334,
+  "all": {
+   "trades": 327,
+   "win_rate": 0.5688,
+   "mean_r": 0.0004,
+   "total_r": 0.13,
+   "profit_factor": 1.005,
+   "max_dd_r": 7.53,
+   "t": 0.02,
+   "return_pct_at_1pct": -0.0,
+   "max_dd_pct_at_1pct": 7.3
+  },
+  "by_year": {
+   "2023": {
+    "trades": 75,
+    "win_rate": 0.5467,
+    "mean_r": -0.0015,
+    "total_r": -0.11,
+    "profit_factor": 0.977,
+    "max_dd_r": 1.88,
+    "t": -0.05,
+    "return_pct_at_1pct": -0.1,
+    "max_dd_pct_at_1pct": 1.9
+   },
+   "2024": {
+    "trades": 98,
+    "win_rate": 0.5204,
+    "mean_r": -0.0467,
+    "total_r": -4.58,
+    "profit_factor": 0.576,
+    "max_dd_r": 5.51,
+    "t": -1.48,
+    "return_pct_at_1pct": -4.5,
+    "max_dd_pct_at_1pct": 5.4
+   },
+   "2025": {
+    "trades": 82,
+    "win_rate": 0.6341,
+    "mean_r": 0.0127,
+    "total_r": 1.04,
+    "profit_factor": 1.189,
+    "max_dd_r": 1.73,
+    "t": 0.41,
+    "return_pct_at_1pct": 1.0,
+    "max_dd_pct_at_1pct": 1.7
+   },
+   "2026": {
+    "trades": 72,
+    "win_rate": 0.5833,
+    "mean_r": 0.0525,
+    "total_r": 3.78,
+    "profit_factor": 1.682,
+    "max_dd_r": 1.89,
+    "t": 1.09,
+    "return_pct_at_1pct": 3.8,
+    "max_dd_pct_at_1pct": 1.9
+   }
+  },
+  "exit_reasons": {
+   "RQ_EMA_EXIT": 315,
+   "SL": 12
+  },
+  "top_blocks": {
+   "same_direction_already_open": 5,
+   "Max positions reached for SPX500 (1/1)": 2
+  },
+  "final_balance": 100111.64354604203
+ },
+ "seconds": 1147
+}

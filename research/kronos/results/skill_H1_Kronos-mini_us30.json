@@ -1,0 +1,95 @@
+{
+ "config": {
+  "model": "Kronos-mini",
+  "lookback": 512,
+  "pred_len": 12,
+  "sample_count": 5,
+  "temperature": 1.0,
+  "top_p": 0.9,
+  "seed": 1234,
+  "threads": 1,
+  "model_root": "models\\kronos"
+ },
+ "model_id": "Kronos-mini@f4e68697-daf3eb66",
+ "args": {
+  "cmd": "skill",
+  "symbols": "US30",
+  "tf": "H1",
+  "start": "2024-07-01",
+  "end": "2026-10-16",
+  "model": "Kronos-mini",
+  "lookback": 512,
+  "pred_len": 12,
+  "samples": 5,
+  "stride": 0,
+  "points": 400,
+  "batch": 4,
+  "threads": 1,
+  "strategies": "ORB_v1,TrendBreakout_v1",
+  "tag": "us30"
+ },
+ "results": {
+  "US30": {
+   "n": 400,
+   "spread_bps": 0.65,
+   "mean_abs_move_bps": 43.28,
+   "kronos": {
+    "trades": 400,
+    "hit_rate": 0.52,
+    "net_bps": 4.714,
+    "t": 1.57
+   },
+   "kronos_confident": {
+    "trades": 230,
+    "hit_rate": 0.5261,
+    "net_bps": 6.159,
+    "t": 1.53
+   },
+   "momentum": {
+    "trades": 400,
+    "hit_rate": 0.5,
+    "net_bps": 0.314,
+    "t": 0.1
+   },
+   "long": {
+    "trades": 400,
+    "hit_rate": 0.525,
+    "net_bps": 1.347,
+    "t": 0.45
+   },
+   "rank_ic": 0.064,
+   "calibration": [
+    {
+     "p_up": "(-0.01, 0.2]",
+     "n": 75,
+     "actual_up": 0.52
+    },
+    {
+     "p_up": "(0.2, 0.4]",
+     "n": 76,
+     "actual_up": 0.474
+    },
+    {
+     "p_up": "(0.4, 0.6]",
+     "n": 94,
+     "actual_up": 0.532
+    },
+    {
+     "p_up": "(0.6, 0.8]",
+     "n": 92,
+     "actual_up": 0.543
+    },
+    {
+     "p_up": "(0.8, 1.01]",
+     "n": 63,
+     "actual_up": 0.556
+    }
+   ],
+   "range_corr": 0.293,
+   "bars": 13561,
+   "first": "2025-12-23 14:00:00",
+   "last": "2026-10-15 03:00:00",
+   "seconds": 1309
+  }
+ }
+}

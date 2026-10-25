@@ -6,6 +6,7 @@ import {
   BarChart3,
   BookOpen,
   Bot,
+  Telescope,
   ChevronLeft,
   ChevronRight,
   FlaskConical,
@@ -48,6 +49,7 @@ const Logs = lazy(() => import('./pages/Logs'));
 const SettingsPage = lazy(() => import('./pages/Settings/index'));
 const Investors = lazy(() => import('./pages/Investors/index'));
 const Agents = lazy(() => import('./pages/Agents'));
+const Kronos = lazy(() => import('./pages/Kronos'));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30000, retry: 1 } },
@@ -94,6 +96,7 @@ function Sidebar({ isCollapsed, setIsCollapsed, isNavOpen, closeNav }) {
     // Admin-only on the server (`require_admin` on the whole /api/rl router);
     // hidden here for operators who are not admins, the same way Investors is.
     ...(user?.is_admin === false ? [] : [{ to: '/agents', icon: Bot, label: 'Agents' }]),
+    ...(user?.is_admin === false ? [] : [{ to: '/kronos', icon: Telescope, label: 'Kronos' }]),
     { to: '/fundamentals', icon: Activity, label: 'Fundamentals' },
     { to: '/analysis', icon: Sparkles, label: 'Analysis' },
     // admin-only on the server; hidden here for operators who are not admins.
@@ -202,6 +205,7 @@ function AppContent() {
               <Route path="/analysis" element={<Analysis />} />
               <Route path="/investors/*" element={<Investors />} />
               <Route path="/agents" element={<Agents />} />
+              <Route path="/kronos" element={<Kronos />} />
               <Route path="/logs" element={<Logs />} />
               <Route path="/settings/*" element={<SettingsPage />} />
             </Routes>

@@ -1,0 +1,219 @@
+{
+ "config": {
+  "model": "Kronos-mini",
+  "lookback": 512,
+  "pred_len": 12,
+  "sample_count": 5,
+  "temperature": 1.0,
+  "top_p": 0.9,
+  "seed": 1234,
+  "threads": 1,
+  "model_root": "models\\kronos"
+ },
+ "model_id": "Kronos-mini@f4e68697-daf3eb66",
+ "args": {
+  "cmd": "skill",
+  "symbols": "MSFT,AMZN,META",
+  "tf": "H1",
+  "start": "2024-07-01",
+  "end": "2026-10-16",
+  "model": "Kronos-mini",
+  "lookback": 512,
+  "pred_len": 12,
+  "samples": 5,
+  "stride": 0,
+  "points": 400,
+  "batch": 4,
+  "threads": 1,
+  "strategies": "ORB_v1,TrendBreakout_v1",
+  "tag": "stocksB"
+ },
+ "results": {
+  "MSFT": {
+   "n": 273,
+   "spread_bps": 0.32,
+   "mean_abs_move_bps": 174.35,
+   "kronos": {
+    "trades": 273,
+    "hit_rate": 0.4579,
+    "net_bps": -8.561,
+    "t": -0.56
+   },
+   "kronos_confident": {
+    "trades": 153,
+    "hit_rate": 0.4575,
+    "net_bps": -6.655,
+    "t": -0.36
+   },
+   "momentum": {
+    "trades": 273,
+    "hit_rate": 0.4799,
+    "net_bps": -6.955,
+    "t": -0.45
+   },
+   "long": {
+    "trades": 273,
+    "hit_rate": 0.5238,
+    "net_bps": 12.168,
+    "t": 0.79
+   },
+   "rank_ic": -0.0404,
+   "calibration": [
+    {
+     "p_up": "(-0.01, 0.2]",
+     "n": 70,
+     "actual_up": 0.571
+    },
+    {
+     "p_up": "(0.2, 0.4]",
+     "n": 52,
+     "actual_up": 0.558
+    },
+    {
+     "p_up": "(0.4, 0.6]",
+     "n": 68,
+     "actual_up": 0.5
+    },
+    {
+     "p_up": "(0.6, 0.8]",
+     "n": 52,
+     "actual_up": 0.423
+    },
+    {
+     "p_up": "(0.8, 1.01]",
+     "n": 31,
+     "actual_up": 0.581
+    }
+   ],
+   "range_corr": 0.071,
+   "bars": 3794,
+   "first": "2024-11-19 14:00:00",
+   "last": "2026-10-13 15:00:00",
+   "seconds": 2429
+  },
+  "AMZN": {
+   "n": 274,
+   "spread_bps": 0.49,
+   "mean_abs_move_bps": 211.42,
+   "kronos": {
+    "trades": 274,
+    "hit_rate": 0.4489,
+    "net_bps": -4.854,
+    "t": -0.27
+   },
+   "kronos_confident": {
+    "trades": 156,
+    "hit_rate": 0.4359,
+    "net_bps": 14.65,
+    "t": 0.62
+   },
+   "momentum": {
+    "trades": 274,
+    "hit_rate": 0.4599,
+    "net_bps": -21.449,
+    "t": -1.19
+   },
+   "long": {
+    "trades": 274,
+    "hit_rate": 0.4891,
+    "net_bps": 12.191,
+    "t": 0.67
+   },
+   "rank_ic": -0.0036,
+   "calibration": [
+    {
+     "p_up": "(-0.01, 0.2]",
+     "n": 75,
+     "actual_up": 0.52
+    },
+    {
+     "p_up": "(0.2, 0.4]",
+     "n": 50,
+     "actual_up": 0.56
+    },
+    {
+     "p_up": "(0.4, 0.6]",
+     "n": 68,
+     "actual_up": 0.515
+    },
+    {
+     "p_up": "(0.6, 0.8]",
+     "n": 48,
+     "actual_up": 0.292
+    },
+    {
+     "p_up": "(0.8, 1.01]",
+     "n": 33,
+     "actual_up": 0.545
+    }
+   ],
+   "range_corr": 0.1,
+   "bars": 3801,
+   "first": "2024-11-15 19:00:00",
+   "last": "2026-10-14 13:00:00",
+   "seconds": 1598
+  },
+  "META": {
+   "n": 274,
+   "spread_bps": 0.3,
+   "mean_abs_move_bps": 237.74,
+   "kronos": {
+    "trades": 274,
+    "hit_rate": 0.4635,
+    "net_bps": 5.561,
+    "t": 0.28
+   },
+   "kronos_confident": {
+    "trades": 161,
+    "hit_rate": 0.4534,
+    "net_bps": -3.943,
+    "t": -0.16
+   },
+   "momentum": {
+    "trades": 274,
+    "hit_rate": 0.4964,
+    "net_bps": -12.289,
+    "t": -0.61
+   },
+   "long": {
+    "trades": 274,
+    "hit_rate": 0.5109,
+    "net_bps": 15.713,
+    "t": 0.78
+   },
+   "rank_ic": 0.0015,
+   "calibration": [
+    {
+     "p_up": "(-0.01, 0.2]",
+     "n": 77,
+     "actual_up": 0.545
+    },
+    {
+     "p_up": "(0.2, 0.4]",
+     "n": 64,
+     "actual_up": 0.531
+    },
+    {
+     "p_up": "(0.4, 0.6]",
+     "n": 49,
+     "actual_up": 0.531
+    },
+    {
+     "p_up": "(0.6, 0.8]",
+     "n": 49,
+     "actual_up": 0.429
+    },
+    {
+     "p_up": "(0.8, 1.01]",
+     "n": 35,
+     "actual_up": 0.486
+    }
+   ],
+   "range_corr": 0.131,
+   "bars": 3801,
+   "first": "2024-11-18 13:00:00",
+   "last": "2026-10-14 13:00:00",
+   "seconds": 1510
+  }
+ }
+}

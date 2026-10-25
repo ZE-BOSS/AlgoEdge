@@ -48,6 +48,20 @@ logger = get_logger(__name__)
 MAX_BASE_SIGNALS = 5000
 
 
+def signal_cap(n_bars: int) -> int:
+    """The cap for a frame of `n_bars`: one setup per 10 bars, never under
+    MAX_BASE_SIGNALS.
+
+    A fixed 5,000 was set for ~80k-bar frames. On 282,463 XAUUSD M5 bars
+    (MT5 max bars = Unlimited) RangeBreakout_v1 finds ~6,800 setups and
+    TrendDrift_v1 ~7,400 (measured 2026-10-19), so both stopped about three
+    quarters of the way through and the most RECENT months - the last test
+    folds, and what live trades - had none of their setups. One per 10 bars is
+    still far below the "re-detects every bar" runaway the cap exists for.
+    """
+    return max(MAX_BASE_SIGNALS, int(n_bars) // 10)
+
+
 def build_strategy(strategy_id: str, config: Any):
     """Construct a registered strategy for signal generation.
 
@@ -115,7 +129,8 @@ def derive_missing(frames_by_tf: dict[str, pd.DataFrame], required: list[str],
 
 
 def generate(symbol: str, timeframe: str, frames_by_tf: dict[str, pd.DataFrame],
-             strategy_id: str, config: Any, *, start_index: int = 300) -> list[dict]:
+             strategy_id: str, config: Any, *, start_index: int = 300,
+             on_progress=None) -> list[dict]:
     """Every signal `strategy_id` finds on these bars, in time order.
 
     `frames_by_tf` must be indexed by bar-open time and sorted, which is what
@@ -144,9 +159,13 @@ def generate(symbol: str, timeframe: str, frames_by_tf: dict[str, pd.DataFrame],
     remap = timeframe in frames_by_tf and primary != timeframe
 
     out: list[dict] = []
+    cap = signal_cap(len(agent_times))
+    step = max(1, len(times) // 50)
 
     async def run() -> None:
         for i in range(int(start_index), len(times)):
+            if on_progress is not None and i % step == 0:
+                on_progress(i / max(1, len(times)), len(out))
             sig = await feed.step(i)
             if not sig:
                 continue
@@ -179,9 +198,9 @@ def generate(symbol: str, timeframe: str, frames_by_tf: dict[str, pd.DataFrame],
                 # live mode B).
                 "bar_index": j - 1,
             })
-            if len(out) >= MAX_BASE_SIGNALS:
+            if len(out) >= cap:
                 logger.warning(
-                    f"[RL] {symbol}/{strategy_id}: base-signal cap {MAX_BASE_SIGNALS} "
+                    f"[RL] {symbol}/{strategy_id}: base-signal cap {cap} "
                     f"reached at bar {i} of {len(times)} — the rest of this frame is "
                     f"not covered")
                 break

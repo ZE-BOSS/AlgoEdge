@@ -57,6 +57,35 @@ async def run_mt5(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     return await loop.run_in_executor(mt5_executor, fn, *args)
 
 
+# ── Which terminal this process belongs to ───────────────────────────────────
+# Two backends on one machine (demo + live, each with its own MT5 terminal)
+# must never cross over. A bare `mt5.initialize()` attaches to WHATEVER
+# terminal the package finds first, so every reconnect - after the terminal
+# drops its IPC link - used to be a coin flip between the demo account and the
+# live one. Every (re)initialise goes through `reinitialize()`, which reuses
+# the path this process connected with, else MT5_PATH / DERIV_MT5_PATH.
+_terminal_path = ""
+
+
+def remember_terminal(path: str | None) -> None:
+    """Record the terminal path a successful initialize() used."""
+    global _terminal_path
+    if path:
+        _terminal_path = str(path)
+
+
+def terminal_path() -> str:
+    import os
+    return _terminal_path or os.getenv("MT5_PATH", "") or os.getenv("DERIV_MT5_PATH", "")
+
+
+def reinitialize(mt5: Any) -> bool:
+    """`mt5.initialize()` pinned to this process's terminal. Call it on the MT5
+    thread, like any other MT5 call."""
+    path = terminal_path()
+    return bool(mt5.initialize(path=path) if path else mt5.initialize())
+
+
 def run_mt5_sync(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     """Blocking variant, for code that is not async.
 

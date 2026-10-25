@@ -1,0 +1,87 @@
+[32m12:51:38[0m | [1mINFO    [0m | [36mbackend.api.routes.backtest[0m:[36mapply_strategy_params[0m | [1m[BACKTEST] FibTrend_v1 on EURUSD: applied measured per-symbol params {'entry_mode': 'immediate', 'stop_level': 0.5, 'swing_bars': 3} (SYNTH_SLOT_PARAMS)[0m
+[32m12:51:40[0m | [1mINFO    [0m | [36mbackend.mt5.data_fetcher[0m:[36mget_data_range[0m | [1mFetching data range for EURUSD M15: 2023-06-15 11:12:00 \u2192 2026-10-25 00:00:00[0m
+[32m12:51:41[0m | [33m[1mWARNING [0m | [36mbackend.mt5.data_fetcher[0m:[36mensure_symbol[0m | [33m[1mMT5 connection lost in DataFetcher. Re-initialising IPC...[0m
+[32m12:51:42[0m | [1mINFO    [0m | [36mbackend.mt5.data_fetcher[0m:[36m_offset_from_volume_profile[0m | [1m[DATA] Server offset from US Tech 100's cash open: +0.0h[0m
+[32m12:51:42[0m | [1mINFO    [0m | [36mbackend.mt5.data_fetcher[0m:[36mdetect_server_utc_offset_hours[0m | [1m[DATA] MT5 server UTC offset pinned by .env: +0.0h (matches the bars)[0m
+[32m12:51:42[0m | [1mINFO    [0m | [36mbackend.mt5.data_fetcher[0m:[36mget_data_range[0m | [1mFetched 66736 candles for EURUSD M15 (2023-06-15 \u2192 2026-10-25)[0m
+[32m12:55:54[0m | [1mINFO    [0m | [36mbackend.api.routes.backtest[0m:[36mbuild_merged_risk_config[0m | [1m[BACKTEST] Applied FibTrend_v1 exit defaults: {'be_mode': 'NONE', 'trail_method_tp1': 'NONE', 'trail_mode': 'NONE'} | research/fib 2026-10-25, H4 structure, 2023-10 -> 2026-10, 20 sign-flip surrogates per market. Synthetics (12): fib 0.5 pullback with the 50-day trend, K=5 legs, 3x H4 ATR trail: +0.183R, +0.202R above surrogate, p<0.05, positive 7 of 8 years. Real CFDs (8): same trend + trail entered at once (no fib): +0.189R, p 0.05, carried by XAUUSD, XAGUSD, BTCUSD; Wall Street 30 negative. Not significant after correcting for 9 variants; swap not modelled. The user's fixed fib-0 target rule was break-even on every market.[0m
+[32m12:55:54[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mfreeze_symbol_info[0m | [1m[SIZER] Symbol info FROZEN for this run — sizing and PnL will use identical values.[0m
+[32m12:55:54[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] \u2550\u2550\u2550 Starting backtest engine \u2550\u2550\u2550[0m
+[32m12:55:54[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Balance: $10000.0 | Signals: 109 | Candles: 66736[0m
+[32m12:55:54[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Risk config: risk_pct=1.0% | min_rr=3.0 | tp_count=1[0m
+[32m12:55:54[0m | [1mINFO    [0m | [36mbackend.risk.compounding[0m:[36m_build_live_profile[0m | [1m[PROFILE] EURUSD: using live broker values (lot_max 100.0 -> 50.0)[0m
+[32m12:55:54[0m | [1mINFO    [0m | [36mbackend.risk.broker_costs[0m:[36m_account_wide_commission[0m | [1m[COSTS] EURUSD: no own deal history — using this account's observed FX commission $0.00/lot (5 round turns) instead of the $7.00 default.[0m
+[32m12:55:54[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36m_costs_for[0m | [1m[COSTS] EURUSD | spread=1.30p slippage=0.10p commission=$0.00/lot swap_long=-11.4200/lot/day swap_short=2.6600/lot/day stops_level=2.00p | broker_source=MT5 | per-field={'slippage_pips': 'MT5', 'commission_per_lot': 'MT5', 'spread_pips': 'MT5', 'swap_long_per_lot_per_day': 'MT5', 'swap_short_per_lot_per_day': 'MT5', 'stops_level_pips': 'MT5', 'exit_slippage_pips': 'DEFAULT_EQUALS_SLIPPAGE_PIPS'}[0m
+[32m12:55:58[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.17 | risk=$97.49 (0.97%) | source=MT5[0m
+[32m12:55:58[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.45 | risk=$92.03 (0.93%) | source=MT5[0m
+[32m12:55:59[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.42 | risk=$91.35 (0.93%) | source=MT5[0m
+[32m12:56:03[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.35 | risk=$94.67 (0.93%) | source=MT5[0m
+[32m12:56:03[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=2.05 | risk=$71.75 (0.71%) | source=MT5[0m
+[32m12:56:03[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.34 | risk=$93.67 (0.94%) | source=MT5[0m
+[32m12:56:03[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.12 | risk=$90.36 (0.91%) | source=MT5[0m
+[32m12:56:05[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.55 | risk=$89.65 (0.91%) | source=MT5[0m
+[32m12:56:06[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.26 | risk=$92.17 (0.94%) | source=MT5[0m
+[32m12:56:07[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.26 | risk=$92.82 (0.95%) | source=MT5[0m
+[32m12:56:08[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.21 | risk=$91.88 (0.95%) | source=MT5[0m
+[32m12:56:10[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.13 | risk=$91.19 (0.94%) | source=MT5[0m
+[32m12:56:10[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.23 | risk=$89.36 (0.93%) | source=MT5[0m
+[32m12:56:14[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.31 | risk=$96.10 (0.95%) | source=MT5[0m
+[32m12:56:14[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.36 | risk=$92.52 (0.93%) | source=MT5[0m
+[32m12:56:18[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=1.32 | risk=$85.14 (0.82%) | source=MT5[0m
+[32m12:56:18[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.74 | risk=$91.76 (0.89%) | source=MT5[0m
+[32m12:56:19[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.24 | risk=$100.20 (0.94%) | source=MT5[0m
+[32m12:56:20[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=1.06 | risk=$91.16 (0.85%) | source=MT5[0m
+[32m12:56:20[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.44 | risk=$99.00 (0.93%) | source=MT5[0m
+[32m12:56:20[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.37 | risk=$98.42 (0.94%) | source=MT5[0m
+[32m12:56:21[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.16 | risk=$97.84 (0.94%) | source=MT5[0m
+[32m12:56:24[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=1.29 | risk=$90.94 (0.83%) | source=MT5[0m
+[32m12:56:24[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.12 | risk=$99.24 (0.92%) | source=MT5[0m
+[32m12:56:24[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.08 | risk=$98.64 (0.92%) | source=MT5[0m
+[32m12:56:27[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.62 | risk=$98.58 (0.92%) | source=MT5[0m
+[32m12:56:28[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.44 | risk=$100.10 (0.94%) | source=MT5[0m
+[32m12:56:31[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.22 | risk=$102.30 (0.93%) | source=MT5[0m
+[32m12:56:32[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.69 | risk=$99.01 (0.90%) | source=MT5[0m
+[32m12:56:33[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.53 | risk=$99.90 (0.92%) | source=MT5[0m
+[32m12:56:33[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.94 | risk=$94.94 (0.88%) | source=MT5[0m
+[32m12:56:33[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.16 | risk=$102.64 (0.96%) | source=MT5[0m
+[32m12:56:37[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.64 | risk=$98.56 (0.91%) | source=MT5[0m
+[32m12:56:40[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.17 | risk=$108.03 (0.96%) | source=MT5[0m
+[32m12:56:41[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.26 | risk=$104.78 (0.94%) | source=MT5[0m
+[32m12:56:42[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.31 | risk=$102.92 (0.93%) | source=MT5[0m
+[32m12:56:42[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.24 | risk=$105.60 (0.97%) | source=MT5[0m
+[32m12:56:42[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.25 | risk=$100.37 (0.93%) | source=MT5[0m
+[32m12:56:43[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.2 | risk=$101.50 (0.95%) | source=MT5[0m
+[32m12:56:43[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.45 | risk=$98.10 (0.92%) | source=MT5[0m
+[32m12:56:43[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.39 | risk=$98.47 (0.94%) | source=MT5[0m
+[32m12:56:43[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.41 | risk=$97.37 (0.94%) | source=MT5[0m
+[32m12:56:44[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.36 | risk=$96.84 (0.94%) | source=MT5[0m
+[32m12:56:46[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=1.67 | risk=$80.16 (0.77%) | source=MT5[0m
+[32m12:56:46[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.24 | risk=$97.80 (0.95%) | source=MT5[0m
+[32m12:56:49[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.37 | risk=$98.05 (0.95%) | source=MT5[0m
+[32m12:56:51[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.43 | risk=$97.83 (0.94%) | source=MT5[0m
+[32m12:56:52[0m | [33m[1mWARNING [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [33m[1m[SIZER] EURUSD: SL distance 0.000045 (0.45 pips) is below the minimum viable stop 0.000260 — driver: spread x2 (2.60 pips). This stop is untradeable live (spread/stops-level would consume it). Refusing to size — returning 0 lots.[0m
+[32m12:56:52[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.22 | risk=$99.77 (0.97%) | source=MT5[0m
+[32m12:56:53[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.42 | risk=$95.76 (0.94%) | source=MT5[0m
+[32m12:56:55[0m | [1mINFO    [0m | [36mbackend.risk.broker_costs[0m:[36m_account_wide_commission[0m | [1m[COSTS] EURUSD: no own deal history — using this account's observed FX commission $0.00/lot (5 round turns) instead of the $7.00 default.[0m
+[32m12:56:55[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.16 | risk=$104.64 (0.96%) | source=MT5[0m
+[32m12:56:56[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.09 | risk=$101.97 (0.94%) | source=MT5[0m
+[32m12:56:57[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.15 | risk=$100.80 (0.94%) | source=MT5[0m
+[32m12:56:57[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.37 | risk=$98.98 (0.93%) | source=MT5[0m
+[32m12:56:58[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.28 | risk=$100.52 (0.96%) | source=MT5[0m
+[32m12:57:00[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.59 | risk=$99.42 (0.92%) | source=MT5[0m
+[32m12:57:00[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=2.05 | risk=$77.90 (0.73%) | source=MT5[0m
+[32m12:57:00[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.47 | risk=$98.94 (0.93%) | source=MT5[0m
+[32m12:57:00[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.41 | risk=$97.79 (0.93%) | source=MT5[0m
+[32m12:57:04[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.21 | risk=$99.12 (0.94%) | source=MT5[0m
+[32m12:57:05[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.51 | risk=$96.13 (0.92%) | source=MT5[0m
+[32m12:57:05[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.55 | risk=$95.70 (0.92%) | source=MT5[0m
+[32m12:57:05[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.17 | risk=$99.20 (0.97%) | source=MT5[0m
+[32m12:57:08[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.59 | risk=$95.58 (0.91%) | source=MT5[0m
+[32m12:57:08[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] EURUSD: lot=0.98 | risk=$89.18 (0.86%) | source=MT5[0m
+[32m12:57:27[0m | [1mINFO    [0m | [36mbackend.backtester.report[0m:[36mapply_bar_level_drawdown[0m | [1m[REPORT] max_drawdown_pct corrected from closed-trade basis 10.09% -> bar-level basis 16.65% (abs $1,665.24, 66738 equity points) | vs peak: 14.02%[0m
+[32m12:57:27[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] \u2550\u2550\u2550 Backtest engine complete \u2550\u2550\u2550[0m
+[32m12:57:27[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Trades: 64 (19W / 45L) | Invalid: 0[0m
+[32m12:57:27[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] P&L: $283.65 | Final balance: $10283.65[0m
+[32m12:57:27[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Best trade: $675.54 | Worst trade: $-126.05[0m
+[32m12:57:27[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Leg-level hit rates: TP1=0.0% TP2=0.0% TP3=0.0% SL=64.1% BE=0.0% TRAIL=35.9% | max_dd=16.65% (bar-level)[0m
+[32m12:57:27[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Cost model applied: {'EURUSD': {'slippage_pips': 0.1, 'commission_per_lot': 0.0, 'spread_pips': 1.3, 'swap_long_per_lot_per_day': -11.42, 'swap_short_per_lot_per_day': 2.66, 'stops_level_pips': 2.0, 'exit_slippage_pips': 0.1, 'sources': {'slippage_pips': 'MT5', 'commission_per_lot': 'MT5', 'spread_pips': 'MT5', 'swap_long_per_lot_per_day': 'MT5', 'swap_short_per_lot_per_day': 'MT5', 'stops_level_pips': 'MT5', 'exit_slippage_pips': 'DEFAULT_EQUALS_SLIPPAGE_PIPS'}, 'broker_source': 'MT5'}}[0m

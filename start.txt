@@ -4,4 +4,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build-sites.ps1
 pm2 restart all
 pm2 logs
 
-Crash 1000 Index, Vol over Crash 750, Vol over Crash 550 drift-alpha-agent
+X4EWijgi0M5n487FPHopbql3E6W
+
+Ny$?caB3
+
+ssh -L 5901:localhost:5900 root@72.62.213.241 "bash /opt/algoedge/src/deploy/linux/vnc.sh"
+
+localhost::5901

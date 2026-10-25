@@ -199,7 +199,9 @@ class _SynthBase(MaxHoldExit, BaseStrategy):
             return False, f"daily trade cap reached ({used_trades}/{max_trades})"
         max_daily = self._p("max_daily_risk_pct", DEFAULTS["max_daily_risk_pct"])
         used_risk = self.daily_risk_used_pct - (risk_pct if already else 0.0)
-        if used_risk + risk_pct > max_daily:
+        from backend.strategies.core import daily_budget
+        if not daily_budget.allows(used_risk, risk_pct, max_daily,
+                                   strategy_id=getattr(self, "strategy_id", ""), symbol=str(getattr(self, "_budget_symbol", ""))):
             return False, (
                 f"daily risk cap reached ({used_risk:.1f}% used + {risk_pct:.1f}% "
                 f"> {max_daily:.1f}% allowed)"
@@ -231,6 +233,7 @@ class _SynthBase(MaxHoldExit, BaseStrategy):
             self.last_reset_date = bar_date
 
         risk_pct = getattr(getattr(self.config, "risk", None), "risk_per_trade_pct", 1.0)
+        self._budget_symbol = symbol
         _ok, _why = self._budget_available(candles.index[-1], risk_pct)
         # Surfaced rather than returning a bare None: hitting the daily budget
         # is the single most likely reason this strategy stops trading part-way
@@ -285,10 +288,14 @@ class _SynthBase(MaxHoldExit, BaseStrategy):
 
     def _log_budget_block(self, symbol: str, reason: str) -> None:
         """Say once per symbol per day that the budget stopped trading."""
+        # A SET of (symbol, day): the live feed re-primes an engine over past
+        # days, and a single remembered key flipped with every replayed date -
+        # the live log carried the same line 1,000-2,000 times a day.
         key = (symbol, self.last_reset_date)
-        if getattr(self, "_budget_logged", None) == key:
+        logged = self.__dict__.setdefault("_budget_logged_keys", set())
+        if key in logged or self.is_backtesting:
             return
-        self._budget_logged = key
+        logged.add(key)
         msg = f"{self.strategy_id} on {symbol}: no more entries today — {reason}"
         logger.info(f"[SYNTH] {msg}")
         try:

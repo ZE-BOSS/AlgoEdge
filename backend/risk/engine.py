@@ -519,11 +519,23 @@ class RiskEngine:
             # (set in position_sizer.py) already carries the specific one; surface
             # it here instead of discarding it.
             specific_reason = sizer_diag.get("refused_reason") or "zero_lot_size"
+            # The returned reason text is the rejection-funnel KEY, so it must not
+            # carry per-trade numbers (each refusal became its own reason, count 1).
+            # How far off a min-lot refusal is goes into the log details instead.
+            min_lot_detail = (
+                f"the minimum {sizer_diag.get('volume_min')} lot would risk "
+                f"${sizer_diag['min_lot_risk_usd']:,.2f} ({sizer_diag.get('min_lot_risk_pct')}% of this "
+                f"${account_balance:,.0f} account); at the requested risk this trade needs about "
+                f"${sizer_diag.get('balance_needed_at_risk_pct') or 0:,.0f}"
+                if sizer_diag.get("min_lot_risk_usd") is not None else None)
             self._signal_log({
                 "event": "risk_rejected",
                 "reason": specific_reason,
-                "balance": account_balance
+                "balance": account_balance,
+                **({"details": min_lot_detail} if min_lot_detail else {}),
             })
+            if min_lot_detail:
+                logger.info(f"[RISK] {symbol}: below broker minimum lot - {min_lot_detail}")
             reason_text = {
                 "no_instrument_profile": f"No instrument profile or live MT5 data for {symbol} — cannot size a position",
                 "stop_below_min_viable": "Stop distance is inside the minimum viable stop (spread/stops-level would consume it)",

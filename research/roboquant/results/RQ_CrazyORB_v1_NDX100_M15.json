@@ -1,0 +1,105 @@
+{
+ "strategy": "RQ_CrazyORB_v1",
+ "symbol": "NDX100",
+ "timeframe": "M15",
+ "claim": "+594% | 81.3% win | DD 19.0% | PF 1.57",
+ "server": "FundedNext-Server",
+ "start_requested": "2025-09-12",
+ "real_costs": {
+  "bars": 26012,
+  "first": "2025-09-12 00:00:00",
+  "last": "2026-10-19 20:45:00",
+  "signals": 408,
+  "all": {
+   "trades": 408,
+   "win_rate": 0.7966,
+   "mean_r": 0.0714,
+   "total_r": 29.11,
+   "profit_factor": 1.344,
+   "max_dd_r": 8.11,
+   "t": 2.61,
+   "return_pct_at_1pct": 32.9,
+   "max_dd_pct_at_1pct": 7.9
+  },
+  "by_year": {
+   "2025": {
+    "trades": 109,
+    "win_rate": 0.7523,
+    "mean_r": 0.0084,
+    "total_r": 0.91,
+    "profit_factor": 1.033,
+    "max_dd_r": 8.11,
+    "t": 0.15,
+    "return_pct_at_1pct": 0.7,
+    "max_dd_pct_at_1pct": 7.9
+   },
+   "2026": {
+    "trades": 299,
+    "win_rate": 0.8127,
+    "mean_r": 0.0943,
+    "total_r": 28.2,
+    "profit_factor": 1.496,
+    "max_dd_r": 5.38,
+    "t": 3.05,
+    "return_pct_at_1pct": 32.0,
+    "max_dd_pct_at_1pct": 5.3
+   }
+  },
+  "exit_reasons": {
+   "TP1": 325,
+   "SL": 82,
+   "RQ_SESSION_FLAT": 1
+  },
+  "top_blocks": {},
+  "final_balance": 107513.1828106219
+ },
+ "zero_costs": {
+  "bars": 26012,
+  "first": "2025-09-12 00:00:00",
+  "last": "2026-10-19 20:45:00",
+  "signals": 408,
+  "all": {
+   "trades": 408,
+   "win_rate": 0.7966,
+   "mean_r": 0.0729,
+   "total_r": 29.75,
+   "profit_factor": 1.354,
+   "max_dd_r": 8.0,
+   "t": 2.68,
+   "return_pct_at_1pct": 33.8,
+   "max_dd_pct_at_1pct": 7.8
+  },
+  "by_year": {
+   "2025": {
+    "trades": 109,
+    "win_rate": 0.7523,
+    "mean_r": 0.0107,
+    "total_r": 1.17,
+    "profit_factor": 1.042,
+    "max_dd_r": 8.0,
+    "t": 0.19,
+    "return_pct_at_1pct": 1.0,
+    "max_dd_pct_at_1pct": 7.8
+   },
+   "2026": {
+    "trades": 299,
+    "win_rate": 0.8127,
+    "mean_r": 0.0956,
+    "total_r": 28.58,
+    "profit_factor": 1.506,
+    "max_dd_r": 5.3,
+    "t": 3.11,
+    "return_pct_at_1pct": 32.5,
+    "max_dd_pct_at_1pct": 5.2
+   }
+  },
+  "exit_reasons": {
+   "TP1": 325,
+   "SL": 82,
+   "RQ_SESSION_FLAT": 1
+  },
+  "top_blocks": {},
+  "final_balance": 127733.22712570024
+ },
+ "seconds": 466
+}

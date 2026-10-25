@@ -1,0 +1,169 @@
+{
+ "strategy": "RQ_TMeanReversion_v1",
+ "symbol": "NDX100",
+ "timeframe": "H1",
+ "claim": "+708% | 63.4% win | DD 27.7% | PF 2.58",
+ "server": "FundedNext-Server",
+ "start_requested": "2020-01-01",
+ "real_costs": {
+  "bars": 23594,
+  "first": "2022-10-20 09:00:00",
+  "last": "2026-10-19 20:00:00",
+  "signals": 91,
+  "all": {
+   "trades": 91,
+   "win_rate": 0.6374,
+   "mean_r": 0.1079,
+   "total_r": 9.82,
+   "profit_factor": 2.438,
+   "max_dd_r": 1.3,
+   "t": 3.21,
+   "return_pct_at_1pct": 10.3,
+   "max_dd_pct_at_1pct": 1.3
+  },
+  "by_year": {
+   "2022": {
+    "trades": 4,
+    "win_rate": 0.25,
+    "mean_r": -0.2402,
+    "total_r": -0.96,
+    "profit_factor": 0.236,
+    "max_dd_r": 0.96,
+    "t": -1.05,
+    "return_pct_at_1pct": -1.0,
+    "max_dd_pct_at_1pct": 1.0
+   },
+   "2023": {
+    "trades": 23,
+    "win_rate": 0.5652,
+    "mean_r": 0.0643,
+    "total_r": 1.48,
+    "profit_factor": 1.945,
+    "max_dd_r": 0.47,
+    "t": 1.23,
+    "return_pct_at_1pct": 1.5,
+    "max_dd_pct_at_1pct": 0.5
+   },
+   "2024": {
+    "trades": 22,
+    "win_rate": 0.5455,
+    "mean_r": 0.0913,
+    "total_r": 2.01,
+    "profit_factor": 2.429,
+    "max_dd_r": 0.49,
+    "t": 1.55,
+    "return_pct_at_1pct": 2.0,
+    "max_dd_pct_at_1pct": 0.5
+   },
+   "2025": {
+    "trades": 24,
+    "win_rate": 0.75,
+    "mean_r": 0.0858,
+    "total_r": 2.06,
+    "profit_factor": 2.03,
+    "max_dd_r": 1.3,
+    "t": 1.24,
+    "return_pct_at_1pct": 2.1,
+    "max_dd_pct_at_1pct": 1.3
+   },
+   "2026": {
+    "trades": 18,
+    "win_rate": 0.7778,
+    "mean_r": 0.2907,
+    "total_r": 5.23,
+    "profit_factor": 9.698,
+    "max_dd_r": 0.24,
+    "t": 3.73,
+    "return_pct_at_1pct": 5.4,
+    "max_dd_pct_at_1pct": 0.2
+   }
+  },
+  "exit_reasons": {
+   "RQ_CALENDAR_EXIT": 90,
+   "SL": 1
+  },
+  "top_blocks": {},
+  "final_balance": 107979.523144
+ },
+ "zero_costs": {
+  "bars": 23594,
+  "first": "2022-10-20 09:00:00",
+  "last": "2026-10-19 20:00:00",
+  "signals": 91,
+  "all": {
+   "trades": 91,
+   "win_rate": 0.6374,
+   "mean_r": 0.1083,
+   "total_r": 9.86,
+   "profit_factor": 2.446,
+   "max_dd_r": 1.3,
+   "t": 3.22,
+   "return_pct_at_1pct": 10.3,
+   "max_dd_pct_at_1pct": 1.3
+  },
+  "by_year": {
+   "2022": {
+    "trades": 4,
+    "win_rate": 0.25,
+    "mean_r": -0.2395,
+    "total_r": -0.96,
+    "profit_factor": 0.237,
+    "max_dd_r": 0.96,
+    "t": -1.05,
+    "return_pct_at_1pct": -1.0,
+    "max_dd_pct_at_1pct": 1.0
+   },
+   "2023": {
+    "trades": 23,
+    "win_rate": 0.5652,
+    "mean_r": 0.0649,
+    "total_r": 1.49,
+    "profit_factor": 1.956,
+    "max_dd_r": 0.47,
+    "t": 1.24,
+    "return_pct_at_1pct": 1.5,
+    "max_dd_pct_at_1pct": 0.5
+   },
+   "2024": {
+    "trades": 22,
+    "win_rate": 0.5455,
+    "mean_r": 0.0917,
+    "total_r": 2.02,
+    "profit_factor": 2.439,
+    "max_dd_r": 0.49,
+    "t": 1.55,
+    "return_pct_at_1pct": 2.0,
+    "max_dd_pct_at_1pct": 0.5
+   },
+   "2025": {
+    "trades": 24,
+    "win_rate": 0.75,
+    "mean_r": 0.0861,
+    "total_r": 2.07,
+    "profit_factor": 2.036,
+    "max_dd_r": 1.3,
+    "t": 1.25,
+    "return_pct_at_1pct": 2.1,
+    "max_dd_pct_at_1pct": 1.3
+   },
+   "2026": {
+    "trades": 18,
+    "win_rate": 0.7778,
+    "mean_r": 0.291,
+    "total_r": 5.24,
+    "profit_factor": 9.722,
+    "max_dd_r": 0.24,
+    "t": 3.73,
+    "return_pct_at_1pct": 5.4,
+    "max_dd_pct_at_1pct": 0.2
+   }
+  },
+  "exit_reasons": {
+   "RQ_CALENDAR_EXIT": 90,
+   "SL": 1
+  },
+  "top_blocks": {},
+  "final_balance": 109279.30499874668
+ },
+ "seconds": 113
+}

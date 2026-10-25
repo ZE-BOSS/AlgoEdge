@@ -80,7 +80,8 @@ class OrderManager:
         terminal_info = mt5.terminal_info()
         if terminal_info is None or not terminal_info.connected:
             logger.warning("MT5 connection lost in OrderManager. Attempting to re-initialize IPC...")
-            mt5.initialize()
+            from backend.mt5.executor import reinitialize
+            reinitialize(mt5)
             
         action = mt5.ORDER_TYPE_BUY if direction.upper() in ("BUY", "BULLISH") else mt5.ORDER_TYPE_SELL
         

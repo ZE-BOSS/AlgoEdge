@@ -70,6 +70,18 @@ class BarFeed:
         """Frames indexed by bar-open time, sorted ascending, one per timeframe."""
         self.frames = frames_by_tf
         self.times = {tf: frames_by_tf[tf].index.values for tf in self.timeframes}
+        # A backtest hands the engine the WHOLE history once, so an engine whose
+        # per-bar work is a pure function of past bars can compute it in one
+        # vectorised pass instead of once per bar (RLStrategy: 80 ms/bar of
+        # features -> agent backtests crawling at "15%", 2026-10-19). Backtest
+        # only: live re-binds a fresh window on every scan.
+        prep = getattr(self.engine, "prepare_backtest", None)
+        if callable(prep) and getattr(self.engine, "is_backtesting", False) \
+                and not isinstance(self, LiveBarFeed):
+            try:
+                prep(self.symbol, frames_by_tf)
+            except Exception:                           # noqa: BLE001 - per-bar path still works
+                pass
 
     async def step(self, i: int):
         """Feed everything that is new as of primary bar i's open; return the

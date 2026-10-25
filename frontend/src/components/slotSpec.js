@@ -9,15 +9,32 @@ export const STRATEGY_OPTIONS = [
   ['VWAP_v1', 'VWAP Institutional', 'vwap'],
   ['ORB_v1', 'Opening Range Breakout', 'orb'],
   ['TrendBreakout_v1', 'Trend Breakout (Donchian)', 'trend_breakout'],
+  ['FibTrend_v1', 'Fib Trend Pullback (H4 fib + trail)', 'fib_trend'],
   ['OvernightSession_v1', 'Overnight Session (index)', 'overnight_session'],
   ['SpikeResumption_v1', 'Spike Resumption (Boom/Crash)', 'spike_resumption'],
   ['DriftJumpAlpha_v1', 'Drift & Jump Alpha', 'drift_jump_alpha'],
   ['BoomDriftJump_v1', 'Boom Drift & Jump', 'boom_drift_jump'],
-  ['BiasIFVG_v1', 'Bias KeyLevel IFVG', 'bias_ifvg'],
   ['SpikeFade_v1', 'Spike Fade', 'synth'],
   ['RangeRevert_v1', 'Range Revert', 'synth'],
   ['RangeBreakout_v1', 'Range Breakout', 'synth'],
   ['TrendDrift_v1', 'Trend Drift', 'synth'],
+  // Reads forecasts the Kronos page precomputes; no parameter group of its own.
+  ['KRONOS_v1', 'Kronos forecast (confident calls)', 'kronos_strategy'],
+  // Replicated from roboquant.dev templates, 2026-10-19 (research/roboquant).
+  ['RQ_NQPrecision_v1', 'NQ Precision Bot (roboquant)', 'rq_nq_precision'],
+  ['RQ_NYORB_v1', 'NY Open Range Breakout (roboquant)', 'rq_ny_orb'],
+  ['RQ_CrazyORB_v1', 'Crazy ORB (roboquant)', 'rq_crazy_orb'],
+  ['RQ_TMeanReversion_v1', 'T-Mean Reversion (roboquant)', 'rq_t_mean_reversion'],
+  ['RQ_CharlesMonger_v1', 'Charles Monger (roboquant)', 'rq_charles_monger'],
+  ['RQ_FlashTriggerORB_v1', 'Flash Trigger ORB (roboquant)', 'rq_flash_trigger_orb'],
+  ['RQ_ScarfaceORB_v1', 'Scarface ORB (roboquant)', 'rq_scarface_orb'],
+  ['RQ_IVB_v1', 'IVB Initial Volatility Breakout (roboquant)', 'rq_ivb'],
+  ['RQ_GigaORB_v1', 'Giga ORB (roboquant)', 'rq_giga_orb'],
+  ['RQ_SigmaBreakout_v1', 'Sigma Breakout (roboquant)', 'rq_sigma_breakout'],
+  ['RQ_DailyVWAP_v1', 'Daily Anchored VWAP (roboquant)', 'rq_daily_vwap'],
+  ['RQ_FridayRevisit_v1', 'Friday Range Revisit Monday Short (roboquant)', 'rq_friday_revisit'],
+  ['RQ_M30ORB_v1', 'M30 ORB + M5 Breakout (roboquant)', 'rq_m30_orb'],
+  ['RQ_SRSweep_v1', 'S&R Sweep (roboquant)', 'rq_sr_sweep'],
 ];
 
 export const STRATEGY_GROUP = Object.fromEntries(STRATEGY_OPTIONS.map(([id, , g]) => [id, g]));

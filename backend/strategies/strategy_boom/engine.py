@@ -154,7 +154,9 @@ class BoomDriftJumpStrategy(BaseStrategy):
             return None
         risk_pct = getattr(getattr(self.config, "risk", None), "risk_per_trade_pct", 1.0)
         max_daily = getattr(p, "max_daily_risk_pct", 4.0) if p else 4.0
-        if not self.gate("daily_risk_cap", self.daily_risk_used_pct + risk_pct <= max_daily):
+        from backend.strategies.core import daily_budget
+        if not self.gate("daily_risk_cap", daily_budget.allows(self.daily_risk_used_pct, risk_pct, max_daily,
+                                                               strategy_id=getattr(self, "strategy_id", "BoomDriftJump_v1"), symbol=symbol)):
             return None
 
         up_move_atr = (float(bar["high"]) - float(bar["open"])) / atr_val

@@ -1,0 +1,44 @@
+# /etc/caddy/Caddyfile on the Linux VPS - every public address of the site.
+# Caddy gets the HTTPS certificates by itself once each DNS A record points
+# at this VPS (it retries until then). After editing: sudo systemctl reload caddy
+
+(api_proxy) {
+	encode gzip
+	reverse_proxy {args[0]} {
+		transport http {
+			read_timeout 10m
+			write_timeout 10m
+		}
+	}
+}
+
+(spa) {
+	root * {args[0]}
+	encode gzip
+	# Single-page apps: unknown paths load index.html and the app routes them.
+	try_files {path} /index.html
+	file_server
+	header /assets/* Cache-Control "public, max-age=31536000, immutable"
+}
+
+alphavantiqcapital.com, www.alphavantiqcapital.com {
+	root * /var/www/landing
+	encode gzip
+	file_server
+}
+
+admin.alphavantiqcapital.com {
+	import spa /var/www/admin
+}
+
+app.alphavantiqcapital.com {
+	import spa /var/www/app
+}
+
+api.alphavantiqcapital.com {
+	import api_proxy 127.0.0.1:8002
+}
+
+api-demo.alphavantiqcapital.com {
+	import api_proxy 127.0.0.1:8001
+}

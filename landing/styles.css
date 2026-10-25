@@ -222,3 +222,10 @@ input, select, textarea { width: 100%; font: 16px var(--sans); color: var(--text
 .retention th { color: var(--text-2); font-weight: 600; white-space: nowrap; }
 .retention td:first-child { color: var(--text); }
 @media (max-width: 620px) { .retention { font-size: 0.86rem; } .retention th { white-space: normal; } }
+
+/* Hero background: a slowly turning 3D field of candles with an equity ribbon
+   (site.js). Behind the copy, never catches the pointer, hidden for print. */
+.hero { position: relative; isolation: isolate; }
+.hero-3d { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; opacity: 0.5; pointer-events: none; }
+.hero > .hero-copy, .hero > .hero-visual { position: relative; z-index: 1; }
+@media print { .hero-3d { display: none; } }

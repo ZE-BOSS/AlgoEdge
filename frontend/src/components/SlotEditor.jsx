@@ -52,6 +52,7 @@ export default function SlotEditor({
   // An agent has no strategy parameters: its decisions are its frozen policy
   // and approved charter. Falling back to 'orb' showed ORB's fields for it.
   const isAgent = isAgentStrategy(slot.strategy_id);
+  const isKronos = slot.strategy_id === 'KRONOS_v1';
   const group = isAgent ? null : (STRATEGY_GROUP[slot.strategy_id] || 'orb');
   const strategyOptions = useStrategyOptions();
   const set = (patch) => onChange({ ...slot, ...patch });
@@ -140,7 +141,8 @@ export default function SlotEditor({
     const dailyCap = effective(strategyRows, slot.strategy_params, 'max_daily_risk_pct');
     if (dailyCap !== undefined && Number.isFinite(riskPct) && riskPct > Number(dailyCap)) {
       out.push(`Risk per trade (${riskPct}%) is above this strategy's own daily risk cap `
-        + `(${dailyCap}%), so it will refuse every bar before forming a signal. `
+        + `(${dailyCap}%), so it can take at most ONE trade a day (the first is always `
+        + `allowed; every later signal that day is refused). `
         + `Raise "Max daily risk pct" on the Strategy tab, or lower risk per trade.`);
     }
     const tradeCap = effective(strategyRows, slot.strategy_params, 'max_trades_per_day');
@@ -261,6 +263,15 @@ export default function SlotEditor({
           </p>
         ) : tab === 'strategy' ? (
           <>
+            {isKronos && (
+              <p className="slot-editor__note">
+                <b>KRONOS_v1</b> trades Kronos&apos;s direction when its sampled forecasts
+                agree. It reads forecasts computed on the Kronos page, so precompute the
+                same symbol, timeframe and dates there before a backtest, with the same
+                model settings as below. Measured only on SPX500 H1: a forward-test
+                candidate, not a proven edge.
+              </p>
+            )}
             <label className="slot-editor__measured" title="On: this slot runs the settings measured for this symbol. Off: the parameters below apply exactly as entered.">
               <input
                 type="checkbox"

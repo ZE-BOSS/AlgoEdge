@@ -1,0 +1,112 @@
+[32m12:51:47[0m | [1mINFO    [0m | [36mbackend.api.routes.backtest[0m:[36mapply_strategy_params[0m | [1m[BACKTEST] FibTrend_v1 on BTCUSD: applied measured per-symbol params {'entry_mode': 'immediate', 'stop_level': 0.5, 'swing_bars': 3} (SYNTH_SLOT_PARAMS)[0m
+[32m12:51:48[0m | [1mINFO    [0m | [36mbackend.mt5.data_fetcher[0m:[36mget_data_range[0m | [1mFetching data range for BTCUSD M15: 2023-06-15 11:12:00 \u2192 2026-10-25 00:00:00[0m
+[32m12:51:48[0m | [33m[1mWARNING [0m | [36mbackend.mt5.data_fetcher[0m:[36mensure_symbol[0m | [33m[1mMT5 connection lost in DataFetcher. Re-initialising IPC...[0m
+[32m12:51:49[0m | [1mINFO    [0m | [36mbackend.mt5.data_fetcher[0m:[36m_offset_from_volume_profile[0m | [1m[DATA] Server offset from US Tech 100's cash open: +0.0h[0m
+[32m12:51:49[0m | [1mINFO    [0m | [36mbackend.mt5.data_fetcher[0m:[36mdetect_server_utc_offset_hours[0m | [1m[DATA] MT5 server UTC offset pinned by .env: +0.0h (matches the bars)[0m
+[32m12:51:49[0m | [1mINFO    [0m | [36mbackend.mt5.data_fetcher[0m:[36mget_data_range[0m | [1mFetched 88977 candles for BTCUSD M15 (2023-06-15 \u2192 2026-10-25)[0m
+[32m12:57:18[0m | [1mINFO    [0m | [36mbackend.api.routes.backtest[0m:[36mbuild_merged_risk_config[0m | [1m[BACKTEST] Applied FibTrend_v1 exit defaults: {'be_mode': 'NONE', 'trail_method_tp1': 'NONE', 'trail_mode': 'NONE'} | research/fib 2026-10-25, H4 structure, 2023-10 -> 2026-10, 20 sign-flip surrogates per market. Synthetics (12): fib 0.5 pullback with the 50-day trend, K=5 legs, 3x H4 ATR trail: +0.183R, +0.202R above surrogate, p<0.05, positive 7 of 8 years. Real CFDs (8): same trend + trail entered at once (no fib): +0.189R, p 0.05, carried by XAUUSD, XAGUSD, BTCUSD; Wall Street 30 negative. Not significant after correcting for 9 variants; swap not modelled. The user's fixed fib-0 target rule was break-even on every market.[0m
+[32m12:57:18[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mfreeze_symbol_info[0m | [1m[SIZER] Symbol info FROZEN for this run — sizing and PnL will use identical values.[0m
+[32m12:57:18[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] \u2550\u2550\u2550 Starting backtest engine \u2550\u2550\u2550[0m
+[32m12:57:18[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Balance: $10000.0 | Signals: 133 | Candles: 88977[0m
+[32m12:57:18[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Risk config: risk_pct=1.0% | min_rr=3.0 | tp_count=1[0m
+[32m12:57:18[0m | [1mINFO    [0m | [36mbackend.risk.compounding[0m:[36m_build_live_profile[0m | [1m[PROFILE] BTCUSD: using live broker values (point_size 1.0 -> 0.001; point_value_per_lot 1.0 -> 0.001; lot_min 0.001 -> 0.01; lot_step 0.001 -> 0.01)[0m
+[32m12:57:18[0m | [1mINFO    [0m | [36mbackend.risk.broker_costs[0m:[36m_account_wide_commission[0m | [1m[COSTS] BTCUSD: no own deal history — using this account's observed FX commission $0.00/lot (5 round turns) instead of the $0.00 default.[0m
+[32m12:57:18[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36m_costs_for[0m | [1m[COSTS] BTCUSD | spread=18424.00p slippage=1610.87p commission=$0.00/lot swap_long=-44.7465/lot/day swap_short=-44.7465/lot/day stops_level=48326.19p | broker_source=MT5 | per-field={'slippage_pips': 'MT5', 'commission_per_lot': 'MT5', 'spread_pips': 'MT5', 'swap_long_per_lot_per_day': 'MT5', 'swap_short_per_lot_per_day': 'MT5', 'stops_level_pips': 'MT5', 'exit_slippage_pips': 'DEFAULT_EQUALS_SLIPPAGE_PIPS'}[0m
+[32m12:57:24[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.04 | risk=$85.72 (0.86%) | source=MT5[0m
+[32m12:57:25[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.04 | risk=$88.16 (0.89%) | source=MT5[0m
+[32m12:57:27[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.13 | risk=$96.02 (0.95%) | source=MT5[0m
+[32m12:57:27[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.18 | risk=$95.44 (0.96%) | source=MT5[0m
+[32m12:57:27[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.04 | risk=$85.18 (0.86%) | source=MT5[0m
+[32m12:57:28[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.07 | risk=$84.46 (0.86%) | source=MT5[0m
+[32m12:57:29[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.37 | risk=$89.17 (0.92%) | source=MT5[0m
+[32m12:57:29[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.07 | risk=$85.52 (0.89%) | source=MT5[0m
+[32m12:57:30[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.09 | risk=$90.95 (0.96%) | source=MT5[0m
+[32m12:57:32[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.05 | risk=$79.20 (0.84%) | source=MT5[0m
+[32m12:57:37[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.09 | risk=$94.00 (0.97%) | source=MT5[0m
+[32m12:57:37[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.03 | risk=$79.12 (0.83%) | source=MT5[0m
+[32m12:57:38[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.02 | risk=$63.23 (0.67%) | source=MT5[0m
+[32m12:57:48[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.06 | risk=$86.97 (0.88%) | source=MT5[0m
+[32m12:57:49[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.04 | risk=$89.57 (0.91%) | source=MT5[0m
+[32m12:57:49[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.03 | risk=$95.68 (0.98%) | source=MT5[0m
+[32m12:57:50[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.04 | risk=$90.79 (0.94%) | source=MT5[0m
+[32m12:57:52[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.07 | risk=$95.26 (0.98%) | source=MT5[0m
+[32m12:57:52[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.04 | risk=$83.81 (0.87%) | source=MT5[0m
+[32m12:57:52[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.07 | risk=$86.96 (0.91%) | source=MT5[0m
+[32m12:57:53[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.07 | risk=$87.82 (0.93%) | source=MT5[0m
+[32m12:57:55[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.03 | risk=$79.31 (0.84%) | source=MT5[0m
+[32m12:57:56[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.06 | risk=$83.46 (0.88%) | source=MT5[0m
+[32m12:57:56[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.32 | risk=$86.46 (0.92%) | source=MT5[0m
+[32m12:57:56[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.03 | risk=$84.72 (0.91%) | source=MT5[0m
+[32m12:57:57[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.08 | risk=$84.71 (0.91%) | source=MT5[0m
+[32m12:57:57[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.04 | risk=$77.11 (0.83%) | source=MT5[0m
+[32m12:57:58[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.04 | risk=$82.02 (0.89%) | source=MT5[0m
+[32m12:57:58[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.08 | risk=$83.82 (0.90%) | source=MT5[0m
+[32m12:57:58[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.13 | risk=$86.15 (0.93%) | source=MT5[0m
+[32m12:57:58[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.02 | risk=$66.44 (0.73%) | source=MT5[0m
+[32m12:58:00[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.06 | risk=$82.57 (0.90%) | source=MT5[0m
+[32m12:58:01[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.1 | risk=$84.31 (0.89%) | source=MT5[0m
+[32m12:58:01[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.1 | risk=$87.52 (0.94%) | source=MT5[0m
+[32m12:58:01[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.04 | risk=$81.02 (0.85%) | source=MT5[0m
+[32m12:58:02[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.03 | risk=$92.22 (0.96%) | source=MT5[0m
+[32m12:58:03[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.05 | risk=$94.24 (0.98%) | source=MT5[0m
+[32m12:58:03[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.06 | risk=$88.50 (0.93%) | source=MT5[0m
+[32m12:58:04[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.1 | risk=$91.27 (0.91%) | source=MT5[0m
+[32m12:58:04[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.57 | risk=$87.44 (0.88%) | source=MT5[0m
+[32m12:58:04[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.34 | risk=$88.99 (0.91%) | source=MT5[0m
+[32m12:58:05[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.07 | risk=$107.16 (0.93%) | source=MT5[0m
+[32m12:58:05[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.12 | risk=$109.73 (0.96%) | source=MT5[0m
+[32m12:58:05[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.12 | risk=$109.16 (0.96%) | source=MT5[0m
+[32m12:58:05[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.05 | risk=$98.90 (0.88%) | source=MT5[0m
+[32m12:58:06[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.02 | risk=$109.03 (0.98%) | source=MT5[0m
+[32m12:58:06[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.08 | risk=$106.92 (0.97%) | source=MT5[0m
+[32m12:58:06[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.1 | risk=$104.94 (0.96%) | source=MT5[0m
+[32m12:58:06[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.05 | risk=$91.72 (0.85%) | source=MT5[0m
+[32m12:58:06[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.03 | risk=$90.79 (0.85%) | source=MT5[0m
+[32m12:58:07[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.03 | risk=$99.98 (0.94%) | source=MT5[0m
+[32m12:58:08[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.11 | risk=$101.71 (0.93%) | source=MT5[0m
+[32m12:58:08[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.07 | risk=$106.30 (0.98%) | source=MT5[0m
+[32m12:58:09[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.06 | risk=$93.73 (0.88%) | source=MT5[0m
+[32m12:58:09[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.1 | risk=$102.12 (0.96%) | source=MT5[0m
+[32m12:58:09[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.08 | risk=$99.64 (0.95%) | source=MT5[0m
+[32m12:58:09[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.08 | risk=$98.55 (0.95%) | source=MT5[0m
+[32m12:58:09[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.07 | risk=$95.72 (0.93%) | source=MT5[0m
+[32m12:58:10[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.12 | risk=$95.68 (0.93%) | source=MT5[0m
+[32m12:58:10[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.03 | risk=$88.88 (0.87%) | source=MT5[0m
+[32m12:58:11[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.13 | risk=$98.35 (0.93%) | source=MT5[0m
+[32m12:58:11[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.12 | risk=$99.65 (0.95%) | source=MT5[0m
+[32m12:58:11[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.49 | risk=$92.39 (0.89%) | source=MT5[0m
+[32m12:58:11[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.03 | risk=$88.99 (0.86%) | source=MT5[0m
+[32m12:58:11[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.07 | risk=$98.19 (0.96%) | source=MT5[0m
+[32m12:58:11[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.06 | risk=$93.65 (0.92%) | source=MT5[0m
+[32m12:58:12[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.1 | risk=$92.79 (0.92%) | source=MT5[0m
+[32m12:58:12[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.14 | risk=$96.02 (0.96%) | source=MT5[0m
+[32m12:58:13[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.09 | risk=$95.07 (0.95%) | source=MT5[0m
+[32m12:58:14[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.09 | risk=$90.70 (0.90%) | source=MT5[0m
+[32m12:58:14[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.06 | risk=$90.25 (0.89%) | source=MT5[0m
+[32m12:58:15[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.26 | risk=$95.36 (0.93%) | source=MT5[0m
+[32m12:58:15[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.22 | risk=$92.69 (0.92%) | source=MT5[0m
+[32m12:58:15[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.08 | risk=$90.69 (0.90%) | source=MT5[0m
+[32m12:58:16[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.02 | risk=$76.09 (0.77%) | source=MT5[0m
+[32m12:58:16[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.09 | risk=$88.38 (0.89%) | source=MT5[0m
+[32m12:58:16[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.05 | risk=$86.75 (0.88%) | source=MT5[0m
+[32m12:58:16[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.09 | risk=$93.71 (0.96%) | source=MT5[0m
+[32m12:58:18[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.08 | risk=$92.75 (0.93%) | source=MT5[0m
+[32m12:58:18[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.16 | risk=$92.36 (0.94%) | source=MT5[0m
+[32m12:58:18[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.35 | risk=$88.09 (0.90%) | source=MT5[0m
+[32m12:58:18[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.35 | risk=$88.77 (0.92%) | source=MT5[0m
+[32m12:58:18[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.17 | risk=$90.51 (0.95%) | source=MT5[0m
+[32m12:58:18[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.01 | risk=$65.43 (0.58%) | source=MT5[0m
+[32m12:58:19[0m | [1mINFO    [0m | [36mbackend.risk.broker_costs[0m:[36m_account_wide_commission[0m | [1m[COSTS] BTCUSD: no own deal history — using this account's observed FX commission $0.00/lot (5 round turns) instead of the $0.00 default.[0m
+[32m12:58:19[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=1.55 | risk=$81.49 (0.72%) | source=MT5[0m
+[32m12:58:19[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.05 | risk=$97.11 (0.87%) | source=MT5[0m
+[32m12:58:19[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.05 | risk=$102.50 (0.92%) | source=MT5[0m
+[32m12:58:20[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.16 | risk=$106.21 (0.94%) | source=MT5[0m
+[32m12:58:20[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.19 | risk=$107.31 (0.96%) | source=MT5[0m
+[32m12:58:20[0m | [1mINFO    [0m | [36mbackend.risk.position_sizer[0m:[36mcalculate_lot_size[0m | [1m[SIZER] BTCUSD: lot=0.39 | risk=$101.06 (0.91%) | source=MT5[0m
+[32m12:58:28[0m | [1mINFO    [0m | [36mbackend.backtester.report[0m:[36mapply_bar_level_drawdown[0m | [1m[REPORT] max_drawdown_pct corrected from closed-trade basis 20.12% -> bar-level basis 21.44% (abs $2,143.98, 88979 equity points) | vs peak: 18.36%[0m
+[32m12:58:28[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] \u2550\u2550\u2550 Backtest engine complete \u2550\u2550\u2550[0m
+[32m12:58:28[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Trades: 90 (24W / 66L) | Invalid: 0[0m
+[32m12:58:28[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] P&L: $986.52 | Final balance: $10986.52[0m
+[32m12:58:28[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Best trade: $1771.41 | Worst trade: $-117.97[0m
+[32m12:58:28[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Leg-level hit rates: TP1=2.2% TP2=0.0% TP3=0.0% SL=52.2% BE=0.0% TRAIL=45.6% | max_dd=21.44% (bar-level)[0m
+[32m12:58:28[0m | [1mINFO    [0m | [36mbackend.backtester.engine[0m:[36mrun[0m | [1m[ENGINE] Cost model applied: {'BTCUSD': {'slippage_pips': 1610.873, 'commission_per_lot': 0.0, 'spread_pips': 18424.0, 'swap_long_per_lot_per_day': -44.74647222222222, 'swap_short_per_lot_per_day': -44.74647222222222, 'stops_level_pips': 48326.18999999999, 'exit_slippage_pips': 1610.873, 'sources': {'slippage_pips': 'MT5', 'commission_per_lot': 'MT5', 'spread_pips': 'MT5', 'swap_long_per_lot_per_day': 'MT5', 'swap_short_per_lot_per_day': 'MT5', 'stops_level_pips': 'MT5', 'exit_slippage_pips': 'DEFAULT_EQUALS_SLIPPAGE_PIPS'}, 'broker_source': 'MT5'}}[0m

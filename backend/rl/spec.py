@@ -203,8 +203,22 @@ class AgentSpec:
             # The literature's own standing advice, and this project has been
             # burned by single-seed results. Five is the floor, not the target.
             raise ValueError("at least 5 seeds - a one-seed result is not a result")
+        # Worded for the form, not the field names: "cpcv_test_groups must be
+        # fewer than cpcv_groups" was shown for a CPCV groups box that read -15,
+        # and did not say which box was wrong (2026-10-19).
+        if self.cpcv_groups < 3:
+            raise ValueError(
+                f"CPCV groups is {self.cpcv_groups} - it must be at least 3 (8 is the "
+                f"default). It is how many blocks the history is cut into.")
+        if self.cpcv_test_groups < 1:
+            raise ValueError(
+                f"Test groups per path is {self.cpcv_test_groups} - it must be at least 1 "
+                f"(2 is the default).")
         if self.cpcv_test_groups >= self.cpcv_groups:
-            raise ValueError("cpcv_test_groups must be fewer than cpcv_groups")
+            raise ValueError(
+                f"Test groups per path ({self.cpcv_test_groups}) must be smaller than "
+                f"CPCV groups ({self.cpcv_groups}) - you cannot hold back more blocks "
+                f"for testing than the history was cut into.")
         if self.max_cpcv_paths < 8:
             # The gate's own floor. Fewer paths is a cheaper run and a weaker
             # claim, and the claim is the product.

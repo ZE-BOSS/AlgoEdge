@@ -46,6 +46,7 @@ import {
 } from '../components/SupervisingAgents';
 import { isAgentStrategy, useAgentIdLookup, useOverlap, useStrategyOptions } from '../hooks/useAgents';
 import CompareStrategies from '../components/CompareStrategies';
+import { ActivityPulse3D, EquityRibbon3D } from '../components/viz/scenes';
 import AnalyzeButton from '../components/AnalyzeButton';
 import ParamsPanel from '../components/ParamsPanel';
 import SlotEditor from '../components/SlotEditor';
@@ -624,6 +625,12 @@ const BacktestResults = memo(function BacktestResults({ result, onRetryTrades, o
     [result.equity_curve],
   );
   const initialBalance = result.initial_balance || 10000;
+  // The 3D replay reads the same decimated curve plus one marker per trade.
+  const eq3d = useMemo(() => eqData.map((d) => d.equity), [eqData]);
+  const trades3d = useMemo(() => {
+    const n = grouped.length;
+    return grouped.map((g, i) => ({ i, n, pnl: g.net_pnl ?? g.pnl ?? 0 }));
+  }, [grouped]);
   // Which normaliser summaryEngine should use for drawdown %, Sharpe/Sortino
   // and Calmar. Read from the run that produced these trades, not from the
   // live form — an old saved run must keep being scored on ITS basis.
@@ -1031,6 +1038,9 @@ const BacktestResults = memo(function BacktestResults({ result, onRetryTrades, o
       {report.trail_hit_rate != null && report.trail_hit_rate > 0 && <div className="badge badge-blue" style={{ padding: '4px 10px', fontSize: '0.75rem' }}>Trail Exit: {(report.trail_hit_rate * 100).toFixed(0)}%</div>}
     </div>
     <div className="grid-2" style={{ marginBottom: 16 }}>
+      {eqData.length > 1 && (<div className="card" style={{ padding: 12, gridColumn: '1 / -1' }}><h4 style={{ marginBottom: 8 }}>Equity in 3D: curve, drawdown underneath, trades as dots</h4>
+        <EquityRibbon3D equity={eq3d} trades={trades3d} height={240} />
+      </div>)}
       {eqData.length > 1 && (<div className="card" style={{ padding: 12 }}><h4 style={{ marginBottom: 8 }}>Equity Curve</h4>
         <ResponsiveContainer width="100%" height={200}><AreaChart data={chartEqData}><XAxis dataKey="bar" hide /><YAxis domain={['auto', 'auto']} fontSize={10} /><Tooltip formatter={v => `$${v.toFixed(2)}`} /><Area type="monotone" dataKey="equity" stroke="#26b98c" fill="#26b98c1f" strokeWidth={2} /></AreaChart></ResponsiveContainer>
       </div>)}
@@ -2507,6 +2517,11 @@ export default function Backtester() {
             </button>
           </div>
           {(isRunning || progress) && <ProgressBar progress={progress} />}
+          {isRunning && (
+            <ActivityPulse3D pct={progress?.pct ?? null} active
+                             label={`${progress?.message || progress?.stage || 'backtesting'} · ${Math.round(progress?.pct || 0)}%`}
+                             height={150} color="#5b9cf6" />
+          )}
           {mutation.isError && <div style={{ color: 'var(--red)', fontSize: '0.8rem' }}>Error: {mutation.error?.response?.data?.detail || mutation.error?.message || 'Failed'}</div>}
           {btError && (
             <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginTop: 6 }}>

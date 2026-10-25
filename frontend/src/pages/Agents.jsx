@@ -46,6 +46,7 @@ import {
 import { rl } from '../services/api';
 import { qk } from '../services/servers';
 import { useBaseStrategies } from '../hooks/useAgents';
+import { ActivityPulse3D } from '../components/viz/scenes';
 
 const C = {
   dim: '#8b949e', faint: '#6e7681', blue: '#58a6ff', green: '#3fb950',
@@ -429,6 +430,12 @@ function TrainingMonitor({ agent, busy, onCancel }) {
         </button>
       )}
     >
+      {busy && (
+        <ActivityPulse3D pct={pct} active height={170} color={C.purple}
+                         intensity={Math.min(1, (p.running_jobs || 1) / 4)}
+                         label={`${stage || 'training'} · ${total ? `job ${done}/${total}` : `${pct.toFixed(0)}%`}`
+                           + (p.iteration ? ` · iteration ${p.iteration}/${p.iterations}` : '')} />
+      )}
       <div style={{
         height: 8, background: C.raised, borderRadius: 4, overflow: 'hidden',
       }}>
@@ -1217,22 +1224,22 @@ function CreatePanel({ features, onCreated, onCancel, initial, retrainOf }) {
                      onChange={(e) => set('population')(e.target.value)} />
             </Field>
             <Field label="Max CPCV paths" hint="Capped from C(groups, test groups).">
-              <input type="number" value={f.max_cpcv_paths}
+              <input type="number" min={8} step={1} value={f.max_cpcv_paths}
                      onChange={(e) => set('max_cpcv_paths')(e.target.value)} />
             </Field>
             <Field label="CPCV groups" hint="The history is cut into this many blocks.">
-              <input type="number" value={f.cpcv_groups}
+              <input type="number" min={3} step={1} value={f.cpcv_groups}
                      onChange={(e) => set('cpcv_groups')(e.target.value)} />
             </Field>
             <Field label="Test groups per path" hint="Held out, purged and embargoed.">
-              <input type="number" value={f.cpcv_test_groups}
+              <input type="number" min={1} step={1} value={f.cpcv_test_groups}
                      onChange={(e) => set('cpcv_test_groups')(e.target.value)} />
             </Field>
             <Field label="Embargo (bars)"
                    hint="Dropped either side of every test block, so a trade that
                      straddles the cut cannot be scored on rows the policy trained
                      on.">
-              <input type="number" value={f.embargo_bars}
+              <input type="number" min={0} step={1} value={f.embargo_bars}
                      onChange={(e) => set('embargo_bars')(e.target.value)} />
             </Field>
             <Field label="Elite fraction" hint="Top slice CEM keeps each iteration.">

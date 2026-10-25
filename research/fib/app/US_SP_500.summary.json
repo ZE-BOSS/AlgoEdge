@@ -1,0 +1,69 @@
+{
+  "strategy": "FibTrend_v1",
+  "symbol": "US SP 500",
+  "window": [
+    "2023-10-25",
+    "2026-10-25"
+  ],
+  "balance": 10000.0,
+  "risk_pct": 1.0,
+  "sizing_basis": "BALANCE",
+  "signals": 139,
+  "trades": 82,
+  "final_balance": 9833.29,
+  "net_pnl": -166.71,
+  "win_rate": 0.2927,
+  "profit_factor": 0.97,
+  "expectancy_usd": -2.03,
+  "expectancy_r": 0.0037,
+  "max_dd_pct": 21.19,
+  "rejections": {},
+  "costs_resolved": {
+    "slippage_pips": 0.6,
+    "commission_per_lot": 0.0,
+    "spread_pips": 3.5999999999999996,
+    "swap_long_per_lot_per_day": -1.3075062,
+    "swap_short_per_lot_per_day": 0.4011666749999999,
+    "stops_level_pips": 5.0,
+    "exit_slippage_pips": 0.6,
+    "sources": {
+      "slippage_pips": "MT5",
+      "commission_per_lot": "MT5",
+      "spread_pips": "MT5",
+      "swap_long_per_lot_per_day": "MT5",
+      "swap_short_per_lot_per_day": "MT5",
+      "stops_level_pips": "MT5",
+      "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "US SP 500"
+  },
+  "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 80,
+    "gapped_exits": 80,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.051,
+    "max_overshoot_r": 2.2694,
+    "total_overshoot_r": 4.0826,
+    "by_symbol": {
+      "US SP 500": {
+        "stop_exits": 80,
+        "gapped_pct": 100.0,
+        "mean_overshoot_r": 0.051,
+        "max_overshoot_r": 2.2694,
+        "profile_mean": 0.02,
+        "profile_source": "class default \u2014 no tick study",
+        "profile_calibration": "assumed"
+      }
+    }
+  },
+  "exit_reasons": {
+    "SL": 40,
+    "TRAIL_SL": 40,
+    "TP1": 1,
+    "END_OF_DATA": 1
+  },
+  "dumped_trades_to": "research/fib/app/US_SP_500.trades.json"
+}

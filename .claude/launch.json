@@ -1,33 +1,65 @@
-﻿{
+{
   "version": "0.0.1",
   "configurations": [
     {
       "name": "algoedge-backend",
       "runtimeExecutable": "venv_win/Scripts/python.exe",
-      "runtimeArgs": ["-m", "uvicorn", "backend.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "backend.main:app",
+        "--reload",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ],
       "cwd": ".",
       "port": 8000
     },
     {
       "name": "algoedge-audit",
       "runtimeExecutable": "py",
-      "runtimeArgs": ["-3.12", ".claude/audit_server.py"],
+      "runtimeArgs": [
+        "-3.12",
+        ".claude/audit_server.py"
+      ],
       "cwd": ".",
       "port": 8011
     },
     {
       "name": "algoedge-frontend-audit",
       "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "set VITE_DEFAULT_BACKEND_URL=http://localhost:8011&& npx vite --port 5173 --strictPort"],
+      "runtimeArgs": [
+        "/c",
+        "set VITE_DEFAULT_BACKEND_URL=http://localhost:8011&& npx vite --port 5173 --strictPort"
+      ],
       "cwd": "frontend",
       "port": 5173
     },
     {
       "name": "algoedge-frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "cwd": "frontend",
       "port": 5173
+    },
+    {
+      "name": "algoedge-landing",
+      "runtimeExecutable": "py",
+      "runtimeArgs": [
+        "-3.12",
+        "-m",
+        "http.server",
+        "8090",
+        "-d",
+        "landing"
+      ],
+      "cwd": ".",
+      "port": 8090
     }
   ]
 }

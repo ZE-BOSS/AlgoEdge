@@ -1,0 +1,151 @@
+{
+ "strategy": "RQ_ScarfaceORB_v1",
+ "symbol": "NDX100",
+ "timeframe": "M1",
+ "claim": "+48.4% | 41.5% win | DD 7.7% | PF 1.35",
+ "server": "FundedNext-Server",
+ "start_requested": "2023-01-01",
+ "real_costs": {
+  "bars": 1240425,
+  "first": "2023-01-02 22:00:00",
+  "last": "2026-10-19 20:59:00",
+  "signals": 460,
+  "all": {
+   "trades": 459,
+   "win_rate": 0.366,
+   "mean_r": 0.074,
+   "total_r": 33.98,
+   "profit_factor": 1.112,
+   "max_dd_r": 25.41,
+   "t": 1.08,
+   "return_pct_at_1pct": 33.8,
+   "max_dd_pct_at_1pct": 22.9
+  },
+  "by_year": {
+   "2023": {
+    "trades": 88,
+    "win_rate": 0.3636,
+    "mean_r": 0.0615,
+    "total_r": 5.41,
+    "profit_factor": 1.092,
+    "max_dd_r": 12.81,
+    "t": 0.39,
+    "return_pct_at_1pct": 4.6,
+    "max_dd_pct_at_1pct": 12.1
+   },
+   "2024": {
+    "trades": 143,
+    "win_rate": 0.3706,
+    "mean_r": 0.0876,
+    "total_r": 12.53,
+    "profit_factor": 1.134,
+    "max_dd_r": 15.22,
+    "t": 0.71,
+    "return_pct_at_1pct": 11.6,
+    "max_dd_pct_at_1pct": 14.4
+   },
+   "2025": {
+    "trades": 131,
+    "win_rate": 0.3359,
+    "mean_r": -0.0164,
+    "total_r": -2.14,
+    "profit_factor": 0.976,
+    "max_dd_r": 22.85,
+    "t": -0.13,
+    "return_pct_at_1pct": -3.4,
+    "max_dd_pct_at_1pct": 20.9
+   },
+   "2026": {
+    "trades": 97,
+    "win_rate": 0.4021,
+    "mean_r": 0.1875,
+    "total_r": 18.18,
+    "profit_factor": 1.304,
+    "max_dd_r": 7.43,
+    "t": 1.24,
+    "return_pct_at_1pct": 18.7,
+    "max_dd_pct_at_1pct": 7.3
+   }
+  },
+  "exit_reasons": {
+   "TP1": 168,
+   "SL": 291
+  },
+  "top_blocks": {
+   "Stop distance is inside the minimum viable stop (spread/stops-level would consum": 1
+  },
+  "final_balance": 91752.98796327459
+ },
+ "zero_costs": {
+  "bars": 1240425,
+  "first": "2023-01-02 22:00:00",
+  "last": "2026-10-19 20:59:00",
+  "signals": 460,
+  "all": {
+   "trades": 459,
+   "win_rate": 0.366,
+   "mean_r": 0.0858,
+   "total_r": 39.4,
+   "profit_factor": 1.133,
+   "max_dd_r": 24.01,
+   "t": 1.26,
+   "return_pct_at_1pct": 41.3,
+   "max_dd_pct_at_1pct": 21.8
+  },
+  "by_year": {
+   "2023": {
+    "trades": 88,
+    "win_rate": 0.3636,
+    "mean_r": 0.0783,
+    "total_r": 6.89,
+    "profit_factor": 1.121,
+    "max_dd_r": 12.32,
+    "t": 0.5,
+    "return_pct_at_1pct": 6.1,
+    "max_dd_pct_at_1pct": 11.7
+   },
+   "2024": {
+    "trades": 143,
+    "win_rate": 0.3706,
+    "mean_r": 0.1002,
+    "total_r": 14.33,
+    "profit_factor": 1.156,
+    "max_dd_r": 14.55,
+    "t": 0.82,
+    "return_pct_at_1pct": 13.7,
+    "max_dd_pct_at_1pct": 13.8
+   },
+   "2025": {
+    "trades": 131,
+    "win_rate": 0.3359,
+    "mean_r": -0.0052,
+    "total_r": -0.67,
+    "profit_factor": 0.992,
+    "max_dd_r": 22.05,
+    "t": -0.04,
+    "return_pct_at_1pct": -2.0,
+    "max_dd_pct_at_1pct": 20.3
+   },
+   "2026": {
+    "trades": 97,
+    "win_rate": 0.4021,
+    "mean_r": 0.1944,
+    "total_r": 18.86,
+    "profit_factor": 1.319,
+    "max_dd_r": 7.26,
+    "t": 1.29,
+    "return_pct_at_1pct": 19.5,
+    "max_dd_pct_at_1pct": 7.1
+   }
+  },
+  "exit_reasons": {
+   "TP1": 168,
+   "SL": 291
+  },
+  "top_blocks": {
+   "Stop distance is inside the minimum viable stop (spread/stops-level would consum": 1
+  },
+  "final_balance": 126755.04732735304
+ },
+ "seconds": 1677
+}

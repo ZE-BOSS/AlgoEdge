@@ -6,6 +6,7 @@ import { useConnectionStore, useAuthStore } from '../store';
 import AnalyzeButton from '../components/AnalyzeButton';
 import CashLedger from '../components/CashLedger';
 import LearningData from '../components/LearningData';
+import { EquityRibbon3D } from '../components/viz/scenes';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
 
 function MiniChart({ data }) {
@@ -386,11 +387,27 @@ export default function Journal() {
     })).sort((a, b) => new Date(b.firstDate) - new Date(a.firstDate));
   }, [trades, summaryGrouping]);
 
+  // Closed trades as a running balance, oldest first, for the 3D view.
+  const journal3d = React.useMemo(() => {
+    const closed = (trades || []).filter((t) => t.pnl != null)
+      .sort((a, b) => new Date(a.exit_time || a.entry_time || 0) - new Date(b.exit_time || b.entry_time || 0));
+    let bal = closed[0]?.balance_before || 10000;
+    const eq = [bal];
+    closed.forEach((t) => { bal += t.pnl || 0; eq.push(bal); });
+    return { eq, marks: closed.map((t, i) => ({ i: i + 1, n: eq.length, pnl: t.pnl })) };
+  }, [trades]);
+
   return (
     <>
       <div className="page-header">
         <h2><BookOpen size={22} style={{ display: 'inline', marginRight: 8 }} />Trade Journal</h2>
         <p>Complete trade history with AI-powered analysis</p>
+        {journal3d.eq.length > 2 && (
+          <div className="card" style={{ padding: 8, marginTop: 8 }}>
+            <EquityRibbon3D equity={journal3d.eq} trades={journal3d.marks} height={200}
+                            title="closed trades: running balance, drawdown underneath, wins and losses" />
+          </div>
+        )}
         <div style={{ marginTop: 8 }}>
           <AnalyzeButton
             targetType="trades"

@@ -156,17 +156,6 @@ export default function StrategySettings() {
       min_sl_pips: 12.0,
       min_sl_atr_mult: 1.0,
     },
-    bias_ifvg: {
-      session_start: '09:30',
-      session_cutoff: '11:00',
-      max_trades_per_day: 2,
-      target_rr: 2.0,
-      sl_buffer_atr_mult: 0.5,
-      min_sl_pips: 12.0,
-      min_sl_atr_mult: 1.0,
-      a_plus_confluence_threshold: 90,
-      rejection_min_body_atr_mult: 0.15,
-    },
   });
 
   // Load current config from backend

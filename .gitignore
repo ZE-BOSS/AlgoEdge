@@ -124,3 +124,19 @@ data/strike_levels/
 
 # investor app builds uploaded through the admin console (Phase 6)
 data/releases/
+
+# Kronos: weights (download with research/kronos/README) and the torch install
+models/kronos/
+.kronos_deps/
+data/kronos/
+algoedge-src.zip
+
+# Research caches and intermediate runs (2026-10-25): regenerate with the
+# pull/run scripts in each folder. The reports, scripts and final results stay.
+research/fib/cache/
+research/fib/app_k5/
+research/fib/app_offset3/
+research/fib/results/fib_results.json
+research/roboquant/cache/
+# roboquant.dev's own template source and trades - theirs, kept local for comparison only
+research/roboquant/source/

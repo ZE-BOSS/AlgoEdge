@@ -1,0 +1,337 @@
+{
+ "config": {
+  "model": "Kronos-mini",
+  "lookback": 512,
+  "pred_len": 12,
+  "sample_count": 5,
+  "temperature": 1.0,
+  "top_p": 0.9,
+  "seed": 1234,
+  "threads": 1,
+  "model_root": "models\\kronos"
+ },
+ "model_id": "Kronos-mini@f4e68697-daf3eb66",
+ "args": {
+  "cmd": "gate",
+  "symbols": "XAUUSD,NDX100",
+  "tf": "M5",
+  "start": "2025-06-01",
+  "end": "2026-10-16",
+  "model": "Kronos-mini",
+  "lookback": 512,
+  "pred_len": 12,
+  "samples": 5,
+  "stride": 0,
+  "points": 400,
+  "batch": 4,
+  "threads": 1,
+  "strategies": "ORB_v1,TrendBreakout_v1",
+  "tag": "gate_xau_ndx"
+ },
+ "results": {
+  "XAUUSD/ORB_v1": {
+   "agree>=0.6": {
+    "gate": {
+     "enabled": true,
+     "min_agreement": 0.6,
+     "max_dispersion_atr": null,
+     "min_exp_return_atr": null,
+     "fail_mode": "open"
+    },
+    "missing_features": 0,
+    "all": {
+     "trades": 268,
+     "mean_r": 0.0707,
+     "total_r": 18.94,
+     "win_rate": 0.2724,
+     "profit_factor": 1.095,
+     "max_dd_r": 20.1,
+     "t": 0.64
+    },
+    "allowed": {
+     "trades": 146,
+     "mean_r": 0.0761,
+     "total_r": 11.11,
+     "win_rate": 0.274,
+     "profit_factor": 1.102,
+     "max_dd_r": 13.0,
+     "t": 0.51
+    },
+    "rejected": {
+     "trades": 135,
+     "mean_r": 0.0785,
+     "total_r": 10.6,
+     "win_rate": 0.2741,
+     "profit_factor": 1.106,
+     "max_dd_r": 15.93,
+     "t": 0.51
+    }
+   },
+   "agree>=0.8": {
+    "gate": {
+     "enabled": true,
+     "min_agreement": 0.8,
+     "max_dispersion_atr": null,
+     "min_exp_return_atr": null,
+     "fail_mode": "open"
+    },
+    "missing_features": 0,
+    "all": {
+     "trades": 268,
+     "mean_r": 0.0707,
+     "total_r": 18.94,
+     "win_rate": 0.2724,
+     "profit_factor": 1.095,
+     "max_dd_r": 20.1,
+     "t": 0.64
+    },
+    "allowed": {
+     "trades": 66,
+     "mean_r": 0.0722,
+     "total_r": 4.77,
+     "win_rate": 0.2727,
+     "profit_factor": 1.097,
+     "max_dd_r": 10.58,
+     "t": 0.32
+    },
+    "rejected": {
+     "trades": 209,
+     "mean_r": 0.0913,
+     "total_r": 19.07,
+     "win_rate": 0.2775,
+     "profit_factor": 1.123,
+     "max_dd_r": 15.54,
+     "t": 0.73
+    }
+   }
+  },
+  "XAUUSD/TrendBreakout_v1": {
+   "agree>=0.6": {
+    "gate": {
+     "enabled": true,
+     "min_agreement": 0.6,
+     "max_dispersion_atr": null,
+     "min_exp_return_atr": null,
+     "fail_mode": "open"
+    },
+    "missing_features": 0,
+    "all": {
+     "trades": 3,
+     "mean_r": 5.9857,
+     "total_r": 17.96,
+     "win_rate": 0.3333,
+     "profit_factor": 9.791,
+     "max_dd_r": 2.04,
+     "t": 0.85
+    },
+    "allowed": {
+     "trades": 2,
+     "mean_r": 9.4995,
+     "total_r": 19.0,
+     "win_rate": 0.5,
+     "profit_factor": 19.98,
+     "max_dd_r": 1.0,
+     "t": NaN
+    },
+    "rejected": {
+     "trades": 3,
+     "mean_r": 5.9857,
+     "total_r": 17.96,
+     "win_rate": 0.3333,
+     "profit_factor": 9.791,
+     "max_dd_r": 2.04,
+     "t": 0.85
+    }
+   },
+   "agree>=0.8": {
+    "gate": {
+     "enabled": true,
+     "min_agreement": 0.8,
+     "max_dispersion_atr": null,
+     "min_exp_return_atr": null,
+     "fail_mode": "open"
+    },
+    "missing_features": 0,
+    "all": {
+     "trades": 3,
+     "mean_r": 5.9857,
+     "total_r": 17.96,
+     "win_rate": 0.3333,
+     "profit_factor": 9.791,
+     "max_dd_r": 2.04,
+     "t": 0.85
+    },
+    "allowed": {
+     "trades": 1,
+     "mean_r": 20.0,
+     "total_r": 20.0,
+     "win_rate": 1.0,
+     "profit_factor": null,
+     "max_dd_r": 0.0,
+     "t": NaN
+    },
+    "rejected": {
+     "trades": 3,
+     "mean_r": 5.9857,
+     "total_r": 17.96,
+     "win_rate": 0.3333,
+     "profit_factor": 9.791,
+     "max_dd_r": 2.04,
+     "t": 0.85
+    }
+   }
+  },
+  "NDX100/ORB_v1": {
+   "agree>=0.6": {
+    "gate": {
+     "enabled": true,
+     "min_agreement": 0.6,
+     "max_dispersion_atr": null,
+     "min_exp_return_atr": null,
+     "fail_mode": "open"
+    },
+    "missing_features": 0,
+    "all": {
+     "trades": 293,
+     "mean_r": 0.0062,
+     "total_r": 1.83,
+     "win_rate": 0.256,
+     "profit_factor": 1.008,
+     "max_dd_r": 33.6,
+     "t": 0.06
+    },
+    "allowed": {
+     "trades": 136,
+     "mean_r": 0.0705,
+     "total_r": 9.59,
+     "win_rate": 0.2721,
+     "profit_factor": 1.095,
+     "max_dd_r": 15.92,
+     "t": 0.46
+    },
+    "rejected": {
+     "trades": 169,
+     "mean_r": -0.0468,
+     "total_r": -7.91,
+     "win_rate": 0.2426,
+     "profit_factor": 0.94,
+     "max_dd_r": 28.2,
+     "t": -0.35
+    }
+   },
+   "agree>=0.8": {
+    "gate": {
+     "enabled": true,
+     "min_agreement": 0.8,
+     "max_dispersion_atr": null,
+     "min_exp_return_atr": null,
+     "fail_mode": "open"
+    },
+    "missing_features": 0,
+    "all": {
+     "trades": 293,
+     "mean_r": 0.0062,
+     "total_r": 1.83,
+     "win_rate": 0.256,
+     "profit_factor": 1.008,
+     "max_dd_r": 33.6,
+     "t": 0.06
+    },
+    "allowed": {
+     "trades": 80,
+     "mean_r": 0.0316,
+     "total_r": 2.53,
+     "win_rate": 0.2625,
+     "profit_factor": 1.042,
+     "max_dd_r": 15.48,
+     "t": 0.16
+    },
+    "rejected": {
+     "trades": 229,
+     "mean_r": 0.031,
+     "total_r": 7.1,
+     "win_rate": 0.262,
+     "profit_factor": 1.041,
+     "max_dd_r": 32.41,
+     "t": 0.26
+    }
+   }
+  },
+  "NDX100/TrendBreakout_v1": {
+   "agree>=0.6": {
+    "gate": {
+     "enabled": true,
+     "min_agreement": 0.6,
+     "max_dispersion_atr": null,
+     "min_exp_return_atr": null,
+     "fail_mode": "open"
+    },
+    "missing_features": 0,
+    "all": {
+     "trades": 1,
+     "mean_r": 13.7326,
+     "total_r": 13.73,
+     "win_rate": 1.0,
+     "profit_factor": null,
+     "max_dd_r": 0.0,
+     "t": NaN
+    },
+    "allowed": {
+     "trades": 1,
+     "mean_r": 13.5094,
+     "total_r": 13.51,
+     "win_rate": 1.0,
+     "profit_factor": null,
+     "max_dd_r": 0.0,
+     "t": NaN
+    },
+    "rejected": {
+     "trades": 1,
+     "mean_r": 13.7326,
+     "total_r": 13.73,
+     "win_rate": 1.0,
+     "profit_factor": null,
+     "max_dd_r": 0.0,
+     "t": NaN
+    }
+   },
+   "agree>=0.8": {
+    "gate": {
+     "enabled": true,
+     "min_agreement": 0.8,
+     "max_dispersion_atr": null,
+     "min_exp_return_atr": null,
+     "fail_mode": "open"
+    },
+    "missing_features": 0,
+    "all": {
+     "trades": 1,
+     "mean_r": 13.7326,
+     "total_r": 13.73,
+     "win_rate": 1.0,
+     "profit_factor": null,
+     "max_dd_r": 0.0,
+     "t": NaN
+    },
+    "allowed": {
+     "trades": 5,
+     "mean_r": 0.1625,
+     "total_r": 0.81,
+     "win_rate": 0.2,
+     "profit_factor": 1.2,
+     "max_dd_r": 4.06,
+     "t": 0.14
+    },
+    "rejected": {
+     "trades": 1,
+     "mean_r": 13.7326,
+     "total_r": 13.73,
+     "win_rate": 1.0,
+     "profit_factor": null,
+     "max_dd_r": 0.0,
+     "t": NaN
+    }
+   }
+  }
+ }
+}

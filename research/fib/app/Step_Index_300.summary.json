@@ -1,0 +1,82 @@
+{
+  "strategy": "FibTrend_v1",
+  "symbol": "Step Index 300",
+  "window": [
+    "2023-10-25",
+    "2026-10-25"
+  ],
+  "balance": 10000.0,
+  "risk_pct": 1.0,
+  "sizing_basis": "BALANCE",
+  "signals": 27,
+  "trades": 13,
+  "final_balance": 9760.1,
+  "net_pnl": -239.9,
+  "win_rate": 0.2308,
+  "profit_factor": 0.741,
+  "expectancy_usd": -18.45,
+  "expectancy_r": -0.1832,
+  "max_dd_pct": 4.8,
+  "rejections": {
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $141.39 (1.43% of this $9,902 account); at the requested risk this trade needs about $14,139": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $149.78 (1.52% of this $9,852 account); at the requested risk this trade needs about $14,978": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $120.72 (1.24% of this $9,708 account); at the requested risk this trade needs about $12,072": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $155.40 (1.63% of this $9,520 account); at the requested risk this trade needs about $15,540": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $144.20 (1.51% of this $9,520 account); at the requested risk this trade needs about $14,420": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $112.49 (1.16% of this $9,719 account); at the requested risk this trade needs about $11,249": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $111.56 (1.16% of this $9,624 account); at the requested risk this trade needs about $11,156": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $125.88 (1.28% of this $9,857 account); at the requested risk this trade needs about $12,588": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $131.78 (1.35% of this $9,760 account); at the requested risk this trade needs about $13,178": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $127.95 (1.31% of this $9,760 account); at the requested risk this trade needs about $12,795": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $150.19 (1.54% of this $9,760 account); at the requested risk this trade needs about $15,019": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $134.79 (1.38% of this $9,760 account); at the requested risk this trade needs about $13,479": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $240.73 (2.47% of this $9,760 account); at the requested risk this trade needs about $24,073": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $120.20 (1.23% of this $9,760 account); at the requested risk this trade needs about $12,020": 1
+  },
+  "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -1.1027875000000003,
+    "swap_short_per_lot_per_day": -1.1027875000000003,
+    "stops_level_pips": 90.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+      "slippage_pips": "MT5",
+      "commission_per_lot": "MT5",
+      "spread_pips": "MT5",
+      "swap_long_per_lot_per_day": "MT5",
+      "swap_short_per_lot_per_day": "MT5",
+      "stops_level_pips": "MT5",
+      "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Step Index 300"
+  },
+  "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 13,
+    "gapped_exits": 13,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0183,
+    "max_overshoot_r": 0.02,
+    "total_overshoot_r": 0.238,
+    "by_symbol": {
+      "Step Index 300": {
+        "stop_exits": 13,
+        "gapped_pct": 100.0,
+        "mean_overshoot_r": 0.0183,
+        "max_overshoot_r": 0.02,
+        "profile_mean": 0.02,
+        "profile_source": "class default \u2014 no tick study",
+        "profile_calibration": "assumed"
+      }
+    }
+  },
+  "exit_reasons": {
+    "SL": 9,
+    "TRAIL_SL": 4
+  },
+  "dumped_trades_to": "research/fib/app/Step_Index_300.trades.json"
+}

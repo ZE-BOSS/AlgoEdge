@@ -1,0 +1,70 @@
+{
+  "strategy": "FibTrend_v1",
+  "symbol": "Volatility 75 Index",
+  "window": [
+    "2023-10-25",
+    "2026-10-25"
+  ],
+  "balance": 10000.0,
+  "risk_pct": 1.0,
+  "sizing_basis": "BALANCE",
+  "signals": 36,
+  "trades": 29,
+  "final_balance": 10005.69,
+  "net_pnl": 5.69,
+  "win_rate": 0.3448,
+  "profit_factor": 1.003,
+  "expectancy_usd": 0.2,
+  "expectancy_r": 0.0171,
+  "max_dd_pct": 8.59,
+  "rejections": {
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.01 lot would risk $113.15 (1.13% of this $10,000 account); at the requested risk this trade needs about $11,315": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.01 lot would risk $124.31 (1.24% of this $10,000 account); at the requested risk this trade needs about $12,431": 1
+  },
+  "costs_resolved": {
+    "slippage_pips": 1.0,
+    "commission_per_lot": 0.0,
+    "spread_pips": 30.0,
+    "swap_long_per_lot_per_day": -0.07664987499999999,
+    "swap_short_per_lot_per_day": -0.07664987499999999,
+    "stops_level_pips": 10770.0,
+    "exit_slippage_pips": 1.0,
+    "sources": {
+      "slippage_pips": "MT5",
+      "commission_per_lot": "MT5",
+      "spread_pips": "MT5",
+      "swap_long_per_lot_per_day": "MT5",
+      "swap_short_per_lot_per_day": "MT5",
+      "stops_level_pips": "MT5",
+      "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Volatility 75 Index"
+  },
+  "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 29,
+    "gapped_exits": 29,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.018,
+    "max_overshoot_r": 0.02,
+    "total_overshoot_r": 0.5214,
+    "by_symbol": {
+      "Volatility 75 Index": {
+        "stop_exits": 29,
+        "gapped_pct": 100.0,
+        "mean_overshoot_r": 0.018,
+        "max_overshoot_r": 0.02,
+        "profile_mean": 0.02,
+        "profile_source": "class default \u2014 no tick study",
+        "profile_calibration": "assumed"
+      }
+    }
+  },
+  "exit_reasons": {
+    "SL": 13,
+    "TRAIL_SL": 16
+  },
+  "dumped_trades_to": "research/fib/app/Volatility_75_Index.trades.json"
+}

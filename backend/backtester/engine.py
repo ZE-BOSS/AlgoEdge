@@ -29,6 +29,7 @@ from backend.utils.logger import get_logger
 from backend.utils.timeutils import detect_session
 from backend.utils.trade_grouper import group_trades
 from backend.backtester.fill_model import position_fill_key
+from backend.backtester.intrabar import resolve_with_minutes
 from backend.risk.profit_target import note_and_check as _note_and_check
 
 logger = get_logger(__name__)
@@ -288,6 +289,16 @@ def validate_at_fill_price(
         )
 
     return True, "", ""
+
+
+def _as_epoch(t: Any) -> float | None:
+    """Bar time as epoch seconds (the loops carry floats; tolerate datetimes)."""
+    try:
+        if isinstance(t, (int, float, np.integer, np.floating)):
+            return float(t)
+        return float(pd.Timestamp(t).timestamp())
+    except Exception:                                   # noqa: BLE001
+        return None
 
 
 def _resolve_sl_tp_hit(
@@ -557,11 +568,20 @@ class CostModelMixin:
     # +0.09R to +0.01R per trade. The leg is resolved here with the same
     # tie-break and fill model as any other bar, then handed to the normal
     # close pipeline on the next pass with this bar as its exit time.
+    def _intrabar_for(self, pos: dict[str, Any]) -> Any:
+        """One-minute resolver for this position's symbol (None = no M1)."""
+        return getattr(self, "intrabar", {}).get(pos.get("symbol", ""))
+
+    def _bar_secs_for(self, pos: dict[str, Any]) -> float | None:
+        """Length of the bar this position is managed on, in seconds."""
+        return getattr(self, "_bar_secs", None)
+
     def _check_entry_bar_exit(self, pos: dict[str, Any], open_p: float, high: float, low: float,
                               bar_time: Any) -> bool:
-        sl_hit, tp_hit = _resolve_sl_tp_hit(
+        sl_hit, tp_hit = resolve_with_minutes(
+            self._intrabar_for(pos),
             pos["direction"], open_p, high, low, pos["stop_loss"], pos["take_profit"],
-            getattr(self, "_simulate_wicks", True),
+            getattr(self, "_simulate_wicks", True), _as_epoch(bar_time), self._bar_secs_for(pos),
         )
         if not (sl_hit or tp_hit):
             return False
@@ -837,6 +857,11 @@ class BacktestEngine(CostModelMixin):
         freeze_symbol_info()
         # Wick simulation: use OHLC shadow-weighted path model for same-bar SL+TP resolution
         self._simulate_wicks = bool(risk_config.get("simulate_wicks", True))
+        # Optional one-minute bars per symbol (backtester/intrabar.py): a bar
+        # that reaches the stop AND the target is then settled from the minutes
+        # instead of by the conservative guess. Set by the caller.
+        self.intrabar: dict[str, Any] = {}
+        self._bar_secs: float | None = None
         # [P1.2] Realistic stop fills — see backtester/fill_model.py. Built here
         # rather than in portfolio_engine alone so the two engines cannot
         # disagree about what a stopped trade costs.
@@ -990,6 +1015,8 @@ class BacktestEngine(CostModelMixin):
         # (FutureWarning, once per process) that it will start returning a
         # Series - and every RL job worker is a new process. Same ndarray.
         dt_arr = pd.DatetimeIndex(dt_series).to_pydatetime()
+        _diffs = np.diff(np.asarray(time_arr[:5000], dtype=float))
+        self._bar_secs = float(np.median(_diffs[_diffs > 0])) if (_diffs > 0).any() else None
 
         # ── Pre-compute OHLC arrays (vectorized, O(n)) ──
         opens_arr = candles["open"].values.astype(float)
@@ -1070,9 +1097,10 @@ class BacktestEngine(CostModelMixin):
                 # as the real close logic below, instead of a naive TP-touch-only
                 # check that ignores whether the same bar's SL also fired and
                 # which side the tie-break would actually pick.
-                _sl_hit_pp, _tp_hit_pp = _resolve_sl_tp_hit(
-                    _p["direction"], open_p, high, low,
+                _sl_hit_pp, _tp_hit_pp = resolve_with_minutes(
+                    self.intrabar.get(_p.get("symbol", "")), _p["direction"], open_p, high, low,
                     _p["stop_loss"], _p["take_profit"], self._simulate_wicks,
+                    _as_epoch(current_time), self._bar_secs,
                 )
                 if _tp_hit_pp:
                     _tp1_closing_this_bar.add(_p.get("group_id"))
@@ -1171,9 +1199,10 @@ class BacktestEngine(CostModelMixin):
                 _raw_tp_hit = (high >= pos["take_profit"]) if pos["direction"] == "BUY" else (low <= pos["take_profit"])
                 if _raw_sl_hit and _raw_tp_hit:
                     pos["same_bar_ambiguous"] = True  # Tag for reporting
-                sl_hit, tp_hit = _resolve_sl_tp_hit(
-                    pos["direction"], open_p, high, low,
+                sl_hit, tp_hit = resolve_with_minutes(
+                    self.intrabar.get(pos.get("symbol", "")), pos["direction"], open_p, high, low,
                     pos["stop_loss"], pos["take_profit"], self._simulate_wicks,
+                    _as_epoch(current_time), self._bar_secs,
                 )
 
                 # Update MAE/MFE using this bar's high/low BEFORE the exit checks below,

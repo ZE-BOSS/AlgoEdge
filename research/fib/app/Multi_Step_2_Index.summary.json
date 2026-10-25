@@ -1,0 +1,67 @@
+{
+  "strategy": "FibTrend_v1",
+  "symbol": "Multi Step 2 Index",
+  "window": [
+    "2023-10-25",
+    "2026-10-25"
+  ],
+  "balance": 10000.0,
+  "risk_pct": 1.0,
+  "sizing_basis": "BALANCE",
+  "signals": 27,
+  "trades": 24,
+  "final_balance": 11172.24,
+  "net_pnl": 1172.24,
+  "win_rate": 0.4583,
+  "profit_factor": 1.994,
+  "expectancy_usd": 48.84,
+  "expectancy_r": 0.491,
+  "max_dd_pct": 2.48,
+  "rejections": {},
+  "costs_resolved": {
+    "slippage_pips": 0.2,
+    "commission_per_lot": 0.0,
+    "spread_pips": 10.0,
+    "swap_long_per_lot_per_day": -0.3258890277777778,
+    "swap_short_per_lot_per_day": -0.3258890277777778,
+    "stops_level_pips": 96.0,
+    "exit_slippage_pips": 0.2,
+    "sources": {
+      "slippage_pips": "MT5",
+      "commission_per_lot": "MT5",
+      "spread_pips": "MT5",
+      "swap_long_per_lot_per_day": "MT5",
+      "swap_short_per_lot_per_day": "MT5",
+      "stops_level_pips": "MT5",
+      "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Multi Step 2 Index"
+  },
+  "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 24,
+    "gapped_exits": 24,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0152,
+    "max_overshoot_r": 0.0201,
+    "total_overshoot_r": 0.3656,
+    "by_symbol": {
+      "Multi Step 2 Index": {
+        "stop_exits": 24,
+        "gapped_pct": 100.0,
+        "mean_overshoot_r": 0.0152,
+        "max_overshoot_r": 0.0201,
+        "profile_mean": 0.02,
+        "profile_source": "class default \u2014 no tick study",
+        "profile_calibration": "assumed"
+      }
+    }
+  },
+  "exit_reasons": {
+    "SL": 10,
+    "TRAIL_SL": 14
+  },
+  "dumped_trades_to": "research/fib/app/Multi_Step_2_Index.trades.json"
+}

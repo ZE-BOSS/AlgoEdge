@@ -287,8 +287,11 @@ class DriftJumpAlphaEngine(BaseStrategy):
 
         max_daily_risk_pct = getattr(self.params, 'max_daily_risk_pct', 4.0) if self.params else 4.0
         risk_per_trade_pct = getattr(getattr(self.config, 'risk', None), 'risk_per_trade_pct', 1.0)
+        from backend.strategies.core import daily_budget
         if not self.gate("daily_risk_cap",
-                         self.daily_risk_used_pct + risk_per_trade_pct <= max_daily_risk_pct):
+                         daily_budget.allows(self.daily_risk_used_pct, risk_per_trade_pct,
+                                             max_daily_risk_pct, strategy_id=getattr(self, "strategy_id", "DriftJumpAlpha_v1"),
+                                             symbol=symbol)):
             self.log_event(f"[{symbol}] max_daily_risk_pct ({max_daily_risk_pct}%) would be exceeded. Blocking entries.")
             return None
 

@@ -1,0 +1,18 @@
+# The MT5 terminal of instance %i, inside its own Wine prefix.
+[Unit]
+Description=AlgoEdge MT5 terminal (%i)
+After=algoedge-xvfb@%i.service
+Requires=algoedge-xvfb@%i.service
+
+[Service]
+User=algoedge
+EnvironmentFile=/opt/algoedge/%i/instance.env
+Environment=WINEDEBUG=-all "WINEDLLOVERRIDES=mscoree=;mshtml="
+ExecStart=/usr/bin/wine "C:/Program Files/MetaTrader 5/terminal64.exe"
+# Wine children (wineserver) belong to this unit too.
+KillMode=control-group
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

@@ -321,7 +321,8 @@ def ensure_symbol(symbol: str) -> str:
     info = mt5.terminal_info()
     if info is None or not info.connected:
         logger.warning("MT5 connection lost in DataFetcher. Re-initialising IPC...")
-        mt5.initialize()
+        from backend.mt5.executor import reinitialize
+        reinitialize(mt5)
     si = mt5.symbol_info(symbol)
     if si is None:
         if mt5.symbol_select(symbol, True):

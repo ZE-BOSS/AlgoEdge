@@ -1,0 +1,170 @@
+{
+ "RQ_FlashTriggerORB_v1": {
+  "template": "The Flash Trigger ORB",
+  "symbol": "NDX100",
+  "window": [
+   "2023-09-18 15:30:00",
+   "2026-09-14 15:15:00"
+  ],
+  "roboquant_trades": 747,
+  "our_signals": 770,
+  "roboquant_trades_we_also_take": 554,
+  "share": 0.742
+ },
+ "RQ_ScarfaceORB_v1": {
+  "template": "Scarface ORB",
+  "symbol": "NDX100",
+  "window": [
+   "2023-04-19 13:54:00",
+   "2026-09-01 13:50:00"
+  ],
+  "roboquant_trades": 432,
+  "our_signals": 442,
+  "roboquant_trades_we_also_take": 209,
+  "share": 0.484
+ },
+ "RQ_IVB_v1": {
+  "template": "IVB - Initial Volatility Breakout",
+  "symbol": "NDX100",
+  "window": [
+   "2023-04-25 17:05:00",
+   "2026-09-02 15:05:00"
+  ],
+  "roboquant_trades": 315,
+  "our_signals": 360,
+  "roboquant_trades_we_also_take": 55,
+  "share": 0.175
+ },
+ "RQ_GigaORB_v1": {
+  "template": "Giga ORB",
+  "symbol": "NDX100",
+  "window": [
+   "2023-04-20 17:00:00",
+   "2026-09-28 14:15:00"
+  ],
+  "roboquant_trades": 608,
+  "our_signals": 679,
+  "roboquant_trades_we_also_take": 386,
+  "share": 0.635
+ },
+ "RQ_SigmaBreakout_v1": {
+  "template": "Sigma Breakout",
+  "symbol": "NDX100",
+  "window": [
+   "2022-10-26 14:30:00",
+   "2026-10-14 15:30:00"
+  ],
+  "roboquant_trades": 796,
+  "our_signals": 808,
+  "roboquant_trades_we_also_take": 546,
+  "share": 0.686
+ },
+ "RQ_DailyVWAP_v1": {
+  "template": "Daily Anchored VWAP Signal Strategy",
+  "symbol": "SPX500",
+  "window": [
+   "2023-04-21 16:30:00",
+   "2026-09-24 13:33:00"
+  ],
+  "roboquant_trades": 362,
+  "our_signals": 325,
+  "roboquant_trades_we_also_take": 87,
+  "share": 0.24
+ },
+ "RQ_FridayRevisit_v1": {
+  "template": "Friday Range Revisit - Monday Short",
+  "symbol": "NDX100",
+  "window": [
+   "2022-12-05 15:05:00",
+   "2026-05-18 13:35:00"
+  ],
+  "roboquant_trades": 44,
+  "our_signals": 31,
+  "roboquant_trades_we_also_take": 25,
+  "share": 0.568
+ },
+ "RQ_M30ORB_v1": {
+  "template": "M30 ORB + M5 Breakout",
+  "symbol": "NDX100",
+  "window": [
+   "2023-11-27 15:10:00",
+   "2026-10-02 14:05:00"
+  ],
+  "roboquant_trades": 706,
+  "our_signals": 643,
+  "roboquant_trades_we_also_take": 254,
+  "share": 0.36
+ },
+ "RQ_SRSweep_v1": {
+  "template": "S&R Sweep",
+  "symbol": "NDX100",
+  "window": [
+   "2023-01-04 14:00:00",
+   "2026-09-01 10:20:00"
+  ],
+  "roboquant_trades": 977,
+  "our_signals": 947,
+  "roboquant_trades_we_also_take": 492,
+  "share": 0.504
+ },
+ "RQ_CrazyORB_v1": {
+  "template": "Crazy ORB",
+  "symbol": "NDX100",
+  "window": [
+   "2025-09-12 13:45:00",
+   "2026-09-11 14:15:00"
+  ],
+  "roboquant_trades": 370,
+  "our_signals": 374,
+  "roboquant_trades_we_also_take": 301,
+  "share": 0.814
+ },
+ "RQ_NYORB_v1": {
+  "template": "NY Open Range Breakout",
+  "symbol": "NDX100",
+  "window": [
+   "2022-10-25 15:15:00",
+   "2026-09-28 14:15:00"
+  ],
+  "roboquant_trades": 950,
+  "our_signals": 925,
+  "roboquant_trades_we_also_take": 638,
+  "share": 0.672
+ },
+ "RQ_NQPrecision_v1": {
+  "template": "NQ Precision Bot",
+  "symbol": "NDX100",
+  "window": [
+   "2023-10-05 13:59:55",
+   "2026-10-02 13:59:55"
+  ],
+  "roboquant_trades": 315,
+  "our_signals": 299,
+  "roboquant_trades_we_also_take": 226,
+  "share": 0.717
+ },
+ "RQ_TMeanReversion_v1": {
+  "template": "T-Mean Reversion",
+  "symbol": "NDX100",
+  "window": [
+   "2022-12-02 19:00:00",
+   "2026-09-04 19:00:00"
+  ],
+  "roboquant_trades": 92,
+  "our_signals": 91,
+  "roboquant_trades_we_also_take": 89,
+  "share": 0.967
+ },
+ "RQ_CharlesMonger_v1": {
+  "template": "Charles Monger Investment Strategy by Shujat",
+  "symbol": "SPX500",
+  "window": [
+   "2022-11-07 19:00:00",
+   "2026-09-17 01:00:00"
+  ],
+  "roboquant_trades": 258,
+  "our_signals": 269,
+  "roboquant_trades_we_also_take": 160,
+  "share": 0.62
+ }
+}

@@ -408,13 +408,28 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
     "BoomDriftJump_v1": "boom_drift_jump",
     "ORB_v1": "orb",
     "TrendBreakout_v1": "trend_breakout",
+    "FibTrend_v1": "fib_trend",
     "OvernightSession_v1": "overnight_session",
     "SpikeResumption_v1": "spike_resumption",
-    "BiasIFVG_v1": "bias_ifvg",
     "SpikeFade_v1": "synth",
     "RangeRevert_v1": "synth",
     "RangeBreakout_v1": "synth",
     "TrendDrift_v1": "synth",
+    "KRONOS_v1": "kronos_strategy",
+    "RQ_NQPrecision_v1": "rq_nq_precision",
+    "RQ_NYORB_v1": "rq_ny_orb",
+    "RQ_CrazyORB_v1": "rq_crazy_orb",
+    "RQ_TMeanReversion_v1": "rq_t_mean_reversion",
+    "RQ_CharlesMonger_v1": "rq_charles_monger",
+    "RQ_FlashTriggerORB_v1": "rq_flash_trigger_orb",
+    "RQ_ScarfaceORB_v1": "rq_scarface_orb",
+    "RQ_IVB_v1": "rq_ivb",
+    "RQ_GigaORB_v1": "rq_giga_orb",
+    "RQ_SigmaBreakout_v1": "rq_sigma_breakout",
+    "RQ_DailyVWAP_v1": "rq_daily_vwap",
+    "RQ_FridayRevisit_v1": "rq_friday_revisit",
+    "RQ_M30ORB_v1": "rq_m30_orb",
+    "RQ_SRSweep_v1": "rq_sr_sweep",
 }
 
 
@@ -584,6 +599,46 @@ def _filter_run_logs(logs: list[dict], cap: int = 2000) -> list[dict]:
 class BulkBacktestRequest(BaseModel):
     ids: list[str]
 
+def _bar_seconds(df: Any) -> float:
+    import numpy as np
+    import pandas as pd
+    try:
+        t = (df["time"].to_numpy(dtype=float) if "time" in df.columns
+             else pd.DatetimeIndex(df.index).as_unit("s").asi8.astype(float))
+        d = np.diff(t[:500])
+        return float(np.median(d[d > 0])) if (d > 0).any() else 0.0
+    except Exception:                                   # noqa: BLE001
+        return 0.0
+
+
+async def _intrabar_minutes(req: Any, primary_tf: str, risk_config: dict, candles: Any):
+    """One-minute bars for the run's span when intrabar resolution is on (see
+    BacktestRequest.intrabar_resolution), else None. A failed fetch only
+    falls back to the conservative same-bar guess - it never fails the run."""
+    import pandas as pd
+    want = getattr(req, "intrabar_resolution", None)
+    if want is None:
+        try:
+            tp1 = float(risk_config.get("tp1_rr") or 0)
+            want = 0 < tp1 < 1.0
+        except (TypeError, ValueError):
+            want = False
+    if not want or primary_tf == "M1" or candles is None or not len(candles):
+        return None
+    try:
+        from backend.mt5.data_fetcher import DataFetcher
+        if "time" in candles.columns:
+            t0, t1 = pd.to_datetime(candles["time"].iloc[0], unit="s"), pd.to_datetime(candles["time"].iloc[-1], unit="s")
+        else:
+            t0, t1 = pd.Timestamp(candles.index[0]), pd.Timestamp(candles.index[-1])
+        m1 = await DataFetcher.get_data_range(req.symbol, "M1", t0.to_pydatetime(),
+                                              (t1 + pd.Timedelta(days=1)).to_pydatetime())
+        return m1 if m1 is not None and len(m1) else None
+    except Exception as exc:                            # noqa: BLE001
+        logger.warning(f"[BACKTEST] intrabar M1 fetch failed ({exc}); using the same-bar guess")
+        return None
+
+
 class BacktestRequest(BaseModel):
     strategy_id: str = "VWAP_v1"
     symbol: str
@@ -597,6 +652,11 @@ class BacktestRequest(BaseModel):
     candle_count: int = 50000
     initial_balance: float = 10000.0
     risk_config: dict[str, Any] = {}
+    # Settle a bar that reaches the stop AND the target from one-minute bars
+    # (backtester/intrabar.py). None = automatic: on for a strategy whose
+    # target is smaller than its stop, where the conservative same-bar guess
+    # decides the result (roboquant Crazy ORB: 65% win guessed, 79% from M1).
+    intrabar_resolution: bool | None = None
     prop_firm: dict[str, Any] = {}
     # [per-slot] THIS slot's own risk settings, the same shape a portfolio row
     # sends (PortfolioSymbolConfig.risk). When present they are resolved through
@@ -1620,6 +1680,7 @@ async def run_backtest_endpoint(
 
             current_state["progress"] = {"stage": "Simulating trades...", "pct": 35}
             await _save_state(current_state)
+            candles_m1 = await _intrabar_minutes(req, primary_tf, merged_risk_config, candles)
             results = await run_backtest(
                 user_id=current_user.id,
                 strategy_id=req.strategy_id,
@@ -1635,6 +1696,7 @@ async def run_backtest_endpoint(
                 progress_phase=PH_SIM,
                 # [B6] H1 context for the trade viewer's higher-timeframe pane.
                 candles_h1=indexed_by_tf.get("H1"),
+                candles_m1=candles_m1,
             )
 
             # [4.9] The supervised half, from the SAME signals and the same
@@ -2355,6 +2417,20 @@ async def run_portfolio_backtest_endpoint(
             await ws_manager.broadcast_to_user(current_user.id, {"type": "backtest_progress", **current_state["progress"]})
 
             portfolio_engine = PortfolioBacktestEngine(merged_risk_config, portfolio_slot_configs)
+            # One-minute bars for slots whose target is smaller than their stop
+            # (backtester/intrabar.py) - the same rule as a single-symbol run.
+            for _key, _df in portfolio_data.items():
+                _sym = symbol_map.get(_key, _key)
+                if _sym in portfolio_engine.intrabar or _df is None or not len(_df):
+                    continue
+                _rc = portfolio_slot_configs.get(_key) or merged_risk_config
+                _m1 = await _intrabar_minutes(type("R", (), {"symbol": _sym, "intrabar_resolution":
+                                              getattr(req, "intrabar_resolution", None)})(),
+                                              "M1" if _bar_seconds(_df) <= 60 else "M5",
+                                              _rc, _df)
+                if _m1 is not None:
+                    from backend.backtester.intrabar import IntrabarResolver
+                    portfolio_engine.intrabar[_sym] = IntrabarResolver(_m1)
 
             # [17.2] Progress during the global simulation. This is the same
             # thread-crossing problem as B4: `run` executes inside

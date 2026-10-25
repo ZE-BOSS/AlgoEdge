@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from backend.mt5.executor import reinitialize as _mt5_reinitialize  # pinned to this process's terminal
 from backend.risk.multi_tp import slot_overrides_from_config
 from backend.strategies.strategy_defaults import get_slot_tp1_rr_defaults
 from backend.strategies.windows import window_bars
@@ -1776,7 +1777,7 @@ class BotService:
                                                         )
                                                         if attempt < max_retries - 1:
                                                             if not mt5.terminal_info():
-                                                                mt5.initialize()
+                                                                _mt5_reinitialize(mt5)
                                                             await asyncio.sleep(0.5)
                                                         else:
                                                             detail = f"TP{tp.level} ({tp.volume}L): {err_msg}"
@@ -1794,7 +1795,7 @@ class BotService:
                                                     )
                                                     if attempt < max_retries - 1:
                                                         if not mt5.terminal_info():
-                                                            mt5.initialize()
+                                                            _mt5_reinitialize(mt5)
                                                         await asyncio.sleep(0.5)
                                                     else:
                                                         detail = f"TP{tp.level} ({tp.volume}L): {str(order_err)[:80]}"

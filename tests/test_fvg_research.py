@@ -98,22 +98,6 @@ def _research(cands):
     return [(c.t_signal, c.direction, round(c.detail["entry_signal"], 8), round(c.stop_dist, 8)) for c in cands]
 
 
-def test_bias_ifvg_default_variant_matches_engine(frames, monkeypatch):
-    # The research candidates are permissive about the day-stop rule and the daily
-    # cap (both are applied at selection); open them on the engine too.
-    from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
-    monkeypatch.setattr(BiasIFVGParams, "max_trades_per_day", 10_000)
-    from backend.strategies.strategy_five_bias_ifvg import engine as be
-    monkeypatch.setattr(be.BiasIFVGEngine, "notify_outcome", lambda *a, **k: None)
-    engine = _run_engine("BiasIFVG_v1", frames)
-    pip = get_pip_size(SYMBOL)
-    out = fr.bias_candidates(fr.from_arrays(_arrays(frames["M5"])), fr.from_arrays(_arrays(frames["M15"])),
-                             fr.from_arrays(_arrays(frames["H4"])), pip, [fr.BiasVariant()])
-    research = _research(out[fr.BiasVariant().name])
-    assert engine, "engine produced no BiasIFVG signals on the fixture — enlarge or reseed it"
-    assert research == engine
-
-
 def test_structure_trend_matches_detector(frames):
     from backend.strategies.core.market_structure import MarketStructureDetector
     h1 = frames["H1"]
@@ -135,33 +119,5 @@ HTF_CASES = [
 ]
 
 
-BIAS_CASES = [
-    (fr.BiasVariant(bias_mode="OFF", key_levels="FVG", leg_mode="REACTION", session="OFF"), {}, ()),
-    (fr.BiasVariant(bias_mode="H4", key_levels="CISD_REJ", leg_mode="BOTH", session="0800-1600"), {}, ()),
-    (fr.BiasVariant(bias_mode="OFF", key_levels="ALL", leg_mode="BOTH", session="OFF"),
-     {"min_inversion_disp_atr": 0.25}, ("inv_disp_025",)),
-]
-
-
-# HTFFVGFlip_v1 was retired on 2026-10-02. Its two parity tests are gone with
-# it: they existed to prove fvg_research reproduced that ENGINE signal for
-# signal, and with no engine there is nothing to compare against. The
-# BiasIFVG parity tests below are unaffected and still do that job.
-#
-# backend/analytics/fvg_research.py keeps its HTF code, which is now research
-# history with no live counterpart -- it cannot drift against an engine that
-# does not exist, but it is also no longer checked by anything.
-@pytest.mark.parametrize("variant,gates,flags", BIAS_CASES)
-def test_bias_variants_and_gates_match_engine(frames, variant, gates, flags, monkeypatch):
-    from backend.strategies.strategy_five_bias_ifvg import engine as be
-    monkeypatch.setattr(be.BiasIFVGEngine, "notify_outcome", lambda *a, **k: None)
-    cfg = UserConfigV2()
-    for k, v in {**variant.params(), **gates, "max_trades_per_day": 10_000, "day_stop_enabled": False}.items():
-        setattr(cfg.bias_ifvg, k, v)
-    engine = _run_engine("BiasIFVG_v1", frames, cfg)
-    pip = get_pip_size(SYMBOL)
-    out = fr.bias_candidates(fr.from_arrays(_arrays(frames["M5"])), fr.from_arrays(_arrays(frames["M15"])),
-                             fr.from_arrays(_arrays(frames["H4"])), pip, [variant])
-    cands = [c for c in out[variant.name] if all(c.feats[f] for f in flags)]
-    assert out[variant.name], "research produced no candidates for this variant on the fixture"
-    assert _research(cands) == engine
+# BiasIFVG_v1 was removed on 2026-10-19 (no edge), and with it the parity
+# tests that compared fvg_research to its engine signal for signal.

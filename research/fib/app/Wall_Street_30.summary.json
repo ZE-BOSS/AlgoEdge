@@ -1,0 +1,75 @@
+{
+  "strategy": "FibTrend_v1",
+  "symbol": "Wall Street 30",
+  "window": [
+    "2023-10-25",
+    "2026-10-25"
+  ],
+  "balance": 10000.0,
+  "risk_pct": 1.0,
+  "sizing_basis": "BALANCE",
+  "signals": 113,
+  "trades": 81,
+  "final_balance": 7538.89,
+  "net_pnl": -2461.11,
+  "win_rate": 0.1481,
+  "profit_factor": 0.533,
+  "expectancy_usd": -30.38,
+  "expectancy_r": -0.4125,
+  "max_dd_pct": 34.05,
+  "rejections": {
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $105.52 (1.11% of this $9,482 account); at the requested risk this trade needs about $10,552": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $204.72 (1.79% of this $11,432 account); at the requested risk this trade needs about $20,472": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $96.64 (1.17% of this $8,247 account); at the requested risk this trade needs about $9,664": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $109.64 (1.33% of this $8,247 account); at the requested risk this trade needs about $10,964": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $83.24 (1.01% of this $8,247 account); at the requested risk this trade needs about $8,324": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $138.16 (1.72% of this $8,012 account); at the requested risk this trade needs about $13,816": 1
+  },
+  "costs_resolved": {
+    "slippage_pips": 0.5,
+    "commission_per_lot": 0.0,
+    "spread_pips": 2.5,
+    "swap_long_per_lot_per_day": -8.950822222222223,
+    "swap_short_per_lot_per_day": 2.746275,
+    "stops_level_pips": 3.0,
+    "exit_slippage_pips": 0.5,
+    "sources": {
+      "slippage_pips": "MT5",
+      "commission_per_lot": "MT5",
+      "spread_pips": "MT5",
+      "swap_long_per_lot_per_day": "MT5",
+      "swap_short_per_lot_per_day": "MT5",
+      "stops_level_pips": "MT5",
+      "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Wall Street 30"
+  },
+  "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 80,
+    "gapped_exits": 80,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0322,
+    "max_overshoot_r": 0.4418,
+    "total_overshoot_r": 2.5748,
+    "by_symbol": {
+      "Wall Street 30": {
+        "stop_exits": 80,
+        "gapped_pct": 100.0,
+        "mean_overshoot_r": 0.0322,
+        "max_overshoot_r": 0.4418,
+        "profile_mean": 0.02,
+        "profile_source": "class default \u2014 no tick study",
+        "profile_calibration": "assumed"
+      }
+    }
+  },
+  "exit_reasons": {
+    "TRAIL_SL": 29,
+    "SL": 51,
+    "TP1": 1
+  },
+  "dumped_trades_to": "research/fib/app/Wall_Street_30.trades.json"
+}

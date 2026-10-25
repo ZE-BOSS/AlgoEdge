@@ -1,0 +1,70 @@
+{
+  "strategy": "FibTrend_v1",
+  "symbol": "US Tech 100",
+  "window": [
+    "2023-10-25",
+    "2026-10-25"
+  ],
+  "balance": 10000.0,
+  "risk_pct": 1.0,
+  "sizing_basis": "BALANCE",
+  "signals": 131,
+  "trades": 82,
+  "final_balance": 11679.0,
+  "net_pnl": 1679.0,
+  "win_rate": 0.3171,
+  "profit_factor": 1.37,
+  "expectancy_usd": 20.48,
+  "expectancy_r": 0.2361,
+  "max_dd_pct": 10.19,
+  "rejections": {
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $111.55 (1.04% of this $10,715 account); at the requested risk this trade needs about $11,155": 1
+  },
+  "costs_resolved": {
+    "slippage_pips": 1.5,
+    "commission_per_lot": 0.0,
+    "spread_pips": 3.6,
+    "swap_long_per_lot_per_day": -4.96578988888889,
+    "swap_short_per_lot_per_day": 1.5235946250000003,
+    "stops_level_pips": 6.0,
+    "exit_slippage_pips": 1.5,
+    "sources": {
+      "slippage_pips": "MT5",
+      "commission_per_lot": "MT5",
+      "spread_pips": "MT5",
+      "swap_long_per_lot_per_day": "MT5",
+      "swap_short_per_lot_per_day": "MT5",
+      "stops_level_pips": "MT5",
+      "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "US Tech 100"
+  },
+  "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 80,
+    "gapped_exits": 80,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0404,
+    "max_overshoot_r": 1.5381,
+    "total_overshoot_r": 3.2339,
+    "by_symbol": {
+      "US Tech 100": {
+        "stop_exits": 80,
+        "gapped_pct": 100.0,
+        "mean_overshoot_r": 0.0404,
+        "max_overshoot_r": 1.5381,
+        "profile_mean": 0.02,
+        "profile_source": "class default \u2014 no tick study",
+        "profile_calibration": "assumed"
+      }
+    }
+  },
+  "exit_reasons": {
+    "SL": 39,
+    "TRAIL_SL": 41,
+    "TP1": 2
+  },
+  "dumped_trades_to": "research/fib/app/US_Tech_100.trades.json"
+}

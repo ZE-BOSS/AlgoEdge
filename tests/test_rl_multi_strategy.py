@@ -262,3 +262,36 @@ def test_contributions_cover_every_column_and_restore_the_observation(episode):
     measured = [r for r in out["rows"] if "r_contribution" in r]
     assert {r["column"] for r in measured} == {"setup_agreement", cols[0]}
     assert np.array_equal(env.observations_for(p), before), "a shuffle leaked"
+
+
+# -- long histories -----------------------------------------------------------
+
+
+def test_the_setup_cap_scales_with_the_history():
+    """5,000 stopped RangeBreakout and TrendDrift three quarters of the way
+    through 282k gold bars, so the most recent months had none of their setups."""
+    from backend.rl import base_signals as bs
+    assert bs.signal_cap(20_000) == bs.MAX_BASE_SIGNALS
+    assert bs.signal_cap(282_463) >= 28_000
+
+
+def test_setup_generation_reports_progress_per_strategy():
+    from backend.rl import train as T
+
+    class Rec:
+        def __init__(self):
+            self.details, self.events, self.cancelled = [], [], False
+
+        def set(self, **kw):
+            if "stage_detail" in kw:
+                self.details.append(kw["stage_detail"])
+
+        def event(self, text):
+            self.events.append(text)
+
+    rec = Rec()
+    spec = _spec(base_strategies=BASES)
+    T.build_episodes(spec, {"EURUSD": _tiny_frame(n=4000)}, progress=rec)
+    assert any("ORB_v1 (1/2)" in d for d in rec.details)
+    assert any("TrendBreakout_v1 (2/2)" in d for d in rec.details)
+    assert sum("found" in e for e in rec.events) == 2

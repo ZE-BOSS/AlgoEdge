@@ -28,23 +28,6 @@ export const CONFLUENCE_FIELDS = {
     ['side', 'Side', ['both', 'long', 'short']],
     ['max_hold_bars', 'Close after N M5 bars (0 = off, study: 288)', 'num'],
   ],
-  bias_ifvg: [
-    ['bias_mode', 'Bias source', ['H4', 'OFF']],
-    ['key_levels', 'Key levels', ['ALL', 'FVG', 'CISD_REJ']],
-    ['ifvg_leg_mode', 'IFVG leg', ['APPROACH', 'REACTION', 'BOTH']],
-    ['session_filter_enabled', 'Session window on', 'bool'],
-    ['day_stop_enabled', 'Day-stop rule', 'bool'],
-    ['min_confluent_levels', 'Min overlapping key levels', 'num'],
-    ['require_h4_aligned', 'H4 FVG points the trade\'s way', 'bool'],
-    ['min_inversion_disp_atr', 'Min inversion close beyond gap (× ATR)', 'num'],
-    ['require_stop_ok', 'Skip floored stops', 'bool'],
-    ['require_htf_trend', 'With the H1 trend (600-bar EMA)', 'bool'],
-    ['require_adx_trend', 'ADX(14) >= 20', 'bool'],
-    ['require_vol_high', 'Volatility above its daily median', 'bool'],
-    ['time_filter', 'Trigger window', ['ALL', 'NY_OPEN', 'LONDON', 'NEWYORK']],
-    ['side', 'Side', ['both', 'long', 'short']],
-    ['max_hold_bars', 'Close after N M5 bars (0 = off, study: 288)', 'num'],
-  ],
 };
 
 export const CONFLUENCE_DEFAULTS = {
@@ -55,8 +38,4 @@ export const CONFLUENCE_DEFAULTS = {
     fvg_displacement_body_pct: 0.6, require_first_tap: false, min_inversion_disp_atr: 0, require_stop_ok: false,
     require_htf_trend: false, require_adx_trend: false, require_vol_high: false, time_filter: 'ALL', side: 'both',
     max_hold_bars: 0 },
-  bias_ifvg: { bias_mode: 'H4', key_levels: 'ALL', ifvg_leg_mode: 'APPROACH', session_filter_enabled: true,
-    day_stop_enabled: true, min_confluent_levels: 0, require_h4_aligned: false, min_inversion_disp_atr: 0,
-    require_stop_ok: false, require_htf_trend: false, require_adx_trend: false, require_vol_high: false,
-    time_filter: 'ALL', side: 'both', max_hold_bars: 0 },
 };

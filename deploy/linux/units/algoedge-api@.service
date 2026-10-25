@@ -1,0 +1,18 @@
+# The AlgoEdge backend of instance %i. Talks to MT5 only through its bridge.
+[Unit]
+Description=AlgoEdge API (%i)
+After=network.target redis-server.service algoedge-bridge@%i.service
+Wants=algoedge-bridge@%i.service
+
+[Service]
+User=algoedge
+WorkingDirectory=/opt/algoedge/%i/app
+EnvironmentFile=/opt/algoedge/%i/instance.env
+ExecStart=/opt/algoedge/%i/venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port ${API_PORT}
+Restart=always
+RestartSec=5
+# Give open orders/positions handling time to finish on a restart.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

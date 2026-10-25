@@ -143,7 +143,13 @@ def build_full_schema() -> list[dict]:
     from backend.strategies.strategy_orb.params import ORBParams
     from backend.strategies.strategy_spike_resumption.params import SpikeResumptionParams
     from backend.strategies.strategy_overnight.params import OvernightSessionParams
+    from backend.strategies.strategy_kronos.params import KronosStrategyParams
+    from backend.strategies.strategy_roboquant.params import (
+        RQNQPrecisionParams, RQNYORBParams, RQCrazyORBParams, RQTMeanReversionParams, RQCharlesMongerParams,
+        RQFlashTriggerORBParams, RQScarfaceORBParams, RQIVBParams, RQGigaORBParams, RQSigmaBreakoutParams, RQDailyAnchoredVWAPParams, RQFridayRevisitParams, RQM30ORBParams, RQSRSweepParams,
+    )
     from backend.strategies.strategy_trend.params import TrendBreakoutParams
+    from backend.strategies.strategy_fib.params import FibTrendParams
     from backend.core.config_schema import DriftJumpAlphaParams
 
     groups: list[tuple[type, str]] = [
@@ -152,19 +158,33 @@ def build_full_schema() -> list[dict]:
         (VWAPParams, "vwap"),
         (ORBParams, "orb"),
         (TrendBreakoutParams, "trend_breakout"),
+        (FibTrendParams, "fib_trend"),
         (OvernightSessionParams, "overnight_session"),
+        (KronosStrategyParams, "kronos_strategy"),
+        (RQNQPrecisionParams, "rq_nq_precision"),
+        (RQNYORBParams, "rq_ny_orb"),
+        (RQCrazyORBParams, "rq_crazy_orb"),
+        (RQTMeanReversionParams, "rq_t_mean_reversion"),
+        (RQCharlesMongerParams, "rq_charles_monger"),
+        (RQFlashTriggerORBParams, "rq_flash_trigger_orb"),
+        (RQScarfaceORBParams, "rq_scarface_orb"),
+        (RQIVBParams, "rq_ivb"),
+        (RQGigaORBParams, "rq_giga_orb"),
+        (RQSigmaBreakoutParams, "rq_sigma_breakout"),
+        (RQDailyAnchoredVWAPParams, "rq_daily_vwap"),
+        (RQFridayRevisitParams, "rq_friday_revisit"),
+        (RQM30ORBParams, "rq_m30_orb"),
+        (RQSRSweepParams, "rq_sr_sweep"),
         (SpikeResumptionParams, "spike_resumption"),
         (DriftJumpAlphaParams, "drift_jump_alpha"),
     ]
     from backend.core.config_schema import SynthParams
-    from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
     from backend.core.config_schema import BoomDriftJumpParams
 
     # Every strategy a slot can run needs a group here: the slot editor builds
     # its parameter form from this schema, so a missing group leaves that
     # strategy with no editable parameters at all.
     groups += [(SynthParams, "synth"),
-               (BiasIFVGParams, "bias_ifvg"),
                (BoomDriftJumpParams, "boom_drift_jump")]
 
     schema: list[dict] = []

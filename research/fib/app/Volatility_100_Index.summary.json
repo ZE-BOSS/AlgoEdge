@@ -1,0 +1,74 @@
+{
+  "strategy": "FibTrend_v1",
+  "symbol": "Volatility 100 Index",
+  "window": [
+    "2023-10-25",
+    "2026-10-25"
+  ],
+  "balance": 10000.0,
+  "risk_pct": 1.0,
+  "sizing_basis": "BALANCE",
+  "signals": 40,
+  "trades": 30,
+  "final_balance": 9698.64,
+  "net_pnl": -301.36,
+  "win_rate": 0.3667,
+  "profit_factor": 0.803,
+  "expectancy_usd": -10.05,
+  "expectancy_r": -0.0963,
+  "max_dd_pct": 5.35,
+  "rejections": {
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 1.0 lot would risk $115.02 (1.15% of this $9,959 account); at the requested risk this trade needs about $11,502": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 1.0 lot would risk $103.23 (1.03% of this $9,987 account); at the requested risk this trade needs about $10,323": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 1.0 lot would risk $106.18 (1.06% of this $9,987 account); at the requested risk this trade needs about $10,618": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 1.0 lot would risk $155.90 (1.56% of this $9,987 account); at the requested risk this trade needs about $15,590": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 1.0 lot would risk $123.50 (1.29% of this $9,563 account); at the requested risk this trade needs about $12,350": 1,
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 1.0 lot would risk $99.64 (1.02% of this $9,810 account); at the requested risk this trade needs about $9,964": 1
+  },
+  "costs_resolved": {
+    "slippage_pips": 1.0,
+    "commission_per_lot": 0.0,
+    "spread_pips": 30.0,
+    "swap_long_per_lot_per_day": -0.18418055555555554,
+    "swap_short_per_lot_per_day": -0.18418055555555554,
+    "stops_level_pips": 138.0,
+    "exit_slippage_pips": 1.0,
+    "sources": {
+      "slippage_pips": "MT5",
+      "commission_per_lot": "MT5",
+      "spread_pips": "MT5",
+      "swap_long_per_lot_per_day": "MT5",
+      "swap_short_per_lot_per_day": "MT5",
+      "stops_level_pips": "MT5",
+      "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Volatility 100 Index"
+  },
+  "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 30,
+    "gapped_exits": 30,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0191,
+    "max_overshoot_r": 0.0207,
+    "total_overshoot_r": 0.5731,
+    "by_symbol": {
+      "Volatility 100 Index": {
+        "stop_exits": 30,
+        "gapped_pct": 100.0,
+        "mean_overshoot_r": 0.0191,
+        "max_overshoot_r": 0.0207,
+        "profile_mean": 0.02,
+        "profile_source": "class default \u2014 no tick study",
+        "profile_calibration": "assumed"
+      }
+    }
+  },
+  "exit_reasons": {
+    "TRAIL_SL": 19,
+    "SL": 11
+  },
+  "dumped_trades_to": "research/fib/app/Volatility_100_Index.trades.json"
+}

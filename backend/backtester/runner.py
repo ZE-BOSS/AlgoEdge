@@ -116,6 +116,9 @@ async def run_backtest(
     # reads (bug B3). origin/dev never carried it; dropping it would silently
     # reintroduce that bug.
     candles_h1: pd.DataFrame = None,
+    # One-minute bars for `symbol`: an ambiguous bar (stop AND target inside
+    # it) is settled from the minutes - backtester/intrabar.py.
+    candles_m1: pd.DataFrame = None,
 ) -> dict[str, Any]:
     """
     Execute a backtest and optionally persist results to PostgreSQL.
@@ -150,6 +153,9 @@ async def run_backtest(
         })
 
     engine = BacktestEngine(risk_config)
+    if candles_m1 is not None and len(candles_m1):
+        from backend.backtester.intrabar import IntrabarResolver
+        engine.intrabar = {symbol: IntrabarResolver(candles_m1)}
 
     if _owned_scale:
         await _broadcast_progress(user_id, {

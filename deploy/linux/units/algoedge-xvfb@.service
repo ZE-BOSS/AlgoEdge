@@ -1,0 +1,15 @@
+# The virtual screen of instance %i - one per instance, so the demo and the
+# live MT5 windows can never be mistaken for each other when logging in.
+[Unit]
+Description=AlgoEdge virtual display (%i)
+After=network.target
+
+[Service]
+User=algoedge
+EnvironmentFile=/opt/algoedge/%i/instance.env
+ExecStart=/bin/sh -c 'rm -f /tmp/.X$${DISPLAY#:}-lock; exec /usr/bin/Xvfb $DISPLAY -screen 0 1600x900x24 -nolisten tcp'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,70 @@
+{
+  "strategy": "FibTrend_v1",
+  "symbol": "Step Index 200",
+  "window": [
+    "2023-10-25",
+    "2026-10-25"
+  ],
+  "balance": 10000.0,
+  "risk_pct": 1.0,
+  "sizing_basis": "BALANCE",
+  "signals": 31,
+  "trades": 28,
+  "final_balance": 10632.85,
+  "net_pnl": 632.85,
+  "win_rate": 0.3214,
+  "profit_factor": 1.335,
+  "expectancy_usd": 22.6,
+  "expectancy_r": 0.2748,
+  "max_dd_pct": 10.19,
+  "rejections": {
+    "Calculated lot size is below this broker's minimum tradeable volume - the minimum 0.1 lot would risk $129.88 (1.19% of this $10,896 account); at the requested risk this trade needs about $12,988": 1
+  },
+  "costs_resolved": {
+    "slippage_pips": 1.0,
+    "commission_per_lot": 0.0,
+    "spread_pips": 2.0,
+    "swap_long_per_lot_per_day": -5.95211111111111,
+    "swap_short_per_lot_per_day": -5.95211111111111,
+    "stops_level_pips": 11.0,
+    "exit_slippage_pips": 1.0,
+    "sources": {
+      "slippage_pips": "MT5",
+      "commission_per_lot": "MT5",
+      "spread_pips": "MT5",
+      "swap_long_per_lot_per_day": "MT5",
+      "swap_short_per_lot_per_day": "MT5",
+      "stops_level_pips": "MT5",
+      "exit_slippage_pips": "DEFAULT_EQUALS_SLIPPAGE_PIPS"
+    },
+    "broker_source": "MT5",
+    "symbol": "Step Index 200"
+  },
+  "fill_model": {
+    "mode": "CONSERVATIVE",
+    "seed": "algoedge",
+    "stop_exits": 27,
+    "gapped_exits": 27,
+    "gapped_pct": 100.0,
+    "mean_overshoot_r": 0.0202,
+    "max_overshoot_r": 0.0231,
+    "total_overshoot_r": 0.5453,
+    "by_symbol": {
+      "Step Index 200": {
+        "stop_exits": 27,
+        "gapped_pct": 100.0,
+        "mean_overshoot_r": 0.0202,
+        "max_overshoot_r": 0.0231,
+        "profile_mean": 0.02,
+        "profile_source": "class default \u2014 no tick study",
+        "profile_calibration": "assumed"
+      }
+    }
+  },
+  "exit_reasons": {
+    "TRAIL_SL": 13,
+    "SL": 14,
+    "END_OF_DATA": 1
+  },
+  "dumped_trades_to": "research/fib/app/Step_Index_200.trades.json"
+}

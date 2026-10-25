@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 
 
 from backend.brokers.base import BaseBroker
-from backend.mt5.executor import mt5_executor
+from backend.mt5.executor import mt5_executor, reinitialize, remember_terminal
 
 
 class MT5Broker(BaseBroker):
@@ -68,8 +68,10 @@ class MT5Broker(BaseBroker):
         loop = asyncio.get_event_loop()
         init_ok = await loop.run_in_executor(
             self._executor, 
-            lambda: mt5.initialize(path=cfg.path) if cfg.path else mt5.initialize()
+            lambda: mt5.initialize(path=cfg.path) if cfg.path else reinitialize(mt5)
         )
+        if init_ok:
+            remember_terminal(cfg.path)
         
         if not init_ok:
             # Without the reason this is undiagnosable: the common causes are a
@@ -153,9 +155,11 @@ class MT5Broker(BaseBroker):
             init_ok = await loop.run_in_executor(
                 self._executor, lambda: mt5.initialize(path=path)
             )
+            if init_ok:
+                remember_terminal(path)
         else:
             init_ok = await loop.run_in_executor(
-                self._executor, mt5.initialize
+                self._executor, lambda: reinitialize(mt5)
             )
 
         if not init_ok:

@@ -27,6 +27,7 @@ from backend.backtester.engine import (
     _calc_duration_minutes,
     _validate_position,
     _to_epoch_seconds,
+    _as_epoch,
     _resolve_sl_tp_hit,
     _gap_adjusted_fill_price,
     CostModelMixin,
@@ -34,6 +35,7 @@ from backend.backtester.engine import (
     _breakeven_stop,
 )
 from backend.backtester.fill_model import build_stop_fill_model, position_fill_key
+from backend.backtester.intrabar import resolve_with_minutes
 # Aliased: run() does its own local `from ... import _apply_exit_slippage`
 # further down, and a local import makes that name FUNCTION-LOCAL for the
 # whole of run() -- so any earlier use of it raises UnboundLocalError. Same
@@ -135,6 +137,10 @@ class PortfolioBacktestEngine(CostModelMixin):
         freeze_symbol_info()
         # Wick simulation flag
         self._simulate_wicks = bool(risk_config.get("simulate_wicks", True))
+        # Optional one-minute bars per REAL symbol (backtester/intrabar.py),
+        # set by the caller; see engine.py.
+        self.intrabar: dict[str, Any] = {}
+        self._bar_secs_by_key: dict[str, float] = {}
         # [P1.2] Realistic stop fills. The old code only asked whether the bar
         # OPENED through the stop, so an intrabar spike — which on Boom/Crash is
         # where every spike happens — booked a perfect fill at the stop price.
@@ -301,6 +307,15 @@ class PortfolioBacktestEngine(CostModelMixin):
             "reason": reason,
         })
 
+    # The entry-bar exit check lives in CostModelMixin; a portfolio position's
+    # "symbol" can be a slot cache key, and bar lengths are kept per key.
+    def _intrabar_for(self, pos: dict[str, Any]) -> Any:
+        sym = pos.get("symbol", "")
+        return self.intrabar.get(getattr(self, "_symbol_map", {}).get(sym, sym))
+
+    def _bar_secs_for(self, pos: dict[str, Any]) -> float | None:
+        return self._bar_secs_by_key.get(pos.get("_cache_key", pos.get("symbol")))
+
     def run(
         self,
         portfolio_data: dict[str, pd.DataFrame],
@@ -335,6 +350,7 @@ class PortfolioBacktestEngine(CostModelMixin):
 
         def _real_symbol(cache_key: str) -> str:
             return symbol_map.get(cache_key, cache_key)
+        self._symbol_map = symbol_map
 
         balance = initial_balance
         self.trades = []
@@ -362,6 +378,11 @@ class PortfolioBacktestEngine(CostModelMixin):
                 all_timestamps.update(df.index.values)
                 
         global_timeline = sorted(list(all_timestamps))
+        for sym, df in portfolio_data.items():
+            _t = df['time'].to_numpy(dtype=float) if 'time' in df.columns else pd.DatetimeIndex(df.index).as_unit("s").asi8.astype(float)
+            _d = np.diff(_t[:5000])
+            if (_d > 0).any():
+                self._bar_secs_by_key[sym] = float(np.median(_d[_d > 0]))
         
         symbol_cache = {}
         for sym, df in portfolio_data.items():
@@ -479,9 +500,10 @@ class PortfolioBacktestEngine(CostModelMixin):
                 # Item 3.7: reuse the same ambiguity-resolved tp_hit determination
                 # as the real close logic below (shared helper — also matches
                 # engine.py's single-symbol pre-pass).
-                _sl_hit_pp, _tp_hit_pp = _resolve_sl_tp_hit(
-                    _p["direction"], _open_p_pp, _bar["high"], _bar["low"],
-                    _p["stop_loss"], _p["take_profit"], self._simulate_wicks,
+                _sl_hit_pp, _tp_hit_pp = resolve_with_minutes(
+                    self.intrabar.get(_real_symbol(_p.get("symbol", ""))), _p["direction"], _open_p_pp,
+                    _bar["high"], _bar["low"], _p["stop_loss"], _p["take_profit"], self._simulate_wicks,
+                    _as_epoch(current_time), self._bar_secs_by_key.get(_ckey),
                 )
                 if _tp_hit_pp:
                     _tp1_closing_this_bar.add(_p.get("group_id"))
@@ -571,9 +593,10 @@ class PortfolioBacktestEngine(CostModelMixin):
                 _raw_tp_hit = (high >= pos["take_profit"]) if pos["direction"] == "BUY" else (low <= pos["take_profit"])
                 if _raw_sl_hit and _raw_tp_hit:
                     pos["same_bar_ambiguous"] = True  # Tag for reporting
-                sl_hit, tp_hit = _resolve_sl_tp_hit(
-                    pos["direction"], open_p, high, low,
+                sl_hit, tp_hit = resolve_with_minutes(
+                    self.intrabar.get(_real_symbol(pos.get("symbol", ""))), pos["direction"], open_p, high, low,
                     pos["stop_loss"], pos["take_profit"], self._simulate_wicks,
+                    _as_epoch(current_time), self._bar_secs_by_key.get(pos.get("_cache_key", pos.get("symbol"))),
                 )
 
                 # Update MAE/MFE using this bar's high/low BEFORE the exit checks below,

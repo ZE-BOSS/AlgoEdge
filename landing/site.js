@@ -254,3 +254,89 @@
     }
   });
 })();
+
+
+// Hero background: a 3D field of candlesticks with a rising equity ribbon,
+// drawn on a canvas (no library). It only animates while the hero is on
+// screen and the tab is visible, at most 30 fps, and holds still for
+// prefers-reduced-motion - so it costs nothing once you scroll past it.
+(function () {
+  'use strict';
+  const cv = document.getElementById('hero-3d');
+  if (!cv || !cv.getContext) return;
+  const ctx = cv.getContext('2d');
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const ROWS = 7, COLS = 22;
+  // A deterministic market: each row a gently trending random walk.
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const rows = [];
+  for (let r = 0; r < ROWS; r += 1) {
+    let p = 0, drift = (rnd() - 0.35) * 0.06;
+    const bars = [];
+    for (let c = 0; c < COLS; c += 1) {
+      const o = p; p += drift + (rnd() - 0.5) * 0.16;
+      bars.push({ o, c: p, h: Math.max(o, p) + rnd() * 0.07, l: Math.min(o, p) - rnd() * 0.07 });
+    }
+    rows.push(bars);
+  }
+  const eq = []; let e = 0;
+  for (let c = 0; c <= COLS * 3; c += 1) { e += 0.012 + (rnd() - 0.42) * 0.03; eq.push(e); }
+  const eqMax = Math.max.apply(null, eq), eqMin = Math.min.apply(null, eq);
+  let yaw = 0.5, visible = true, raf = 0, last = 0;
+
+  const size = () => {
+    const d = Math.min(window.devicePixelRatio || 1, 1.5);
+    cv.width = Math.round(cv.clientWidth * d); cv.height = Math.round(cv.clientHeight * d);
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+  };
+  const P = (x, y, z, w, h) => {
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(0.42), sp = Math.sin(0.42);
+    const x1 = x * cy - z * sy, z1 = x * sy + z * cy;
+    const y1 = y * cp - z1 * sp, z2 = y * sp + z1 * cp;
+    const f = Math.min(w, h * 1.7) * 0.5 / (z2 + 3.4) * 3.4 / 1.1;
+    return [w * 0.62 + x1 * f, h * 0.55 - y1 * f];
+  };
+  const draw = (t) => {
+    const w = cv.clientWidth, h = cv.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    for (let r = 0; r < ROWS; r += 1) {
+      const z = (r / (ROWS - 1)) * 2 - 1;
+      const reveal = reduce ? COLS : Math.min(COLS, Math.floor(((t * 0.12 + r * 0.07) % 1.2) / 1.2 * (COLS + 6)));
+      for (let c = 0; c < reveal; c += 1) {
+        const b = rows[r][c], x = (c / (COLS - 1)) * 2.2 - 1.1;
+        const up = b.c >= b.o;
+        const a = P(x, b.h, z, w, h), bt = P(x, b.l, z, w, h);
+        const o = P(x, b.o, z, w, h), cl = P(x, b.c, z, w, h);
+        ctx.strokeStyle = up ? 'rgba(44,194,149,0.55)' : 'rgba(240,106,103,0.5)';
+        ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(bt[0], bt[1]); ctx.stroke();
+        ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(cl[0], cl[1]); ctx.stroke();
+      }
+    }
+    ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(228,194,115,0.9)'; ctx.beginPath();
+    const n = reduce ? eq.length : Math.max(2, Math.floor(((t * 0.08) % 1) * eq.length) + 2);
+    for (let i = 0; i < Math.min(n, eq.length); i += 1) {
+      const x = (i / (eq.length - 1)) * 2.2 - 1.1, y = ((eq[i] - eqMin) / (eqMax - eqMin)) * 1.4 - 0.4;
+      const p = P(x, y + 0.5, 1.25, w, h);
+      if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]);
+    }
+    ctx.stroke();
+  };
+  const loop = (now) => {
+    raf = 0;
+    if (!visible || document.hidden) return;
+    if (now - last >= 33) {
+      yaw += reduce ? 0 : 0.0025 * Math.min(4, (now - last) / 16 || 1);
+      last = now; draw(now / 1000);
+    }
+    if (!reduce) raf = requestAnimationFrame(loop);
+  };
+  const kick = () => { if (!raf && visible && !document.hidden) raf = requestAnimationFrame(loop); };
+  size(); draw(0);
+  window.addEventListener('resize', () => { size(); draw(last / 1000); }, { passive: true });
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver((es) => { visible = es.some((x) => x.isIntersecting); kick(); }).observe(cv);
+  }
+  document.addEventListener('visibilitychange', kick);
+  kick();
+})();

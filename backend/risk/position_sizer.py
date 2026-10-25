@@ -1071,6 +1071,16 @@ def calculate_lot_size(
             f"(risk cap and/or margin ceiling left no tradeable size). Returning 0 lots."
         )
         diag["refused_reason"] = "below_broker_min_lot"
+        # What the SMALLEST tradeable size would have risked, and the account
+        # this trade needs at the requested risk - so a refusal on a small
+        # account says how far off it is (TrendBreakout on gold: the 0.01 lot
+        # risks ~$172, 17% of $1,000; it needs ~$17k at 1%), instead of only
+        # "below minimum".
+        min_lot_risk = volume_min * effective_sl_distance * value_per_unit_move
+        diag["min_lot_risk_usd"] = round(min_lot_risk, 2)
+        diag["min_lot_risk_pct"] = round(min_lot_risk / account_balance * 100.0, 2) if account_balance > 0 else None
+        diag["balance_needed_at_risk_pct"] = round(min_lot_risk / (risk_pct / 100.0), 0) if risk_pct > 0 else None
+        diag["volume_min"] = volume_min
         _last_sizing_diagnostics_var.set(diag)
         return 0.0
 

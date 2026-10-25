@@ -1,0 +1,19 @@
+# The MetaTrader5 bridge of instance %i (deploy/linux/mt5_bridge_server.py),
+# a Windows Python in the same Wine prefix as the terminal. Localhost only.
+[Unit]
+Description=AlgoEdge MT5 bridge (%i)
+After=algoedge-mt5@%i.service
+Wants=algoedge-mt5@%i.service
+
+[Service]
+User=algoedge
+EnvironmentFile=/opt/algoedge/%i/instance.env
+Environment=WINEDEBUG=-all "WINEDLLOVERRIDES=mscoree=;mshtml="
+# Forward slashes: systemd unescapes backslashes ("C:\algoedge" became
+# "C:<bell>lgoedge"); Wine and Windows Python accept "/" in Windows paths.
+ExecStart=/usr/bin/wine C:/Python311/python.exe C:/algoedge/mt5_bridge_server.py --host 127.0.0.1 --port ${BRIDGE_PORT} --key-file C:/algoedge/bridge.key
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

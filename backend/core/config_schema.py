@@ -11,11 +11,16 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Literal
 
-from backend.strategies.strategy_five_bias_ifvg.params import BiasIFVGParams
 from backend.strategies.strategy_orb.params import ORBParams
 from backend.strategies.strategy_spike_resumption.params import SpikeResumptionParams
 from backend.strategies.strategy_overnight.params import OvernightSessionParams
+from backend.strategies.strategy_kronos.params import KronosStrategyParams
+from backend.strategies.strategy_roboquant.params import (
+    RQNQPrecisionParams, RQNYORBParams, RQCrazyORBParams, RQTMeanReversionParams, RQCharlesMongerParams,
+    RQFlashTriggerORBParams, RQScarfaceORBParams, RQIVBParams, RQGigaORBParams, RQSigmaBreakoutParams, RQDailyAnchoredVWAPParams, RQFridayRevisitParams, RQM30ORBParams, RQSRSweepParams,
+)
 from backend.strategies.strategy_trend.params import TrendBreakoutParams
+from backend.strategies.strategy_fib.params import FibTrendParams
 from backend.strategies.strategy_vwap.params import VWAPParams
 # ─────────────────────────────────────────────────────────────────────────────
 # RISK MANAGEMENT PARAMETERS
@@ -1246,10 +1251,25 @@ class UserConfigV2(UserConfig):
     vwap: VWAPParams = field(default_factory=VWAPParams)
     orb: ORBParams = field(default_factory=ORBParams)
     trend_breakout: TrendBreakoutParams = field(default_factory=TrendBreakoutParams)
+    fib_trend: FibTrendParams = field(default_factory=FibTrendParams)
     overnight_session: OvernightSessionParams = field(default_factory=OvernightSessionParams)
+    kronos_strategy: KronosStrategyParams = field(default_factory=KronosStrategyParams)
+    rq_nq_precision: RQNQPrecisionParams = field(default_factory=RQNQPrecisionParams)
+    rq_ny_orb: RQNYORBParams = field(default_factory=RQNYORBParams)
+    rq_crazy_orb: RQCrazyORBParams = field(default_factory=RQCrazyORBParams)
+    rq_t_mean_reversion: RQTMeanReversionParams = field(default_factory=RQTMeanReversionParams)
+    rq_charles_monger: RQCharlesMongerParams = field(default_factory=RQCharlesMongerParams)
+    rq_flash_trigger_orb: RQFlashTriggerORBParams = field(default_factory=RQFlashTriggerORBParams)
+    rq_scarface_orb: RQScarfaceORBParams = field(default_factory=RQScarfaceORBParams)
+    rq_ivb: RQIVBParams = field(default_factory=RQIVBParams)
+    rq_giga_orb: RQGigaORBParams = field(default_factory=RQGigaORBParams)
+    rq_sigma_breakout: RQSigmaBreakoutParams = field(default_factory=RQSigmaBreakoutParams)
+    rq_daily_vwap: RQDailyAnchoredVWAPParams = field(default_factory=RQDailyAnchoredVWAPParams)
+    rq_friday_revisit: RQFridayRevisitParams = field(default_factory=RQFridayRevisitParams)
+    rq_m30_orb: RQM30ORBParams = field(default_factory=RQM30ORBParams)
+    rq_sr_sweep: RQSRSweepParams = field(default_factory=RQSRSweepParams)
     spike_resumption: SpikeResumptionParams = field(default_factory=SpikeResumptionParams)
     synth: SynthParams = field(default_factory=SynthParams)
-    bias_ifvg: BiasIFVGParams = field(default_factory=BiasIFVGParams)
     prop_firm: PropFirmParams = field(default_factory=PropFirmParams)
 
     @classmethod
@@ -1262,10 +1282,28 @@ class UserConfigV2(UserConfig):
         vwap_data = data.pop("vwap", {})
         orb_data = data.pop("orb", {})
         overnight_session_data = data.pop("overnight_session", {})
+        kronos_strategy_data = data.pop("kronos_strategy", {})
+        rq_nq_precision_data = data.pop("rq_nq_precision", {})
+        rq_ny_orb_data = data.pop("rq_ny_orb", {})
+        rq_crazy_orb_data = data.pop("rq_crazy_orb", {})
+        rq_t_mean_reversion_data = data.pop("rq_t_mean_reversion", {})
+        rq_charles_monger_data = data.pop("rq_charles_monger", {})
+        rq_flash_trigger_orb_data = data.pop("rq_flash_trigger_orb", {})
+        rq_scarface_orb_data = data.pop("rq_scarface_orb", {})
+        rq_ivb_data = data.pop("rq_ivb", {})
+        rq_giga_orb_data = data.pop("rq_giga_orb", {})
+        rq_sigma_breakout_data = data.pop("rq_sigma_breakout", {})
+        rq_daily_vwap_data = data.pop("rq_daily_vwap", {})
+        rq_friday_revisit_data = data.pop("rq_friday_revisit", {})
+        rq_m30_orb_data = data.pop("rq_m30_orb", {})
+        rq_sr_sweep_data = data.pop("rq_sr_sweep", {})
         trend_breakout_data = data.pop("trend_breakout", {})
+        fib_trend_data = data.pop("fib_trend", {})
         spike_resumption_data = data.pop("spike_resumption", {})
         synth_data = data.pop("synth", {})
-        bias_ifvg_data = data.pop("bias_ifvg", {})
+        # BiasIFVG_v1 was removed 2026-10-19: a saved config may still carry its
+        # block, which is dropped here rather than failing the load.
+        data.pop("bias_ifvg", None)
         prop_firm_data = data.pop("prop_firm", {})
         import dataclasses
         known_fields = {f.name for f in dataclasses.fields(cls)}
@@ -1284,10 +1322,25 @@ class UserConfigV2(UserConfig):
         config.vwap = VWAPParams(**filter_kwargs(VWAPParams, vwap_data))
         config.orb = ORBParams(**filter_kwargs(ORBParams, orb_data))
         config.trend_breakout = TrendBreakoutParams(**filter_kwargs(TrendBreakoutParams, trend_breakout_data))
+        config.fib_trend = FibTrendParams(**filter_kwargs(FibTrendParams, fib_trend_data))
         config.overnight_session = OvernightSessionParams(**filter_kwargs(OvernightSessionParams, overnight_session_data))
+        config.kronos_strategy = KronosStrategyParams(**filter_kwargs(KronosStrategyParams, kronos_strategy_data))
+        config.rq_nq_precision = RQNQPrecisionParams(**filter_kwargs(RQNQPrecisionParams, rq_nq_precision_data))
+        config.rq_ny_orb = RQNYORBParams(**filter_kwargs(RQNYORBParams, rq_ny_orb_data))
+        config.rq_crazy_orb = RQCrazyORBParams(**filter_kwargs(RQCrazyORBParams, rq_crazy_orb_data))
+        config.rq_t_mean_reversion = RQTMeanReversionParams(**filter_kwargs(RQTMeanReversionParams, rq_t_mean_reversion_data))
+        config.rq_charles_monger = RQCharlesMongerParams(**filter_kwargs(RQCharlesMongerParams, rq_charles_monger_data))
+        config.rq_flash_trigger_orb = RQFlashTriggerORBParams(**filter_kwargs(RQFlashTriggerORBParams, rq_flash_trigger_orb_data))
+        config.rq_scarface_orb = RQScarfaceORBParams(**filter_kwargs(RQScarfaceORBParams, rq_scarface_orb_data))
+        config.rq_ivb = RQIVBParams(**filter_kwargs(RQIVBParams, rq_ivb_data))
+        config.rq_giga_orb = RQGigaORBParams(**filter_kwargs(RQGigaORBParams, rq_giga_orb_data))
+        config.rq_sigma_breakout = RQSigmaBreakoutParams(**filter_kwargs(RQSigmaBreakoutParams, rq_sigma_breakout_data))
+        config.rq_daily_vwap = RQDailyAnchoredVWAPParams(**filter_kwargs(RQDailyAnchoredVWAPParams, rq_daily_vwap_data))
+        config.rq_friday_revisit = RQFridayRevisitParams(**filter_kwargs(RQFridayRevisitParams, rq_friday_revisit_data))
+        config.rq_m30_orb = RQM30ORBParams(**filter_kwargs(RQM30ORBParams, rq_m30_orb_data))
+        config.rq_sr_sweep = RQSRSweepParams(**filter_kwargs(RQSRSweepParams, rq_sr_sweep_data))
         config.spike_resumption = SpikeResumptionParams(**filter_kwargs(SpikeResumptionParams, spike_resumption_data))
         config.synth = SynthParams(**filter_kwargs(SynthParams, synth_data))
-        config.bias_ifvg = BiasIFVGParams(**filter_kwargs(BiasIFVGParams, bias_ifvg_data))
         config.prop_firm = PropFirmParams(**filter_kwargs(PropFirmParams, prop_firm_data))
         
 
@@ -1349,14 +1402,44 @@ class UserConfigV2(UserConfig):
             self.orb = ORBParams()
         if self.trend_breakout is None:
             self.trend_breakout = TrendBreakoutParams()
+        if self.fib_trend is None:
+            self.fib_trend = FibTrendParams()
         if self.overnight_session is None:
             self.overnight_session = OvernightSessionParams()
+        if self.kronos_strategy is None:
+            self.kronos_strategy = KronosStrategyParams()
+        if self.rq_nq_precision is None:
+            self.rq_nq_precision = RQNQPrecisionParams()
+        if self.rq_ny_orb is None:
+            self.rq_ny_orb = RQNYORBParams()
+        if self.rq_crazy_orb is None:
+            self.rq_crazy_orb = RQCrazyORBParams()
+        if self.rq_t_mean_reversion is None:
+            self.rq_t_mean_reversion = RQTMeanReversionParams()
+        if self.rq_charles_monger is None:
+            self.rq_charles_monger = RQCharlesMongerParams()
+        if self.rq_flash_trigger_orb is None:
+            self.rq_flash_trigger_orb = RQFlashTriggerORBParams()
+        if self.rq_scarface_orb is None:
+            self.rq_scarface_orb = RQScarfaceORBParams()
+        if self.rq_ivb is None:
+            self.rq_ivb = RQIVBParams()
+        if self.rq_giga_orb is None:
+            self.rq_giga_orb = RQGigaORBParams()
+        if self.rq_sigma_breakout is None:
+            self.rq_sigma_breakout = RQSigmaBreakoutParams()
+        if self.rq_daily_vwap is None:
+            self.rq_daily_vwap = RQDailyAnchoredVWAPParams()
+        if self.rq_friday_revisit is None:
+            self.rq_friday_revisit = RQFridayRevisitParams()
+        if self.rq_m30_orb is None:
+            self.rq_m30_orb = RQM30ORBParams()
+        if self.rq_sr_sweep is None:
+            self.rq_sr_sweep = RQSRSweepParams()
         if self.spike_resumption is None:
             self.spike_resumption = SpikeResumptionParams()
         if self.synth is None:
             self.synth = SynthParams()
-        if self.bias_ifvg is None:
-            self.bias_ifvg = BiasIFVGParams()
         if self.prop_firm is None:
             self.prop_firm = PropFirmParams()
 

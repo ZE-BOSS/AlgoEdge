@@ -1,0 +1,281 @@
+{
+ "config": {
+  "model": "Kronos-mini",
+  "lookback": 512,
+  "pred_len": 12,
+  "sample_count": 5,
+  "temperature": 1.0,
+  "top_p": 0.9,
+  "seed": 1234,
+  "threads": 1,
+  "model_root": "models\\kronos"
+ },
+ "model_id": "Kronos-mini@f4e68697-daf3eb66",
+ "args": {
+  "cmd": "skill",
+  "symbols": "XAUUSD,EURUSD,NDX100,SPX500",
+  "tf": "H1",
+  "start": "2024-07-01",
+  "end": "2026-10-16",
+  "model": "Kronos-mini",
+  "lookback": 512,
+  "pred_len": 12,
+  "samples": 5,
+  "stride": 0,
+  "points": 400,
+  "batch": 4,
+  "threads": 1,
+  "strategies": "ORB_v1,TrendBreakout_v1",
+  "tag": "macro"
+ },
+ "results": {
+  "XAUUSD": {
+   "n": 400,
+   "spread_bps": 0.83,
+   "mean_abs_move_bps": 89.43,
+   "kronos": {
+    "trades": 400,
+    "hit_rate": 0.5125,
+    "net_bps": 3.196,
+    "t": 0.51
+   },
+   "kronos_confident": {
+    "trades": 234,
+    "hit_rate": 0.5256,
+    "net_bps": 4.869,
+    "t": 0.58
+   },
+   "momentum": {
+    "trades": 400,
+    "hit_rate": 0.53,
+    "net_bps": 17.3,
+    "t": 2.81
+   },
+   "long": {
+    "trades": 400,
+    "hit_rate": 0.4925,
+    "net_bps": -2.036,
+    "t": -0.33
+   },
+   "rank_ic": 0.0386,
+   "calibration": [
+    {
+     "p_up": "(-0.01, 0.2]",
+     "n": 108,
+     "actual_up": 0.472
+    },
+    {
+     "p_up": "(0.2, 0.4]",
+     "n": 75,
+     "actual_up": 0.44
+    },
+    {
+     "p_up": "(0.4, 0.6]",
+     "n": 91,
+     "actual_up": 0.516
+    },
+    {
+     "p_up": "(0.6, 0.8]",
+     "n": 86,
+     "actual_up": 0.535
+    },
+    {
+     "p_up": "(0.8, 1.01]",
+     "n": 40,
+     "actual_up": 0.5
+    }
+   ],
+   "range_corr": 0.122,
+   "bars": 13589,
+   "first": "2025-12-23 02:00:00",
+   "last": "2026-10-14 23:00:00",
+   "seconds": 3179
+  },
+  "EURUSD": {
+   "n": 400,
+   "spread_bps": 0.11,
+   "mean_abs_move_bps": 18.28,
+   "kronos": {
+    "trades": 400,
+    "hit_rate": 0.49,
+    "net_bps": -1.517,
+    "t": -1.17
+   },
+   "kronos_confident": {
+    "trades": 229,
+    "hit_rate": 0.5109,
+    "net_bps": -1.634,
+    "t": -1.09
+   },
+   "momentum": {
+    "trades": 400,
+    "hit_rate": 0.4725,
+    "net_bps": -1.313,
+    "t": -1.01
+   },
+   "long": {
+    "trades": 400,
+    "hit_rate": 0.48,
+    "net_bps": -1.035,
+    "t": -0.8
+   },
+   "rank_ic": -0.0232,
+   "calibration": [
+    {
+     "p_up": "(-0.01, 0.2]",
+     "n": 90,
+     "actual_up": 0.522
+    },
+    {
+     "p_up": "(0.2, 0.4]",
+     "n": 76,
+     "actual_up": 0.434
+    },
+    {
+     "p_up": "(0.4, 0.6]",
+     "n": 95,
+     "actual_up": 0.4
+    },
+    {
+     "p_up": "(0.6, 0.8]",
+     "n": 83,
+     "actual_up": 0.602
+    },
+    {
+     "p_up": "(0.8, 1.01]",
+     "n": 56,
+     "actual_up": 0.429
+    }
+   ],
+   "range_corr": 0.195,
+   "bars": 14278,
+   "first": "2026-01-08 19:00:00",
+   "last": "2026-10-15 07:00:00",
+   "seconds": 2223
+  },
+  "NDX100": {
+   "n": 400,
+   "spread_bps": 0.86,
+   "mean_abs_move_bps": 67.31,
+   "kronos": {
+    "trades": 400,
+    "hit_rate": 0.4975,
+    "net_bps": 2.67,
+    "t": 0.58
+   },
+   "kronos_confident": {
+    "trades": 221,
+    "hit_rate": 0.4751,
+    "net_bps": -0.921,
+    "t": -0.15
+   },
+   "momentum": {
+    "trades": 400,
+    "hit_rate": 0.48,
+    "net_bps": -2.956,
+    "t": -0.65
+   },
+   "long": {
+    "trades": 400,
+    "hit_rate": 0.525,
+    "net_bps": 3.406,
+    "t": 0.74
+   },
+   "rank_ic": -0.0058,
+   "calibration": [
+    {
+     "p_up": "(-0.01, 0.2]",
+     "n": 74,
+     "actual_up": 0.608
+    },
+    {
+     "p_up": "(0.2, 0.4]",
+     "n": 81,
+     "actual_up": 0.481
+    },
+    {
+     "p_up": "(0.4, 0.6]",
+     "n": 98,
+     "actual_up": 0.51
+    },
+    {
+     "p_up": "(0.6, 0.8]",
+     "n": 86,
+     "actual_up": 0.512
+    },
+    {
+     "p_up": "(0.8, 1.01]",
+     "n": 61,
+     "actual_up": 0.525
+    }
+   ],
+   "range_corr": 0.189,
+   "bars": 13570,
+   "first": "2025-12-23 19:00:00",
+   "last": "2026-10-15 06:00:00",
+   "seconds": 1472
+  },
+  "SPX500": {
+   "n": 400,
+   "spread_bps": 0.84,
+   "mean_abs_move_bps": 42.55,
+   "kronos": {
+    "trades": 400,
+    "hit_rate": 0.5725,
+    "net_bps": 9.797,
+    "t": 3.39
+   },
+   "kronos_confident": {
+    "trades": 213,
+    "hit_rate": 0.6103,
+    "net_bps": 14.587,
+    "t": 3.54
+   },
+   "momentum": {
+    "trades": 400,
+    "hit_rate": 0.545,
+    "net_bps": 2.865,
+    "t": 0.98
+   },
+   "long": {
+    "trades": 400,
+    "hit_rate": 0.515,
+    "net_bps": 2.204,
+    "t": 0.75
+   },
+   "rank_ic": 0.1895,
+   "calibration": [
+    {
+     "p_up": "(-0.01, 0.2]",
+     "n": 65,
+     "actual_up": 0.323
+    },
+    {
+     "p_up": "(0.2, 0.4]",
+     "n": 76,
+     "actual_up": 0.592
+    },
+    {
+     "p_up": "(0.4, 0.6]",
+     "n": 111,
+     "actual_up": 0.486
+    },
+    {
+     "p_up": "(0.6, 0.8]",
+     "n": 80,
+     "actual_up": 0.575
+    },
+    {
+     "p_up": "(0.8, 1.01]",
+     "n": 68,
+     "actual_up": 0.588
+    }
+   ],
+   "range_corr": 0.206,
+   "bars": 13561,
+   "first": "2025-12-23 14:00:00",
+   "last": "2026-10-15 03:00:00",
+   "seconds": 1331
+  }
+ }
+}

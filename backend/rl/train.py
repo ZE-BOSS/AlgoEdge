@@ -786,13 +786,15 @@ def build_episodes(spec: AgentSpec, datasets: dict[str, pd.DataFrame], *,
                     base_strategies=spec.bases,
                     configs={sid: strategy_config(spec, symbol, strategy_blocks,
                                                   risk_config, sid)
-                             for sid in spec.bases})
+                             for sid in spec.bases},
+                    progress=progress)
             else:
                 data = E.EpisodeData.build(
                     symbol, spec.timeframe, frame, spec.features,
                     base_strategy=spec.bases[0],
                     config=strategy_config(spec, symbol, strategy_blocks, risk_config,
-                                           spec.bases[0]))
+                                           spec.bases[0]),
+                    progress=progress)
             if progress is not None:
                 n_setups = (sum(len(v) for v in data.base_multi.values())
                             if data.base_multi else len(data.base_signals or {}))

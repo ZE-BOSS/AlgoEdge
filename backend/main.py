@@ -34,6 +34,7 @@ from backend.api.routes import (
     mt5_test,
     push,
     rl,
+    kronos,
     signals,
     stats,
     strategy_factory,
@@ -336,6 +337,7 @@ app.include_router(system.router)  # Telegram status/test, live account, state r
 # withdrawals, costs, and whether the journal adds up to the balance.
 app.include_router(cash.router)
 app.include_router(rl.router)                # [W4] RL agents, charters, proposals
+app.include_router(kronos.router)            # Kronos forecasts: jobs in their own process
 
 
 # ── Request Logging Middleware ───────────────────────────────────────────────

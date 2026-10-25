@@ -5,6 +5,7 @@ User registration, login, and JWT token management.
 Email + password authentication with bcrypt hashing.
 """
 
+import asyncio
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -86,8 +87,19 @@ def create_token(user_id: str, token_type: str = "access") -> str:
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
+# "Open until the first account exists" is check-then-insert: two concurrent
+# sign-ups on an empty server would both pass it. Each instance is one process,
+# so a process lock around the check and the insert closes that window.
+_REGISTER_LOCK = asyncio.Lock()
+
+
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    async with _REGISTER_LOCK:
+        return await _register_locked(req, db)
+
+
+async def _register_locked(req: RegisterRequest, db: AsyncSession):
     """Create a new user account and return JWT tokens.
 
     Open only until the first account exists, or while ALLOW_REGISTRATION=1.

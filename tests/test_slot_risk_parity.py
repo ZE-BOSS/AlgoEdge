@@ -462,8 +462,10 @@ def test_both_backtest_routes_hand_the_strategy_the_resolved_risk():
     assert "apply_resolved_risk_to_strategy_config(config, portfolio_slot_configs[slot_key])" in src
 
 
-def test_risk_above_the_strategys_daily_cap_blocks_every_bar():
-    """The interaction itself, so the cause stays documented in a test."""
+def test_risk_above_the_strategys_daily_cap_still_allows_the_first_trade():
+    """It used to block every bar: live (5% per trade vs the 4% default cap)
+    never traded a synthetic slot. Since 2026-10-19 the first trade of a day
+    always passes (core/daily_budget.py); later ones are still capped."""
     import asyncio
 
     import numpy as np
@@ -488,9 +490,9 @@ def test_risk_above_the_strategys_daily_cap_blocks_every_bar():
         summary = engine.gates.summary()
         return (summary.get("gates") or summary)["daily_risk_cap"]
 
-    # default cap is 4%: 5% per trade cannot pass on any bar, ever
-    blocked = asyncio.run(gate_stats(5.0))
-    assert blocked["passed"] == 0 and blocked["failed"] == blocked["evaluated"] > 0
+    # default cap is 4%: 5% per trade with nothing used today still passes
+    first = asyncio.run(gate_stats(5.0))
+    assert first["failed"] == 0 and first["evaluated"] > 0
 
     allowed = asyncio.run(gate_stats(3.0))
     assert allowed["failed"] == 0, "3% is inside the 4% cap and must reach the entry logic"

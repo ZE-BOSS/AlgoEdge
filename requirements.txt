@@ -2,7 +2,7 @@
 # AlgoEdge Trading Bot — Python Requirements
 # ============================================================
 # pip install -r requirements.txt
-# Python 3.11+ | Windows 10/11 (MT5 API is Windows-only)
+# Python 3.11+ | Windows 10/11, or Linux with the Wine MT5 bridge (deploy/linux/)
 # ============================================================
 
 # ── Core MT5 Integration ─────────────────────────────────────
@@ -11,8 +11,10 @@
 # ("DLL load failed while importing _core: An Application Control policy has
 # blocked this file"), which takes out every MT5 route at import. 5.0.5120 and
 # 5.0.4993 both load; 5.0.5120 is the newest that does.
-MetaTrader5==5.0.5120
-pywin32
+# Windows only: on Linux the backend reaches MT5 through the Wine bridge
+# (backend/mt5/bridge_client.py), so these must not install there.
+MetaTrader5==5.0.5120; sys_platform == "win32"
+pywin32; sys_platform == "win32"
 
 # ── Async Backend ────────────────────────────────────────────
 fastapi

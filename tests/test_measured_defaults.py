@@ -20,7 +20,7 @@ from backend.strategies.strategy_defaults import (
 )
 
 STRATEGIES = ["DriftJumpAlpha_v1", "ORB_v1", "VWAP_v1",
-              "BiasIFVG_v1", "SpikeFade_v1", "RangeRevert_v1", "RangeBreakout_v1", "TrendDrift_v1"]
+              "SpikeFade_v1", "RangeRevert_v1", "RangeBreakout_v1", "TrendDrift_v1"]
 
 
 @pytest.mark.parametrize("sid", STRATEGIES)

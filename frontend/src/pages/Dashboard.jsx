@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, DollarSign, Target, Shield, Activity, AlertTriangle, Play, Square, Eye, Loader2, Terminal, Trash2 } from 'lucide-react';
 import { useConnectionStore, useRiskStore, useAuthStore } from '../store';
 import { getDashboardData, getChartData, startBot, stopBot, getBotLogs, forceCloseAll, getLiveAccount } from '../services/api';
+import { ActivityPulse3D, EquityRibbon3D } from '../components/viz/scenes';
 import { confirmOnLive } from '../services/servers';
 import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
 import SlotDiagnostics from '../components/SlotDiagnostics';
@@ -40,9 +41,17 @@ function getCategoryColor(evt) {
  * looks idle.
  */
 function LiveAccountPanel() {
+  // This session's equity, one point per poll (10 s), last hour kept: the
+  // live 3D ribbon. Appended when the poll returns - client-side only, so it
+  // costs the server nothing.
+  const [session, setSession] = useState([]);
   const { data: acct } = useQuery({
     queryKey: ['live-account'],
-    queryFn: () => getLiveAccount().then(r => r.data),
+    queryFn: () => getLiveAccount().then((r) => {
+      const v = Number(r.data?.equity);
+      if (Number.isFinite(v)) setSession((prev) => [...prev, v].slice(-360));
+      return r.data;
+    }),
     refetchInterval: 10000,
   });
 
@@ -77,6 +86,10 @@ function LiveAccountPanel() {
         </div>
       )}
 
+      {session.length > 2 && (
+        <EquityRibbon3D equity={session} live height={170}
+                        title="live equity this session (every 10 s)" />
+      )}
       <div className="metrics-grid" style={{ marginBottom: 0 }}>
         <MetricCard label="Balance" value={money(acct.balance)} icon={DollarSign} subtext={acct.server || ''} />
         <MetricCard
@@ -390,6 +403,11 @@ function BotControl() {
         </div>
       )}
 
+      <ActivityPulse3D active={isRunning} height={150} color={isRunning ? '#26b98c' : '#667286'}
+                       intensity={Math.min(1, (dashboardData?.positions?.length || 0) / 5 + 0.2)}
+                       label={isRunning
+                         ? `live · ${dashboardData?.positions?.length || 0} open · ${botStatus?.total_signals_today ?? 0} signals today`
+                         : 'bot stopped'} />
       {botStatus && (
         <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
           <div><strong>Symbols:</strong> {(isRunning && botStatus.symbols?.length ? botStatus.symbols : configSymbols).join(', ')

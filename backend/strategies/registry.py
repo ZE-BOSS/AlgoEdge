@@ -25,10 +25,13 @@ def _load_strategies():
         import backend.strategies.strategy_boom.engine  # noqa: F401
         import backend.strategies.strategy_orb.engine  # noqa: F401
         import backend.strategies.strategy_synth.engine  # noqa: F401
-        import backend.strategies.strategy_five_bias_ifvg.engine  # noqa: F401
         import backend.strategies.strategy_trend.engine  # noqa: F401
+        import backend.strategies.strategy_fib.engine  # noqa: F401  (fib pullback in trend, 2026-10-25)
         import backend.strategies.strategy_overnight.engine  # noqa: F401
         import backend.strategies.strategy_spike_resumption.engine  # noqa: F401
+        import backend.strategies.strategy_kronos.engine  # noqa: F401  (reads forecasts; never imports torch)
+        import backend.strategies.strategy_roboquant.engine  # noqa: F401  (five roboquant.dev templates)
+        import backend.strategies.strategy_roboquant.engine_more  # noqa: F401  (nine more, 2026-10-20)
         _LOADED = True
 
 def register_strategy(name: str):

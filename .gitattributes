@@ -1,0 +1,2 @@
+# Scripts and units that run on Linux must keep LF line endings.
+deploy/linux/** text eol=lf

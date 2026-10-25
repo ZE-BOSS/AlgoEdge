@@ -1,0 +1,95 @@
+{
+ "config": {
+  "model": "Kronos-mini",
+  "lookback": 512,
+  "pred_len": 12,
+  "sample_count": 5,
+  "temperature": 1.0,
+  "top_p": 0.9,
+  "seed": 1234,
+  "threads": 1,
+  "model_root": "models\\kronos"
+ },
+ "model_id": "Kronos-mini@f4e68697-daf3eb66",
+ "args": {
+  "cmd": "skill",
+  "symbols": "SPCX",
+  "tf": "M15",
+  "start": "2026-06-01",
+  "end": "2026-10-16",
+  "model": "Kronos-mini",
+  "lookback": 512,
+  "pred_len": 12,
+  "samples": 5,
+  "stride": 0,
+  "points": 400,
+  "batch": 4,
+  "threads": 1,
+  "strategies": "ORB_v1,TrendBreakout_v1",
+  "tag": "newstock"
+ },
+ "results": {
+  "SPCX": {
+   "n": 139,
+   "spread_bps": 47.91,
+   "mean_abs_move_bps": 208.78,
+   "kronos": {
+    "trades": 139,
+    "hit_rate": 0.5755,
+    "net_bps": 18.589,
+    "t": 0.74
+   },
+   "kronos_confident": {
+    "trades": 72,
+    "hit_rate": 0.5833,
+    "net_bps": 10.105,
+    "t": 0.27
+   },
+   "momentum": {
+    "trades": 139,
+    "hit_rate": 0.3885,
+    "net_bps": -115.256,
+    "t": -4.57
+   },
+   "long": {
+    "trades": 139,
+    "hit_rate": 0.5108,
+    "net_bps": -35.106,
+    "t": -1.36
+   },
+   "rank_ic": 0.1569,
+   "calibration": [
+    {
+     "p_up": "(-0.01, 0.2]",
+     "n": 17,
+     "actual_up": 0.471
+    },
+    {
+     "p_up": "(0.2, 0.4]",
+     "n": 28,
+     "actual_up": 0.5
+    },
+    {
+     "p_up": "(0.4, 0.6]",
+     "n": 39,
+     "actual_up": 0.41
+    },
+    {
+     "p_up": "(0.6, 0.8]",
+     "n": 34,
+     "actual_up": 0.706
+    },
+    {
+     "p_up": "(0.8, 1.01]",
+     "n": 21,
+     "actual_up": 0.429
+    }
+   ],
+   "range_corr": 0.261,
+   "bars": 2184,
+   "first": "2026-07-16 17:45:00",
+   "last": "2026-10-15 15:45:00",
+   "seconds": 643
+  }
+ }
+}

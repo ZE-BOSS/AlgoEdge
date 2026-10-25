@@ -5,6 +5,7 @@ import { BarChart3, TrendingUp, Target, Shield, Activity, Clock } from 'lucide-r
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, CartesianGrid } from 'recharts';
 import { getStats, getTrades } from '../services/api';
 import MoneyCurves from '../components/MoneyCurves';
+import { EquityRibbon3D } from '../components/viz/scenes';
 import { useConnectionStore, useAuthStore } from '../store';
 
 const COLORS = ['#3fb68b', '#58a6ff', '#bc8cff', '#f0883e', '#79c0ff', '#f85149', '#d29922', '#8b949e'];
@@ -53,6 +54,8 @@ export default function Analytics() {
     });
     return decimate(out, 500);
   }, [s.equity_curve, trades]);
+  const eq3d = useMemo(() => equityCurve.map((d) => d.balance), [equityCurve]);
+  const trades3d = useMemo(() => (trades || []).map((t, i, a) => ({ i, n: a.length, pnl: t.pnl || 0 })), [trades]);
 
   // TP distribution (TP1-TP5)
   const tpDist = [
@@ -97,6 +100,13 @@ export default function Analytics() {
         <StatCard label="Max Consec Losses" value={s.max_consecutive_losses || 0} color="red" icon={Clock} />
       </div>
 
+      {equityCurve.length > 2 && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div className="card-header"><span className="card-title">Equity in 3D</span></div>
+          <EquityRibbon3D equity={eq3d} trades={trades3d} height={240}
+                          title="balance, drawdown underneath, each trade a dot (drag to rotate)" />
+        </div>
+      )}
       <div className="grid-2" style={{ marginBottom: 24 }}>
         <div className="card">
           <div className="card-header"><span className="card-title">Equity Curve</span></div>
