@@ -64,6 +64,31 @@ def constants() -> dict:
             if k.isupper() and isinstance(getattr(mt5, k), (int, float, str))}
 
 
+# Functions whose newer MetaTrader5 builds (5.0.6231 here) refuse the request
+# dict passed positionally - `order_send(request)`, the documented form and the
+# one the backend uses - with last_error (-2, 'Unnamed arguments not allowed')
+# and a None result. The refusal is argument parsing: nothing reached the
+# broker, so retrying the same request by keyword cannot place an order twice.
+_REQUEST_FUNCS = {"order_send", "order_check"}
+
+
+def _unnamed_args_refused() -> bool:
+    try:
+        code, text = mt5.last_error()
+    except Exception:                                   # noqa: BLE001
+        return False
+    return code == -2 and "unnamed" in str(text).lower()
+
+
+def _call(name, fn, args, kwargs):
+    result = fn(*args, **kwargs)
+    if (result is None and name in _REQUEST_FUNCS and len(args) == 1 and not kwargs
+            and isinstance(args[0], dict) and _unnamed_args_refused()):
+        log.info("%s: positional request refused by this MetaTrader5 build - retrying by keyword", name)
+        result = fn(request=args[0])
+    return result
+
+
 def handle(msg):
     kind = msg[0]
     if kind == "ping":
@@ -75,7 +100,7 @@ def handle(msg):
         if name.startswith("_") or not hasattr(mt5, name):
             return ("err", f"MetaTrader5 has no function {name!r}")
         fn = getattr(mt5, name)
-        return ("ok", encode(fn(*args, **(kwargs or {}))))
+        return ("ok", encode(_call(name, fn, tuple(args or ()), dict(kwargs or {}))))
     return ("err", f"unknown request {kind!r}")
 
 
@@ -117,6 +142,14 @@ def main() -> None:
            os.environ.get("ALGOEDGE_MT5_BRIDGE_KEY", "").encode())
     if not key:
         raise SystemExit("no bridge key: pass --key-file or set ALGOEDGE_MT5_BRIDGE_KEY")
+    # Attach to this prefix's terminal straight away. A bridge restarted on its
+    # own (crash, update) was otherwise unattached until the backend happened to
+    # call initialize(), and account_info() returned None meanwhile - which the
+    # bot reads as "broker not connected" and refuses the trade.
+    try:
+        log.info("initialize(): %s %s", mt5.initialize(), mt5.last_error())
+    except Exception as exc:                            # noqa: BLE001 - the backend still initialises on demand
+        log.warning("initialize() at start failed: %s", exc)
     if a.host not in ("127.0.0.1", "localhost"):
         log.warning("listening on %s - the bridge is meant for localhost only", a.host)
     while True:

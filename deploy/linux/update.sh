@@ -39,6 +39,15 @@ bash "$SRC/deploy/linux/add_instance.sh" demo 8001 18811 1
 echo "== live"
 bash "$SRC/deploy/linux/add_instance.sh" live 8002 18812 2
 
+# add_instance.sh copies the new bridge code into each Wine prefix but does not
+# restart the bridge. Restart it, then the API AFTER it, so the API attaches to
+# the fresh bridge at startup.
+for n in demo live; do
+    systemctl restart "algoedge-bridge@$n"
+    sleep 3
+    systemctl restart "algoedge-api@$n"
+done
+
 echo "== websites"
 if ! command -v npm >/dev/null; then
     apt-get install -y -q nodejs npm

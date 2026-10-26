@@ -193,3 +193,35 @@ def test_startup_connects_the_broker_on_the_linux_bridge_too():
     src = inspect.getsource(m)
     assert 'os.name == "nt" or os.environ.get("ALGOEDGE_MT5_BRIDGE")' in src
     assert "ensure_connected()" in src
+
+
+def test_order_send_falls_back_to_the_keyword_form_newer_mt5_builds_demand():
+    """MetaTrader5 5.0.6231 (the VPS) refuses order_send(request) with
+    (-2, 'Unnamed arguments not allowed') and returns None - every live order
+    failed on 2026-10-26. The bridge retries by keyword, once, and only on that
+    pre-send refusal, so nothing can be placed twice."""
+    fake = _fake_mt5()
+    sent = []
+
+    def order_send(*args, **kwargs):
+        if args:                                        # the newer build: positional refused
+            fake.last_error = lambda: (-2, "Unnamed arguments not allowed")
+            return None
+        sent.append(kwargs["request"])
+        return collections.namedtuple("OrderSendResult", ["retcode", "order"])(10009, 88)
+    fake.order_send = order_send
+    server = _load_server(fake)
+    req = {"action": 1, "symbol": "Boom 900 Index", "volume": 0.2}
+    status, value = server.handle(("call", "order_send", (req,), {}))
+    assert status == "ok" and value["values"] == [10009, 88]
+    assert sent == [req]                                # exactly one order reached the broker
+
+
+def test_a_real_order_failure_is_not_retried():
+    fake = _fake_mt5()
+    calls = []
+    fake.order_send = lambda *a, **k: calls.append((a, k)) or None
+    fake.last_error = lambda: (-10004, "No IPC connection")
+    server = _load_server(fake)
+    status, value = server.handle(("call", "order_send", ({"action": 1},), {}))
+    assert status == "ok" and value is None and len(calls) == 1
