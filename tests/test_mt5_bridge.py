@@ -248,3 +248,44 @@ def test_a_real_order_failure_is_not_retried():
     server = _load_server(fake)
     status, value = server.handle(("call", "order_send", ({"action": 1},), {}))
     assert status == "ok" and value is None and len(calls) == 1
+
+
+def test_reads_refused_positionally_are_repeated_by_keyword():
+    """history_deals_get(date_from, date_to) - the closed-trade sync, the cash
+    ledger - raised "SystemError ... returned a result with an exception set"
+    on the VPS's MetaTrader5 build, and order_calc_margin returned None with
+    'Unnamed arguments not allowed'. The bridge repeats such a read by keyword,
+    and keeps calling it by keyword afterwards."""
+    from datetime import datetime
+    fake = _fake_mt5()
+    seen = []
+
+    def history_deals_get(*args, **kwargs):
+        seen.append((args, kwargs))
+        if args:
+            raise SystemError("<built-in function history_deals_get> returned a result with an exception set")
+        return ("deal",)
+    fake.history_deals_get = history_deals_get
+
+    def order_calc_margin(*args, **kwargs):
+        if args:
+            fake.last_error = lambda: (-2, "Unnamed arguments not allowed")
+            return None
+        return 12.5
+    fake.order_calc_margin = order_calc_margin
+    server = _load_server(fake)
+
+    a, b = datetime(2026, 10, 1), datetime(2026, 10, 26)
+    assert server.handle(("call", "history_deals_get", (a, b), {"group": "*X*"})) == ("ok", ("deal",))
+    assert seen[-1] == ((), {"date_from": a, "date_to": b, "group": "*X*"})
+    n = len(seen)
+    server.handle(("call", "history_deals_get", (a, b), {}))
+    assert len(seen) == n + 1 and seen[-1][0] == ()          # straight to keywords now
+    assert server.handle(("call", "order_calc_margin", (0, "XAUUSD", 0.1, 2000.0), {})) == ("ok", 12.5)
+
+
+def test_reads_that_work_positionally_are_left_alone():
+    fake = _fake_mt5()
+    server = _load_server(fake)
+    status, value = server.handle(("call", "copy_rates_from_pos", ("XAUUSD", 1, 0, 3), {}))
+    assert status == "ok" and value["shape"] == [3]

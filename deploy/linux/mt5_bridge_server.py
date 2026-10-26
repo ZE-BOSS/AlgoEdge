@@ -96,7 +96,68 @@ def _not_placed(result) -> bool:
     return getattr(result, "retcode", None) == TRADE_RETCODE_INVALID
 
 
+# The documented parameter names of the READ functions the backend calls with
+# positional arguments. The same builds refuse those positionally too - either
+# None with (-2, 'Unnamed arguments not allowed') or, for history_deals_get,
+# "SystemError: ... returned a result with an exception set" - which broke the
+# closed-trade sync (journal P&L), the cash ledger and margin sizing. A read
+# can be retried freely, so it is repeated by keyword; once a function has
+# needed that, it is called by keyword from then on.
+_PARAM_NAMES = {
+    "history_deals_get": ("date_from", "date_to"),
+    "history_orders_get": ("date_from", "date_to"),
+    "history_deals_total": ("date_from", "date_to"),
+    "history_orders_total": ("date_from", "date_to"),
+    "order_calc_margin": ("action", "symbol", "volume", "price"),
+    "order_calc_profit": ("action", "symbol", "volume", "price_open", "price_close"),
+    "copy_rates_from": ("symbol", "timeframe", "date_from", "count"),
+    "copy_rates_from_pos": ("symbol", "timeframe", "start_pos", "count"),
+    "copy_rates_range": ("symbol", "timeframe", "date_from", "date_to"),
+    "copy_ticks_from": ("symbol", "date_from", "count", "flags"),
+    "copy_ticks_range": ("symbol", "date_from", "date_to", "flags"),
+    "symbol_info": ("symbol",),
+    "symbol_info_tick": ("symbol",),
+    "symbol_select": ("symbol", "enable"),
+    "market_book_add": ("symbol",),
+    "market_book_get": ("symbol",),
+    "market_book_release": ("symbol",),
+}
+_KEYWORD_ONLY: set[str] = set()
+
+
+def _as_keywords(name, args, kwargs):
+    names = _PARAM_NAMES[name]
+    if len(args) > len(names):
+        return None
+    return {**dict(zip(names, args)), **kwargs}
+
+
+def _call_read(name, fn, args, kwargs):
+    if name in _KEYWORD_ONLY:
+        named = _as_keywords(name, args, kwargs)
+        if named is not None:
+            return fn(**named)
+    try:
+        result = fn(*args, **kwargs)
+        refused = result is None and _unnamed_args_refused()
+    except (SystemError, TypeError) as exc:
+        result, refused = None, exc
+    if not refused:
+        return result
+    named = _as_keywords(name, args, kwargs)
+    if named is None:
+        if isinstance(refused, Exception):
+            raise refused
+        return result
+    log.info("%s: positional arguments refused by this MetaTrader5 build (%s) - calling it by keyword from now on",
+             name, refused if isinstance(refused, Exception) else mt5.last_error())
+    _KEYWORD_ONLY.add(name)
+    return fn(**named)
+
+
 def _call(name, fn, args, kwargs):
+    if name in _PARAM_NAMES and args:
+        return _call_read(name, fn, args, kwargs)
     result = fn(*args, **kwargs)
     if not (result is None and name in _REQUEST_FUNCS and len(args) == 1 and not kwargs
             and isinstance(args[0], dict) and _unnamed_args_refused()):
