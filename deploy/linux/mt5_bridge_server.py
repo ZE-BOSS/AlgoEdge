@@ -80,12 +80,42 @@ def _unnamed_args_refused() -> bool:
     return code == -2 and "unnamed" in str(text).lower()
 
 
+TRADE_RETCODE_INVALID = 10013          # "Invalid request": rejected, nothing placed
+
+
+def _not_placed(result) -> bool:
+    """True only when this attempt certainly placed nothing: refused while
+    parsing its arguments (None, last_error -2) or rejected as an invalid
+    request (retcode 10013). Any other outcome is final - retrying it could
+    place an order twice."""
+    if result is None:
+        try:
+            return mt5.last_error()[0] == -2
+        except Exception:                               # noqa: BLE001
+            return False
+    return getattr(result, "retcode", None) == TRADE_RETCODE_INVALID
+
+
 def _call(name, fn, args, kwargs):
     result = fn(*args, **kwargs)
-    if (result is None and name in _REQUEST_FUNCS and len(args) == 1 and not kwargs
+    if not (result is None and name in _REQUEST_FUNCS and len(args) == 1 and not kwargs
             and isinstance(args[0], dict) and _unnamed_args_refused()):
-        log.info("%s: positional request refused by this MetaTrader5 build - retrying by keyword", name)
-        result = fn(request=args[0])
+        return result
+    request = args[0]
+    # This build wants the request's FIELDS as named arguments
+    # (order_send(action=..., symbol=...)). `request=` is the other spelling a
+    # build might take; it is tried second because on 5.0.6231 it is accepted
+    # as one unknown field and the terminal answers "Invalid request".
+    for label, attempt in (("fields as keywords", lambda: fn(**request)),
+                           ("request=", lambda: fn(request=request))):
+        log.info("%s: positional request refused by this MetaTrader5 build - retrying with %s", name, label)
+        try:
+            result = attempt()
+        except TypeError as exc:                        # this build does not take that spelling at all
+            log.info("%s with %s: %s", name, label, exc)
+            continue
+        if not _not_placed(result):
+            return result
     return result
 
 

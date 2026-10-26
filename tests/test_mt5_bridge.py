@@ -195,26 +195,49 @@ def test_startup_connects_the_broker_on_the_linux_bridge_too():
     assert "ensure_connected()" in src
 
 
-def test_order_send_falls_back_to_the_keyword_form_newer_mt5_builds_demand():
+def test_order_send_falls_back_to_named_fields_as_newer_mt5_builds_demand():
     """MetaTrader5 5.0.6231 (the VPS) refuses order_send(request) with
-    (-2, 'Unnamed arguments not allowed') and returns None - every live order
-    failed on 2026-10-26. The bridge retries by keyword, once, and only on that
-    pre-send refusal, so nothing can be placed twice."""
+    (-2, 'Unnamed arguments not allowed'), and order_send(request={...}) reaches
+    the terminal as an empty order ("Invalid request", 10013). It wants the
+    fields as named arguments. Every retry follows an attempt that certainly
+    placed nothing, so exactly one order reaches the broker."""
     fake = _fake_mt5()
-    sent = []
+    placed = []
+    R = collections.namedtuple("OrderSendResult", ["retcode", "order", "comment"])
 
     def order_send(*args, **kwargs):
-        if args:                                        # the newer build: positional refused
+        if args:                                        # positional: refused while parsing
             fake.last_error = lambda: (-2, "Unnamed arguments not allowed")
             return None
-        sent.append(kwargs["request"])
-        return collections.namedtuple("OrderSendResult", ["retcode", "order"])(10009, 88)
+        if "request" in kwargs:                         # one unknown field -> empty order
+            return R(10013, 0, "Invalid request")
+        placed.append(kwargs)
+        return R(10009, 88, "done")
     fake.order_send = order_send
     server = _load_server(fake)
     req = {"action": 1, "symbol": "Boom 900 Index", "volume": 0.2}
     status, value = server.handle(("call", "order_send", (req,), {}))
-    assert status == "ok" and value["values"] == [10009, 88]
-    assert sent == [req]                                # exactly one order reached the broker
+    assert status == "ok" and value["values"][:2] == [10009, 88]
+    assert placed == [req]
+
+
+def test_a_placed_or_ambiguous_result_is_never_retried():
+    """Only 'nothing was placed' outcomes are retried: a done or requoted order
+    from the named-field form is returned as it is."""
+    fake = _fake_mt5()
+    calls = []
+    R = collections.namedtuple("OrderSendResult", ["retcode", "order", "comment"])
+
+    def order_send(*args, **kwargs):
+        calls.append((args, kwargs))
+        if args:
+            fake.last_error = lambda: (-2, "Unnamed arguments not allowed")
+            return None
+        return R(10004, 0, "Requote")                   # not a 'nothing placed' answer -> final
+    fake.order_send = order_send
+    server = _load_server(fake)
+    status, value = server.handle(("call", "order_send", ({"action": 1},), {}))
+    assert value["values"][0] == 10004 and len(calls) == 2
 
 
 def test_a_real_order_failure_is_not_retried():
