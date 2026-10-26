@@ -289,3 +289,20 @@ def test_reads_that_work_positionally_are_left_alone():
     server = _load_server(fake)
     status, value = server.handle(("call", "copy_rates_from_pos", ("XAUUSD", 1, 0, 3), {}))
     assert status == "ok" and value["shape"] == [3]
+
+
+def test_a_second_client_is_served_while_the_first_stays_connected(bridge):
+    """The API keeps its bridge connection open for good. The bridge used to
+    serve one connection until it closed, so mt5_selftest / mt5_login (a second
+    process) hung on their first call (VPS, 2026-10-26)."""
+    first, _fake = bridge
+    assert first.account_info().login == 123                # first client connected and idle
+    port = first.__dict__["_address"][1]
+    second = BridgedMT5(("127.0.0.1", port), KEY, timeout_s=5)
+    try:
+        t0 = time.monotonic()
+        assert second.account_info().login == 123
+        assert time.monotonic() - t0 < 3
+        assert first.account_info().login == 123             # and the first still works
+    finally:
+        second._drop("test over")

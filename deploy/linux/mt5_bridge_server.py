@@ -31,6 +31,7 @@ import argparse
 import logging
 import os
 import sys
+import threading
 import time
 from multiprocessing.connection import Listener
 
@@ -195,30 +196,46 @@ def handle(msg):
     return ("err", f"unknown request {kind!r}")
 
 
+# One MetaTrader5 call at a time, whichever client it comes from: the package
+# is not thread-safe, and a call and its last_error() must not interleave with
+# another client's.
+_MT5_LOCK = threading.Lock()
+
+
+def _serve_client(conn, peer: int) -> None:
+    log.info("client %d connected", peer)
+    try:
+        while True:
+            try:
+                msg = conn.recv()
+            except (EOFError, OSError):
+                break
+            try:
+                with _MT5_LOCK:
+                    reply = handle(msg)
+            except Exception as exc:                    # noqa: BLE001 - reported to the caller
+                reply = ("err", f"{type(exc).__name__}: {exc}")
+            conn.send(reply)
+    finally:
+        conn.close()
+        log.info("client %d disconnected", peer)
+
+
 def serve(host: str, port: int, key: bytes) -> None:
+    """Every client on its own thread. It used to serve ONE connection until
+    it closed - and the API keeps its connection open for good, so any second
+    process (mt5_selftest, mt5_login, a worker) waited forever."""
     listener = Listener((host, port), authkey=key)
     log.info("listening on %s:%s (MetaTrader5 %s)", host, port, getattr(mt5, "__version__", "?"))
+    peer = 0
     while True:
         try:
             conn = listener.accept()
         except Exception as exc:                        # noqa: BLE001 - a bad handshake must not stop the server
             log.warning("rejected a connection: %s", exc)
             continue
-        log.info("client connected")
-        try:
-            while True:
-                try:
-                    msg = conn.recv()
-                except (EOFError, OSError):
-                    break
-                try:
-                    reply = handle(msg)
-                except Exception as exc:                # noqa: BLE001 - reported to the caller
-                    reply = ("err", f"{type(exc).__name__}: {exc}")
-                conn.send(reply)
-        finally:
-            conn.close()
-            log.info("client disconnected")
+        peer += 1
+        threading.Thread(target=_serve_client, args=(conn, peer), daemon=True).start()
 
 
 def main() -> None:
