@@ -173,21 +173,25 @@ class OrderManager:
         
         filling_type = mt5.ORDER_FILLING_FOK if (sym_info.filling_mode & 1) else mt5.ORDER_FILLING_IOC
         
+        # Exact Python types, every field. Newer MetaTrader5 packages (the VPS
+        # runs 5.0.6231) refuse a request with e.g. a float `deviation` (20.0
+        # from a JSON-saved setting) or a numpy number, and they refuse it by
+        # returning None - which looked exactly like a lost connection.
         request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
+            "action": int(mt5.TRADE_ACTION_DEAL),
+            "symbol": str(symbol),
             "volume": float(volume),
-            "type": action,
-            "price": price,
-            "sl": sl,
-            "tp": tp,
-            "deviation": deviation_points,
-            "magic": magic,
-            "comment": comment,
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": filling_type,
+            "type": int(action),
+            "price": float(price),
+            "sl": float(sl),
+            "tp": float(tp),
+            "deviation": int(round(float(deviation_points or 0))),
+            "magic": int(magic),
+            "comment": str(comment or "")[:31],
+            "type_time": int(mt5.ORDER_TIME_GTC),
+            "type_filling": int(filling_type),
         }
-        
+
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             _executor,
@@ -195,8 +199,14 @@ class OrderManager:
         )
 
         if result is None:
-            logger.error("Order failed: MT5 returned None (connection lost?)")
-            return {"success": False, "error": "MT5 returned None"}
+            # MT5 says WHY in last_error(); without it every refusal read as
+            # "connection lost?" and could not be told apart.
+            try:
+                why = await loop.run_in_executor(_executor, mt5.last_error)
+            except Exception as e:                      # noqa: BLE001
+                why = f"last_error() unavailable: {e}"
+            logger.error(f"Order failed: MT5 returned None - last_error={why} - request={request}")
+            return {"success": False, "error": f"MT5 returned None: {why}"}
 
         # Phase-5 fix: fall back to ORDER_FILLING_RETURN once if the broker
         # rejects our bitmask-selected filling mode as unsupported (retcode
@@ -208,14 +218,15 @@ class OrderManager:
                 f"retrying once with ORDER_FILLING_RETURN."
             )
             retry_request = dict(request)
-            retry_request["type_filling"] = mt5.ORDER_FILLING_RETURN
+            retry_request["type_filling"] = int(mt5.ORDER_FILLING_RETURN)
             result = await loop.run_in_executor(
                 _executor,
                 lambda: mt5.order_send(retry_request)
             )
             if result is None:
-                logger.error("Order failed: MT5 returned None on filling-mode retry")
-                return {"success": False, "error": "MT5 returned None"}
+                why = mt5.last_error()
+                logger.error(f"Order failed: MT5 returned None on filling-mode retry - last_error={why}")
+                return {"success": False, "error": f"MT5 returned None: {why}"}
 
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             err = result.comment
@@ -327,13 +338,14 @@ class OrderManager:
         if rounded_sl == pos.sl:
             return True
 
+        # Exact Python types - see place_market_order.
         request = {
-            "action": mt5.TRADE_ACTION_SLTP,
-            "position": ticket,
-            "symbol": pos.symbol,
-            "sl": rounded_sl,
-            "tp": pos.tp,
-            "magic": pos.magic
+            "action": int(mt5.TRADE_ACTION_SLTP),
+            "position": int(ticket),
+            "symbol": str(pos.symbol),
+            "sl": float(rounded_sl),
+            "tp": float(pos.tp),
+            "magic": int(pos.magic),
         }
 
         result = await loop.run_in_executor(
@@ -342,7 +354,7 @@ class OrderManager:
         )
 
         if result is None:
-            logger.error("Modify SL failed: MT5 returned None")
+            logger.error(f"Modify SL failed: MT5 returned None - last_error={mt5.last_error()} - request={request}")
             return False
 
         if result.retcode != mt5.TRADE_RETCODE_DONE:
@@ -392,18 +404,19 @@ class OrderManager:
         sym_info = await loop.run_in_executor(_executor, lambda: mt5.symbol_info(symbol))
         filling_type = mt5.ORDER_FILLING_FOK if sym_info and (sym_info.filling_mode & 1) else mt5.ORDER_FILLING_IOC
         
+        # Exact Python types - see place_market_order.
         request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": position.volume,
-            "type": action,
-            "position": ticket,
-            "price": price,
-            "deviation": deviation_points,
-            "magic": position.magic,
+            "action": int(mt5.TRADE_ACTION_DEAL),
+            "symbol": str(symbol),
+            "volume": float(position.volume),
+            "type": int(action),
+            "position": int(ticket),
+            "price": float(price),
+            "deviation": int(round(float(deviation_points or 0))),
+            "magic": int(position.magic),
             "comment": "manual close",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": filling_type,
+            "type_time": int(mt5.ORDER_TIME_GTC),
+            "type_filling": int(filling_type),
         }
         
         result = await loop.run_in_executor(
@@ -411,7 +424,8 @@ class OrderManager:
             lambda: mt5.order_send(request)
         )
         if result is None:
-            logger.error(f"Close position {ticket} failed: MT5 returned None")
+            logger.error(f"Close position {ticket} failed: MT5 returned None - "
+                         f"last_error={mt5.last_error()} - request={request}")
             return False
             
         return result.retcode == mt5.TRADE_RETCODE_DONE
