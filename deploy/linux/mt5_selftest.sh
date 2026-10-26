@@ -13,4 +13,5 @@ BASE="/opt/algoedge/$NAME"
 [ -f "$BASE/instance.env" ] || { echo "no instance '$NAME'"; exit 1; }
 set -a; . "$BASE/instance.env"; set +a
 cd "$BASE/app"
+export PYTHONPATH="$BASE/app${PYTHONPATH:+:$PYTHONPATH}"   # so `import backend` finds the app
 exec "$BASE/venv/bin/python" "$BASE/app/deploy/linux/mt5_selftest.py" "$@"
