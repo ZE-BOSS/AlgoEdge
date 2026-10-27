@@ -189,7 +189,11 @@ def test_backtester_runs_the_saved_slots_parameters_not_form_defaults():
 
     js = Path("frontend/src/pages/Backtester.jsx").read_text(encoding="utf-8")
     # the single run's slot is seeded from the saved slot for this pairing
-    assert "savedSlot?.strategy_params_override" in js,         "the slot editor must start from the saved slot's parameters"
+    # ...from BOTH keys a saved slot can carry them under: Settings > Strategy
+    # saves `strategy_params`, older configs `strategy_params_override`.
+    # Reading only the latter ran every saved slot on the shared defaults.
+    assert "slotStrategyParams(savedSlot)" in js,         "the slot editor must start from the saved slot's parameters"
+    assert "...(slot.strategy_params_override || {}), ...(slot.strategy_params || {})" in js
     assert "const savedSlot = findLiveSlot(userCfg?.config, form.symbol, form.strategy_id);" in js
     # and the run sends that slot, not a global block
     # The run's strategy params come from the slot editor for the strategy it

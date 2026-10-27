@@ -1208,6 +1208,24 @@ class UserConfig:
 
 
 
+def _slot_strategy_params(slot_data: dict) -> dict:
+    """A saved slot with its strategy parameters where InstrumentSlot keeps them.
+
+    The slot editor (Settings > Strategy, and the Backtester) saves a slot's own
+    strategy parameters as `strategy_params`; InstrumentSlot's field is
+    `strategy_params_override`, and filter_kwargs drops every key that is not a
+    field. So every per-symbol strategy setting was silently discarded on load
+    and the live bot ran the shared defaults - a slot saved with
+    max_daily_risk_pct 20 logged "max_daily_risk_pct (4%) would be exceeded"
+    (2026-10-27). The editor's `strategy_params` is the current value, so it
+    wins over an older `strategy_params_override` key by key."""
+    if not isinstance(slot_data, dict) or not isinstance(slot_data.get("strategy_params"), dict):
+        return slot_data
+    out = dict(slot_data)
+    out["strategy_params_override"] = {**(out.get("strategy_params_override") or {}), **out["strategy_params"]}
+    return out
+
+
 def _sync_trail_rr_aliases(risk_data: dict) -> dict:
     """[17.4] Keep `trail_trigger_rr` and `trail_activation_rr` in agreement.
 
@@ -1359,7 +1377,8 @@ class UserConfigV2(UserConfig):
         # a fresh random id on every load would make circuit-breaker/UI state
         # keyed by slot_id appear to be a "new slot" on every config reload.
         if instrument_slots_data:
-            config.instrument_slots = [InstrumentSlot(**filter_kwargs(InstrumentSlot, s)) for s in instrument_slots_data]
+            config.instrument_slots = [InstrumentSlot(**filter_kwargs(InstrumentSlot, _slot_strategy_params(s)))
+                                       for s in instrument_slots_data]
         elif config.instrument_settings:
             config.instrument_slots = [
                 InstrumentSlot(

@@ -40,8 +40,41 @@ _PERMANENT_RETCODES: dict[int, str] = {
 }
 
 
+# MT5 SYMBOL_TRADE_MODE_*: 0 disabled, 1 long only, 2 short only, 3 close only, 4 full.
+_TRADE_MODE_BLOCKS = {
+    0: "trading is DISABLED for this symbol at the broker",
+    3: "the broker has this symbol in CLOSE-ONLY mode - no new positions can be opened "
+       "(existing ones can still be closed)",
+}
+
+
 class OrderManager:
     """Handles execution of orders on MT5."""
+
+    @staticmethod
+    def entry_block_reason(symbol: str, direction: str) -> str | None:
+        """Why the BROKER will not accept a new position on `symbol` in
+        `direction` right now, or None. Read from the symbol's own trade mode.
+
+        Deriv put Vol over Crash 550/750 in close-only mode (2026-10): without
+        this check the bot sized and sent orders that came back as 10044 "Only
+        position closing is allowed" on demo and, with no price published,
+        "lot size below minimum" on live - neither of which said what was wrong.
+        Call on the MT5 thread."""
+        if not mt5:
+            return None
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            return None
+        mode = getattr(info, "trade_mode", 4)
+        buy = str(direction).upper() in ("BUY", "BULLISH", "LONG")
+        if mode in _TRADE_MODE_BLOCKS:
+            return f"{symbol}: {_TRADE_MODE_BLOCKS[mode]}"
+        if mode == 1 and not buy:
+            return f"{symbol}: the broker allows LONG positions only"
+        if mode == 2 and buy:
+            return f"{symbol}: the broker allows SHORT positions only"
+        return None
 
     @staticmethod
     async def place_market_order(
@@ -108,6 +141,10 @@ class OrderManager:
         if not sym_info:
             logger.error(f"Order failed: Could not get symbol info for {symbol}")
             return {"success": False, "error": "Symbol info error"}
+        blocked = OrderManager.entry_block_reason(symbol, direction)
+        if blocked:
+            logger.warning(f"Order refused before sending: {blocked}")
+            return {"success": False, "error": blocked, "permanent": True}
             
         digits = sym_info.digits
         tick_size = sym_info.trade_tick_size

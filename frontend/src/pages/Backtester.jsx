@@ -1290,6 +1290,13 @@ function findLiveSlot(config, symbol, strategyId) {
 // component by `useStrategyOptions` - agents come from the server, not from a
 // constant.
 
+// A saved slot's own strategy parameters. Settings > Strategy saves them as
+// `strategy_params`; older configs carry `strategy_params_override`. Reading only
+// the latter made every backtest of a saved slot run the shared defaults.
+const slotStrategyParams = (slot) => (slot
+  ? { ...(slot.strategy_params_override || {}), ...(slot.strategy_params || {}) }
+  : null);
+
 // Builds the backend strategy_params payload for one portfolio symbol/strategy
 // pairing. Portfolio backtests previously only forwarded tuned params for
 // ORB_v1/DriftJumpAlpha_v1/CRT_v1 — any other strategy silently got
@@ -1489,7 +1496,7 @@ export default function Backtester() {
           symbol: s.symbol,
           strategy_id: s.strategy_id,
           // The row's own strategy parameters (not a global block any more).
-          strategy_params: s.strategy_params ?? (findLiveSlot(userCfg?.config, s.symbol, s.strategy_id)?.strategy_params_override || {}),
+          strategy_params: s.strategy_params ?? (slotStrategyParams(findLiveSlot(userCfg?.config, s.symbol, s.strategy_id)) || {}),
           use_measured_params: s.use_measured_params !== false,
           // [17.1] null = inherit the portfolio-wide tp1_rr. Sent only when the
           // row actually sets one, matching the backend's "None = inherit".
@@ -1771,7 +1778,7 @@ export default function Backtester() {
     symbol: form.symbol,
     strategy_id: form.strategy_id,
     strategy_params: (edited ? form.slot_strategy_params : undefined)
-      ?? (savedSlot?.strategy_params_override || {}),
+      ?? (slotStrategyParams(savedSlot) || {}),
     risk: (edited ? form.slot_risk : undefined) ?? slotRiskOf(savedSlot),
     use_measured_params: (edited ? form.use_measured_params : undefined)
       ?? (savedSlot?.use_measured_params !== false),

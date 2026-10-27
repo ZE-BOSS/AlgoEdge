@@ -363,6 +363,25 @@ class BotService:
         except Exception as e:
             logger.error(f"Slot/MT5 reconciliation error: {e}")
 
+    @staticmethod
+    def _slot_risk(slot, config, name, default=None):
+        """This slot's own value for risk setting `name`: its `risk` block (where
+        the slot editor saves every per-slot setting), then its legacy named
+        field, then the account default.
+
+        The live gates read ONLY the legacy named fields (slot.max_positions_per_
+        symbol ...), which the editor never sets - so a slot saved with 4
+        positions per symbol and pyramiding on was held to the account's 1 by
+        the circuit-breaker gate, and nothing ever stacked (2026-10-27)."""
+        from backend.risk.slot_book import slot_overrides_from
+        own = slot_overrides_from(slot)
+        if own.get(name) is not None:
+            return own[name]
+        legacy = getattr(slot, name, None)
+        if legacy is not None:
+            return legacy
+        return getattr(getattr(config, "risk", None), name, default)
+
     def _slot_engine(self, slot, config):
         """This slot's engine, rebuilt in place whenever its settings change."""
         from backend.risk.live_risk_config import build_live_risk_config
@@ -389,7 +408,9 @@ class BotService:
         sp = getattr(engine, "params", None)
 
         def _r(name, default=None):
-            return getattr(risk, name, default) if risk is not None else default
+            # the slot's own value first - this line is what the CONFIG log
+            # reports as "resolved parameters"
+            return self._slot_risk(slot, config, name, default)
 
         def _s(name, default=None):
             """Strategy-param value, showing the per-slot override if there is one."""
@@ -402,17 +423,11 @@ class BotService:
             "symbol": slot.symbol,
             "strategy_id": getattr(engine, "strategy_id", slot.strategy_id),
             # Gates that cap how many trades a day is allowed to produce.
-            "risk_per_trade_pct": (
-                slot.risk_per_trade_pct if slot.risk_per_trade_pct is not None
-                else _r("risk_per_trade_pct")
-            ),
+            "risk_per_trade_pct": _r("risk_per_trade_pct"),
             "max_risk_hard_cap_pct": _r("max_risk_hard_cap_pct"),
             "max_daily_trades": _r("max_daily_trades"),
             "max_concurrent_positions": _r("max_concurrent_positions"),
-            "max_positions_per_symbol": (
-                slot.max_positions_per_symbol if slot.max_positions_per_symbol is not None
-                else _r("max_positions_per_symbol")
-            ),
+            "max_positions_per_symbol": _r("max_positions_per_symbol"),
             "max_daily_drawdown_pct": _r("max_daily_drawdown_pct"),
             "allow_pyramiding": _r("allow_pyramiding"),
             "min_bars_between_entries": _r("min_bars_between_entries"),
@@ -1462,16 +1477,12 @@ class BotService:
                                     # evaluate_signal's own (slot-aware) check further down would
                                     # have allowed it. Must agree with evaluate_signal's internal
                                     # check_symbol call or this early-exit silently overrides it.
-                                    _slot_max_positions = (
-                                        slot.max_positions_per_symbol
-                                        if slot.max_positions_per_symbol is not None
-                                        else getattr(config.risk, "max_positions_per_symbol", 1)
-                                    )
+                                    _slot_max_positions = self._slot_risk(slot, config, "max_positions_per_symbol", 1)
                                     cb_ok, cb_reason = _slot_circuit.check_symbol(
                                         signal.symbol,
                                         slot_id=slot.slot_id,
                                         slot_max_positions=_slot_max_positions,
-                                        slot_max_losses_per_day=slot.max_losses_per_day,
+                                        slot_max_losses_per_day=self._slot_risk(slot, config, "max_losses_per_day"),
                                     )
                                     if not cb_ok:
                                         self._log_event(f"[REJECTED] Circuit breaker blocked {signal.symbol}: {cb_reason}", "SIGNAL", "RISK")
@@ -1493,6 +1504,21 @@ class BotService:
 
                                 # === Execute trade via RiskEngine ===
                                 try:
+                                    # The broker's own word first: a symbol in close-only
+                                    # (or disabled) mode cannot take a new position, and
+                                    # sizing against it failed with a misleading reason.
+                                    from backend.mt5.executor import mt5_executor as _mt5x
+                                    from backend.mt5.order_manager import OrderManager as _OM
+                                    _blocked = await asyncio.get_running_loop().run_in_executor(
+                                        _mt5x, _OM.entry_block_reason, signal.symbol, signal.direction)
+                                    if _blocked:
+                                        self._log_event(f"[REJECTED] {_blocked}", "SIGNAL", "RISK")
+                                        self._last_signal_time[_dedupe_key] = _sig_fp
+                                        await self._save_signal_state(signal, "SKIPPED", _blocked,
+                                                                      category="symbol not tradable at broker")
+                                        self._suppressed("symbol_not_tradable", slot.slot_id)
+                                        continue
+
                                     from backend.brokers.factory import broker_factory
                                     broker = broker_factory.get_broker()
 
@@ -1588,15 +1614,14 @@ class BotService:
                                     # global RiskParams value, same "None = inherit"
                                     # convention as InstrumentSlot's own fields.
                                     _signal_metadata["slot_id"] = slot.slot_id
-                                    _signal_metadata["slot_max_positions"] = (
-                                        slot.max_positions_per_symbol
-                                        if slot.max_positions_per_symbol is not None
-                                        else getattr(config.risk, "max_positions_per_symbol", 1)
-                                    )
-                                    if slot.max_losses_per_day is not None:
-                                        _signal_metadata["slot_max_losses_per_day"] = slot.max_losses_per_day
-                                    if slot.risk_per_trade_pct is not None:
-                                        _signal_metadata["slot_risk_per_trade_pct"] = slot.risk_per_trade_pct
+                                    _signal_metadata["slot_max_positions"] = self._slot_risk(
+                                        slot, config, "max_positions_per_symbol", 1)
+                                    _slot_losses = self._slot_risk(slot, config, "max_losses_per_day")
+                                    if _slot_losses:
+                                        _signal_metadata["slot_max_losses_per_day"] = _slot_losses
+                                    _slot_rpt = self._slot_risk(slot, config, "risk_per_trade_pct")
+                                    if _slot_rpt is not None:
+                                        _signal_metadata["slot_risk_per_trade_pct"] = _slot_rpt
 
                                     signal_data = {
                                         "group_id": group_id,

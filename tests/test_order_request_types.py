@@ -70,3 +70,12 @@ def test_a_refused_request_reports_mt5s_reason(monkeypatch):
     res = _place(StrictMT5(refuse=True), monkeypatch)
     assert not res["success"]
     assert "Invalid" in res["error"] and "deviation" in res["error"]
+
+
+def test_a_close_only_symbol_is_refused_before_anything_is_sent(monkeypatch):
+    fake = StrictMT5()
+    Info = collections.namedtuple("SymInfo", SymInfo._fields + ("trade_mode",))
+    fake.symbol_info = lambda s: Info(2, 0.01, 0.01, 100.0, 0.01, 0, 0.01, 1, 3)
+    res = _place(fake, monkeypatch, symbol="Vol over Crash 550")
+    assert not res["success"] and "CLOSE-ONLY" in res["error"] and res.get("permanent")
+    assert fake.sent is None
