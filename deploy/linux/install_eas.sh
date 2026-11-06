@@ -60,22 +60,37 @@ for mql in "${targets[@]}"; do
         [ -f "$ME" ] || { echo "== [$NAME] EA copied: $b.mq5"; continue; }
 
         rm -f "$dst/$b.log" "$dst/$b.ex5"
-        winsrc="$("${AS[@]}" winepath -w "$dst/$b.mq5" 2>/dev/null)"
-        winlog="$("${AS[@]}" winepath -w "$dst/$b.log" 2>/dev/null)"
-        timeout 180 "${AS[@]}" wine "C:/Program Files/MetaTrader 5/MetaEditor64.exe" \
-            "/compile:$winsrc" "/log:$winlog" >/dev/null 2>&1
+        winsrc="$("${AS[@]}" winepath -w "$dst/$b.mq5" 2>/dev/null | tr -d '\r')"
+        out="$(mktemp)"; chmod 666 "$out"
+        start=$(date +%s)
+        # MetaEditor writes <file>.log next to the source when /log has no path.
+        ( cd "$dst" && timeout 180 "${AS[@]}" wine "C:/Program Files/MetaTrader 5/MetaEditor64.exe" \
+            "/compile:$winsrc" "/log" >"$out" 2>&1 )
+        rc=$?
+        secs=$(( $(date +%s) - start ))
 
         result=""
-        if [ -f "$dst/$b.log" ]; then
-            # MetaEditor writes its log as UTF-16.
-            result="$(iconv -f UTF-16 -t UTF-8 "$dst/$b.log" 2>/dev/null | tr -d '\r')"
-        fi
+        for lg in "$dst/$b.log" "$mql/Experts/$b.log" "$mql/../logs/metaeditor.log"; do
+            if [ -f "$lg" ]; then
+                # MetaEditor writes its log as UTF-16.
+                result="$(iconv -f UTF-16 -t UTF-8 "$lg" 2>/dev/null | tr -d '\r')"
+                [ -n "$result" ] && break
+            fi
+        done
         if [ -f "$dst/$b.ex5" ]; then
             echo "== [$NAME] EA compiled: Experts/AlgoEdge/$b.ex5  ($(echo "$result" | grep -i 'result' | tail -1))"
         else
             echo "!! [$NAME] EA FAILED to compile: $b.mq5"
-            echo "$result" | grep -iE 'error|warning|result' | head -25 | sed 's/^/   /'
+            if [ -n "$result" ]; then
+                echo "$result" | grep -iE 'error|warning|result' | head -25 | sed 's/^/   /'
+            else
+                echo "   no compiler log. exit code $rc after ${secs}s (124 = timed out)"
+                echo "   source path given to MetaEditor: ${winsrc:-<winepath returned nothing>}"
+                echo "   wine output:"; tail -15 "$out" | sed 's/^/     /'
+                echo "   files in $dst:"; ls -la "$dst" | sed 's/^/     /'
+            fi
         fi
+        rm -f "$out"
     done
 done
 exit 0
