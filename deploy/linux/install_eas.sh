@@ -49,6 +49,28 @@ if [ ${#targets[@]} -eq 0 ]; then
 fi
 
 ME="$MT5_DIR/MetaEditor64.exe"
+
+# A MetaEditor that is already open in this prefix swallows a command-line
+# /compile (the new process hands it over and exits at once, nothing compiles).
+# Close only this instance's MetaEditor (matched by WINEPREFIX); MT5 itself and
+# the other instance are left alone.
+stop_metaeditor() {
+    local stopped=0 pid
+    for pid in $(pgrep -u algoedge -f 'MetaEditor64' 2>/dev/null); do
+        if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qx "WINEPREFIX=$WINEPREFIX"; then
+            kill "$pid" 2>/dev/null && stopped=1
+        fi
+    done
+    if [ "$stopped" = 1 ]; then
+        echo "   [$NAME] closed the open MetaEditor so the compile can run (reopen it with F4 in MT5)"
+        for _ in $(seq 1 10); do
+            pgrep -u algoedge -f 'MetaEditor64' >/dev/null 2>&1 || break
+            sleep 1
+        done
+        sleep 2
+    fi
+}
+[ -f "$ME" ] && stop_metaeditor
 [ -f "$ME" ] || echo "!! [$NAME] EAs: MetaEditor64.exe not found - EAs copied but not compiled (MT5 compiles them when you open them in MetaEditor)."
 
 for mql in "${targets[@]}"; do
@@ -67,6 +89,12 @@ for mql in "${targets[@]}"; do
         ( cd "$dst" && timeout 180 "${AS[@]}" wine "C:/Program Files/MetaTrader 5/MetaEditor64.exe" \
             "/compile:$winsrc" "/log" >"$out" 2>&1 )
         rc=$?
+        # wine can return before MetaEditor has finished: give it up to 60 s.
+        for _ in $(seq 1 60); do
+            [ -f "$dst/$b.ex5" ] && break
+            [ -f "$dst/$b.log" ] && [ -s "$dst/$b.log" ] && { sleep 1; break; }
+            sleep 1
+        done
         secs=$(( $(date +%s) - start ))
 
         result=""
