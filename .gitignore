@@ -57,6 +57,7 @@ instance/
 # MetaTrader / trading files (if applicable)
 *.ex5
 *.mq5
+!mql5/Experts/*.mq5
 *.dat
 
 # =========================

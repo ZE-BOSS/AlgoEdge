@@ -1,0 +1,339 @@
+//@version=6
+// EQH/EQL FVG Breakouts — rebuild of the LuxAlgo TikTok video (BTCUSDT 15m)
+// Video rules: equal highs / equal lows = stop-loss pools (boxes). A candle that blasts
+// through the pool with a big body AND leaves a fair value gap = breakout signal.
+// "No gap, no signal." Optional: keep only zones formed in the New York session
+// (0930-1600 ET, Mon-Fri), as in the Quant version shown at the end of the video.
+// Defaults below = the defaults shown in the indicator's settings dialog.
+// The trade layer (stop / target / sizing) is my test layer: the video gives no exit rules.
+strategy("EQH/EQL FVG Breakouts (video test)", shorttitle="EQH/EQL FVG", overlay=true,
+     max_boxes_count=500, max_labels_count=500, max_lines_count=200,
+     initial_capital=10000, currency=currency.USD,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.percent, commission_value=0.04,
+     slippage=1, margin_long=0, margin_short=0,
+     process_orders_on_close=true, pyramiding=0)
+
+// ───────────────────────── Liquidity detection (video defaults)
+grpL = "Liquidity Detection"
+pLeft    = input.int(10, "Pivot Left Length", minval=1, group=grpL, tooltip="Number of bars to the left required for a pivot.")
+pRight   = input.int(2, "Pivot Right Length", minval=1, group=grpL)
+eqThr    = input.float(0.03, "Equality Threshold (%)", minval=0, step=0.01, group=grpL, tooltip="Maximum percentage difference to consider two highs/lows 'equal'.")
+maxZones = input.int(60, "Max Active Zones", minval=1, group=grpL)
+maxDist  = input.int(30, "Max EQH/EQL Distance (Bars)", minval=1, group=grpL, tooltip="Maximum number of bars allowed between the two pivots used to create an EQH or EQL.")
+maxAge   = input.int(30, "Max EQH/EQL Age (Bars)", minval=1, group=grpL, tooltip="Unswept zones are removed after this many bars.")
+reqClean = input.bool(false, "Require no price beyond the level between the 2 pivots", group=grpL, tooltip="My optional extra (not in the video). Off = video behaviour.")
+
+grpS = "New York session version (end of video)"
+useSess = input.bool(false, "Only keep zones formed in session", group=grpS, tooltip="Zones are created only when the later pivot candle falls within the session.")
+sessIn  = input.session("0930-1600:23456", "Session", group=grpS)
+sessTz  = input.string("America/New_York", "Session time zone", group=grpS)
+
+grpV = "Visuals"
+bullCol  = input.color(color.rgb(8, 153, 129), "Bullish Zone Color (EQL)", group=grpV)
+bearCol  = input.color(color.rgb(242, 54, 69), "Bearish Zone Color (EQH)", group=grpV)
+zoneTr   = input.int(85, "Zone Transparency", minval=0, maxval=100, group=grpV)
+showMid  = input.bool(false, "Show Midline", group=grpV)
+showVol  = input.bool(true, "Show Volume", group=grpV)
+delSweep = input.bool(false, "Delete on Sweep", group=grpV)
+
+grpB = "Breakout Signals"
+showSig = input.bool(true, "Show Breakout Signals", group=grpB)
+atrLen  = input.int(14, "Breakout ATR Length", minval=1, group=grpB)
+minBody = input.float(0.5, "Min Breakout Body (ATR)", minval=0, step=0.1, group=grpB, tooltip="Minimum breakout candle body size as a multiple of ATR. 0 disables the strength filter.")
+showFvg = input.bool(true, "Show Breakout FVGs", group=grpB)
+fvgProj = input.int(5, "FVG Projection (Bars)", minval=1, group=grpB)
+fvgTr   = input.int(80, "FVG Transparency", minval=0, maxval=100, group=grpB)
+maxFvg  = input.int(100, "Max Breakout FVGs", minval=1, group=grpB)
+minFvg  = input.float(0.1, "Min FVG Size (ATR)", minval=0, step=0.05, group=grpB, tooltip="Minimum gap size as a multiple of ATR. 0 allows any valid gap.")
+
+// ───────────────────────── Trade layer (mine — video has no exits)
+grpT = "Trade rules (test layer)"
+tradeDir  = input.string("Both", "Direction", options=["Both", "Long only", "Short only"], group=grpT)
+stopMode  = input.string("FVG far edge", "Stop placement", options=["FVG far edge", "Breakout candle extreme", "Zone level", "ATR from entry"], group=grpT)
+stopBuf   = input.float(0.0, "Stop buffer (x ATR)", minval=0, step=0.05, group=grpT)
+atrStop   = input.float(1.0, "ATR stop multiple (for 'ATR from entry')", minval=0.1, step=0.1, group=grpT)
+tgtR      = input.float(1.0, "Target (R multiple)", minval=0.1, step=0.1, group=grpT)
+maxHold   = input.int(0, "Max bars in trade (0 = off)", minval=0, group=grpT)
+sigInSess = input.bool(false, "Only take signals inside the session", group=grpT)
+trendLen  = input.int(0, "Trend filter EMA length (0 = off)", minval=0, group=grpT, tooltip="My optional extra: longs only above the EMA, shorts only below.")
+
+grpR = "Position sizing"
+sizeMode = input.string("Risk % of equity", "Sizing", options=["Risk % of equity", "Fixed quantity"], group=grpR)
+riskPct  = input.float(1.0, "Risk per trade (% of equity)", minval=0.01, step=0.1, group=grpR)
+fixQty   = input.float(1.0, "Fixed quantity", minval=0, group=grpR)
+qtyStep  = input.float(0.001, "Quantity step (min lot)", minval=0.000001, group=grpR)
+maxLev   = input.float(5.0, "Max position notional (x equity)", minval=0.1, group=grpR)
+minMode  = input.string("Skip the trade", "If risk size < 1 step", options=["Skip the trade", "Use 1 step"], group=grpR)
+showTbl  = input.bool(true, "Show stats table", group=grpR)
+
+// ───────────────────────── Types / state
+type Piv
+    float price
+    int   bar
+    float vol
+
+type Zone
+    bool  isHigh
+    float top
+    float btm
+    int   b1
+    int   b2
+    float vol
+    box   bx
+    label lb
+    label l1
+    label l2
+    line  mid
+    bool  swept
+    int   sweptBar
+
+var array<Piv>  highs = array.new<Piv>()
+var array<Piv>  lows  = array.new<Piv>()
+var array<Zone> zones = array.new<Zone>()
+var array<box>  fvgs  = array.new<box>()
+
+atr   = ta.atr(atrLen)
+sessT = time(timeframe.period, sessIn, sessTz)
+inSessNow = not na(sessT)
+greyC = color.new(color.gray, 40)
+
+fv(float v) => str.tostring(v, format.volume)
+
+delZone(Zone z) =>
+    box.delete(z.bx)
+    label.delete(z.lb)
+    label.delete(z.l1)
+    label.delete(z.l2)
+    line.delete(z.mid)
+
+// ───────────────────────── 1) Breakout check: candle [1] swept a zone; candle [0] confirms the FVG
+bool  bullSig  = false
+bool  bearSig  = false
+float bullZone = na
+float bearZone = na
+bullFvg = low > high[2] and (low - high[2]) >= minFvg * atr
+bearFvg = high < low[2] and (low[2] - high) >= minFvg * atr
+bigBody = math.abs(close[1] - open[1]) >= minBody * nz(atr[1], atr)
+if zones.size() > 0
+    for z in zones
+        if z.swept and z.sweptBar == bar_index - 1
+            if z.isHigh and close[1] > z.top and close[1] > open[1] and bigBody and bullFvg
+                bullSig  := true
+                bullZone := z.btm
+            if not z.isHigh and close[1] < z.btm and close[1] < open[1] and bigBody and bearFvg
+                bearSig  := true
+                bearZone := z.top
+
+if bullSig and showSig
+    label.new(bar_index - 1, low[1], "Break", style=label.style_triangleup, color=bullCol, textcolor=chart.fg_color, size=size.tiny, yloc=yloc.belowbar)
+if bearSig and showSig
+    label.new(bar_index - 1, high[1], "Break", style=label.style_triangledown, color=bearCol, textcolor=chart.fg_color, size=size.tiny, yloc=yloc.abovebar)
+if bullSig and showFvg
+    fvgs.push(box.new(bar_index - 1, low, bar_index - 1 + fvgProj, high[2], border_color=color.new(bullCol, 50), bgcolor=color.new(bullCol, fvgTr)))
+if bearSig and showFvg
+    fvgs.push(box.new(bar_index - 1, low[2], bar_index - 1 + fvgProj, high, border_color=color.new(bearCol, 50), bgcolor=color.new(bearCol, fvgTr)))
+while fvgs.size() > maxFvg
+    box.delete(fvgs.shift())
+
+// ───────────────────────── 2) Sweeps / expiry / extension of active zones
+if zones.size() > 0
+    for i = zones.size() - 1 to 0
+        Zone z = zones.get(i)
+        if z.swept
+            zones.remove(i)          // keep drawings, drop from active list after the confirm bar
+        else
+            bool hit = z.isHigh ? high > z.top : low < z.btm
+            if hit
+                z.swept    := true
+                z.sweptBar := bar_index
+                if delSweep
+                    delZone(z)
+                else
+                    z.bx.set_right(bar_index)
+                    z.bx.set_bgcolor(color.new(color.gray, 85))
+                    z.bx.set_border_color(greyC)
+                    z.lb.set_x(bar_index)
+                    z.lb.set_text("Swept " + (z.isHigh ? "EQH" : "EQL") + (showVol ? " (" + fv(z.vol) + ")" : ""))
+                    z.lb.set_textcolor(greyC)
+                    if not na(z.mid)
+                        z.mid.set_x2(bar_index)
+                        z.mid.set_color(greyC)
+            else if bar_index - z.b2 > maxAge
+                delZone(z)
+                zones.remove(i)
+            else
+                z.bx.set_right(bar_index)
+                z.lb.set_x(bar_index)
+                if not na(z.mid)
+                    z.mid.set_x2(bar_index)
+
+// ───────────────────────── 3) New pivots → equal highs / lows
+ph = ta.pivothigh(high, pLeft, pRight)
+pl = ta.pivotlow(low, pLeft, pRight)
+bool sessOk = not useSess or not na(sessT[pRight])
+
+makeZone(bool isHigh, Piv a, Piv b) =>
+    float top = math.max(a.price, b.price)
+    float btm = math.min(a.price, b.price)
+    color c   = isHigh ? bearCol : bullCol
+    float v   = a.vol + b.vol
+    string nm = isHigh ? "EQH" : "EQL"
+    box   bx  = box.new(a.bar, top, bar_index, btm, border_color=color.new(c, 40), bgcolor=color.new(c, zoneTr))
+    label lb  = label.new(bar_index, (top + btm) / 2, nm + (showVol ? " (" + fv(v) + ")" : ""), style=label.style_label_left, color=color.new(color.black, 100), textcolor=c, size=size.small)
+    label l1  = label.new(a.bar, a.price, showVol ? fv(a.vol) : "", style=isHigh ? label.style_label_down : label.style_label_up, color=color.new(c, 60), textcolor=chart.fg_color, size=size.tiny)
+    label l2  = label.new(b.bar, b.price, showVol ? fv(b.vol) : "", style=isHigh ? label.style_label_down : label.style_label_up, color=color.new(c, 60), textcolor=chart.fg_color, size=size.tiny)
+    line  md  = showMid ? line.new(a.bar, (top + btm) / 2, bar_index, (top + btm) / 2, color=color.new(c, 30), style=line.style_dotted) : na
+    Zone.new(isHigh, top, btm, a.bar, b.bar, v, bx, lb, l1, l2, md, false, na)
+
+if not na(ph)
+    Piv p = Piv.new(ph, bar_index - pRight, volume[pRight])
+    if sessOk and highs.size() > 0
+        for q in highs
+            if p.bar - q.bar > maxDist
+                break
+            if math.abs(p.price - q.price) / q.price * 100 <= eqThr
+                bool clean = true
+                if reqClean
+                    float lvl = math.max(p.price, q.price)
+                    int kEnd = bar_index - q.bar - 1
+                    if kEnd >= pRight + 1
+                        for k = pRight + 1 to kEnd
+                            if high[k] > lvl
+                                clean := false
+                if clean
+                    zones.push(makeZone(true, q, p))
+                break
+    highs.unshift(p)
+    while highs.size() > 0 and p.bar - highs.last().bar > maxDist
+        highs.pop()
+
+if not na(pl)
+    Piv p = Piv.new(pl, bar_index - pRight, volume[pRight])
+    if sessOk and lows.size() > 0
+        for q in lows
+            if p.bar - q.bar > maxDist
+                break
+            if math.abs(p.price - q.price) / q.price * 100 <= eqThr
+                bool clean = true
+                if reqClean
+                    float lvl = math.min(p.price, q.price)
+                    int kEnd = bar_index - q.bar - 1
+                    if kEnd >= pRight + 1
+                        for k = pRight + 1 to kEnd
+                            if low[k] < lvl
+                                clean := false
+                if clean
+                    zones.push(makeZone(false, q, p))
+                break
+    lows.unshift(p)
+    while lows.size() > 0 and p.bar - lows.last().bar > maxDist
+        lows.pop()
+
+// cap active (unswept) zones
+int activeN = 0
+if zones.size() > 0
+    for z in zones
+        if not z.swept
+            activeN += 1
+while activeN > maxZones and zones.size() > 0
+    Zone z0 = zones.shift()
+    if not z0.swept
+        delZone(z0)
+        activeN -= 1
+
+// ───────────────────────── 4) Trades
+var array<float> rStat = array.from(0.0, 0.0, 0.0)   // [sum risk %, count, max risk %]
+var int   entryBar = na
+var box   pbTp = na
+var box   pbSl = na
+float ema = ta.ema(close, math.max(trendLen, 1))
+
+calcQty(float riskPerUnit) =>
+    float q = 0.0
+    if sizeMode == "Fixed quantity"
+        q := fixQty
+    else
+        float raw = strategy.equity * riskPct / 100 / riskPerUnit
+        q := math.floor(raw / qtyStep) * qtyStep
+        if q < qtyStep
+            q := minMode == "Use 1 step" ? qtyStep : 0.0
+    float cap = math.floor(strategy.equity * maxLev / (close * syminfo.pointvalue) / qtyStep) * qtyStep
+    math.min(q, cap)
+
+bool flat   = strategy.position_size == 0
+bool sessGo = not sigInSess or inSessNow
+bool longOk  = tradeDir != "Short only" and (trendLen == 0 or close > ema)
+bool shortOk = tradeDir != "Long only" and (trendLen == 0 or close < ema)
+
+if bullSig and longOk and flat and sessGo
+    float stp = stopMode == "FVG far edge" ? high[2] : stopMode == "Breakout candle extreme" ? low[1] : stopMode == "Zone level" ? bullZone : close - atrStop * atr
+    stp -= stopBuf * atr
+    float rk = close - stp
+    if rk > 0
+        float q = calcQty(rk * syminfo.pointvalue)
+        if q > 0
+            float tp = close + tgtR * rk
+            strategy.entry("Long", strategy.long, qty=q)
+            strategy.exit("Long X", "Long", stop=stp, limit=tp)
+            entryBar := bar_index
+            float rp = q * rk * syminfo.pointvalue / strategy.equity * 100
+            rStat.set(0, rStat.get(0) + rp)
+            rStat.set(1, rStat.get(1) + 1)
+            rStat.set(2, math.max(rStat.get(2), rp))
+            pbTp := box.new(bar_index, tp, bar_index + 10, close, border_color=color.new(color.green, 70), bgcolor=color.new(color.green, 85))
+            pbSl := box.new(bar_index, close, bar_index + 10, stp, border_color=color.new(color.red, 70), bgcolor=color.new(color.red, 85))
+
+if bearSig and shortOk and flat and sessGo
+    float stp = stopMode == "FVG far edge" ? low[2] : stopMode == "Breakout candle extreme" ? high[1] : stopMode == "Zone level" ? bearZone : close + atrStop * atr
+    stp += stopBuf * atr
+    float rk = stp - close
+    if rk > 0
+        float q = calcQty(rk * syminfo.pointvalue)
+        if q > 0
+            float tp = close - tgtR * rk
+            strategy.entry("Short", strategy.short, qty=q)
+            strategy.exit("Short X", "Short", stop=stp, limit=tp)
+            entryBar := bar_index
+            float rp = q * rk * syminfo.pointvalue / strategy.equity * 100
+            rStat.set(0, rStat.get(0) + rp)
+            rStat.set(1, rStat.get(1) + 1)
+            rStat.set(2, math.max(rStat.get(2), rp))
+            pbTp := box.new(bar_index, close, bar_index + 10, tp, border_color=color.new(color.green, 70), bgcolor=color.new(color.green, 85))
+            pbSl := box.new(bar_index, stp, bar_index + 10, close, border_color=color.new(color.red, 70), bgcolor=color.new(color.red, 85))
+
+if maxHold > 0 and strategy.position_size != 0 and bar_index - entryBar >= maxHold
+    strategy.close_all(comment="Time")
+
+// position boxes end where the trade ended
+if strategy.position_size == 0 and strategy.position_size[1] != 0 and not na(pbTp)
+    pbTp.set_right(bar_index)
+    pbSl.set_right(bar_index)
+else if strategy.position_size != 0 and not na(pbTp)
+    pbTp.set_right(math.max(bar_index, pbTp.get_right()))
+    pbSl.set_right(math.max(bar_index, pbSl.get_right()))
+
+// ───────────────────────── 5) Stats table
+var table tb = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 20), border_width=1)
+if showTbl and barstate.islastconfirmedhistory or showTbl and barstate.islast
+    int   n   = strategy.closedtrades
+    float pf  = strategy.grossloss != 0 ? strategy.grossprofit / strategy.grossloss : na
+    float wr  = n > 0 ? strategy.wintrades / n * 100 : na
+    float ddp = strategy.max_drawdown / strategy.initial_capital * 100
+    float avR = rStat.get(1) > 0 ? rStat.get(0) / rStat.get(1) : na
+    table.cell(tb, 0, 0, "EQH/EQL FVG", text_color=color.white, text_size=size.small)
+    table.cell(tb, 1, 0, syminfo.ticker + " " + timeframe.period, text_color=color.white, text_size=size.small)
+    table.cell(tb, 0, 1, "Trades", text_color=color.white, text_size=size.small)
+    table.cell(tb, 1, 1, str.tostring(n), text_color=color.white, text_size=size.small)
+    table.cell(tb, 0, 2, "Win rate", text_color=color.white, text_size=size.small)
+    table.cell(tb, 1, 2, str.tostring(wr, "#.0") + "%", text_color=color.white, text_size=size.small)
+    table.cell(tb, 0, 3, "Profit factor", text_color=color.white, text_size=size.small)
+    table.cell(tb, 1, 3, str.tostring(pf, "#.00"), text_color=color.white, text_size=size.small)
+    table.cell(tb, 0, 4, "Net P&L", text_color=color.white, text_size=size.small)
+    table.cell(tb, 1, 4, str.tostring(strategy.netprofit, "#,###.00") + " (" + str.tostring(strategy.netprofit / strategy.initial_capital * 100, "#.0") + "%)", text_color=strategy.netprofit >= 0 ? color.lime : color.red, text_size=size.small)
+    table.cell(tb, 0, 5, "Max drawdown", text_color=color.white, text_size=size.small)
+    table.cell(tb, 1, 5, str.tostring(ddp, "#.0") + "% of start", text_color=color.white, text_size=size.small)
+    table.cell(tb, 0, 6, "Risk/trade avg | max", text_color=color.white, text_size=size.small)
+    table.cell(tb, 1, 6, str.tostring(avR, "#.00") + "% | " + str.tostring(rStat.get(2), "#.00") + "%", text_color=color.white, text_size=size.small)
+    table.cell(tb, 0, 7, "Sizing", text_color=color.white, text_size=size.small)
+    table.cell(tb, 1, 7, sizeMode == "Fixed quantity" ? "Fixed " + str.tostring(fixQty) : str.tostring(riskPct) + "% risk", text_color=color.white, text_size=size.small)

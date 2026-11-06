@@ -89,6 +89,17 @@ then steps 6–8 for `live` (uncomment the `api-live` block in the Caddyfile).
 Upload a new zip (step 3), then re-run `add_instance.sh` with the SAME arguments:
 it syncs the code, keeps `.env`, the database and the MT5 login, and restarts.
 
+## Expert Advisors (MT5 EAs)
+Put the `.mq5` source in `mql5/Experts/` in the repo. Every `add_instance.sh` /
+`update.sh` run copies it into each terminal's `MQL5/Experts/AlgoEdge/` and
+compiles it with MetaEditor; the output says "EA compiled" or lists the errors.
+To install or recompile without a full update:
+```bash
+sudo bash /opt/algoedge/src/deploy/linux/install_eas.sh live
+```
+Then in MT5 (over VNC): Navigator > Expert Advisors > AlgoEdge (right-click >
+Refresh if MT5 was open), drag the EA onto the chart, allow Algo Trading.
+
 ## Day to day
 | What | Command |
 |---|---|

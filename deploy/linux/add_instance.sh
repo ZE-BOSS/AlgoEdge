@@ -124,6 +124,9 @@ fi
 echo "== [$NAME] services"
 systemctl daemon-reload
 systemctl enable --now "algoedge-mt5@$NAME" "algoedge-bridge@$NAME"
+
+echo "== [$NAME] Expert Advisors (mql5/Experts -> MT5 Experts/AlgoEdge)"
+SRC="$SRC" bash "$HERE/install_eas.sh" "$NAME" || echo "!! [$NAME] EA install step failed (trading unaffected)"
 if [ "${NEW_ENV:-0}" = 1 ]; then
     echo
     echo "!! $BASE/app/.env was created from the template. Fill in the secrets"
