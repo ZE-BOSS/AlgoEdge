@@ -70,19 +70,29 @@ for mql in "${targets[@]}"; do
         secs=$(( $(date +%s) - start ))
 
         result=""
-        for lg in "$dst/$b.log" "$mql/Experts/$b.log" "$mql/../logs/metaeditor.log"; do
+        for lg in "$dst/$b.log" "$mql/Experts/$b.log"; do
             if [ -f "$lg" ]; then
                 # MetaEditor writes its log as UTF-16.
                 result="$(iconv -f UTF-16 -t UTF-8 "$lg" 2>/dev/null | tr -d '\r')"
                 [ -n "$result" ] && break
             fi
         done
+        # Otherwise MetaEditor's own log (portable install: <MT5>/logs/metaeditor.log):
+        # keep only the lines about this EA, newest last.
+        if [ -z "$result" ]; then
+            for lg in "$mql/../logs/metaeditor.log" "$mql/../logs/"*.log; do
+                [ -f "$lg" ] || continue
+                r="$(iconv -f UTF-16 -t UTF-8 "$lg" 2>/dev/null | tr -d '\r' | grep -a "$b" | tail -30)"
+                [ -n "$r" ] && { result="$r"; break; }
+            done
+        fi
         if [ -f "$dst/$b.ex5" ]; then
             echo "== [$NAME] EA compiled: Experts/AlgoEdge/$b.ex5  ($(echo "$result" | grep -i 'result' | tail -1))"
         else
             echo "!! [$NAME] EA FAILED to compile: $b.mq5"
             if [ -n "$result" ]; then
-                echo "$result" | grep -iE 'error|warning|result' | head -25 | sed 's/^/   /'
+                echo "$result" | grep -iE 'error|warning|result|compile' | tail -25 | sed 's/^/   /'
+                echo "   (exit code $rc after ${secs}s)"
             else
                 echo "   no compiler log. exit code $rc after ${secs}s (124 = timed out)"
                 echo "   source path given to MetaEditor: ${winsrc:-<winepath returned nothing>}"
