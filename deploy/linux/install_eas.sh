@@ -73,8 +73,15 @@ stop_metaeditor() {
 [ -f "$ME" ] && stop_metaeditor
 [ -f "$ME" ] || echo "!! [$NAME] EAs: MetaEditor64.exe not found - EAs copied but not compiled (MT5 compiles them when you open them in MetaEditor)."
 
+ti=0
 for mql in "${targets[@]}"; do
+    ti=$((ti + 1))
     dst="$mql/Experts/AlgoEdge"
+    # MetaEditor misreads a /compile: path with spaces ("Program Files",
+    # "MetaTrader 5") once Wine has quoted it: give it a path without spaces
+    # through a link C:\ae_mt5_<n> -> the folder holding this MQL5.
+    link="$WINEPREFIX/drive_c/ae_mt5_$ti"
+    sudo -u algoedge ln -sfn "$(dirname "$mql")" "$link"
     sudo -u algoedge mkdir -p "$dst"
     for f in "${files[@]}"; do
         b="$(basename "$f" .mq5)"
@@ -82,7 +89,7 @@ for mql in "${targets[@]}"; do
         [ -f "$ME" ] || { echo "== [$NAME] EA copied: $b.mq5"; continue; }
 
         rm -f "$dst/$b.log" "$dst/$b.ex5"
-        winsrc="$("${AS[@]}" winepath -w "$dst/$b.mq5" 2>/dev/null | tr -d '\r')"
+        winsrc="C:\\ae_mt5_$ti\\MQL5\\Experts\\AlgoEdge\\$b.mq5"
         out="$(mktemp)"; chmod 666 "$out"
         start=$(date +%s)
         # MetaEditor writes <file>.log next to the source when /log has no path.
@@ -126,6 +133,8 @@ for mql in "${targets[@]}"; do
                 echo "   source path given to MetaEditor: ${winsrc:-<winepath returned nothing>}"
                 echo "   wine output:"; tail -15 "$out" | sed 's/^/     /'
                 echo "   files in $dst:"; ls -la "$dst" | sed 's/^/     /'
+                echo "   MT5 / MetaEditor processes:"
+                ps -eo pid,user,etime,args | grep -iE 'metaeditor|terminal64' | grep -v grep | cut -c1-160 | sed 's/^/     /'
             fi
         fi
         rm -f "$out"
