@@ -1,0 +1,150 @@
+//@version=6
+// Roboquant template "Daily Anchored VWAP Signal Strategy" — line-by-line Pine port of the rq_sdk (Rust) source.
+// Preset (showcase run): MES 3m, typical price, session 0930-1600 ET, EMA 11, 3 contracts, ATR stop off,
+// relative-volatility filter on (ATR14 <= 1.1 x ATR50), 2 extra attempts after a first loss.
+strategy("RQ Daily Anchored VWAP Signal", shorttitle="RQ dVWAP", overlay=true, pyramiding=0,
+     initial_capital=10000, currency=currency.USD, default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.5, slippage=0, margin_long=0, margin_short=0)
+
+use_typical_price  = input.bool(true, "Use typical price", tooltip="use_typical_price")
+session_start_hhmm = input.int(930, "Session start HHMM", minval=0, maxval=2359, tooltip="session_start_hhmm")
+session_end_hhmm   = input.int(1600, "Session end HHMM", minval=0, maxval=2359, tooltip="session_end_hhmm")
+ema_length         = input.int(11, "EMA length", minval=1, maxval=500, tooltip="ema_length (code default 20, preset 11)")
+contracts          = input.int(3, "Contracts per trade", minval=1, maxval=100, tooltip="contracts (preset 3)")
+atr_period         = input.int(14, "ATR period", minval=1, maxval=200)
+atr_stop_multiplier= input.float(2.0, "ATR stop multiplier", minval=0.1, maxval=20)
+use_atr_stop       = input.bool(false, "Use ATR stop", tooltip="preset off")
+use_rel_vol        = input.bool(true, "Use relative volatility filter")
+baseline_atr_period= input.int(50, "Baseline ATR period", minval=2, maxval=500)
+max_relative_atr   = input.float(1.1, "Maximum relative ATR", minval=0.1, maxval=5.0, tooltip="code default 1.20, preset 1.1")
+additional_attempts= input.int(2, "Additional attempts after first loss", minval=0, maxval=20)
+grpX = "Port / cross-asset (not in the Roboquant code)"
+tz       = input.string("America/New_York", "Time zone (code: ET)", group=grpX)
+volOne   = input.bool(false, "No volume data: weight every bar as 1", group=grpX)
+qtyLev   = input.float(0.0, "Override size: notional = x equity (0 = code sizing)", minval=0, step=0.1, group=grpX)
+cfdLev   = input.float(1.0, "Non-futures symbols (Deriv/CFD/crypto): notional = x equity when the override is 0", minval=0.01, step=0.1, group=grpX)
+tFrom    = input.time(timestamp("2000-01-01T00:00:00"), "Trade from", group=grpX)
+tTo      = input.time(timestamp("2100-01-01T00:00:00"), "Trade until", group=grpX)
+
+int hhmm = hour(time, tz) * 100 + minute(time, tz)
+int d    = year(time, tz) * 10000 + month(time, tz) * 100 + dayofmonth(time, tz)
+in_session(int t) =>
+    int a = math.max(math.min(session_start_hhmm, 2359), 0)
+    int b = math.max(math.min(session_end_hhmm, 2359), 0)
+    a <= b ? (t >= a and t <= b) : (t >= a or t <= b)
+
+float ema          = ta.ema(close, math.max(ema_length, 1))
+float atr          = ta.atr(math.max(atr_period, 1))
+float baseline_atr = ta.atr(math.max(baseline_atr_period, 2))
+
+var float pv = 0.0
+var float vol = 0.0
+var int   day = 0
+var int   regime = 0
+var bool  waiting_red = false
+var bool  waiting_green = false
+var float prev_close = na
+var float prev_vwap = na
+var bool  has_prev = false
+var bool  first_trade_closed = false
+var bool  first_trade_won = false
+var int   attempts_used = 0
+var int   seenClosed = 0
+
+// on_trade(PositionClosed) runs when the fill happens (bar open) — before on_bar's day reset
+while seenClosed < strategy.closedtrades
+    float pnl = strategy.closedtrades.profit(seenClosed)
+    if not first_trade_closed
+        first_trade_closed := true
+        first_trade_won := pnl > 0.0
+    else
+        attempts_used += 1
+    seenClosed += 1
+
+allowed() =>
+    not first_trade_closed ? true : first_trade_won ? false : attempts_used < additional_attempts
+
+if d != day
+    day := d
+    pv := 0.0
+    vol := 0.0
+    regime := 0
+    waiting_red := false
+    waiting_green := false
+    has_prev := false
+    first_trade_closed := false
+    first_trade_won := false
+    attempts_used := 0
+
+float p = use_typical_price ? (high + low + close) / 3.0 : close
+float v = volOne ? 1.0 : math.max(nz(volume), 0.0)
+pv += p * v
+vol += v
+
+bool red_dot = false
+bool green_dot = false
+bool red_tri = false
+bool green_tri = false
+float vwapPlot = na
+
+if not na(ema) and vol > 0.0
+    float vwap = pv / vol
+    vwapPlot := vwap
+    if not na(atr) and not na(baseline_atr) and atr > 0.0 and baseline_atr > 0.0
+        float relative_atr = atr / baseline_atr
+        bool volatility_allowed = not use_rel_vol or relative_atr <= math.max(max_relative_atr, 0.1)
+        if in_session(hhmm)
+            if waiting_red and close > ema
+                waiting_red := false
+                regime := -2
+                red_tri := true
+            else if waiting_green and close < ema
+                waiting_green := false
+                regime := 2
+                green_tri := true
+            else if regime == -2 and ema > vwap
+                regime := -3
+            else if regime == 2 and ema < vwap
+                regime := 3
+            else if regime == -3 and has_prev and prev_close >= prev_vwap and close < vwap
+                regime := 0
+                green_dot := true
+            else if regime == 3 and has_prev and prev_close <= prev_vwap and close > vwap
+                regime := 0
+                red_dot := true
+            else if regime == 0
+                if ema < vwap and close < ema
+                    waiting_red := true
+                    regime := -1
+                    red_dot := true
+                else if ema > vwap and close > ema
+                    waiting_green := true
+                    regime := 1
+                    green_dot := true
+        bool inDates = time >= tFrom and time <= tTo
+        float lev = qtyLev > 0 ? qtyLev : syminfo.type != "futures" ? cfdLev : 0.0
+        float q = lev > 0 ? math.floor(strategy.equity * lev / (close * syminfo.pointvalue) / 0.001) * 0.001 : math.max(contracts, 1)
+        if allowed() and volatility_allowed and strategy.position_size == 0 and inDates
+            float stop_distance = atr * math.max(atr_stop_multiplier, 0.1)
+            if green_dot
+                strategy.entry("Long", strategy.long, qty=q, comment="Green dot")
+                if use_atr_stop
+                    strategy.exit("Long SL", "Long", stop=close - stop_distance)
+            else if red_dot
+                strategy.entry("Short", strategy.short, qty=q, comment="Red dot")
+                if use_atr_stop
+                    strategy.exit("Short SL", "Short", stop=close + stop_distance)
+        if green_tri and strategy.position_size > 0
+            strategy.close_all(comment="Green triangle")
+        if red_tri and strategy.position_size < 0
+            strategy.close_all(comment="Red triangle")
+        prev_close := close
+        prev_vwap := vwap
+        has_prev := true
+
+plot(ema, "EMA", color=#F59E0B)
+plot(vwapPlot, "Daily VWAP", color=#22C55E, style=plot.style_linebr)
+plotshape(green_dot, "Green Dot", shape.circle, location.belowbar, #22C55E, size=size.tiny)
+plotshape(red_dot, "Red Dot", shape.circle, location.abovebar, #EF4444, size=size.tiny)
+plotshape(green_tri, "Green Triangle", shape.triangleup, location.belowbar, #22C55E, size=size.tiny)
+plotshape(red_tri, "Red Triangle", shape.triangledown, location.abovebar, #EF4444, size=size.tiny)

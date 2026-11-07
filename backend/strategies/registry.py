@@ -32,6 +32,7 @@ def _load_strategies():
         import backend.strategies.strategy_kronos.engine  # noqa: F401  (reads forecasts; never imports torch)
         import backend.strategies.strategy_roboquant.engine  # noqa: F401  (five roboquant.dev templates)
         import backend.strategies.strategy_roboquant.engine_more  # noqa: F401  (nine more, 2026-10-20)
+        import backend.strategies.strategy_zero_loss.engine  # noqa: F401  (Zero Loss Boom & Crash v3.2, TradingView mirror)
         _LOADED = True
 
 def register_strategy(name: str):

@@ -35,6 +35,7 @@ export const STRATEGY_OPTIONS = [
   ['RQ_FridayRevisit_v1', 'Friday Range Revisit Monday Short (roboquant)', 'rq_friday_revisit'],
   ['RQ_M30ORB_v1', 'M30 ORB + M5 Breakout (roboquant)', 'rq_m30_orb'],
   ['RQ_SRSweep_v1', 'S&R Sweep (roboquant)', 'rq_sr_sweep'],
+  ['ZeroLossBoomCrash_v32', 'Zero Loss Boom & Crash v3.2', 'zero_loss_boom_crash'],
 ];
 
 export const STRATEGY_GROUP = Object.fromEntries(STRATEGY_OPTIONS.map(([id, , g]) => [id, g]));

@@ -430,6 +430,7 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
     "RQ_FridayRevisit_v1": "rq_friday_revisit",
     "RQ_M30ORB_v1": "rq_m30_orb",
     "RQ_SRSweep_v1": "rq_sr_sweep",
+    "ZeroLossBoomCrash_v32": "zero_loss_boom_crash",
 }
 
 
@@ -611,6 +612,39 @@ def _bar_seconds(df: Any) -> float:
         return 0.0
 
 
+async def _with_m5_backfill(symbol: str, primary_tf: str, m1: Any, t0: Any, t1: Any):
+    """MT5 keeps only ~7 weeks of M1, so on a longer run every older ambiguous
+    bar fell back to the conservative same-bar guess - Crazy ORB (target 0.35x
+    its stop) then showed 65% wins where TradingView and the M5 path show ~81%.
+    Five-minute bars cover the months M1 does not: they settle most same-bar
+    ambiguity on a 15-minute (or slower) strategy, and a five-minute bar that
+    itself reaches both levels still falls back to the conservative guess."""
+    import pandas as pd
+    if primary_tf in ("M1", "M5"):
+        return m1 if m1 is not None and len(m1) else None
+    try:
+        from backend.mt5.data_fetcher import DataFetcher
+        m5 = await DataFetcher.get_data_range(symbol, "M5", t0.to_pydatetime(),
+                                              (t1 + pd.Timedelta(days=1)).to_pydatetime())
+    except Exception as exc:                            # noqa: BLE001
+        logger.warning(f"[BACKTEST] intrabar M5 backfill fetch failed ({exc})")
+        m5 = None
+    if m5 is None or not len(m5):
+        return m1 if m1 is not None and len(m1) else None
+    if m1 is None or not len(m1):
+        return m5
+
+    def _t(df):
+        return (df["time"].astype("int64") if "time" in df.columns
+                else pd.Series(pd.DatetimeIndex(df.index).as_unit("s").asi8, index=df.index))
+    first_m1 = int(_t(m1).min())
+    older = m5[_t(m5).to_numpy() < first_m1]
+    if not len(older):
+        return m1
+    cols = [c for c in ("time", "open", "high", "low", "close") if c in m1.columns and c in older.columns]
+    return pd.concat([older[cols], m1[cols]], ignore_index=True)
+
+
 async def _intrabar_minutes(req: Any, primary_tf: str, risk_config: dict, candles: Any):
     """One-minute bars for the run's span when intrabar resolution is on (see
     BacktestRequest.intrabar_resolution), else None. A failed fetch only
@@ -625,17 +659,21 @@ async def _intrabar_minutes(req: Any, primary_tf: str, risk_config: dict, candle
             want = False
     if not want or primary_tf == "M1" or candles is None or not len(candles):
         return None
+    if "time" in candles.columns:
+        t0, t1 = pd.to_datetime(candles["time"].iloc[0], unit="s"), pd.to_datetime(candles["time"].iloc[-1], unit="s")
+    else:
+        t0, t1 = pd.Timestamp(candles.index[0]), pd.Timestamp(candles.index[-1])
+    m1 = None
     try:
         from backend.mt5.data_fetcher import DataFetcher
-        if "time" in candles.columns:
-            t0, t1 = pd.to_datetime(candles["time"].iloc[0], unit="s"), pd.to_datetime(candles["time"].iloc[-1], unit="s")
-        else:
-            t0, t1 = pd.Timestamp(candles.index[0]), pd.Timestamp(candles.index[-1])
         m1 = await DataFetcher.get_data_range(req.symbol, "M1", t0.to_pydatetime(),
                                               (t1 + pd.Timedelta(days=1)).to_pydatetime())
-        return m1 if m1 is not None and len(m1) else None
     except Exception as exc:                            # noqa: BLE001
-        logger.warning(f"[BACKTEST] intrabar M1 fetch failed ({exc}); using the same-bar guess")
+        logger.warning(f"[BACKTEST] intrabar M1 fetch failed ({exc}); trying M5 bars")
+    try:
+        return await _with_m5_backfill(req.symbol, primary_tf, m1, t0, t1)
+    except Exception as exc:                            # noqa: BLE001
+        logger.warning(f"[BACKTEST] intrabar bars unavailable ({exc}); using the same-bar guess")
         return None
 
 

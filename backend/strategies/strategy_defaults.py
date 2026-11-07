@@ -75,7 +75,9 @@ NO_MEASURED_TARGET: frozenset[str] = frozenset({
     # roboquant templates that exit on time / a regime flip, never on target
     "RQ_TMeanReversion_v1", "RQ_CharlesMonger_v1",
     # ...and the 2026-10-20 ports whose exits are a band flip / an EMA cross
-    "RQ_SigmaBreakout_v1", "RQ_DailyVWAP_v1", })
+    "RQ_SigmaBreakout_v1", "RQ_DailyVWAP_v1",
+    # TradingView mirror: exits at the opposite zone / after 100 candles
+    "ZeroLossBoomCrash_v32", })
 
 
 STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -287,6 +289,15 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
         "tp_count": 1, "tp1_rr": 1.0, "min_rr": 1.0,
         "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
         "evidence": "roboquant.dev template S&R Sweep, NQ 5m preset: 3/3 pivot levels, sweep and close back with EMA(30) trend, stop at the candle, 1R. Claimed +57.0%, 52.1% win, DD 11.0%, PF 1.25.",
+    },
+    # ── Zero Loss Boom & Crash v3.2 - mirrors the TradingView strategy ──
+    "ZeroLossBoomCrash_v32": {
+        "tp_count": 1, "tp1_rr": 40.0, "min_rr": 0.1,
+        "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
+        "evidence": "TradingView 'Zero Loss Boom & Crash - strategy v3.2' (M5): EMA5 scaled to the last 100 "
+                    "candles touched 80/20 within 5 candles and turned for 3, candle body crosses EMA30; "
+                    "stop 8x ATR(14), exit at the opposite zone or after 100 candles, 1% risk. Beat 99.2% of "
+                    "500 random-timing runs (Sep 27 - Nov 3 2026).",
     },
     "TrendBreakout_v1": {
         "tp_count": 1,

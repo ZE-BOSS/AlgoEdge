@@ -15,6 +15,7 @@ from backend.strategies.strategy_orb.params import ORBParams
 from backend.strategies.strategy_spike_resumption.params import SpikeResumptionParams
 from backend.strategies.strategy_overnight.params import OvernightSessionParams
 from backend.strategies.strategy_kronos.params import KronosStrategyParams
+from backend.strategies.strategy_zero_loss.params import ZeroLossBoomCrashParams
 from backend.strategies.strategy_roboquant.params import (
     RQNQPrecisionParams, RQNYORBParams, RQCrazyORBParams, RQTMeanReversionParams, RQCharlesMongerParams,
     RQFlashTriggerORBParams, RQScarfaceORBParams, RQIVBParams, RQGigaORBParams, RQSigmaBreakoutParams, RQDailyAnchoredVWAPParams, RQFridayRevisitParams, RQM30ORBParams, RQSRSweepParams,
@@ -1286,6 +1287,7 @@ class UserConfigV2(UserConfig):
     rq_friday_revisit: RQFridayRevisitParams = field(default_factory=RQFridayRevisitParams)
     rq_m30_orb: RQM30ORBParams = field(default_factory=RQM30ORBParams)
     rq_sr_sweep: RQSRSweepParams = field(default_factory=RQSRSweepParams)
+    zero_loss_boom_crash: ZeroLossBoomCrashParams = field(default_factory=ZeroLossBoomCrashParams)
     spike_resumption: SpikeResumptionParams = field(default_factory=SpikeResumptionParams)
     synth: SynthParams = field(default_factory=SynthParams)
     prop_firm: PropFirmParams = field(default_factory=PropFirmParams)
@@ -1315,6 +1317,7 @@ class UserConfigV2(UserConfig):
         rq_friday_revisit_data = data.pop("rq_friday_revisit", {})
         rq_m30_orb_data = data.pop("rq_m30_orb", {})
         rq_sr_sweep_data = data.pop("rq_sr_sweep", {})
+        zero_loss_boom_crash_data = data.pop("zero_loss_boom_crash", {})
         trend_breakout_data = data.pop("trend_breakout", {})
         fib_trend_data = data.pop("fib_trend", {})
         spike_resumption_data = data.pop("spike_resumption", {})
@@ -1357,6 +1360,7 @@ class UserConfigV2(UserConfig):
         config.rq_friday_revisit = RQFridayRevisitParams(**filter_kwargs(RQFridayRevisitParams, rq_friday_revisit_data))
         config.rq_m30_orb = RQM30ORBParams(**filter_kwargs(RQM30ORBParams, rq_m30_orb_data))
         config.rq_sr_sweep = RQSRSweepParams(**filter_kwargs(RQSRSweepParams, rq_sr_sweep_data))
+        config.zero_loss_boom_crash = ZeroLossBoomCrashParams(**filter_kwargs(ZeroLossBoomCrashParams, zero_loss_boom_crash_data))
         config.spike_resumption = SpikeResumptionParams(**filter_kwargs(SpikeResumptionParams, spike_resumption_data))
         config.synth = SynthParams(**filter_kwargs(SynthParams, synth_data))
         config.prop_firm = PropFirmParams(**filter_kwargs(PropFirmParams, prop_firm_data))

@@ -352,33 +352,33 @@ class RQTMeanReversion(_RQBase):
             return None
         entry = float(candles["close"].iloc[-1])
         sl = entry * (1.0 - p.disaster_stop_pct / 100.0)
+        meta = dict(friday=str(fri.date()))
+        if p.notional_x and p.notional_x > 0:
+            meta["size_notional_x"] = float(p.notional_x)
         return self._signal(symbol, timeframe, candles, "BUY", entry, sl,
-                            entry + 40.0 * (entry - sl), friday=str(fri.date()))
+                            entry + 40.0 * (entry - sl), **meta)
 
     def on_position_bar(self, symbol, timeframe, candles, position):
-        """Close at the first bar AT OR AFTER the scheduled exit following the
-        entry. Upstream closes on the bar that IS Wed 10:00 UTC; on complete
-        bars that is the same bar, but live, a bot that was offline for that
-        one bar would otherwise hold another whole week."""
+        """Close once a bar AT the scheduled exit (Wed 10:00 UTC) has printed
+        since the entry - the Pine script's rule (weekday == exit_day and
+        hour == exit_hour), so a holiday Wednesday with no 10:00 bar holds the
+        trade to the next week exactly as on TradingView. Reading it from the
+        window rather than only the last bar keeps a bot that was offline for
+        that one bar from holding another whole week."""
         p = self.params
-        last = pd.Timestamp(int(c.epochs(candles)[-1]), unit="s")
+        idx = pd.DatetimeIndex(pd.to_datetime(c.epochs(candles), unit="s"))
         entry = position.get("entry_time")
         try:
-            e = (pd.Timestamp(int(entry), unit="s") if isinstance(entry, (int, float))
+            e = (pd.Timestamp(int(float(entry)), unit="s") if isinstance(entry, (int, float, str)) and str(entry).replace(".", "", 1).isdigit()
                  else pd.Timestamp(entry).tz_localize(None) if entry is not None else None)
         except Exception:                               # noqa: BLE001
             e = None
-        if e is None:
-            due = (last.isoweekday() == p.exit_day and last.hour == p.exit_hour
-                   and last.minute >= p.exit_minute)
+        hit = ((idx.dayofweek + 1) == p.exit_day) & (idx.hour == p.exit_hour) & (idx.minute >= p.exit_minute)
+        if e is not None:
+            hit &= idx > e
         else:
-            days = (p.exit_day - e.isoweekday()) % 7
-            exit_at = (e.normalize() + pd.Timedelta(days=days)
-                       + pd.Timedelta(hours=p.exit_hour, minutes=p.exit_minute))
-            if exit_at <= e:
-                exit_at += pd.Timedelta(days=7)
-            due = last >= exit_at
-        return self._close(position, "RQ_CALENDAR_EXIT") if due else None
+            hit = hit & (np.arange(len(idx)) == len(idx) - 1)
+        return self._close(position, "RQ_CALENDAR_EXIT") if bool(hit.any()) else None
 
 
 # ── Charles Monger ───────────────────────────────────────────────────────────

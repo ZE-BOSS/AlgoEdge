@@ -1700,12 +1700,13 @@ class BotService:
                                             # backtesting. Compute the same actual_risk_dollars the engine
                                             # already derives internally (sum of post-split TP volumes priced
                                             # at the signal's entry/SL distance) and pass it through.
-                                            from backend.risk.position_sizer import calculate_risk_dollars
-                                            initial_risk_dollars = calculate_risk_dollars(
+                                            from backend.risk.position_sizer import open_risk_dollars
+                                            initial_risk_dollars = open_risk_dollars(
                                                 sum(tp.volume for tp in tp_levels),
                                                 signal.entry_price,
                                                 signal.stop_loss,
                                                 signal.symbol,
+                                                signal_data.get("metadata"),
                                             )
                                             _slot_circuit.position_opened(
                                                 group_id, len(tp_levels), symbol=signal.symbol,

@@ -1,0 +1,166 @@
+//@version=6
+// Roboquant template "The Flash Trigger ORB" — line-by-line Pine port of the rq_sdk (Rust) source.
+// Preset (showcase run): MNQ 15m, 14:30 UTC targeted candle, 3:1 R:R, 1% of account risked,
+// trailing on (70 points to activate, 25-point buffer), 23:59 UTC flatten.
+// Run it on a chart timeframe equal to candle_tf_min (the code says the same).
+strategy("RQ Flash Trigger ORB", shorttitle="RQ Flash ORB", overlay=true, pyramiding=0,
+     initial_capital=10000, currency=currency.USD, default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.5, slippage=0, margin_long=0, margin_short=0,
+     max_lines_count=500)
+
+candle_tf_min   = input.int(15, "Targeted Candle Timeframe (min)", options=[1, 2, 3, 5, 10, 15, 30, 45, 60, 120, 180, 240], tooltip="candle_tf_min — informational, the chart timeframe must match")
+target_hour     = input.int(14, "Targeted Candle Hour", minval=0, maxval=23)
+target_minute   = input.int(30, "Targeted Candle Minute", minval=0, maxval=59)
+utc_offset      = input.int(0, "UTC Offset (hours)", minval=-12, maxval=14)
+risk_reward     = input.float(3.0, "Risk:Reward", minval=0.1, maxval=20)
+risk_mode       = input.int(2, "Risk Per Trade Mode (0=Fixed Lot, 1=Fixed $, 2=% Account)", options=[0, 1, 2])
+lot_size        = input.float(1.0, "Fixed Lot Size", minval=1, maxval=1000)
+risk_usd        = input.float(100.0, "Risk Per Trade ($)", minval=1)
+risk_percent    = input.float(1.0, "Risk Per Trade (% of Account)", minval=0.01, maxval=100)
+eod_close_hour  = input.int(23, "Close All Trades Hour (UTC)", minval=0, maxval=23)
+eod_close_minute= input.int(59, "Close All Trades Minute (UTC)", minval=0, maxval=59)
+activate_trailing = input.bool(true, "Activate Trailing SL", tooltip="code default off, preset on")
+trail_activate_points = input.float(70.0, "Trail Trigger (points in profit)", minval=0.1)
+trail_buffer_points   = input.float(25.0, "Trailing Buffer (points)", minval=0.1)
+day_filter      = input.bool(false, "Day Filter")
+trade_monday    = input.bool(true, "Trade Monday")
+trade_tuesday   = input.bool(true, "Trade Tuesday")
+trade_wednesday = input.bool(true, "Trade Wednesday")
+trade_thursday  = input.bool(true, "Trade Thursday")
+trade_friday    = input.bool(true, "Trade Friday")
+grpX = "Port / cross-asset (not in the Roboquant code)"
+trailPct = input.bool(false, "Cross-asset: trail trigger/buffer as % of price (70 pts -> 0.26%, 25 pts -> 0.093%)", group=grpX)
+minLot   = input.float(1.0, "Min tradable size (code floors to whole contracts = 1)", minval=0.000001, group=grpX)
+consTrail= input.bool(true, "Trail the stop only after each bar closes (as AlgoEdge does; off = TradingView intrabar trail)", group=grpX)
+tolMatch = input.bool(false, "Match the bar that CONTAINS the target time (feeds whose bars start at :01)", group=grpX)
+tFrom    = input.time(timestamp("2000-01-01T00:00:00"), "Trade from", group=grpX)
+tTo      = input.time(timestamp("2100-01-01T00:00:00"), "Trade until", group=grpX)
+
+LINE_EXTEND_BARS = 5
+int  shifted   = time + utc_offset * 3600000
+int  local_date = year(shifted, "UTC") * 10000 + month(shifted, "UTC") * 100 + dayofmonth(shifted, "UTC")
+int  local_hhmm = hour(shifted, "UTC") * 100 + minute(shifted, "UTC")
+int  utc_date  = year(time, "UTC") * 10000 + month(time, "UTC") * 100 + dayofmonth(time, "UTC")
+int  utc_hhmm  = hour(time, "UTC") * 100 + minute(time, "UTC")
+
+day_allowed() =>
+    if not day_filter
+        true
+    else
+        int wd = dayofweek(shifted, "UTC")
+        wd == dayofweek.monday ? trade_monday : wd == dayofweek.tuesday ? trade_tuesday : wd == dayofweek.wednesday ? trade_wednesday : wd == dayofweek.thursday ? trade_thursday : wd == dayofweek.friday ? trade_friday : false
+
+size_for_trade(float stop_distance) =>
+    float q = 0.0
+    float step = syminfo.type != "futures" ? math.min(minLot, 0.001) : minLot
+    if risk_mode == 1
+        float lpc = math.abs(stop_distance) * syminfo.pointvalue
+        q := lpc > 0 ? math.floor(risk_usd / lpc / step) * step : 0.0
+    else if risk_mode == 2
+        float lpc = math.abs(stop_distance) * syminfo.pointvalue
+        q := lpc > 0 ? math.floor(strategy.equity * risk_percent / 100.0 / lpc / step) * step : 0.0
+        q := math.max(q, step)   // ctx.size_risk_pct never returns 0 here (inferred: the showcase trades every day)
+    else
+        q := math.max(lot_size, 1.0)
+    q
+
+var int   session_date = 0
+var float range_high = na
+var float range_low = na
+var bool  range_active = false
+var int   range_start_bar = na
+var bool  traded_this_range = false
+var int   utc_session_date = 0
+var bool  closed_for_day = false
+var float eSL = na
+var float eTP = na
+var int   eDir = 0
+var float eRef = na
+var float eExt = na
+var line  hl = na
+var line  ll = na
+var float sl_px = na
+var float tp_px = na
+
+if local_date != session_date
+    session_date := local_date
+    range_active := false
+    traded_this_range := false
+
+if utc_date != utc_session_date
+    utc_session_date := utc_date
+    closed_for_day := false
+
+int eod_hhmm = eod_close_hour * 100 + eod_close_minute
+if not closed_for_day and utc_hhmm >= eod_hhmm
+    if strategy.position_size != 0
+        strategy.close_all(comment="EOD flatten (UTC)")
+    closed_for_day := true
+
+int target_hhmm = target_hour * 100 + target_minute
+bool formed = false
+int tfMin = timeframe.in_seconds() / 60
+bool hit = tolMatch ? (local_hhmm >= target_hhmm and (hour(shifted, "UTC") * 60 + minute(shifted, "UTC")) < (target_hour * 60 + target_minute + tfMin)) : local_hhmm == target_hhmm
+if not range_active and hit and day_allowed()
+    range_high := high
+    range_low := low
+    range_active := true
+    traded_this_range := false
+    range_start_bar := bar_index
+    formed := true
+    hl := line.new(bar_index, range_high, bar_index + LINE_EXTEND_BARS, range_high, color=#00C853, width=2)
+    ll := line.new(bar_index, range_low, bar_index + LINE_EXTEND_BARS, range_low, color=#FF3B30, width=2)
+
+float trA = trailPct ? close * trail_activate_points / 27000.0 : trail_activate_points
+float trB = trailPct ? close * trail_buffer_points / 27000.0 : trail_buffer_points
+if not formed and range_active and not traded_this_range and bar_index > range_start_bar and strategy.position_size == 0 and time >= tFrom and time <= tTo
+    if close > range_high
+        float sl = range_low
+        float stop_distance = close - sl
+        if stop_distance > 0
+            float qty = size_for_trade(stop_distance)
+            if qty > 0
+                float tp = close + stop_distance * risk_reward
+                strategy.entry("Long", strategy.long, qty=qty, comment="Above range high")
+                eSL := sl
+                eTP := tp
+                eDir := 1
+                eRef := close
+                eExt := close
+                if activate_trailing and not consTrail
+                    strategy.exit("Long X", "Long", stop=sl, limit=tp, trail_points=trA / syminfo.mintick, trail_offset=trB / syminfo.mintick)
+                else
+                    strategy.exit("Long X", "Long", stop=sl, limit=tp)
+                traded_this_range := true
+    else if close < range_low
+        float sl = range_high
+        float stop_distance = sl - close
+        if stop_distance > 0
+            float qty = size_for_trade(stop_distance)
+            if qty > 0
+                float tp = close - stop_distance * risk_reward
+                strategy.entry("Short", strategy.short, qty=qty, comment="Below range low")
+                eSL := sl
+                eTP := tp
+                eDir := -1
+                eRef := close
+                eExt := close
+                if activate_trailing and not consTrail
+                    strategy.exit("Short X", "Short", stop=sl, limit=tp, trail_points=trA / syminfo.mintick, trail_offset=trB / syminfo.mintick)
+                else
+                    strategy.exit("Short X", "Short", stop=sl, limit=tp)
+                traded_this_range := true
+
+// conservative trailing (port option): stop moves only from completed bars
+if consTrail and activate_trailing and strategy.position_size != 0 and eDir != 0
+    float fill = strategy.position_avg_price
+    if eDir == 1
+        eExt := math.max(eExt, high)
+        if eExt - fill >= trA
+            eSL := math.max(eSL, eExt - trB)
+        strategy.exit("Long X", "Long", stop=eSL, limit=eTP)
+    else
+        eExt := math.min(eExt, low)
+        if fill - eExt >= trA
+            eSL := math.min(eSL, eExt + trB)
+        strategy.exit("Short X", "Short", stop=eSL, limit=eTP)

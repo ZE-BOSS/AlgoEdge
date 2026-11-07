@@ -111,6 +111,15 @@ async def run(args) -> dict:
 
     risk_config = build_merged_risk_config(req)
     bt = BacktestEngine(risk_config)
+    # The route settles a bar that reaches both the stop and the target from
+    # M1 bars (M5 where M1 history ends) when the target is under 1R; so must
+    # a parity run, or its numbers are not the page's.
+    from backend.api.routes.backtest import _intrabar_minutes
+    _ib_src = df.reset_index(drop=True) if "time" in df.columns else df
+    _m1 = await _intrabar_minutes(req, primary, risk_config, _ib_src)
+    if _m1 is not None and len(_m1):
+        from backend.backtester.intrabar import IntrabarResolver
+        bt.intrabar = {req.symbol: IntrabarResolver(_m1)}
     res = bt.run(df, signals, req.initial_balance, by_tf.get("M15", df), by_tf.get("M5", df), engine, None, by_tf.get("H1"))
     out = summarize(res, req, len(signals))
     out["costs_resolved"] = {k: v for k, v in bt._costs_for(req.symbol).items() if not str(k).startswith("_")}

@@ -1,0 +1,127 @@
+//@version=6
+// Roboquant template "Sigma Breakout" — line-by-line Pine port of the rq_sdk (Rust) source.
+// Preset (showcase run): MNQ 30m, n_sigma_days 2, band_mult 1.5, use_vwap off, sl_pct 0, fixed_lot 1.
+// Engine conventions copied: signals on bar close, market orders fill next bar open.
+strategy("RQ Sigma Breakout", shorttitle="RQ Sigma", overlay=true, pyramiding=0,
+     initial_capital=10000, currency=currency.USD, default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.5, slippage=0, margin_long=0, margin_short=0)
+
+n_sigma_days   = input.int(2, "N Sigma Days", minval=2, maxval=60, tooltip="n_sigma_days (code default 14, preset 2)")
+band_mult      = input.float(1.5, "Band Multiplier", minval=0.1, maxval=5.0, step=0.1, tooltip="band_mult (code default 1.0, preset 1.5)")
+use_vwap       = input.bool(false, "Use VWAP as reference (false = RTH Open)", tooltip="use_vwap")
+sl_pct         = input.float(0.0, "Stop Loss % (0 = off)", minval=0, maxval=20, step=0.1, tooltip="sl_pct")
+fixed_lot      = input.int(1, "Fixed Lot (used when SL off)", minval=1, maxval=100, tooltip="fixed_lot")
+risk_pct       = input.float(1.0, "Risk % of equity (used only when SL on)", minval=0.1, maxval=20, step=0.1, tooltip="risk_pct")
+fixed_risk_usd = input.float(0.0, "Fixed Risk $ per trade (0 = off, used only when SL on)", minval=0, step=10, tooltip="fixed_risk_usd")
+grpX = "Port / cross-asset (not in the Roboquant code)"
+SESSION_OPEN_ET  = input.int(930, "Session open HHMM (hardcoded 930 in the code)", group=grpX)
+SESSION_CLOSE_ET = input.int(1600, "Session close HHMM (hardcoded 1600 in the code)", group=grpX)
+tz        = input.string("America/New_York", "Session time zone (code: ET)", group=grpX)
+qtyLev    = input.float(0.0, "Override size: notional = x equity (0 = use the code's sizing)", minval=0, step=0.1, group=grpX)
+cfdLev    = input.float(1.0, "Non-futures symbols (Deriv/CFD/crypto): notional = x equity when the override is 0", minval=0.01, step=0.1, group=grpX)
+tFrom     = input.time(timestamp("2000-01-01T00:00:00"), "Trade from", group=grpX)
+tTo       = input.time(timestamp("2100-01-01T00:00:00"), "Trade until", group=grpX)
+
+type Rolling
+    array<float> v
+
+int hhmm = hour(time, tz) * 100 + minute(time, tz)
+int dnum = year(time, tz) * 10000 + month(time, tz) * 100 + dayofmonth(time, tz)
+bool in_rth = hhmm >= SESSION_OPEN_ET and hhmm < SESSION_CLOSE_ET
+
+var map<int, Rolling> slot_hist = map.new<int, Rolling>()
+var int   cur_day = 0
+var float day_open = na
+var bool  have_day_open = false
+var bool  trading_enabled = false
+var float vwap_pv = 0.0
+var float vwap_vol = 0.0
+var float vwap_prev = na
+var bool  have_vwap_prev = false
+
+size_for_entry(float close_px) =>
+    float q = 0.0
+    float lev = qtyLev > 0 ? qtyLev : (syminfo.type != "futures" and sl_pct == 0.0) ? cfdLev : 0.0
+    if lev > 0
+        q := math.floor(strategy.equity * lev / (close_px * syminfo.pointvalue) / 0.001) * 0.001
+    else if sl_pct > 0.0
+        float stop_distance = close_px * (sl_pct / 100.0)
+        float loss_per_contract = math.abs(stop_distance) * syminfo.pointvalue
+        float risk_usd = fixed_risk_usd > 0.0 ? fixed_risk_usd : strategy.equity * (risk_pct / 100.0)
+        q := loss_per_contract > 0 ? math.floor(risk_usd / loss_per_contract) : 0.0
+    else
+        q := fixed_lot
+    q
+
+float pRef = na
+float pUp  = na
+float pLo  = na
+
+// ---- new RTH day bookkeeping ----
+if dnum != cur_day
+    if strategy.position_size != 0
+        strategy.close_all(comment="Day rollover")
+    cur_day := dnum
+    have_day_open := false
+    vwap_pv := 0.0
+    vwap_vol := 0.0
+    have_vwap_prev := false
+
+// Flatten the instant we reach/pass the session close
+if hhmm >= SESSION_CLOSE_ET and strategy.position_size != 0
+    strategy.close_all(comment="RTH close")
+
+if in_rth
+    if not have_day_open
+        day_open := open
+        have_day_open := true
+    float reference = use_vwap ? (have_vwap_prev ? vwap_prev : day_open) : day_open
+    Rolling h = slot_hist.get(hhmm)
+    if na(h)
+        h := Rolling.new(array.new<float>())
+        slot_hist.put(hhmm, h)
+    bool have_full_history = h.v.size() >= math.max(n_sigma_days, 2)
+    float sigma = h.v.size() > 0 ? h.v.avg() : 0.0
+    float upper = reference + band_mult * sigma
+    float lower = reference - band_mult * sigma
+    pRef := reference
+    pUp  := have_full_history ? upper : na
+    pLo  := have_full_history ? lower : na
+    if not trading_enabled and have_full_history
+        trading_enabled := true
+    bool inDates = time >= tFrom and time <= tTo
+    if trading_enabled and inDates
+        float pos = strategy.position_size
+        bool broke_upper = close > upper
+        bool broke_lower = close < lower
+        if broke_upper and pos <= 0
+            float qty = size_for_entry(close)
+            if qty > 0
+                strategy.entry("Long", strategy.long, qty=qty, comment="Upper break")
+                if sl_pct > 0
+                    strategy.exit("Long SL", "Long", stop=close * (1.0 - sl_pct / 100.0))
+            else if pos < 0
+                strategy.close_all(comment="Opposite band")
+        else if broke_lower and pos >= 0
+            float qty = size_for_entry(close)
+            if qty > 0
+                strategy.entry("Short", strategy.short, qty=qty, comment="Lower break")
+                if sl_pct > 0
+                    strategy.exit("Short SL", "Short", stop=close * (1.0 + sl_pct / 100.0))
+            else if pos > 0
+                strategy.close_all(comment="Opposite band")
+    // ---- causal VWAP with THIS bar (becomes prev for the next bar) ----
+    float typical = (high + low + close) / 3.0
+    vwap_pv += typical * nz(volume)
+    vwap_vol += nz(volume)
+    if vwap_vol > 0.0
+        vwap_prev := vwap_pv / vwap_vol
+        have_vwap_prev := true
+    // ---- push today's |close - day_open| into this slot's history ----
+    h.v.push(math.abs(close - day_open))
+    if h.v.size() > math.max(n_sigma_days, 2)
+        h.v.shift()
+
+plot(pRef, "Reference", color=#FFD700, style=plot.style_linebr)
+plot(pUp,  "Upper Band", color=#26A69A, style=plot.style_linebr)
+plot(pLo,  "Lower Band", color=#EF5350, style=plot.style_linebr)

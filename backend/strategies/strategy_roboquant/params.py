@@ -91,10 +91,17 @@ class RQTMeanReversionParams:
     exit_day: int = 3
     exit_hour: int = 10
     exit_minute: int = 0
-    disaster_stop_pct: float = 5.0
-    """The template has NO stop. The app's risk engine sizes from a stop, so a
-    far one is placed to size the trade and protect against a crash; in the
-    measured period it was never the exit."""
+    notional_x: float = 1.0
+    """Position VALUE as a multiple of the sizing balance - the TradingView
+    port's "Non-futures symbols: notional = x equity" (default 1.0). The rule
+    has no stop to size from, so the trade is sized like the Pine script, not
+    from risk %. 0 = size from risk % against `disaster_stop_pct` instead."""
+    disaster_stop_pct: float = 30.0
+    """The template and the Pine script have NO stop. A crash stop this far away
+    is still sent with the order, so the broker protects the account if the bot
+    is offline; it never sizes the trade and has never been reached in a 5-day
+    hold (was 5%, which stopped out the April 2025 trade the Pine script held
+    and, at 1% risk, sized 41 of 43 trades below Deriv's minimum lot)."""
 
 
 @dataclass

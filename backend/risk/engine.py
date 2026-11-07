@@ -20,6 +20,7 @@ from backend.risk.position_sizer import (
     get_confluence_scaled_risk,
     get_last_sizing_diagnostics,
     get_pip_size,
+    notional_lot_size,
 )
 from backend.risk.trailing_manager import TrailingManager
 from backend.utils.logger import get_logger
@@ -492,20 +493,59 @@ class RiskEngine:
         # Determine the effective risk percentage for the sizing function
         effective_risk_pct = (requested_risk_dollars / base_balance) * 100.0
         
-        total_lots = calculate_lot_size(
-            base_balance, effective_risk_pct, entry, sl, symbol,
-            max_risk_hard_cap_pct=max_risk_hard_cap_pct_val,
-            max_margin_utilisation_pct=self.max_margin_utilisation_pct,
-            max_account_leverage=self.max_account_leverage,
-            min_deployable_risk_pct=self.min_deployable_risk_pct,
-            min_stop_spread_multiple=self.min_stop_spread_multiple,
-            cost_config=self.config,
-            global_min_sl_pips=self.min_sl_pips,
-            min_stop_cost_multiple=self.min_stop_cost_multiple,
-        )
-        # [I3] internal stages of the call just made — read back immediately so no
-        # other sizing call on this context can overwrite it first.
-        sizer_diag = get_last_sizing_diagnostics() or {}
+        # [notional] A strategy whose source rule has NO stop (the TradingView
+        # T-Mean Reversion port) sizes by position VALUE, not by stop distance:
+        # metadata.size_notional_x = position value as a multiple of the sizing
+        # balance (1.0 = the Pine script's "notional = 1x equity"). Its far
+        # protective stop then only guards against a crash and never sizes.
+        _notional_x = None
+        try:
+            _nx = (signal_data.get("metadata") or {}).get("size_notional_x")
+            _notional_x = float(_nx) if _nx else None
+        except (TypeError, ValueError):
+            _notional_x = None
+        if _notional_x and _notional_x > 0:
+            total_lots = notional_lot_size(base_balance * _notional_x * brake_mult, entry, symbol)
+            sizer_diag = dict(get_last_sizing_diagnostics() or {})
+        else:
+            total_lots = calculate_lot_size(
+                base_balance, effective_risk_pct, entry, sl, symbol,
+                max_risk_hard_cap_pct=max_risk_hard_cap_pct_val,
+                max_margin_utilisation_pct=self.max_margin_utilisation_pct,
+                max_account_leverage=self.max_account_leverage,
+                min_deployable_risk_pct=self.min_deployable_risk_pct,
+                min_stop_spread_multiple=self.min_stop_spread_multiple,
+                cost_config=self.config,
+                global_min_sl_pips=self.min_sl_pips,
+                min_stop_cost_multiple=self.min_stop_cost_multiple,
+            )
+            # [I3] internal stages of the call just made — read back immediately so no
+            # other sizing call on this context can overwrite it first.
+            sizer_diag = get_last_sizing_diagnostics() or {}
+        # [min-lot] The Zero Loss Boom & Crash Pine script trades the broker's
+        # minimum lot when the risk-based size floors below it ("Trade the
+        # minimum lot") instead of skipping. Honoured only for a signal that
+        # asks, and only while the minimum lot still risks no more than the
+        # hard cap - the general rule (never round up) is unchanged.
+        if (total_lots == 0.0 and not _notional_x
+                and (signal_data.get("metadata") or {}).get("round_up_to_min_lot")
+                and sizer_diag.get("refused_reason") == "below_broker_min_lot"):
+            from backend.risk.position_sizer import get_symbol_info
+            _vmin = float(get_symbol_info(symbol).get("volume_min") or 0.0)
+            _rmin = calculate_risk_dollars(_vmin, entry, sl, symbol) if _vmin > 0 else 0.0
+            if 0 < _rmin <= base_balance * max_risk_hard_cap_pct_val / 100.0:
+                total_lots = _vmin
+                requested_risk_dollars = _rmin
+                sizer_diag = dict(sizer_diag, refused_reason=None, raised_to_min_lot=True)
+                signal_data.setdefault("metadata", {})["raised_to_min_lot"] = True
+        if _notional_x and _notional_x > 0 and total_lots > 0:
+            # The risk budget becomes what this size actually risks to the far
+            # stop, so the post-split overshoot check compares like with like;
+            # the open risk the circuit breaker books is capped at the percent
+            # budget (see open_risk_cap_dollars) so a crash stop does not freeze
+            # every other strategy's daily budget while this one is open.
+            signal_data.setdefault("metadata", {})["open_risk_cap_dollars"] = round(requested_risk_dollars, 2)
+            requested_risk_dollars = calculate_risk_dollars(total_lots, entry, sl, symbol)
 
         # Calculate actual dollar risk from the sizer output (before TP splits)
         pre_split_risk_dollars = calculate_risk_dollars(total_lots, entry, sl, symbol)

@@ -1652,10 +1652,11 @@ class BacktestEngine(CostModelMixin):
                     # would never reach sub_trades<=0 and the circuit breaker
                     # would never record its PnL / release its symbol slot.
                     if hasattr(self.risk_engine, "circuit") and hasattr(self.risk_engine.circuit, "position_opened"):
-                        actual_risk_dollars = sum(
-                            calculate_risk_dollars(p["volume"], p["entry_price"], p["stop_loss"], p.get("symbol", ""))
-                            for p in staged_positions
-                        )
+                        from backend.risk.position_sizer import open_risk_dollars
+                        actual_risk_dollars = open_risk_dollars(
+                            sum(p["volume"] for p in staged_positions), staged_positions[0]["entry_price"],
+                            staged_positions[0]["stop_loss"], staged_positions[0].get("symbol", ""),
+                            sig.get("metadata"))
                         self.risk_engine.circuit.position_opened(
                             group_id,
                             len(staged_positions),

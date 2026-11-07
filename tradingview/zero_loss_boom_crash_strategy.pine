@@ -1,0 +1,228 @@
+//@version=6
+// Zero Loss Boom & Crash — strategy v3.2 (optimised).  Based on youtube.com/watch?v=Uj83GoThTLs.
+// Black line = EMA 5 scaled to the last N bars' high/low (non-repainting; the video's on-screen scaling looks ahead).
+//
+// Four directions, each can be switched on/off (Settings > Inputs > Directions):
+//   Video trades : Boom SELL  (black touched 80, candle crosses red EMA 30 and closes below)
+//                  Crash BUY  (black touched 20, candle crosses red EMA 30 and closes above)
+//   Spike-side   : Crash SELL (black touched 80, candle closes below red)  — added
+//                  Boom  BUY  (black touched 20, candle closes above red)  — added
+// Optimised defaults (Sep 27 – Nov 3 2026, M5): both trade types on, hold until the black line reaches the
+// opposite zone (max 100 candles), N = 100. Beat 99.2% of 500 random-timing runs with the same directions and holds.
+// Risk: position size from % of equity / fixed $ / fixed lots; stop = ATR multiple or points (or none, with the
+// ATR distance used only to size). Spread is counted inside the risk, so a stopped trade loses ≈ the chosen risk.
+// Risk is set in Settings > Inputs > 'Risk and position size'. The Properties tab's Default order size is used only
+// if 'Position size' = 'Properties tab'. A risk-based lot below the broker minimum is raised to the minimum (or skipped).
+// Default: 1% of equity, stop 8 x ATR(14), black line moving back out of the zone for 3 candles. With no stop, '1%' is only an estimate.
+// With short fixed holds the video trades lost at every setting tested; the opposite-zone exit changed that (notes at end).
+//
+// SPREAD: chart = bid; one full spread per round trip. The table always shows results before and after spread.
+// For TradingView's own report to include it: Properties -> Commission = half the spread, per contract.
+strategy("Zero Loss Boom & Crash — strategy v3.2", shorttitle="ZL B&C 3.2", overlay=true,
+     initial_capital=1000, currency=currency.USD,
+     default_qty_type=strategy.fixed, default_qty_value=0.2,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.0,
+     margin_long=1, margin_short=1, pyramiding=0,
+     process_orders_on_close=true, max_bars_back=1000, max_labels_count=500)
+
+// ───────────── Inputs
+grpI     = "Indicators (as in the video)"
+redLen   = input.int(30, "Red MA period (EMA of close)", minval=1, group=grpI)
+blackLen = input.int(5, "Black MA period (EMA of close)", minval=1, group=grpI)
+lvlSell  = input.float(80, "Sell zone level", group=grpI)
+lvlBuy   = input.float(20, "Buy zone level", group=grpI)
+nBars    = input.int(100, "Black line scaled to last N bars", minval=10, group=grpI)
+
+grpT      = "Directions (turn each on / off)"
+boomBuy   = input.bool(true, "Boom BUY   (black at 20, closes above red — spike side)", group=grpT)
+boomSell  = input.bool(true, "Boom SELL  (black at 80, closes below red — video trade)", group=grpT)
+crashBuy  = input.bool(true, "Crash BUY  (black at 20, closes above red — video trade)", group=grpT)
+crashSell = input.bool(true, "Crash SELL (black at 80, closes below red — spike side)", group=grpT)
+
+grpR     = "Entry and exit"
+zoneMem  = input.int(5, "Black line touched the zone within last N candles", minval=1, group=grpR)
+turnN    = input.int(3, "Black line moving back out of the zone for N candles in a row (0 = off)", minval=0, maxval=10, group=grpR)
+crBody   = "Candle body crosses the red line"
+crClose  = "Close crosses the red line"
+crossDef = input.string(crBody, "Price-action trigger", options=[crBody, crClose], group=grpR)
+exFixed  = "Fixed: hold N candles"
+exRed    = "Exit when price closes back across the red line (max N candles)"
+exZone   = "Hold until the black line reaches the opposite zone (max N candles)"
+exitMode = input.string(exZone, "Exit", options=[exZone, exFixed, exRed], group=grpR)
+holdBars = input.int(100, "Hold N candles (the maximum for zone / red-line exits)", minval=1, group=grpR)
+minHold  = input.int(1, "Red-line exit: earliest after N candles", minval=1, group=grpR)
+
+grpK      = "Risk and position size"
+rmLots    = "Fixed lots"
+rmPct     = "% of equity"
+rmUsd     = "Fixed $ per trade"
+rmProps   = "Properties tab: Default order size"
+riskMode  = input.string(rmPct, "Position size (set the risk HERE, not in Properties)", options=[rmPct, rmUsd, rmLots, rmProps], group=grpK)
+fixedLots = input.float(0.2, "Fixed lots (if 'Fixed lots')", minval=0.01, step=0.01, group=grpK)
+riskPct   = input.float(1.0, "Risk % of equity per trade", minval=0.05, maxval=10, step=0.05, group=grpK)
+riskUsd   = input.float(10.0, "Risk $ per trade", minval=0.1, step=0.5, group=grpK)
+slNone    = "None (time exit only)"
+slAtrM    = "ATR multiple"
+slPtsM    = "Fixed points"
+slMode    = input.string(slAtrM, "Stop loss", options=[slNone, slAtrM, slPtsM], group=grpK)
+atrLen    = input.int(14, "ATR length", minval=1, group=grpK)
+slAtr     = input.float(8.0, "Stop = ATR x  (also the risk estimate when stop is 'None')", minval=0.1, step=0.1, group=grpK)
+slPts     = input.float(20.0, "Stop in points (if 'Fixed points')", minval=0.01, step=0.5, group=grpK)
+tpR       = input.float(0.0, "Take profit at R multiple (0 = off)", minval=0.0, step=0.5, group=grpK)
+minLot    = input.float(0.2, "Broker minimum lot", minval=0.0, step=0.01, group=grpK)
+bmTrade   = "Trade the minimum lot (actual risk shown in table)"
+bmSkip    = "Skip the trade"
+belowMin  = input.string(bmTrade, "If the risk-based lot is below the minimum", options=[bmTrade, bmSkip], group=grpK)
+lotStep   = input.float(0.01, "Lot step", minval=0.0001, step=0.01, group=grpK)
+maxLot    = input.float(50.0, "Maximum lot", minval=0.01, step=0.5, group=grpK)
+spreadIn  = input.float(0.0, "Spread in points (0 = auto for Deriv Boom/Crash)", minval=0.0, step=0.01, group=grpK)
+
+// ───────────── Signals
+redMA   = ta.ema(close, redLen)
+blackMA = ta.ema(close, blackLen)
+hh      = ta.highest(high, nBars)
+ll      = ta.lowest(low, nBars)
+black   = hh > ll ? 100 * (blackMA - ll) / (hh - ll) : na
+
+isBoom  = str.contains(syminfo.ticker, "BOOM")
+isCrash = str.contains(syminfo.ticker, "CRASH")
+other   = not isBoom and not isCrash
+
+crossDn = crossDef == crBody ? (open > redMA and close < redMA) : (close[1] >= redMA[1] and close < redMA)
+crossUp = crossDef == crBody ? (open < redMA and close > redMA) : (close[1] <= redMA[1] and close > redMA)
+inSell  = ta.highest(black, zoneMem) >= lvlSell
+inBuy   = ta.lowest(black, zoneMem) <= lvlBuy
+
+// other symbols: buys if Boom BUY or Crash BUY is on, sells if Boom SELL or Crash SELL is on
+videoSell = inSell and crossDn and ((isBoom and boomSell) or (other and (boomSell or crashSell)))
+videoBuy  = inBuy and crossUp and ((isCrash and crashBuy) or (other and (boomBuy or crashBuy)))
+spikeSell = inSell and crossDn and isCrash and crashSell
+spikeBuy  = inBuy and crossUp and isBoom and boomBuy
+turnS = true                                            // black line moving back out of the zone
+turnB = true
+if turnN > 0
+    for k = 0 to turnN - 1
+        if not (black[k] < black[k + 1])
+            turnS := false
+        if not (black[k] > black[k + 1])
+            turnB := false
+sellSig   = (videoSell or spikeSell) and turnS
+buySig    = (videoBuy or spikeBuy) and turnB
+
+// ───────────── Spread and position sizing
+tk         = syminfo.ticker
+autoSpread = str.contains(tk, "CRASH_1000") ? 0.54 : str.contains(tk, "CRASH_500") ? 0.33 : str.contains(tk, "CRASH_300") ? 1.10 :
+             str.contains(tk, "BOOM_1000") ? 1.72 : str.contains(tk, "BOOM_500") ? 0.53 : str.contains(tk, "BOOM_300") ? 0.50 : 0.0
+spreadPts  = spreadIn > 0 ? spreadIn : autoSpread
+
+atr      = ta.atr(atrLen)
+riskDist = slMode == slPtsM ? slPts : atr * slAtr                 // stop distance in points (estimate if no stop)
+riskCash = riskMode == rmPct ? strategy.equity * riskPct / 100.0 : riskUsd
+f_qty() =>
+    float q = na
+    if riskMode == rmLots
+        q := fixedLots
+    else if riskMode == rmProps
+        q := strategy.default_entry_qty(close)                           // whatever is set in Properties
+    else if not na(riskDist) and riskDist > 0
+        raw = riskCash / ((riskDist + spreadPts) * syminfo.pointvalue)   // spread counted inside the risk
+        q := math.min(maxLot, math.floor(raw / lotStep) * lotStep)
+    if not na(q) and q < minLot
+        q := belowMin == bmTrade and riskMode != rmLots and riskMode != rmProps ? minLot : na
+    q := not na(q) and q > 0 ? q : na
+    q
+
+// ───────────── Orders (entry at the signal candle's close)
+var int entryBar = na
+var int skipped  = 0
+var int   nUp    = 0      // trades raised to the minimum lot
+var float rSum   = 0.0    // risk taken, % of equity (lot x (stop distance + spread))
+var float rMax   = 0.0
+var int   rN     = 0
+if strategy.position_size != 0
+    held   = bar_index - entryBar
+    backX  = strategy.position_size > 0 ? close < redMA : close > redMA
+    zoneX  = strategy.position_size > 0 ? black >= lvlSell : black <= lvlBuy     // reached the opposite zone
+    doExit = exitMode == exFixed ? held >= holdBars : exitMode == exZone ? (held >= holdBars or zoneX) : (held >= holdBars or (held >= minHold and backX))
+    if doExit
+        strategy.close_all(comment=exitMode == exZone and zoneX ? "opposite zone" : "time exit")
+if strategy.position_size == 0 and (sellSig or buySig) and bar_index > nBars
+    qty = f_qty()
+    if na(qty)
+        skipped += 1
+    else
+        tag = sellSig ? (videoSell ? "SELL video" : "SELL spike") : (videoBuy ? "BUY video" : "BUY spike")
+        id  = sellSig ? "SELL" : "BUY"
+        strategy.entry(id, sellSig ? strategy.short : strategy.long, qty=qty, comment=tag)
+        if not na(riskDist) and strategy.equity > 0
+            rPct = 100.0 * qty * (riskDist + spreadPts) * syminfo.pointvalue / strategy.equity
+            rSum += rPct
+            rMax := math.max(rMax, rPct)
+            rN   += 1
+        if riskMode != rmLots and riskMode != rmProps and qty == minLot and riskCash / ((riskDist + spreadPts) * syminfo.pointvalue) < minLot
+            nUp += 1
+        entryBar := bar_index
+        if slMode != slNone or tpR > 0
+            d      = sellSig ? -1 : 1
+            stopPx = slMode != slNone ? close - d * riskDist : na
+            tpPx   = tpR > 0 ? close + d * tpR * riskDist : na
+            strategy.exit("SL/TP " + id, from_entry=id, stop=stopPx, limit=tpPx, comment_loss="stop", comment_profit="TP")
+
+plot(redMA, "Red MA (EMA 30)", color.red, 2)
+plotshape(sellSig, "Sell signal", shape.triangledown, location.abovebar, color.red, size=size.tiny)
+plotshape(buySig, "Buy signal", shape.triangleup, location.belowbar, color.teal, size=size.tiny)
+
+alertcondition(sellSig, "ZL SELL", "Zero Loss B&C v3.2: SELL on {{ticker}} {{interval}}")
+alertcondition(buySig,  "ZL BUY",  "Zero Loss B&C v3.2: BUY on {{ticker}} {{interval}}")
+
+// ───────────── Results before / after spread
+var table tb = table.new(position.top_right, 2, 11, bgcolor=color.new(color.gray, 80), border_width=1)
+if barstate.islastconfirmedhistory or barstate.islast
+    n        = strategy.closedtrades
+    float paid = 0.0                               // commission TradingView already charged (if you set one)
+    float lotsSum = 0.0
+    if n > 0
+        for i = 0 to n - 1
+            paid    += strategy.closedtrades.commission(i)
+            lotsSum += math.abs(strategy.closedtrades.size(i))
+    gross    = strategy.netprofit + paid           // P&L with no costs at all
+    spreadC  = lotsSum * spreadPts * syminfo.pointvalue
+    net      = gross - spreadC
+    firstT   = n > 0 ? strategy.closedtrades.entry_time(0) : na
+    days     = n > 0 ? (time - firstT) / 86400000.0 : na
+    table.cell(tb, 0, 0, "Trades / days", text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 1, 0, str.tostring(n) + " / " + str.tostring(days, "#.0"), text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 0, 1, "Win rate", text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 1, 1, n > 0 ? str.tostring(100.0 * strategy.wintrades / n, "#.0") + "%" : "-", text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 0, 2, "P&L before spread", text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 1, 2, "$" + str.tostring(gross, "#.00"), text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 0, 3, "Spread cost (" + str.tostring(spreadPts) + " pts x lots traded)", text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 1, 3, "-$" + str.tostring(spreadC, "#.00"), text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 0, 4, "P&L after spread", text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 1, 4, "$" + str.tostring(net, "#.00"), text_color=net >= 0 ? color.green : color.red, text_size=size.small)
+    table.cell(tb, 0, 5, "Avg per trade after spread", text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 1, 5, n > 0 ? "$" + str.tostring(net / n, "#.000") : "-", text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 0, 6, "Avg lot / raised to min lot / skipped", text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 1, 6, (n > 0 ? str.tostring(lotsSum / n, "#.00") : "-") + " / " + str.tostring(nUp) + " / " + str.tostring(skipped), text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 0, 7, "Risk per trade: avg / max (% of equity" + (slMode == slNone ? ", no stop = estimate)" : ")"), text_color=chart.fg_color, text_size=size.small)
+    table.cell(tb, 1, 7, rN > 0 ? str.tostring(rSum / rN, "#.00") + "% / " + str.tostring(rMax, "#.00") + "%" : "-", text_color=rN > 0 and rMax > riskPct * 1.5 and riskMode == rmPct ? color.orange : chart.fg_color, text_size=size.small)
+    sizeTxt = riskMode == rmPct ? str.tostring(riskPct) + "% of equity" : riskMode == rmUsd ? "$" + str.tostring(riskUsd) + " per trade" : riskMode == rmLots ? str.tostring(fixedLots) + " lots" : "Properties tab order size"
+    table.cell(tb, 0, 8, "Sizing: " + sizeTxt + (riskMode == rmLots or riskMode == rmProps ? "" : ", stop " + slMode), text_color=chart.fg_color, text_size=size.tiny)
+    table.cell(tb, 0, 9, riskMode == rmProps ? "Lot size comes from Properties > Default order size" : "Properties > Default order size is ignored (set risk in Inputs)", text_color=chart.fg_color, text_size=size.tiny)
+    table.cell(tb, 0, 10, "Commission for tester = " + str.tostring(spreadPts / 2) + " per contract", text_color=chart.fg_color, text_size=size.tiny)
+
+// ───────────── Notes from the optimisation (M5, Sep 27 – Nov 3 2026, 0.2 lot, after spread)
+// • Video trades only: 0 of 126 setting combinations profitable on the full period.
+// • Spike-side trades, hold 16–30, N 100: profitable in both halves; almost all of it from Boom 1000 buys
+//   (96 of 106 entries are the candle right after a Boom spike). Edge ≈ 2 standard errors — forward-test first.
+// • Holding longer alone did not help the video trades; the red-line exit was worse than a fixed hold.
+// • Opposite-zone exit (0.2 lot, after spread, 6 indices): both types max 100 = +$421 (1st half +$238 / 2nd +$151);
+//   both, no max = +$386; spike-side only, max 100 = +$207; video only, no max = +$226.
+//   Random timing with the same directions/holds: median −$144, 95th percentile +$285.
+// • Risk settings, opposite-zone exit, $1,000 start, spread as commission, sum of 6 indices (TradingView tester):
+//   fixed 0.2 lot +$422 (worst drawdown 16.5%) | 1% no stop +$912 (33.1%) | 1% ATRx3 stop +$1,429 (21.6%)
+//   1% ATRx5 stop +$687 (15.8%) | 1% ATRx3 + 2R target +$659 (18.4%). Boom 1000 + Crash 1000 carry most of it;
+//   Boom 300 / Crash 300 / Boom 500 are about break-even or negative with stops.
+// • v3.2 filter, fixed 0.2 lot, 6 indices, after spread: stop 5xATR, no filter: 1,024 trades, win 47.6%, +$495, longest losing streak 11.
+//   Stop 8xATR + black line turning 3 candles: 642 trades, win 62.3%, +$733 (1st half +$394 / 2nd +$339), longest streak 6.
+//   Every index won more often; Boom 1000 streak 10 -> 4, Crash 1000 11 -> 5. Pausing after losses did not help (spikes have no memory).

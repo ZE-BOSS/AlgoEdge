@@ -188,13 +188,19 @@ def test_charles_monger_enters_on_the_green_flip_and_exits_on_red():
 
 
 def test_t_mean_reversion_exit_survives_a_missed_bar():
-    """Live, the Wed 10:00 bar can be missed (bot offline): the exit must still
-    happen on the next bar, not a week later."""
+    """Live, the bot can be offline for the Wed 10:00 bar: MT5 history still
+    holds that bar, so the exit happens on the bot's next call, not a week
+    later. A 10:00 bar that never printed (a holiday) holds the trade to the
+    next Wednesday - the TradingView script's rule (weekday == Wed and
+    hour == 10), which this strategy now mirrors exactly."""
     eng = get_strategy("RQ_TMeanReversion_v1")(UserConfigV2())
     idx = pd.date_range("2026-03-13 19:00", "2026-03-18 14:00", freq="1h")
-    idx = idx[idx != pd.Timestamp("2026-03-18 10:00")]
     g = pd.DataFrame({"open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0}, index=idx)
     pos = {"ticket": 1, "direction": "BUY", "entry_time": int(pd.Timestamp("2026-03-13 19:00").timestamp())}
     k9 = idx.get_loc(pd.Timestamp("2026-03-18 09:00"))
     assert eng.on_position_bar("NDX100", "H1", g.iloc[:k9 + 1], pos) is None
-    assert eng.on_position_bar("NDX100", "H1", g.iloc[:k9 + 2], pos).action == "CLOSE"   # 11:00
+    # first call after the 10:00 bar (bot was offline at 10:00, back at 12:00)
+    assert eng.on_position_bar("NDX100", "H1", g.iloc[:k9 + 4], pos).action == "CLOSE"
+    # the 10:00 bar never printed: hold, as TradingView does
+    gap = g.drop(pd.Timestamp("2026-03-18 10:00"))
+    assert eng.on_position_bar("NDX100", "H1", gap, pos) is None

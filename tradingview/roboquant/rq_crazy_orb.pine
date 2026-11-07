@@ -1,0 +1,133 @@
+//@version=6
+// Roboquant template "Crazy ORB" — line-by-line Pine port of the rq_sdk (Rust) source.
+// Preset (showcase run): NQ 15m, 09:15-09:30 ET range, ATR(14) stop 1x, 0.35R target, $2,001 risk,
+// min size 1, 2 trades/day (one per side), entries 09:30-15:45 ET, flatten 15:55 ET.
+strategy("RQ Crazy ORB", shorttitle="RQ Crazy ORB", overlay=true, pyramiding=0,
+     initial_capital=10000, currency=currency.USD, default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=2.5, slippage=0, margin_long=0, margin_short=0,
+     max_boxes_count=500)
+
+range_start_hhmm = input.int(915, "Range start (HHMM ET)", minval=0, maxval=2359, tooltip="code default 900, preset 915")
+range_end_hhmm   = input.int(930, "Range end (HHMM ET)", minval=0, maxval=2359, tooltip="code default 915, preset 930")
+atr_period       = input.int(14, "ATR period", minval=2, maxval=200)
+atr_mult         = input.float(1.0, "Stop distance (ATR x)", minval=0.1, maxval=10, tooltip="code default 1.5, preset 1")
+rr               = input.float(0.35, "Take profit (R multiple)", minval=0.25, maxval=10, tooltip="code default 2.0, preset 0.35")
+risk_usd         = input.float(2001.0, "Risk per trade (USD)", minval=25, maxval=50000, tooltip="code default 500, preset 2001")
+min_size         = input.int(1, "Min size (contracts)", minval=0, maxval=200)
+max_trades       = input.int(2, "Max trades per day", minval=1, maxval=20)
+trade_start_hhmm = input.int(930, "Trading window start (HHMM ET)", minval=0, maxval=2359)
+trade_end_hhmm   = input.int(1545, "No entries after (HHMM ET)", minval=0, maxval=2359)
+flatten_hhmm     = input.int(1555, "Flatten everything at (HHMM ET)", minval=0, maxval=2359)
+draw_visuals     = input.bool(true, "Draw range + trades")
+grpX = "Port / cross-asset (not in the Roboquant code)"
+tz      = input.string("America/New_York", "Time zone (code: ET)", group=grpX)
+riskPct = input.float(0.0, "Cross-asset: risk % of equity instead of $ (0 = off)", minval=0, step=0.1, group=grpX)
+cfdRisk = input.float(1.0, "Non-futures symbols (Deriv/CFD/crypto): risk % of equity when the line above is 0", minval=0.01, step=0.1, group=grpX)
+minLot  = input.float(1.0, "Size step (code: whole contracts = 1)", minval=0.000001, group=grpX)
+tFrom   = input.time(timestamp("2000-01-01T00:00:00"), "Trade from", group=grpX)
+tTo     = input.time(timestamp("2100-01-01T00:00:00"), "Trade until", group=grpX)
+
+int date = year(time, tz) * 10000 + month(time, tz) * 100 + dayofmonth(time, tz)
+int hhmm = hour(time, tz) * 100 + minute(time, tz)
+float atr = ta.atr(math.max(atr_period, 1))
+
+var int   day = 0
+var float range_high = 0.0
+var float range_low = 0.0
+var bool  building = false
+var bool  range_done = false
+var bool  ready = false
+var bool  long_used = false
+var bool  short_used = false
+var int   trades_today = 0
+var int   pending = 0
+var box   zone = na
+var int   seenEntries = 0
+
+// on_trade(OrderFilled): an entry filled at this bar's open
+int entriesNow = strategy.opentrades + strategy.closedtrades
+while seenEntries < entriesNow
+    if pending == 1
+        long_used := true
+    else if pending == -1
+        short_used := true
+    pending := 0
+    trades_today += 1
+    seenEntries += 1
+
+if date != day
+    if strategy.position_size != 0
+        strategy.close_all(comment="Day reset")
+    strategy.cancel_all()
+    day := date
+    range_high := 0.0
+    range_low := 0.0
+    building := false
+    range_done := false
+    ready := false
+    long_used := false
+    short_used := false
+    trades_today := 0
+    pending := 0
+
+int start = math.max(math.min(range_start_hhmm, 2359), 0)
+int end_  = math.max(math.min(range_end_hhmm, 2359), 0)
+if hhmm >= start and hhmm < end_
+    if not building
+        building := true
+        range_high := high
+        range_low := low
+        if draw_visuals
+            zone := box.new(bar_index, range_high, bar_index, range_low, border_color=#2962ff, bgcolor=color.new(#2962ff, 82), text="ORB", text_size=size.tiny, text_color=#2962ff)
+    else
+        range_high := math.max(range_high, high)
+        range_low := math.min(range_low, low)
+        if draw_visuals and not na(zone)
+            zone.set_top(range_high)
+            zone.set_bottom(range_low)
+            zone.set_right(bar_index)
+else if not range_done and hhmm >= end_
+    range_done := true
+    ready := building
+
+int flat_at = math.max(math.min(flatten_hhmm, 2359), 0)
+plot(ready ? range_high : na, "ORB High", color=#2962ff, style=plot.style_linebr)
+plot(ready ? range_low : na, "ORB Low", color=#2962ff, style=plot.style_linebr)
+
+plan() =>
+    float stop_dist = atr * atr_mult
+    float qty = na
+    if not na(atr) and stop_dist > 0
+        float lpc = stop_dist * syminfo.pointvalue
+        bool cfd = syminfo.type != "futures"
+        float rp = riskPct > 0 ? riskPct : cfd ? cfdRisk : 0.0
+        float step = cfd ? math.min(minLot, 0.001) : minLot
+        float budget = rp > 0 ? strategy.equity * rp / 100.0 : risk_usd
+        qty := math.floor(budget / lpc / step) * step
+        float floor_size = math.max(min_size, 1) * step
+        if qty < floor_size
+            qty := floor_size
+    [qty, stop_dist]
+
+if hhmm >= flat_at
+    if strategy.position_size != 0
+        strategy.close_all(comment="Flatten")
+    strategy.cancel_all()
+    pending := 0
+else
+    if ready and pending == 0 and strategy.position_size == 0 and trades_today < max_trades and time >= tFrom and time <= tTo
+        int open_at = math.max(math.min(trade_start_hhmm, 2359), 0)
+        int close_at = math.max(math.min(trade_end_hhmm, 2359), 0)
+        if hhmm >= open_at and hhmm < close_at
+            if close > range_high and not long_used
+                [qty, sd] = plan()
+                if not na(qty)
+                    pending := 1
+                    strategy.entry("Long", strategy.long, qty=qty, comment="Close above ORB")
+                    strategy.exit("Long X", "Long", stop=close - sd, limit=close + rr * sd)
+            else if close < range_low and not short_used
+                [qty, sd] = plan()
+                if not na(qty)
+                    pending := -1
+                    strategy.entry("Short", strategy.short, qty=qty, comment="Close below ORB")
+                    strategy.exit("Short X", "Short", stop=close + sd, limit=close - rr * sd)

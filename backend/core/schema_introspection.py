@@ -144,6 +144,7 @@ def build_full_schema() -> list[dict]:
     from backend.strategies.strategy_spike_resumption.params import SpikeResumptionParams
     from backend.strategies.strategy_overnight.params import OvernightSessionParams
     from backend.strategies.strategy_kronos.params import KronosStrategyParams
+    from backend.strategies.strategy_zero_loss.params import ZeroLossBoomCrashParams
     from backend.strategies.strategy_roboquant.params import (
         RQNQPrecisionParams, RQNYORBParams, RQCrazyORBParams, RQTMeanReversionParams, RQCharlesMongerParams,
         RQFlashTriggerORBParams, RQScarfaceORBParams, RQIVBParams, RQGigaORBParams, RQSigmaBreakoutParams, RQDailyAnchoredVWAPParams, RQFridayRevisitParams, RQM30ORBParams, RQSRSweepParams,
@@ -175,6 +176,7 @@ def build_full_schema() -> list[dict]:
         (RQFridayRevisitParams, "rq_friday_revisit"),
         (RQM30ORBParams, "rq_m30_orb"),
         (RQSRSweepParams, "rq_sr_sweep"),
+        (ZeroLossBoomCrashParams, "zero_loss_boom_crash"),
         (SpikeResumptionParams, "spike_resumption"),
         (DriftJumpAlphaParams, "drift_jump_alpha"),
     ]

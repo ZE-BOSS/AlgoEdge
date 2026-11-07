@@ -1121,6 +1121,54 @@ def calculate_risk_dollars(
     value_per_unit_move = tick_value / tick_size
     return lots * sl_distance * value_per_unit_move
 
+def notional_lot_size(position_value: float, entry_price: float, symbol: str,
+                      use_live_mt5: bool = True) -> float:
+    """Lots whose position VALUE is `position_value` dollars at `entry_price`
+    (value per lot = price x value of a 1.0 price move per lot), floored to the
+    broker's lot step and capped at its maximum. 0.0 - with
+    refused_reason=below_broker_min_lot in the diagnostics - when that floors
+    below the broker's minimum: as in calculate_lot_size, never rounded up.
+    For a strategy that sizes like the TradingView strategy it mirrors
+    ("qty = equity x N / price") rather than from a stop."""
+    info = get_symbol_info(symbol, use_live_mt5=use_live_mt5)
+    tick_value = float(info.get("tick_value") or 0.0)
+    tick_size = float(info.get("tick_size") or 0.0)
+    step = float(info.get("volume_step") or 0.01)
+    vmin = float(info.get("volume_min") or step)
+    vmax = float(info.get("volume_max") or 1e9)
+    diag = {"mode": "notional", "position_value": round(position_value, 2), "volume_min": vmin,
+            "volume_step": step, "symbol": symbol}
+    if tick_value <= 0 or tick_size <= 0 or entry_price <= 0 or position_value <= 0:
+        diag["refused_reason"] = "zero_tick_or_distance"
+        _last_sizing_diagnostics_var.set(diag)
+        return 0.0
+    value_per_lot = entry_price * tick_value / tick_size
+    raw = position_value / value_per_lot
+    lots = math.floor(raw / step + 1e-9) * step if step > 0 else raw
+    lots = min(round(lots, 6), vmax)
+    diag.update(raw_lots=round(raw, 6), lots=lots)
+    if lots < vmin - 1e-12:
+        diag["refused_reason"] = "below_broker_min_lot"
+        diag["min_lot_risk_usd"] = None
+        _last_sizing_diagnostics_var.set(diag)
+        return 0.0
+    _last_sizing_diagnostics_var.set(diag)
+    return lots
+
+
+def open_risk_dollars(lots: float, entry_price: float, stop_loss_price: float, symbol: str,
+                      metadata: dict | None = None) -> float:
+    """The risk the circuit breaker books for an open position: the money to
+    the stop, capped by `metadata.open_risk_cap_dollars` when the risk engine
+    sized the trade by value (a far crash stop is not the risk budget)."""
+    r = calculate_risk_dollars(lots, entry_price, stop_loss_price, symbol)
+    try:
+        cap = float((metadata or {}).get("open_risk_cap_dollars") or 0.0)
+    except (TypeError, ValueError):
+        cap = 0.0
+    return min(r, cap) if cap > 0 else r
+
+
 def kelly_risk_fraction(
     win_rate: float,
     avg_win_r: float,

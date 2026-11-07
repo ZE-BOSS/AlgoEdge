@@ -1076,11 +1076,10 @@ class PortfolioBacktestEngine(CostModelMixin):
                 _slot_circuit = self._slot_engine(cache_key, strategy_id).circuit
 
                 if hasattr(_slot_circuit, "position_opened"):
-                    from backend.risk.position_sizer import calculate_risk_dollars
-                    actual_risk = sum(
-                        calculate_risk_dollars(lvl.volume, sig["entry_price"], sig["stop_loss"], symbol)
-                        for lvl in tp_levels
-                    )
+                    from backend.risk.position_sizer import open_risk_dollars
+                    actual_risk = open_risk_dollars(
+                        sum(lvl.volume for lvl in tp_levels), sig["entry_price"], sig["stop_loss"], symbol,
+                        sig.get("metadata"))
                     _slot_circuit.position_opened(
                         group_id,
                         len(tp_levels),
