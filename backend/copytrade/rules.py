@@ -28,6 +28,8 @@ DEFAULT_RULES: dict[str, Any] = {
     "allow_min_lot": True,        # if the risk budget is below the broker's min lot, trade the min lot...
     "min_lot_max_risk_pct": 2.0,  # ...but only if that risk is at most this % of balance
     # entries
+    "zone_entry": "layer",        # an entry ZONE: layer = limit orders spread through it (first fill -> TP1,
+                                  # deepest -> last TP; already-reached levels fill at market); market = one entry now
     "market_tolerance_pct": 0.15, # a market signal is taken at market while price is within this % of the written entry
     "chase_rule": "limit",        # price ran past the entry: limit = wait at the entry with a limit order, skip, market
     "skip_if_tp1_passed": True,   # do not enter if price is already beyond TP1
@@ -45,6 +47,8 @@ DEFAULT_RULES: dict[str, Any] = {
     "follow_partial_close": True,
     "follow_cancel": True,
     "be_offset_pct": 0.0,         # breakeven = entry +/- this % (to cover spread/commission)
+    "cancel_pending_on_be": True, # "risk free" means no risk left: a breakeven instruction also cancels the signal's unfilled orders
+    "cancel_pending_after_tp": 1, # once TPn fills, cancel the signal's unfilled zone orders (0 = keep them)
     "be_after_tp": 0,             # 0 = off; 1 = move the remaining legs to breakeven once TP1 fills; 2 = after TP2 ...
     "edit_updates": True,         # an edited signal updates SL/TP of the trade it opened
     # filters
@@ -130,9 +134,10 @@ def split_volume(total: float, weights: list[float], spec: dict) -> list[float]:
         s = sum(w)
         legs = [floor_step(total * x / s, step) for x in w]
         if all(v >= vmin - 1e-12 for v in legs):
-            rem = floor_step(total - sum(legs), step)
-            if rem > 0:
-                legs[0] = round(legs[0] + rem, 8)
+            # the floor remainder, one step at a time from leg 1 on
+            k = int(round(floor_step(total - sum(legs), step) / step)) if step > 0 else 0
+            for j in range(k):
+                legs[j % n] = round(legs[j % n] + step, 8)
             return legs
         n -= 1
     return []
@@ -186,6 +191,10 @@ def build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: d
     entry = sig.get("entry")
     lo, hi = sig.get("entry_low"), sig.get("entry_high")
     tol = float(rules.get("market_tolerance_pct") or 0) / 100.0
+
+    if (rules.get("zone_entry", "layer") == "layer" and want in ("MARKET", "LIMIT")
+            and lo is not None and hi is not None and float(hi) > float(lo)):
+        return _layer_plan(p, sig, mkt, s, float(lo), float(hi), spec, balance, rules)
 
     # ── where and how to enter ──
     if want == "MARKET":
@@ -295,6 +304,113 @@ def build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: d
         p.notes.append(f"volume covers {len(vols)} of {len(targets)} targets at the min lot - kept the nearest")
     p.legs = [{"leg": i + 1, "volume": v, "tp": targets[i]} for i, v in enumerate(vols)]
     p.risk_dollars = round(sum(vols) * lpl, 2)
+    p.ok = True
+    return p
+
+
+def _size_legs(p: OpenPlan, entries: list[float], targets: list, sl: float, spec: dict,
+               balance: float, rules: dict) -> bool:
+    """Volume per leg in proportion to the weights, total sized so the summed
+    risk to the stop is the budget. Drops the furthest legs if the minimum lot
+    does not fit them all. Fills p.legs / p.risk_dollars; False + p.reason if
+    nothing fits."""
+    vmin = spec.get("volume_min") or 0.01
+    n = len(targets)
+    while n > 0:
+        w = _weights_for(n, rules)
+        sw = sum(w) or 1.0
+        lpls = [loss_per_lot(entries[i], sl, spec) for i in range(n)]
+        if any(x <= 0 for x in lpls):
+            p.reason = f"cannot size: no tick value for {p.symbol}"
+            return False
+        avg_lpl = sum(w[i] / sw * lpls[i] for i in range(n))
+        if rules.get("risk_mode") == "fixed_lots":
+            total = float(rules.get("fixed_lots") or vmin)
+        else:
+            budget = balance * float(rules.get("risk_pct") or 0) / 100.0
+            total = budget / avg_lpl
+            if total < vmin * n and n == 1 and rules.get("allow_min_lot", True) \
+                    and vmin * lpls[0] <= balance * float(rules.get("min_lot_max_risk_pct") or 0) / 100.0:
+                p.notes.append(f"risk budget below one min lot - trading the min lot")
+                total = vmin
+        vols = split_volume(total, w, spec)
+        if len(vols) == n and rules.get("risk_mode") != "fixed_lots":
+            # never above the budget: take a step off the legs that risk most per lot
+            step = spec.get("volume_step") or vmin
+            budget = balance * float(rules.get("risk_pct") or 0) / 100.0
+            while sum(vols[i] * lpls[i] for i in range(n)) > budget * 1.001:
+                cands = [i for i in range(n) if vols[i] - step >= vmin - 1e-12]
+                if not cands:
+                    break
+                i = max(cands, key=lambda j: lpls[j])
+                vols[i] = round(vols[i] - step, 8)
+        if len(vols) == n:
+            p.legs = [{"leg": i + 1, "volume": vols[i], "tp": targets[i], "entry": round(entries[i], int(spec.get("digits") or 5)),
+                       "kind": p.legs_kind[i] if hasattr(p, "legs_kind") else p.order_type} for i in range(n)]
+            p.risk_dollars = round(sum(vols[i] * lpls[i] for i in range(n)), 2)
+            if n < len(targets):
+                p.notes.append(f"volume covers {n} of {len(targets)} targets at the min lot - kept the nearest")
+            return True
+        n -= 1
+    p.reason = f"risk budget is below the minimum lot {vmin}"
+    return False
+
+
+def _layer_plan(p: OpenPlan, sig: dict, mkt: float, s: int, lo: float, hi: float, spec: dict,
+                balance: float, rules: dict) -> OpenPlan:
+    """Limit orders spread through the entry zone. Leg 1 (TP1) gets the level
+    price reaches first (the zone's near edge), the last leg the deepest - the
+    "worst entries take the first targets, best entries run" way signal
+    providers who post zones manage them. Levels price has already reached
+    fill at market now (at a better price than written)."""
+    buy = s == 1
+    near, far = (hi, lo) if buy else (lo, hi)
+    sl = sig.get("sl")
+    if sl is None:
+        if rules.get("missing_sl") == "default":
+            sl = far * (1 - s * float(rules.get("default_sl_pct") or 0.5) / 100.0)
+            p.notes.append(f"no stop in the message - default stop {sl:.5g}")
+        else:
+            p.reason = "no stop loss in the message"
+            return p
+    sl = float(sl)
+    if (sl - far) * s >= 0:
+        p.reason = f"stop {sl} is not beyond the zone {lo}-{hi}"
+        return p
+    if (sl - mkt) * s >= 0:
+        p.reason = f"price {mkt} is already beyond the stop {sl} - signal is stale"
+        return p
+    p.sl = sl
+    tps = [float(t) for t in (sig.get("tps") or []) if (float(t) - near) * s > 0]
+    max_legs = int(rules.get("max_legs") or 10)
+    targets: list = tps[:max_legs]
+    if sig.get("tp_open") and len(targets) < max_legs:
+        targets.append(None)
+    if not targets:
+        rr = float(rules.get("missing_tp_rr") or 0)
+        targets = [near + s * rr * abs(near - sl)] if rr > 0 else [None]
+    n = len(targets)
+    levels = [near + (far - near) * (i / (n - 1) if n > 1 else 0.0) for i in range(n)]
+    kinds, entries = [], []
+    for lv in levels:
+        if (mkt - lv) * s <= 0:            # price is at/through this level: take it now, at the better price
+            kinds.append("MARKET")
+            entries.append(mkt)
+        else:
+            kinds.append("LIMIT")
+            entries.append(lv)
+    # a market leg whose target is already behind the price would close at a loss of the spread: make it a limit
+    for i, t in enumerate(targets):
+        if kinds[i] == "MARKET" and t is not None and (t - mkt) * s <= 0:
+            kinds[i], entries[i] = "LIMIT", levels[i]
+    p.legs_kind = kinds  # type: ignore[attr-defined]
+    p.order_type = "LAYER" if len(set(kinds)) > 1 or kinds[0] == "LIMIT" else "MARKET"
+    p.entry = entries[0]
+    if not _size_legs(p, entries, targets, sl, spec, balance, rules):
+        return p
+    filled_now = sum(1 for k in kinds[: len(p.legs)] if k == "MARKET")
+    p.notes.append(f"zone {lo:g}-{hi:g}: {len(p.legs)} levels, {filled_now} at market now, "
+                   f"{len(p.legs) - filled_now} limit orders")
     p.ok = True
     return p
 

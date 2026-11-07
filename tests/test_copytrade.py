@@ -86,7 +86,7 @@ def _sig(**kw):
 
 
 def test_plan_market_inside_zone_risk_split():
-    r = merge_rules({"risk_pct": 1.0, "split_weights": [50, 30, 20]})
+    r = merge_rules({"risk_pct": 1.0, "split_weights": [50, 30, 20], "zone_entry": "market"})
     p = build_open_plan(_sig(), {"bid": 2348.8, "ask": 2349.0}, GOLD, 10_000, r, "XAUUSD")
     assert p.ok and p.order_type == "MARKET" and p.entry == 2349.0
     # $100 risk / ($9 per 0.01-unit... ) = 100 / (9.0/0.01*1) = 0.111 lots -> 0.05/0.03/0.02 (+0.01 remainder)
@@ -96,10 +96,11 @@ def test_plan_market_inside_zone_risk_split():
 
 
 def test_plan_price_ran_away_waits_with_limit():
-    r = merge_rules({})
+    r = merge_rules({"zone_entry": "market"})
     p = build_open_plan(_sig(), {"bid": 2354.0, "ask": 2354.2}, GOLD, 10_000, r, "XAUUSD")
     assert p.ok and p.order_type == "LIMIT" and p.entry == 2350.0
-    p2 = build_open_plan(_sig(), {"bid": 2354.0, "ask": 2354.2}, GOLD, 10_000, merge_rules({"chase_rule": "skip"}), "XAUUSD")
+    p2 = build_open_plan(_sig(), {"bid": 2354.0, "ask": 2354.2}, GOLD, 10_000,
+                         merge_rules({"chase_rule": "skip", "zone_entry": "market"}), "XAUUSD")
     assert not p2.ok and "ran past" in p2.reason
 
 
@@ -109,6 +110,50 @@ def test_plan_limit_already_reached_fills_at_market():
     assert p.ok and p.order_type == "MARKET"
     p = build_open_plan(s, {"bid": 2352.0, "ask": 2352.2}, GOLD, 10_000, merge_rules({}), "XAUUSD")
     assert p.ok and p.order_type == "LIMIT" and p.entry == 2350.0
+
+
+def test_layered_zone_like_gold_trader_sunny():
+    """His format: zone posted ahead of time, price above it for a buy, 7 TPs."""
+    sig = parse_message("Buy Gold 4487 - 4495Stop Loss 4483TP1 4497TP2 4499TP3 4501TP4 Open (4504/4507/4512/4518)").to_dict()
+    assert sig["tps"] == [4497, 4499, 4501, 4504, 4507, 4512, 4518]
+    r = merge_rules({})
+    p = build_open_plan(sig, {"bid": 4505.0, "ask": 4505.3}, GOLD, 10_000, r, "XAUUSD")
+    assert p.ok and p.order_type == "LAYER" and len(p.legs) == 7
+    assert [l["kind"] for l in p.legs] == ["LIMIT"] * 7
+    assert p.legs[0]["entry"] == 4495 and p.legs[-1]["entry"] == 4487       # first fill -> TP1, deepest -> TP7
+    assert p.risk_dollars <= 100.0
+    # price inside the zone: the levels already reached fill now, the deeper ones wait
+    p = build_open_plan(sig, {"bid": 4491.0, "ask": 4491.3}, GOLD, 10_000, r, "XAUUSD")
+    assert [l["kind"] for l in p.legs].count("MARKET") == 3 and p.risk_dollars <= 100.0
+    # price under the stop: stale
+    assert not build_open_plan(sig, {"bid": 4482.0, "ask": 4482.3}, GOLD, 10_000, r, "XAUUSD").ok
+
+
+def test_his_follow_ups():
+    k = lambda t: parse_message(t).kind
+    assert k("Cancelling sell limit orders 💡Price tapped 3 pips below my zone") == "CANCEL"
+    assert k("Closing buy limit orders. Price came 30 pips from entry and straight up to TP7 ✅") == "CANCEL"
+    assert k("Adjusting buy limit orders 💡Update below 👇") == "CANCEL"
+    assert k("Price sold just beneath my zone. Closing sell limit orders and will update with new zone") == "CANCEL"
+    assert k("Managing risk by moving most stops to BE 💡if we don’t push up from here I’ll exit positions") == "BREAKEVEN"
+    assert k("Price is above the zone. Setting all to BE to stay in risk free 🤝") == "BREAKEVEN"
+    assert k("Set BE on all positions to stay in risk free 💯") == "BREAKEVEN"
+    assert k("As price goes back above zone I’ll close worst entries for BE and partial profits") == "NONE"
+    assert k("Over $11,000 USD 🤑TP1 ✅TP2 ✅✅BE 🤝") == "INFO"
+    assert k("TP3 HIT ✅✅✅") == "INFO"
+    assert k("Still holding my buy limit orders, price is only 20 pips away") == "INFO"
+    assert k("Price has tapped me out this setup with SL") == "INFO"
+    m = parse_message("US Session is open - adjusting SL to 4372.5 🎯")
+    assert (m.kind, m.new_price) == ("MOVE_SL", 4372.5)
+
+
+def test_whole_public_history_parses():
+    rows = [l.rstrip("\n").split("\t") for l in open(Path(__file__).parents[1] / "data/copytrade/goldtradersunny_public.tsv")
+            if l.strip() and not l.startswith("#")]
+    sigs = [parse_message(r[4]) for r in rows if r[0] == "S"]
+    assert len(sigs) == 96 and all(p.kind == "OPEN" and p.sl and len(p.tps) == 7 for p in sigs)
+    kinds = [parse_message(r[4]).kind for r in rows if r[0] == "F"]
+    assert "OPEN" not in kinds and kinds.count("CANCEL") >= 40 and kinds.count("BREAKEVEN") >= 50
 
 
 def test_plan_refusals():
@@ -213,7 +258,7 @@ def env(monkeypatch):
             await c.run_sync(Base.metadata.create_all)
         async with Session() as s:
             s.add(CopyTradeSettings(user_id="u1", enabled=True, dry_run=False,
-                                    rules={"split_weights": [50, 30, 20]}))
+                                    rules={"split_weights": [50, 30, 20], "zone_entry": "market"}))
             ch = CopyTradeChannel(user_id="u1", chat_id=-1001, title="Gold VIP", enabled=True, rules={})
             s.add(ch)
             await s.commit()
@@ -304,6 +349,21 @@ def test_max_open_signals_and_chatter(env):
     assert r["status"] == "IGNORED"
     r = _run(env.service.handle_message("u1", env.ch, 71, "move SL to entry"))
     assert r["status"] == "IGNORED" and "no open signal" in r["detail"]
+
+
+def test_layered_signal_end_to_end(env):
+    async def to_layer():
+        async with env.Session() as s:
+            st = await s.get(CopyTradeSettings, "u1")
+            st.rules = {**st.rules, "zone_entry": "layer"}
+            await s.commit()
+    _run(to_layer())
+    env.fake.bid, env.fake.ask = 4505.0, 4505.3
+    r = _run(env.service.handle_message("u1", env.ch, 80, "Buy Gold 4487 - 4495\nStop Loss 4483\nTP1 4497\nTP2 4499\n"
+                                        "TP3 4501\nTP4 Open (4504/4507/4512/4518)"))
+    assert r["status"] == "EXECUTED" and len(env.fake.orders) == 7 and not env.fake.positions
+    r = _run(env.service.handle_message("u1", env.ch, 81, "Cancelling buy limit orders 💡", reply_to=80))
+    assert r["status"] == "EXECUTED" and not env.fake.orders
 
 
 def test_defaults_cover_every_rule_key():

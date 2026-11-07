@@ -161,20 +161,22 @@ class CopyTradeService:
         placed, failed = 0, 0
         for leg in plan.legs:
             comment = f"AE_CT{ch.id % 1000}_{sig.msg_id % 100000}_TP{leg['leg']}"
+            kind = leg.get("kind") or plan.order_type
+            entry = leg.get("entry") if leg.get("entry") is not None else plan.entry
             row = CopyTradeOrder(user_id=sig.user_id, signal_id=sig.id, channel_id=ch.id, leg=leg["leg"],
-                                 kind=plan.order_type, symbol=plan.symbol, side=plan.side, volume=leg["volume"],
-                                 entry=plan.entry, sl=plan.sl, tp=leg["tp"])
+                                 kind=kind, symbol=plan.symbol, side=plan.side, volume=leg["volume"],
+                                 entry=entry, sl=plan.sl, tp=leg["tp"])
             if dry:
-                row.status = "PAPER" if plan.order_type == "MARKET" else "PAPER_PENDING"
-                acts.append(f"[dry run] leg {leg['leg']}: {leg['volume']} lots TP {leg['tp']}")
+                row.status = "PAPER" if kind == "MARKET" else "PAPER_PENDING"
+                acts.append(f"[dry run] leg {leg['leg']}: {kind} {leg['volume']} lots @ {entry:g} TP {leg['tp']}")
                 placed += 1
             else:
                 ok, detail, ticket = await mt5ops.place(
-                    plan.symbol, plan.side, plan.order_type, leg["volume"], plan.entry, plan.sl, leg["tp"],
+                    plan.symbol, plan.side, kind, leg["volume"], entry, plan.sl, leg["tp"],
                     int(rules["magic"]), comment, spec, float(rules.get("pending_expiry_hours") or 0))
                 row.ticket, row.detail = ticket, detail
-                row.status = ("OPEN" if plan.order_type == "MARKET" else "PENDING") if ok else "FAILED"
-                acts.append(f"leg {leg['leg']}: {leg['volume']} lots TP {leg['tp']} -> "
+                row.status = ("OPEN" if kind == "MARKET" else "PENDING") if ok else "FAILED"
+                acts.append(f"leg {leg['leg']}: {kind} {leg['volume']} lots @ {entry:g} TP {leg['tp']} -> "
                             f"{'#' + str(ticket) if ok else 'FAILED ' + detail}")
                 placed, failed = placed + ok, failed + (not ok)
             s.add(row)
@@ -325,6 +327,9 @@ class CopyTradeService:
                 o.status, changed = "CANCELLED", True
 
         if kind == "BREAKEVEN":
+            if rules.get("cancel_pending_on_be", True):
+                for o in pendings:
+                    await cancel(o)
             if not positions:
                 acts.append(f"signal #{root.msg_id}: no filled position to move to breakeven")
             for o in positions:
@@ -436,6 +441,17 @@ class CopyTradeService:
                                 ok, _ = await mt5ops.cancel_order(r.ticket)
                                 if ok:
                                     r.status, r.detail = "CANCELLED", "expired"
+                    # unfilled zone orders after TPn filled
+                    cancel_after = int(rules.get("cancel_pending_after_tp") or 0)
+                    if cancel_after:
+                        for r in [r for r in rows if before[r.id] == "OPEN" and r.status == "CLOSED" and r.leg >= cancel_after]:
+                            if r.ticket and await mt5ops.closed_by_tp(r.ticket):
+                                for o in rows:
+                                    if o.status == "PENDING" and o.ticket:
+                                        ok, _ = await mt5ops.cancel_order(o.ticket)
+                                        if ok:
+                                            o.status, o.detail = "CANCELLED", f"TP{r.leg} filled"
+                                break
                     # breakeven after TPn
                     be_after = int(rules.get("be_after_tp") or 0)
                     if be_after:
@@ -488,6 +504,11 @@ class CopyTradeService:
                 move = (exit_px - r.entry) * (1 if buy else -1)
                 r.status = "CLOSED"
                 r.detail = f"paper {'SL' if hit_sl else 'TP'} at {exit_px:g} ({move:+g} per unit)"
+                cancel_after = int(rules.get("cancel_pending_after_tp") or 0)
+                if hit_tp and cancel_after and r.leg >= cancel_after:
+                    for o in live:
+                        if o.status == "PAPER_PENDING":
+                            o.status, o.detail = "CANCELLED", f"TP{r.leg} filled"
                 be_after = int(rules.get("be_after_tp") or 0)
                 if hit_tp and be_after and r.leg >= be_after:
                     for o in live:

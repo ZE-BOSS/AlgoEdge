@@ -124,7 +124,7 @@ def _side_and_type(up: str) -> tuple[str | None, str]:
 
 
 def _entry(up: str, side: str | None) -> tuple[float | None, float | None, float | None]:
-    zone = re.search(r"(?:ENTRY|ENTER|@|AT|PRICE|ZONE|BUY|SELL|NOW|LIMIT|STOP)\s*[:=]?\s*" + NUM + r"\s*(?:-|–|/|TO|~)\s*" + NUM, up)
+    zone = re.search(r"(?:ENTRY|ENTER|@|AT|PRICE|ZONE|BUY|SELL|NOW|LIMIT)\b(?:(?!\b(?:SL|S/L|STOP|TP\d*|T/P|TARGETS?|TAKE)\b)[^\d]){0,24}?" + NUM + r"\s*(?:-|–|/|TO|~)\s*" + NUM, up)
     if zone:
         a, b = _num(zone.group(1)), _num(zone.group(2))
         lo, hi = min(a, b), max(a, b)
@@ -133,7 +133,7 @@ def _entry(up: str, side: str | None) -> tuple[float | None, float | None, float
             return (hi if side == "BUY" else lo), lo, hi
     single = re.search(r"(?:ENTRY|ENTER|@|AT|PRICE|OPEN)\s*[:=]?\s*" + NUM, up)
     if not single:
-        single = re.search(r"\b(?:BUY|SELL|LONG|SHORT)\s*(?:LIMIT|STOP|NOW)?\s*[:@=]?\s*" + NUM, up)
+        single = re.search(r"\b(?:BUY|SELL|LONG|SHORT)\b(?:(?!\b(?:SL|S/L|STOP|TP\d*|T/P|TARGETS?|TAKE)\b)[^\d]){0,24}?" + NUM, up)
     if single:
         v = _num(single.group(1))
         return v, v, v
@@ -153,50 +153,93 @@ def _tps(up: str) -> tuple[list[float], bool]:
         k = int(m.group(1))
         if 1 <= k <= 20:
             found.setdefault(k, _num(m.group(2)))
+    # "TP4 Open (4504/4507/4512/4518)": the bracketed prices are TP4, TP5, ...
+    mo = re.search(r"\bTP\s*(\d{1,2})?\s*[:=]?\s*OPEN\s*\(([^)]*)\)", up)
+    if mo:
+        k0 = int(mo.group(1)) if mo.group(1) else (max(found) + 1 if found else 1)
+        for j, x in enumerate(re.findall(NUM, mo.group(2))):
+            found.setdefault(k0 + j, _num(x))
     tps = [found[k] for k in sorted(found)]
     if not tps:
-        m = re.search(r"\b(?:TP|T/P|TAKE\s*PROFITS?|TARGETS?)\s*[:=@]?\s*((?:" + NUM + r"\s*(?:/|,|-|\||&|AND)?\s*)+)", up)
+        # "TP 2350 / 2340 / 2330", "Targets: 2350, 2340" - prices of 3+ digits, not "TP7 ✅"
+        m = re.search(r"\b(?:TP|T/P|TAKE\s*PROFITS?|TARGETS?)(?!\s*\d{1,2}\b)\s*[:=@]?\s*((?:\d{3,7}(?:[.,]\d{1,6})?\s*(?:/|,|-|\||&|AND)?\s*)+)", up)
         if m:
             tps = [_num(x) for x in re.findall(NUM, m.group(1))]
-    tp_open = bool(re.search(r"\bTP\s*\d*\s*[:=]?\s*OPEN\b", up))
+    tp_open = bool(re.search(r"\bTP\s*\d*\s*[:=]?\s*OPEN\b", up)) and not mo
     return tps[:10], tp_open
 
 
+_FUTURE = re.compile(r"\b(I'LL|I WILL|WILL|IF|WHEN|AS SOON AS|AS PRICE GOES|ONCE)\b")
+
+
+def _sentences(up: str) -> list[str]:
+    return [x.strip() for x in re.split(r"(?<!\d)\.|\.(?!\d)|[!?\n,;]|\bAND\b|\s-\s|💡|📌|🎯|🤝|💯|🏆|👇", up) if x.strip()]
+
+
 def _management(up: str) -> ParsedSignal | None:
+    """Follow-ups, in priority order. Each rule looks at one sentence at a time
+    and skips sentences in the future or conditional tense ("I'll close if...",
+    "as price goes back above I'll set BE") - only what is being done NOW acts."""
     p = ParsedSignal()
-    if re.search(r"\b(CANCEL|CANCELL?ED|DELETE|REMOVE)\b.*\b(ORDER|LIMIT|STOP|PENDING|SIGNAL|ENTRY|TRADE|IT)\b"
-                 r"|\b(CANCEL|DELETE)\b\s*$|\bPENDING\b.*\b(CANCEL|DELETE|REMOVE)", up):
+    sents = _sentences(up)
+    now = [x for x in sents if not _FUTURE.search(x)]
+    joined_now = " | ".join(now)
+
+    # results recaps and progress reports: never an instruction
+    if re.match(r"^\s*(OVER\s*\$|\$\s*\d)", up) or re.search(
+            r"PROFIT TARGETS HIT|TAKE PROFITS HIT|TP TARGETS HIT|PIPS\s*(SMASHED|SECURED)|\bTHIS (MONTH|WEEK) SO FAR", up):
+        p.kind = "INFO"
+        m = re.search(r"\bTP\s*(\d{1,2})\b", up)
+        p.tp_index = int(m.group(1)) if m else None
+        return p
+    m = re.search(r"\bTP\s*(\d{1,2})\s*(?:HIT|DONE|REACHED|SMASHED|ACHIEVED|✅)", up)
+    if m and not re.search(r"\b(CANCEL|CLOS|ADJUST|BE\b|RISK)", joined_now):
+        p.kind, p.tp_index = "INFO", int(m.group(1))
+        return p
+
+    # pending orders: cancelling / closing / adjusting / removing LIMIT or STOP ORDERS
+    # touches only unfilled orders - "closing buy limit orders" must never close a position
+    if re.search(r"\b(CANCEL\w*|CLOS\w*|ADJUST\w*|REMOV\w*|DELET\w*|PULL\w*)\b[^|]{0,20}?\b(BUY|SELL)?\s*(LIMIT|STOP|PENDING)\s*ORDERS?\b", joined_now) \
+            or re.search(r"\b(CANCEL|DELETE|REMOVE)\b.*\b(ORDER|LIMIT|PENDING|SIGNAL|ENTRY|SETUP|IT)\b|\b(CANCEL|DELETE)\b\s*$", joined_now):
         p.kind = "CANCEL"
         return p
-    if re.search(r"\b(SL|STOP\s*LOSS|STOP)\b.{0,25}\b(ENTRY|BE|B/E|BREAK\s*-?\s*EVEN|BREAKEVEN|OPEN(?:ING)?\s*PRICE)\b"
-                 r"|\bBREAK\s*-?\s*EVEN\b|\bSECURE\b.{0,20}\b(TRADE|PROFIT|POSITION|ENTRY)|\bRISK\s*FREE\b|\bSET\s*BE\b", up):
+    if re.search(r"\bSTILL HOLDING\b|\bHOLDING (MY )?(BUY|SELL) LIMIT|LIMIT ORDERS? READY|\bI'M LIVE\b|REACHED MY ZONE", up):
+        p.kind = "INFO"
+        return p
+
+    # breakeven: "stops to BE", "set all to BE", "BE on all", "risk free", "SL to entry"
+    if re.search(r"\b(SL|SLS|STOP|STOPS|STOP\s*LOSS(ES)?|POSITIONS?|ALL|ENTRIES|TRADES?|SET|SETTING|MOVE|MOVING|MOVED)\b[^|]{0,25}?"
+                 r"\b(BE|B/E|BREAK\s*-?\s*EVEN|BREAKEVEN|ENTRY|OPEN(?:ING)?\s*PRICE)\b"
+                 r"|\b(SET|SETTING)\s+(BE|BREAKEVEN)\b|\bBE\s+ON\s+ALL\b|\bRISK[\s-]*FREE\b|\bSECURE\b.{0,20}\b(TRADE|PROFIT|POSITION|ENTRY)",
+                 joined_now) and not re.search(r"\b(SL|STOP)\b[^|]{0,15}\b(HIT|TAKEN|TRIGGERED|REACHED)\b", joined_now):
         p.kind = "BREAKEVEN"
         return p
-    m = re.search(r"\b(?:MOVE|SET|NEW|ADJUST|CHANGE|UPDATE|PUT|TRAIL)\b.{0,15}\b(?:SL|STOP\s*LOSS|STOP)\b.{0,12}?" + NUM, up) \
-        or re.search(r"\b(?:SL|STOP\s*LOSS)\s*(?:MOVED|NOW|UPDATED|CHANGED)?\s*(?:TO|AT|:|=)\s*" + NUM, up)
+
+    m = re.search(r"\b(?:MOVE|MOVING|SET|SETTING|NEW|ADJUST|ADJUSTING|CHANGE|CHANGING|UPDATE|PUT|TRAIL)\b[^|]{0,15}\b(?:SL|STOP\s*LOSS|STOPS?)\b[^|]{0,12}?" + NUM, joined_now) \
+        or re.search(r"\b(?:SL|STOP\s*LOSS)\s*(?:MOVED|NOW|UPDATED|CHANGED)?\s*(?:TO|AT|:|=)\s*" + NUM, joined_now)
     if m:
         p.kind, p.new_price = "MOVE_SL", _num(m.group(1))
         return p
-    m = re.search(r"\b(?:MOVE|SET|NEW|ADJUST|CHANGE|UPDATE)\b.{0,15}\bTP\s*(\d{1,2})?\b.{0,12}?" + NUM, up)
+    m = re.search(r"\b(?:MOVE|SET|NEW|ADJUST|ADJUSTING|CHANGE|UPDATE)\b[^|]{0,15}\bTP\s*(\d{1,2})?\b[^|]{0,12}?" + NUM, joined_now)
     if m:
         p.kind, p.new_price = "MOVE_TP", _num(m.group(2))
         p.tp_index = int(m.group(1)) if m.group(1) else None
         return p
-    if re.search(r"\b(CLOSE|EXIT|TAKE\s*(?:SOME\s*)?PROFITS?|BOOK\s*PROFITS?|SECURE\s*PROFITS?|CLOSING)\b", up) \
-            and not re.search(r"\b(TP\s*\d*\s*(HIT|DONE|REACHED|SMASHED))\b", up):
+
+    # stopped out / out of the trade
+    if re.search(r"\b(SL|STOP\s*LOSS|STOP)\s*(HIT|TAKEN|TRIGGERED)\b|\b(REACHED|HIT|TAPPED ME OUT)\b[^|]{0,20}\b(SL|STOP)\b", up):
+        p.kind = "INFO"
+        return p
+    if re.search(r"\bI'?M OUT (OF )?(THIS|THE|MY) (SETUP|TRADE|POSITION)", joined_now) or re.search(
+            r"\b(CLOSE|EXIT|TAKE\s*(?:SOME\s*)?PROFITS?|BOOK\s*PROFITS?|SECURE\s*PROFITS?|CLOSING|CLOSED)\b", joined_now):
         p.kind = "CLOSE"
-        if re.search(r"\b(HALF|50\s*%|PARTIAL(?:S|LY)?|SOME)\b", up):
-            m = re.search(r"(\d{1,3})\s*%", up)
+        if re.search(r"\b(HALF|50\s*%|PARTIAL(?:S|LY)?|SOME|WORST)\b", joined_now):
+            m = re.search(r"(\d{1,3})\s*%", joined_now)
             p.close_fraction = (int(m.group(1)) / 100.0) if m else 0.5
         else:
             p.close_fraction = 1.0
-        if re.search(r"\bALL\b.{0,10}\b(TRADES|POSITIONS|ORDERS)\b", up):
+        if re.search(r"\bALL\b.{0,10}\b(TRADES|POSITIONS|ORDERS)\b", joined_now):
             p.applies_to = "all"
-        return p
-    m = re.search(r"\bTP\s*(\d{1,2})\s*(?:HIT|DONE|REACHED|SMASHED|ACHIEVED|✅)", up)
-    if m or re.search(r"\b(SL|STOP\s*LOSS)\s*(?:HIT|TAKEN|TRIGGERED)\b", up):
-        p.kind = "INFO"
-        p.tp_index = int(m.group(1)) if m else None
         return p
     return None
 
@@ -204,7 +247,10 @@ def _management(up: str) -> ParsedSignal | None:
 def parse_message(text: str) -> ParsedSignal:
     if not text or not text.strip():
         return ParsedSignal()
-    up = " ".join(text.upper().replace("—", "-").replace("–", "-").split())
+    up = text.upper().replace("—", "-").replace("–", "-").replace("’", "'").replace("‘", "'")
+    # "4495Stop Loss 4483TP1 4497TP2" (line breaks lost when copied): split number|word
+    up = re.sub(r"(\d)([A-Z])", r"\1 \2", up)
+    up = " ".join(up.split())
     up = re.sub(r"(?<=\d)\s+(?=\d{3}\b)", "", up) if re.search(r"\d \d{3}\b", up) else up
     symbol = find_symbol(up)
     side, otype = _side_and_type(up)
@@ -212,7 +258,8 @@ def parse_message(text: str) -> ParsedSignal:
     tps, tp_open = _tps(up)
     # An OPEN names a side and at least a stop or a target; otherwise it is a
     # follow-up (or chat).
-    if side and (sl is not None or tps) and not re.search(r"\bCLOSE\b|\bCANCEL", up):
+    if side and (sl is not None or tps) and not re.search(
+            r"\b(CLOS\w*|CANCEL\w*|ADJUST\w* (BUY|SELL)|HIT|SMASHED)\b|^\s*OVER\s*\$", up):
         p = ParsedSignal(kind="OPEN", symbol=symbol, side=side, order_type=otype, sl=sl, tps=tps, tp_open=tp_open)
         p.entry, p.entry_low, p.entry_high = _entry(up, side)
         if otype == "MARKET" and p.entry is None:
