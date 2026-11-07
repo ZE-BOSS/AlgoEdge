@@ -25,6 +25,7 @@ from backend.api.routes import (
     cash,
     charts,
     config,
+    copytrade,
     dashboard,
     llm,
     logs,
@@ -222,7 +223,23 @@ async def lifespan(app: FastAPI):
         "INFO" if tg_ok else "WARN", category="SYSTEM",
     )
 
+    # Telegram copy trading: reconnect saved logins and start the housekeeping
+    # loop. Never on an audit server - it runs against a COPY of the database
+    # and must not place trades from it.
+    if os.getenv("ALGOEDGE_AUDIT") != "1":
+        try:
+            from backend.copytrade.telegram_client import telegram_manager
+            await telegram_manager.start_all()
+        except Exception as e:
+            logger.warning(f"Copy trading not started: {e}")
+
     yield
+
+    try:
+        from backend.copytrade.telegram_client import telegram_manager as _tgm
+        await _tgm.stop_all()
+    except Exception:
+        pass
 
     if investor_jobs is not None:
         investor_jobs.cancel()
@@ -339,6 +356,7 @@ app.include_router(system.router)  # Telegram status/test, live account, state r
 # withdrawals, costs, and whether the journal adds up to the balance.
 app.include_router(cash.router)
 app.include_router(rl.router)                # [W4] RL agents, charters, proposals
+app.include_router(copytrade.router)          # Telegram copy trading
 app.include_router(kronos.router)            # Kronos forecasts: jobs in their own process
 
 

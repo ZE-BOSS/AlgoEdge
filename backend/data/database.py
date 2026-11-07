@@ -59,6 +59,7 @@ async def init_db():
     import backend.investor.models  # noqa: F401 — imported for the side effect
     import backend.mt5.cash_models  # noqa: F401 — same reason: the cash ledger
     import backend.rl.models  # noqa: F401 — agents, charters, proposals, adherence
+    import backend.copytrade.models  # noqa: F401 — Telegram copy trading
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -558,3 +558,22 @@ export const kronos = {
   cancel: (id) => api.post(`${KRONOS}/jobs/${id}/cancel`),
   results: () => api.get(`${KRONOS}/results`),
 };
+
+// ── Copy trading (Telegram signal channels) ────────────────────────────────
+const CT = '/copytrade';
+export const copytrade = {
+  status: () => api.get(`${CT}/status`),
+  saveSettings: (data) => api.put(`${CT}/settings`, data),
+  loginStart: (data) => api.post(`${CT}/login/start`, data),
+  loginCode: (data) => api.post(`${CT}/login/code`, data),
+  logout: () => api.post(`${CT}/logout`),
+  dialogs: () => api.get(`${CT}/dialogs`),
+  channels: () => api.get(`${CT}/channels`),
+  addChannel: (data) => api.post(`${CT}/channels`, data),
+  patchChannel: (id, data) => api.patch(`${CT}/channels/${id}`, data),
+  deleteChannel: (id) => api.delete(`${CT}/channels/${id}`),
+  history: (id, limit = 100) => api.get(`${CT}/channels/${id}/history`, { params: { limit } }),
+  parse: (text, channel_id) => api.post(`${CT}/parse`, { text, channel_id }),
+  signals: (params) => api.get(`${CT}/signals`, { params }),
+  orders: (sid) => api.get(`${CT}/signals/${sid}/orders`),
+};

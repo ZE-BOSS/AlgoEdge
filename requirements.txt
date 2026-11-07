@@ -56,6 +56,7 @@ Pillow
 
 # ── Security & Crypto ────────────────────────────────────────
 cryptography
+telethon>=1.36           # Telegram copy trading (user login that reads signal channels)
 python-jose[cryptography]
 # bcrypt is used DIRECTLY (backend/core/passwords.py), not through passlib.
 # passlib 1.7.4 (its last release, 2020) is broken against bcrypt >= 4.1: it

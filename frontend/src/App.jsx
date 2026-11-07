@@ -6,6 +6,7 @@ import {
   BarChart3,
   BookOpen,
   Bot,
+  Copy,
   Telescope,
   ChevronLeft,
   ChevronRight,
@@ -50,6 +51,7 @@ const SettingsPage = lazy(() => import('./pages/Settings/index'));
 const Investors = lazy(() => import('./pages/Investors/index'));
 const Agents = lazy(() => import('./pages/Agents'));
 const Kronos = lazy(() => import('./pages/Kronos'));
+const CopyTrading = lazy(() => import('./pages/CopyTrading'));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30000, retry: 1 } },
@@ -92,6 +94,7 @@ function Sidebar({ isCollapsed, setIsCollapsed, isNavOpen, closeNav }) {
     { to: '/backtester', icon: FlaskConical, label: 'Backtester' },
     { to: '/analytics', icon: BarChart3, label: 'Analytics' },
     { to: '/signals', icon: Zap, label: 'Signals' },
+    { to: '/copy-trading', icon: Copy, label: 'Copy Trading' },
     { to: '/strategy-lab', icon: FlaskConical, label: 'Strategy Lab' },
     // Admin-only on the server (`require_admin` on the whole /api/rl router);
     // hidden here for operators who are not admins, the same way Investors is.
@@ -200,6 +203,7 @@ function AppContent() {
               <Route path="/backtester" element={<Backtester />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/signals" element={<Signals />} />
+              <Route path="/copy-trading" element={<CopyTrading />} />
               <Route path="/strategy-lab" element={<StrategyLab />} />
               <Route path="/fundamentals" element={<Fundamentals />} />
               <Route path="/analysis" element={<Analysis />} />
