@@ -85,6 +85,7 @@ class ParsedSignal:
     tp_index: int | None = None              # MOVE_TP / INFO "TP2 hit"
     new_price: float | None = None           # MOVE_SL / MOVE_TP target
     applies_to: str = "reply_or_last"        # reply_or_last / symbol / all
+    also_breakeven: bool = False             # CLOSE that also says "and set breakeven" ("closed half & set BE")
     confidence: float = 0.0
     notes: list[str] = field(default_factory=list)
 
@@ -161,85 +162,152 @@ def _tps(up: str) -> tuple[list[float], bool]:
             found.setdefault(k0 + j, _num(x))
     tps = [found[k] for k in sorted(found)]
     if not tps:
+        # "TP: 4021 TP: 4019 TP. 4017 TP: open" - one unindexed TP per target
+        rep = [_num(x) for x in re.findall(r"\bT\.?P\s*[:.=]\s*" + NUM, up)]
+        if len(rep) >= 2:
+            tps = rep
+    if not tps:
         # "TP 2350 / 2340 / 2330", "Targets: 2350, 2340" - prices of 3+ digits, not "TP7 ✅"
         m = re.search(r"\b(?:TP|T/P|TAKE\s*PROFITS?|TARGETS?)(?!\s*\d{1,2}\b)\s*[:=@]?\s*((?:\d{3,7}(?:[.,]\d{1,6})?\s*(?:/|,|-|\||&|AND)?\s*)+)", up)
         if m:
             tps = [_num(x) for x in re.findall(NUM, m.group(1))]
-    tp_open = bool(re.search(r"\bTP\s*\d*\s*[:=]?\s*OPEN\b", up)) and not mo
+    tp_open = bool(re.search(r"\bTP\s*\d*\s*[:.=]?\s*OPEN\b", up)) and not mo
     return tps[:10], tp_open
 
 
-_FUTURE = re.compile(r"\b(I'LL|I WILL|WILL|IF|WHEN|AS SOON AS|AS PRICE GOES|ONCE)\b")
+_FUTURE = re.compile(r"\b(I'LL|I WILL|WILL|WE'LL|GOING TO|GONNA)\b")
+_CONDITIONAL = re.compile(r"^\W*(IF|WHEN|ONCE|AS SOON AS|AS PRICE GOES|AFTER|AT TP\s*\d|AT TAKE ?PROFIT|UNTIL)\b|\bTP\s*\d\s+TO\s+(CLOSE|TAKE|SET)\b|\b(IF|ONCE|AS SOON AS)\b.{0,40}\b(HIT|HITS|REACH|BREAK|GOES|PUSH)")
+_NEGATED = re.compile(r"\b(NOT|DON'?T|DONT|DO NOT|NEVER|NO NEED TO|WON'?T|WOULDN'?T|I'?M NOT)\b\W*(\w+\W+){0,2}?(CLOSE|CLOSING|ADJUST\w*|MOVE|MOVING|CANCEL\w*|EXIT|SET)")
+BE_WORD = r"(?:B/?E|BRE?A?K\s*-?\s*E?VEN\w*|BREKAEVEN\w*|BREAKEVE\w*)"
 
 
 def _sentences(up: str) -> list[str]:
-    return [x.strip() for x in re.split(r"(?<!\d)\.|\.(?!\d)|[!?\n,;]|\bAND\b|\s-\s|💡|📌|🎯|🤝|💯|🏆|👇", up) if x.strip()]
+    return [x.strip() for x in re.split(r"(?<!\d)\.|\.(?!\d)|[!?\n;]|💡|📌|🎯|🤝|💯|🏆|👇|🤑|🚀|💰|🙏🏽|👍🏽|💪🏽|👊🏽|💦|🔥", up) if x.strip()]
+
+
+def _clauses(sentence: str) -> list[str]:
+    return [x.strip() for x in re.split(r",|&|\bAND\b|\s-\s|\bTHEN\b|\bBUT\b", sentence) if x.strip()]
+
+
+def _acting_now(up: str) -> str:
+    """The parts of a message that describe something to do NOW. A sentence
+    that opens with a condition ("once TP1 hits...", "at TP3 I'll...") is
+    dropped whole; inside the rest, a clause in the future tense ("will
+    update", "I'll close") is dropped unless it also says NOW ("I'll close
+    all now", "will set breakeven now")."""
+    keep = []
+    for sent in _sentences(up):
+        if _CONDITIONAL.search(sent):
+            continue
+        for cl in _clauses(sent):
+            if _FUTURE.search(cl) and not re.search(r"\bNOW+\b|\bRIGHT AWAY\b|\bIMMEDIATELY\b", cl):
+                continue
+            keep.append(cl)
+    return " | ".join(keep)
 
 
 def _management(up: str) -> ParsedSignal | None:
-    """Follow-ups, in priority order. Each rule looks at one sentence at a time
-    and skips sentences in the future or conditional tense ("I'll close if...",
-    "as price goes back above I'll set BE") - only what is being done NOW acts."""
+    """Follow-ups, in priority order. Only what is being done NOW acts (see
+    _acting_now); results, progress reports and "breakeven got hit" are
+    information; "not close", "I'm not adjusting" never act."""
     p = ParsedSignal()
-    sents = _sentences(up)
-    now = [x for x in sents if not _FUTURE.search(x)]
-    joined_now = " | ".join(now)
+    now = _acting_now(up)
 
-    # results recaps and progress reports: never an instruction
+    # trade-tracking bots (Cornix etc.) and results recaps: never an instruction
+    if re.search(r"#\w+/USDT|CLOSED AT STOPLOSS|CLOSED DUE TO OPPOSITE|AVERAGE ENTRY PRICE|ALL TARGETS ACHIEVED|"
+                 r"ALL ENTRIES ACHIEVED|TAKE-PROFIT TARGET \d", up):
+        p.kind = "INFO"
+        return p
     if re.match(r"^\s*(OVER\s*\$|\$\s*\d)", up) or re.search(
             r"PROFIT TARGETS HIT|TAKE PROFITS HIT|TP TARGETS HIT|PIPS\s*(SMASHED|SECURED)|\bTHIS (MONTH|WEEK) SO FAR", up):
         p.kind = "INFO"
         m = re.search(r"\bTP\s*(\d{1,2})\b", up)
         p.tp_index = int(m.group(1)) if m else None
         return p
-    m = re.search(r"\bTP\s*(\d{1,2})\s*(?:HIT|DONE|REACHED|SMASHED|ACHIEVED|✅)", up)
-    if m and not re.search(r"\b(CANCEL|CLOS|ADJUST|BE\b|RISK)", joined_now):
-        p.kind, p.tp_index = "INFO", int(m.group(1))
+
+    # something that already happened to the positions: "breakeven (got) hit", "some entries hit breakeven",
+    # "SL hit", "tapped me out", "out on breakeven" - the broker already did it
+    already = re.search(BE_WORD + r"\s*(GOT\s*|HAS\s*|WAS\s*|JUST\s*)?(HIT|TAKEN|TRIGGERED)|"
+                        r"\b(HIT|HITS|HITTING|ABOUT TO HIT|WILL HIT|OUT ON|OUT AT|WICKED ME OUT ON)\s+(MY\s+|THE\s+|ON\s+)?" + BE_WORD + r"|"
+                        r"\b(SL|STOP\s*LOSS|STOP)\s*(GOT\s*|WAS\s*)?(HIT|TAKEN|TRIGGERED)\b|"
+                        r"\b(REACHED|HIT|TAPPED ME OUT)\b[^|]{0,20}\b(SL|STOP)\b|CLOSED THE TRADES ITSELVES", up)
+    instruct_be = re.search(r"\b(SET|SETTING|PUT|MOVE|MOVING)\b[^|]{0,20}" + BE_WORD, now)
+    if already and not instruct_be:
+        p.kind = "INFO"
         return p
+
+    m = re.search(r"\bTP\s*(\d{1,2})\s*(?:HIT|DONE|REACHED|SMASHED|ACHIEVED|CHECK\w*|✅)", up) or \
+        re.search(r"\bTAKE\s*PROFIT\s*(\d{1,2})\s*(?:HIT\w*|DONE|REACHED|SMASH\w*|CHECK\w*|✅)", up)
+    tp_info = int(m.group(1)) if m else None
 
     # pending orders: cancelling / closing / adjusting / removing LIMIT or STOP ORDERS
     # touches only unfilled orders - "closing buy limit orders" must never close a position
-    if re.search(r"\b(CANCEL\w*|CLOS\w*|ADJUST\w*|REMOV\w*|DELET\w*|PULL\w*)\b[^|]{0,20}?\b(BUY|SELL)?\s*(LIMIT|STOP|PENDING)\s*ORDERS?\b", joined_now) \
-            or re.search(r"\b(CANCEL|DELETE|REMOVE)\b.*\b(ORDER|LIMIT|PENDING|SIGNAL|ENTRY|SETUP|IT)\b|\b(CANCEL|DELETE)\b\s*$", joined_now):
+    if re.search(r"\b(CANCEL\w*|CLOS\w*|ADJUST\w*|REMOV\w*|DELET\w*|PULL\w*)\b[^|]{0,20}?\b(BUY|SELL)?\s*(LIMIT|STOP|PENDING)\s*ORDERS?\b", now) \
+            or re.search(r"\b(CANCEL|DELETE|REMOVE)\b.*\b(ORDER|LIMIT|PENDING|SIGNAL|ENTRY|SETUP|IT)\b|\b(CANCEL|DELETE)\b\s*$", now):
         p.kind = "CANCEL"
         return p
     if re.search(r"\bSTILL HOLDING\b|\bHOLDING (MY )?(BUY|SELL) LIMIT|LIMIT ORDERS? READY|\bI'M LIVE\b|REACHED MY ZONE", up):
         p.kind = "INFO"
         return p
 
-    # breakeven: "stops to BE", "set all to BE", "BE on all", "risk free", "SL to entry"
-    if re.search(r"\b(SL|SLS|STOP|STOPS|STOP\s*LOSS(ES)?|POSITIONS?|ALL|ENTRIES|TRADES?|SET|SETTING|MOVE|MOVING|MOVED)\b[^|]{0,25}?"
-                 r"\b(BE|B/E|BREAK\s*-?\s*EVEN|BREAKEVEN|ENTRY|OPEN(?:ING)?\s*PRICE)\b"
-                 r"|\b(SET|SETTING)\s+(BE|BREAKEVEN)\b|\bBE\s+ON\s+ALL\b|\bRISK[\s-]*FREE\b|\bSECURE\b.{0,20}\b(TRADE|PROFIT|POSITION|ENTRY)",
-                 joined_now) and not re.search(r"\b(SL|STOP)\b[^|]{0,15}\b(HIT|TAKEN|TRIGGERED|REACHED)\b", joined_now):
+    # a new stop level stated wins over everything below ("moving SL to 4148 ok cause I closed many entries")
+    if not re.search(r"\b(NOT|NO|WON'?T|WILL NOT)\b[^|]{0,15}\b(ADJUST\w*|MOVE|MOVING)\b", up):
+        m = re.search(r"\b(?:MOVE|MOVING|SET|SETTING|NEW|ADJUST\w*|CHANGE|CHANGING|UPDATE|PUT|TRAIL)\b[^\d|]{0,45}?\b(?:SL|S/L|STOP\s*LOSS|STOPS?)\b[^\d]{0,60}?" + NUM, up) \
+            or re.search(r"\b(?:SL|STOP\s*LOSS)\s*(?:MOVED|NOW|UPDATED|CHANGED)?\s*(?:TO|AT|:|=)\s*" + NUM, up) \
+            or re.search(r"\bLAST\s+(?:SL\s+)?ADJUST\w*\b[^\d]{0,30}?" + NUM, up)
+        if m and 100 <= _num(m.group(1)):
+            p.kind, p.new_price = "MOVE_SL", _num(m.group(1))
+            return p
+
+    # closing positions, all or part. Explicit amounts only: "close all", "closing all entries", "I'm out of
+    # this trade", "close/closed half", "take half profits", "take 60%", "close worst / top entries",
+    # "closed most". "Take some profits" names no amount: advice (the TP legs already take profit).
+    # Past-tense reports with no amount ("$12,000 closed already", "closed nice profit") are not orders.
+    if not _NEGATED.search(up):
+        frac = 0.0
+        if re.search(r"\bI'?M OUT (OF )?(THIS|THE|MY|ALL) (SETUP|TRADE|TRADES|POSITION|POSITIONS|ENTRIES)", now) or \
+                re.search(r"\b(CLOS(E|ING)|EXIT\w*)\b\s*(ALL|EVERYTHING|THE TRADE|THIS TRADE|ALL (MY |THE )?(ENTRIES|POSITIONS|TRADES))\b(?!\s+(TOP|WORST|BOTTOM|BEST|BAD)\b)", now) or \
+                re.search(r"\b(CLOSE|CLOSING)\b\s*(IT|NOW|EVERYTHING)?\s*(NOW)?\s*$", now):
+            frac = 1.0
+        elif (m2 := re.search(r"\b(CLOS\w*|TAKE|TAKING|TOOK|SECURE\w*|BOOK\w*)\b[^|]{0,25}?\b(HALF|(\d{2})\s*%)", now)):
+            frac = 0.5 if m2.group(2) == "HALF" else int(m2.group(3)) / 100.0
+        elif re.search(r"\b(CLOS\w*)\b[^|]{0,15}\b(WORST|TOP|BOTTOM|BAD)\s+(ENTR\w*|POSITIONS?)", now):
+            frac = 0.5
+        elif re.search(r"\bCLOS\w*\b[^|]{0,10}\bMOST\b", now):
+            frac = 0.75
+        if frac > 0:
+            p.kind, p.close_fraction = "CLOSE", frac
+            p.also_breakeven = frac < 1.0 and bool(re.search(BE_WORD + r"|ZERO RISK|RISK[\s-]*FREE|NO (MORE )?RISK", now))
+            if re.search(r"\bALL\b.{0,10}\b(TRADES|POSITIONS|ORDERS)\b", now):
+                p.applies_to = "all"
+            return p
+
+    # breakeven / zero risk: "set breakeven", "breakeven set", "SET BREAKEVENNNN", "zero risk", "risk free",
+    # "reduce risk to zero", "move your SL above your entries", "SL to entry"
+    be = re.search(
+        r"\b(SL|SLS|STOP|STOPS|STOP\s*LOSS(ES)?|POSITIONS?|ALL|ENTRIES|TRADES?|SET|SETTING|PUT|MOVE|MOVING|MOVED|FULLY|FULL)\b[^|]{0,25}?"
+        r"(" + BE_WORD + r"|\bENTRY\b|\bOPEN(?:ING)?\s*PRICE\b)"
+        r"|" + BE_WORD + r"\s*(IS\s*|FULLY\s*|NOW\s*)?(SET|ON|ACTIVE|DONE)\b"
+        r"|\b(SET|SETTING)\s+" + BE_WORD +
+        r"|" + BE_WORD + r"\s+ON\s+ALL\b|\bRISK[\s-]*FREE\b|\bZERO+\s*RISK\w*|\bREDUCE\s*(THE\s*)?RISK\b[^|]{0,15}\bZERO\b"
+        r"|\bNO (MORE )?RISK\b|\bSL\b[^|]{0,15}\b(ABOVE|BELOW)\b[^|]{0,15}\bENTR\w*"
+        r"|\bMAKE SURE\b[^|]{0,30}" + BE_WORD + r"|^\W*" + BE_WORD + r"\W*(NOW+)?\W*$"
+        r"|\b(ON|AT|RUNNING|ABOVE|BELOW)\s+" + BE_WORD, now)
+    if be and not _NEGATED.search(now):
         p.kind = "BREAKEVEN"
         return p
 
-    m = re.search(r"\b(?:MOVE|MOVING|SET|SETTING|NEW|ADJUST|ADJUSTING|CHANGE|CHANGING|UPDATE|PUT|TRAIL)\b[^|]{0,15}\b(?:SL|STOP\s*LOSS|STOPS?)\b[^|]{0,12}?" + NUM, joined_now) \
-        or re.search(r"\b(?:SL|STOP\s*LOSS)\s*(?:MOVED|NOW|UPDATED|CHANGED)?\s*(?:TO|AT|:|=)\s*" + NUM, joined_now)
-    if m:
-        p.kind, p.new_price = "MOVE_SL", _num(m.group(1))
-        return p
-    m = re.search(r"\b(?:MOVE|SET|NEW|ADJUST|ADJUSTING|CHANGE|UPDATE)\b[^|]{0,15}\bTP\s*(\d{1,2})?\b[^|]{0,12}?" + NUM, joined_now)
+    m = re.search(r"\b(?:MOVE|SET|NEW|ADJUST|ADJUSTING|CHANGE|UPDATE)\b[^|]{0,15}\bTP\s*(\d{1,2})?\b[^|]{0,12}?" + NUM, now)
     if m:
         p.kind, p.new_price = "MOVE_TP", _num(m.group(2))
         p.tp_index = int(m.group(1)) if m.group(1) else None
         return p
 
-    # stopped out / out of the trade
-    if re.search(r"\b(SL|STOP\s*LOSS|STOP)\s*(HIT|TAKEN|TRIGGERED)\b|\b(REACHED|HIT|TAPPED ME OUT)\b[^|]{0,20}\b(SL|STOP)\b", up):
-        p.kind = "INFO"
+    if tp_info is not None:
+        p.kind, p.tp_index = "INFO", tp_info
         return p
-    if re.search(r"\bI'?M OUT (OF )?(THIS|THE|MY) (SETUP|TRADE|POSITION)", joined_now) or re.search(
-            r"\b(CLOSE|EXIT|TAKE\s*(?:SOME\s*)?PROFITS?|BOOK\s*PROFITS?|SECURE\s*PROFITS?|CLOSING|CLOSED)\b", joined_now):
-        p.kind = "CLOSE"
-        if re.search(r"\b(HALF|50\s*%|PARTIAL(?:S|LY)?|SOME|WORST)\b", joined_now):
-            m = re.search(r"(\d{1,3})\s*%", joined_now)
-            p.close_fraction = (int(m.group(1)) / 100.0) if m else 0.5
-        else:
-            p.close_fraction = 1.0
-        if re.search(r"\bALL\b.{0,10}\b(TRADES|POSITIONS|ORDERS)\b", joined_now):
-            p.applies_to = "all"
+    if already:
+        p.kind = "INFO"
         return p
     return None
 

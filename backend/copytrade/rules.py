@@ -51,6 +51,8 @@ DEFAULT_RULES: dict[str, Any] = {
     "cancel_pending_after_tp": 1, # once TPn fills, cancel the signal's unfilled zone orders (0 = keep them)
     "be_after_tp": 0,             # 0 = off; 1 = move the remaining legs to breakeven once TP1 fills; 2 = after TP2 ...
     "edit_updates": True,         # an edited signal updates SL/TP of the trade it opened
+    "close_on_opposite": False,   # a new signal in the other direction closes this channel's open trades on that symbol
+    "max_sl_move_pct": 3.0,       # ignore a "move SL to X" more than this % from the entry (a typo: 4113 for 4413)
     # filters
     "allowed_symbols": [],        # canonical names; empty = everything
     "max_open_signals": 5,        # open signals at once (per channel)

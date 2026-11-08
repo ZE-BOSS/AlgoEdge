@@ -156,6 +156,44 @@ def test_whole_public_history_parses():
     assert "OPEN" not in kinds and kinds.count("CANCEL") >= 40 and kinds.count("BREAKEVEN") >= 50
 
 
+def test_gold_platinum_trader_format():
+    p = parse_message("Gold buy now 4394.3 - 4391SL: 4386TP: 4397TP: 4399TP: 4401TP: 4403TP: 4405TP: open")
+    assert (p.kind, p.side, p.entry_low, p.entry_high, p.sl) == ("OPEN", "BUY", 4391, 4394.3, 4386)
+    assert p.tps == [4397, 4399, 4401, 4403, 4405] and p.tp_open
+    p = parse_message("Gold sell now 4325.2 - 4329SL: 4333TP: 4323TP. 4321TP. 4319TP: 4317TP: 4315TP. open")
+    assert p.side == "SELL" and len(p.tps) == 5 and p.sl == 4333
+    k = lambda t: parse_message(t)
+    assert k("SET BREAKEVEN FOR ZERO RISK NOW!!").kind == "BREAKEVEN"
+    assert k("SET BREAKEVENNNN NOW ZERO RISK!!").kind == "BREAKEVEN"
+    assert k("REDUCE RISK NOW TO ZERO!!!").kind == "BREAKEVEN"
+    assert k("Breakeven fully set, zero risk trade now!").kind == "BREAKEVEN"
+    assert k("Breakeven hit, OUT of all entries!").kind == "INFO"
+    assert k("Some entries hit breakeven, some are still running").kind == "INFO"
+    assert k("LETS COUNT THE PROFITSCOUNT ONLY NOT CLOSE").kind in ("NONE", "INFO")
+    assert k("TP1 checkk, take some profits & set breakeven now for zero risk ok!").kind == "BREAKEVEN"
+    c = k("Closed half Profits & will set breakeven now for zero risk!!")
+    assert (c.kind, c.close_fraction, c.also_breakeven) == ("CLOSE", 0.5, True)
+    c = k("Close all top entries now and set breakeven on bottom entries ok")
+    assert (c.kind, c.close_fraction, c.also_breakeven) == ("CLOSE", 0.5, True)
+    assert (k("Setup didnt worked out closing all entries now").close_fraction) == 1.0
+    assert (k("Last adjustment for today 3914 ok").kind, k("Last adjustment for today 3914 ok").new_price) == ("MOVE_SL", 3914)
+    assert k("Moving SL to 4148 ok cause I closed many entries and my risk is low").kind == "MOVE_SL"
+    assert k("I'm not adjusting SL on this last trade.").kind == "NONE"
+    assert k("At TP3 I'll close half profits again").kind == "NONE"
+    assert k("Once we hit TP1, lets take worst entries and set breakeven ok").kind == "NONE"
+    assert k("#GOLD/USDT Closed at stoploss after reaching take profit ⚠Loss: 0.1169%").kind == "INFO"
+    assert k("HyperLiquid Futures#GOLD/USDT Closed due to opposite direction signal").kind == "INFO"
+
+
+def test_whole_gold_platinum_history_parses():
+    rows = [l.rstrip("\n").split("\t") for l in open(Path(__file__).parents[1] / "data/copytrade/goldplatinumtrader23_public.tsv", encoding="utf-8")
+            if l.strip() and not l.startswith("#")]
+    sigs = [parse_message(r[4]) for r in rows if r[0] == "S"]
+    assert len(sigs) == 128 and all(p.kind == "OPEN" and p.sl and len(p.tps) >= 3 for p in sigs)
+    fk = [parse_message(r[4]).kind for r in rows if r[0] == "F"]
+    assert "OPEN" not in fk and fk.count("BREAKEVEN") >= 120 and fk.count("MOVE_SL") >= 35
+
+
 def test_plan_refusals():
     r = merge_rules({})
     assert "no stop" in build_open_plan(_sig(sl=None), {"bid": 2349, "ask": 2349.2}, GOLD, 1e4, r, "X").reason
@@ -364,6 +402,19 @@ def test_layered_signal_end_to_end(env):
     assert r["status"] == "EXECUTED" and len(env.fake.orders) == 7 and not env.fake.positions
     r = _run(env.service.handle_message("u1", env.ch, 81, "Cancelling buy limit orders 💡", reply_to=80))
     assert r["status"] == "EXECUTED" and not env.fake.orders
+
+
+def test_close_half_and_breakeven_and_typo_stop(env):
+    _run(env.service.handle_message("u1", env.ch, 90, "XAUUSD BUY\nSL 2340\nTP1 2355\nTP2 2360\nTP3 2365"))
+    r = _run(env.service.handle_message("u1", env.ch, 91, "Closed half Profits & will set breakeven now for zero risk!!", reply_to=90))
+    assert r["status"] == "EXECUTED"
+    assert any(c[0] == "close" for c in env.fake.calls)
+    assert any(c[0] == "modpos" and c[2] == pytest.approx(2349.0) for c in env.fake.calls)
+    n = len(env.fake.calls)
+    r = _run(env.service.handle_message("u1", env.ch, 92, "Move SL to 2049", reply_to=90))     # typo for 2349
+    assert "typo" in r["detail"] and len(env.fake.calls) == n
+    r = _run(env.service.handle_message("u1", env.ch, 93, "Move SL to 2352", reply_to=90))     # above the bid: wrong side
+    assert "wrong side" in r["detail"]
 
 
 def test_defaults_cover_every_rule_key():

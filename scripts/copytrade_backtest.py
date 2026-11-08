@@ -50,7 +50,9 @@ def load_channel(path: str):
     sigs, fups = [], []
     for kind, mid, t, ref, text in rows:
         if kind == "S":
-            sigs.append({"id": int(mid), "t": ts(t), "reported_tp": int(ref), "text": text, "p": parse_message(text).to_dict()})
+            rep = ref.split(":")[0].lstrip("A") if ":" in ref else ref
+            sigs.append({"id": int(mid), "t": ts(t), "reported_tp": int(rep or 0), "reported": ref, "text": text,
+                         "p": parse_message(text).to_dict()})
         else:
             fups.append({"id": int(mid), "t": ts(t), "reply": int(ref), "text": text, "p": parse_message(text).to_dict()})
     # a follow-up belongs to the signal it replies to, else the latest signal before it
@@ -107,7 +109,7 @@ def load_bars_mt5(symbol: str, tf: str, start: int, end: int, cache: Path):
 
 
 def simulate(sig, fups, bars, rules, follow=True, auto_be_tp=0, expiry_h=24.0, max_hold_h=48.0,
-             balance=10_000.0, offset=0):
+             balance=10_000.0, offset=0, opposite_t=None):
     T = bars["time"]
     t0 = sig["t"] + offset
     i0 = int(np.searchsorted(T, t0 + 1))           # first bar that opens after the message
@@ -124,7 +126,10 @@ def simulate(sig, fups, bars, rules, follow=True, auto_be_tp=0, expiry_h=24.0, m
         legs.append({"leg": L["leg"], "vol": L["volume"], "entry": L["entry"], "tp": L["tp"], "sl": plan.sl,
                      "state": "OPEN" if L["kind"] == "MARKET" else "PENDING", "fill_i": i0 if L["kind"] == "MARKET" else None,
                      "exit": None, "why": None})
-    events = sorted(((f["t"] + offset, f) for f in (fups if follow else [])), key=lambda x: x[0])
+    evs = [(f["t"] + offset, f) for f in (fups if follow else [])]
+    if opposite_t is not None:
+        evs.append((opposite_t + offset, {"p": {"kind": "CLOSE", "close_fraction": 1.0}}))
+    events = sorted(evs, key=lambda x: x[0])
     ei = 0
     end_i = int(np.searchsorted(T, t0 + max_hold_h * 3600))
     budget = balance * float(rules.get("risk_pct") or 1.0) / 100.0
@@ -143,12 +148,34 @@ def simulate(sig, fups, bars, rules, follow=True, auto_be_tp=0, expiry_h=24.0, m
                 elif k == "BREAKEVEN" and g["state"] == "PENDING" and rules.get("cancel_pending_on_be", True):
                     g["state"], g["why"] = "CANCELLED", "BE msg"
                 elif k == "MOVE_SL" and p.get("new_price") and g["state"] in ("OPEN", "PENDING"):
-                    g["sl"] = float(p["new_price"])
-                elif k == "CLOSE" and g["state"] == "OPEN":
-                    px = o if s == 1 else o + sp
-                    g["state"], g["exit"], g["why"] = "CLOSED", px, "close msg"
-                elif k == "CLOSE" and g["state"] == "PENDING":
+                    new = float(p["new_price"])
+                    ref = sig["p"].get("entry_high") or new
+                    wrong_side = g["state"] == "OPEN" and ((s == 1 and new >= o) or (s == -1 and new <= o + sp))
+                    if abs(new - ref) / ref * 100 <= float(rules.get("max_sl_move_pct") or 3.0) and not wrong_side:
+                        g["sl"] = new
+                elif k == "CLOSE" and g["state"] == "PENDING" and (p.get("close_fraction") or 1) >= 0.999:
                     g["state"], g["why"] = "CANCELLED", "close msg"
+            if k == "CLOSE":
+                frac = float(p.get("close_fraction") or 1.0)
+                openl = sorted([g for g in legs if g["state"] == "OPEN"], key=lambda g: g["leg"])
+                want = sum(g["vol"] for g in openl) * frac
+                px = o if s == 1 else o + sp
+                for g in openl:
+                    if want <= 1e-9:
+                        break
+                    take = min(g["vol"], want)
+                    if take >= g["vol"] - 1e-9:
+                        g["state"], g["exit"], g["why"] = "CLOSED", px, "close msg"
+                    else:   # split the leg: the closed part is booked now, the rest keeps running
+                        legs.append({**g, "vol": take, "state": "CLOSED", "exit": px, "why": "close msg", "leg": g["leg"]})
+                        g["vol"] = round(g["vol"] - take, 8)
+                    want -= take
+                if p.get("also_breakeven"):
+                    for g in legs:
+                        if g["state"] == "OPEN":
+                            g["sl"] = breakeven_price(g["entry"], sig["p"]["side"], rules)
+                        elif g["state"] == "PENDING" and rules.get("cancel_pending_on_be", True):
+                            g["state"], g["why"] = "CANCELLED", "BE msg"
             ei += 1
         if expiry_h and T[i] - t0 > expiry_h * 3600:
             for g in legs:
@@ -262,16 +289,39 @@ def main() -> int:
             ok += (seg_l <= near + 0.5) if p["side"] == "BUY" else (seg_h >= near - 0.5)
         print(f"# offset {off:+6d}s: zone reached within 1h for {ok}/{n} signals he reported a TP on", file=sys.stderr)
 
+    # for "buy/sell now <price>" signals: how far the market was from the quoted price when he posted
+    for off in (-900, -600, -300, -120, 0, 60, 120, 300):
+        d, sd = [], []
+        for sg in sigs:
+            p = sg["p"]
+            first = p["entry_high"] if p["side"] == "BUY" else p["entry_low"]
+            i = np.searchsorted(bars["time"], sg["t"] + off)
+            if 0 < i < len(bars["time"]) and abs(bars["time"][i] - sg["t"] - off) < 600:
+                d.append(abs(float(bars["open"][i]) - float(first)))
+                sd.append((float(bars["open"][i]) - float(first)) * (1 if p["side"] == "BUY" else -1))
+        if d:
+            print(f"# offset {off:+6d}s: market vs quoted entry: median {np.median(d):.2f}, within $1 for "
+                  f"{sum(x <= 1 for x in d)}/{len(d)}; already moved toward TP by {np.median(sd):+.2f} "
+                  f"(>= TP1 distance for {sum(1 for sg, x in zip(sigs, sd) if x >= 2)}/{len(sd)})", file=sys.stderr)
+
     base = merge_rules({"risk_pct": 1.0})
+    opp = {}
+    for i, sg in enumerate(sigs):
+        nxt = next((x for x in sigs[i + 1:] if x["p"]["side"] != sg["p"]["side"]), None)
+        opp[sg["id"]] = nxt["t"] if nxt else None
     runs = [
         ("AlgoEdge copier, follows his messages (cancel / BE / move SL), default rules", dict(follow=True)),
         ("Signals only, no follow-ups, pending expire after 1h", dict(follow=False, expiry_h=1)),
         ("Signals only, auto-BE after TP1, pending expire after 1h", dict(follow=False, auto_be_tp=1, expiry_h=1)),
         ("Follows his messages + auto-BE after TP1", dict(follow=True, auto_be_tp=1)),
+        ("Follows his messages + closes on an opposite signal", dict(follow=True, use_opp=True)),
     ]
     out = {}
     for name, kw in runs:
-        results = [simulate(sg, by_sig.get(sg["id"], []), bars, base, offset=a.offset, **kw) for sg in sigs]
+        use_opp = kw.pop("use_opp", False)
+        results = [simulate(sg, by_sig.get(sg["id"], []), bars, base, offset=a.offset,
+                            opposite_t=opp[sg["id"]] if use_opp else None, **kw) for sg in sigs]
+        kw["use_opp"] = use_opp
         report(name, sigs, results)
         out[name] = results
         if a.detail and kw.get("follow") and not kw.get("auto_be_tp"):
@@ -279,7 +329,7 @@ def main() -> int:
             for sg, r in zip(sigs, results):
                 d = datetime.fromtimestamp(sg["t"], timezone.utc).strftime("%m-%d %H:%M")
                 print(f"  {sg['id']}  {d}  {sg['p']['side']:4}  {r.get('order_type',''):6}  {r['status']:8} "
-                      f"{r.get('R', 0):+5.2f}  {','.join(map(str, r.get('tps', []))) or '-':8} TP{sg['reported_tp']}"
+                      f"{r.get('R', 0):+5.2f}  {','.join(map(str, sorted(set(r.get('tps', []))))) or '-':8} {sg.get('reported', 'TP' + str(sg['reported_tp']))}"
                       f"  {r.get('reason','')}")
     if a.json:
         Path(a.json).write_text(json.dumps({k: [{kk: vv for kk, vv in r.items() if kk != 'legs'} for r in v]

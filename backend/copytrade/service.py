@@ -148,6 +148,15 @@ class CopyTradeService:
         if not pd.get("symbol"):
             sig.status, sig.detail = "SKIPPED", "no symbol in the message"
             return
+        if rules.get("close_on_opposite"):
+            for prev in active:
+                pp = prev.parsed or {}
+                if pp.get("symbol") == pd.get("symbol") and pp.get("side") and pp.get("side") != pd.get("side"):
+                    orders = await self._live_orders(s, prev.id)
+                    acts0: list[str] = []
+                    await self._apply("CLOSE", {"close_fraction": 1.0}, prev, orders, rules, acts0, dry)
+                    prev.status = "CLOSED"
+                    prev.detail = (prev.detail or "") + f" | closed by opposite signal #{sig.msg_id}"
         plan, why = await self.plan_for(pd, rules)
         if plan is None or not plan.ok:
             sig.status, sig.detail = "SKIPPED", why or "no plan"
@@ -339,11 +348,22 @@ class CopyTradeService:
                     entry = pos.price_open if pos is not None else entry
                 await set_sl(o, breakeven_price(entry, side, rules), "breakeven")
         elif kind == "MOVE_SL":
-            if pd.get("new_price") is None:
+            new = pd.get("new_price")
+            if new is None:
                 acts.append("no price for the new stop")
+                return False
+            new = float(new)
+            entries = [o.entry for o in orders if o.entry]
+            ref = (sum(entries) / len(entries)) if entries else ((root.parsed or {}).get("entry_high") or (root.parsed or {}).get("entry") or new)
+            if ref and abs(new - float(ref)) / float(ref) * 100 > float(rules.get("max_sl_move_pct") or 3.0):
+                acts.append(f"ignored SL {new:g}: {abs(new - float(ref)) / float(ref) * 100:.1f}% from the entry - looks like a typo")
+                return False
+            q = await mt5ops.quote(root.symbol) if root.symbol else None
+            if q and positions and ((side == "BUY" and new >= q["bid"]) or (side == "SELL" and new <= q["ask"])):
+                acts.append(f"ignored SL {new:g}: on the wrong side of the price ({q['bid']}/{q['ask']})")
+                return False
             for o in positions + pendings:
-                if pd.get("new_price") is not None:
-                    await set_sl(o, float(pd["new_price"]), "moved")
+                await set_sl(o, new, "moved")
         elif kind == "MOVE_TP":
             idx = pd.get("tp_index")
             for o in positions + pendings:
@@ -361,6 +381,13 @@ class CopyTradeService:
                 by_id = {o.id: o for o in positions}
                 for oid, vol in plan:
                     await close(by_id[oid], vol)
+                if pd.get("also_breakeven") and rules.get("follow_breakeven", True):
+                    for o in positions:
+                        if o.status in ("OPEN", "PAPER"):
+                            await set_sl(o, breakeven_price(o.entry, side, rules), "breakeven")
+                    if rules.get("cancel_pending_on_be", True):
+                        for o in pendings:
+                            await cancel(o)
         elif kind == "CANCEL":
             if not pendings:
                 acts.append(f"signal #{root.msg_id}: no pending order to cancel (filled positions are left open)")
