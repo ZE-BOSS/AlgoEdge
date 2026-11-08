@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -264,14 +265,26 @@ def main() -> int:
     ap.add_argument("--offset", type=int, default=0, help="seconds added to message times to match bar times")
     ap.add_argument("--detail", action="store_true")
     ap.add_argument("--json", default=None)
+    ap.add_argument("--since", default=None, help="YYYY-MM-DD: only signals from this date")
     a = ap.parse_args()
 
     sigs, by_sig = load_channel(a.channel)
     if a.bars == "mt5":
         bars = load_bars_mt5(a.symbol, a.tf, sigs[0]["t"] - 3600, sigs[-1]["t"] + 3 * 86400,
-                             Path("/tmp") / f"ct_{a.symbol}_{a.tf}.npz")
+                             Path("/tmp") / f"ct_{a.symbol}_{a.tf}_{os.getuid()}.npz")
     else:
         bars = load_bars_npz(a.bars)
+    # only signals the bars cover (MT5 serves a limited history, e.g. ~100k M1 bars)
+    lo = int(bars["time"][0]) + 3600
+    hi = int(bars["time"][-1]) - 3600
+    if a.since:
+        lo = max(lo, ts(a.since + " 00:00:00"))
+    n0 = len(sigs)
+    sigs = [s for s in sigs if lo <= s["t"] <= hi]
+    print(f"# {len(sigs)}/{n0} signals inside the bars ({datetime.fromtimestamp(lo, timezone.utc):%Y-%m-%d} .. "
+          f"{datetime.fromtimestamp(hi, timezone.utc):%Y-%m-%d})")
+    if not sigs:
+        raise SystemExit("no signals inside the bar range")
 
     # alignment check: for signals he reported a TP on, the zone should be touched soon after
     for off in sorted({a.offset, 0, 3600, -3600, 7200, -7200, 10800}):
