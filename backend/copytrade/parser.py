@@ -177,6 +177,11 @@ def _tps(up: str) -> tuple[list[float], bool]:
 
 _FUTURE = re.compile(r"\b(I'LL|I WILL|WILL|WE'LL|GOING TO|GONNA)\b")
 _CONDITIONAL = re.compile(r"^\W*(IF|WHEN|ONCE|AS SOON AS|AS PRICE GOES|AFTER|AT TP\s*\d|AT TAKE ?PROFIT|UNTIL)\b|\bTP\s*\d\s+TO\s+(CLOSE|TAKE|SET)\b|\b(IF|ONCE|AS SOON AS)\b.{0,40}\b(HIT|HITS|REACH|BREAK|GOES|PUSH)")
+# "I'm going to close my entries" is what he is doing now - unless the clause
+# also says when ("I'm going to close half at TP3", "...if we break 3300").
+_IMMINENT = re.compile(r"\b(I'?M|I AM|WE'?RE|WE ARE)\s+(GOING TO|GONNA)\b")
+_DEFER = re.compile(r"\b(AT|IF|ONCE|WHEN|AFTER|BEFORE|LATER|TOMORROW|TONIGHT|NEXT|SOON|UNTIL|MONDAY|TUESDAY|"
+                    r"WEDNESDAY|THURSDAY|FRIDAY|WEEK)\b|\bTP\s*\d|\bIN \d+\s*(MIN|HOUR)|\bWILL\b|\bI'LL\b")
 _NEGATED = re.compile(r"\b(NOT|DON'?T|DONT|DO NOT|NEVER|NO NEED TO|WON'?T|WOULDN'?T|I'?M NOT)\b\W*(\w+\W+){0,2}?(CLOSE|CLOSING|ADJUST\w*|MOVE|MOVING|CANCEL\w*|EXIT|SET)")
 BE_WORD = r"(?:B/?E|BRE?A?K\s*-?\s*E?VEN\w*|BREKAEVEN\w*|BREAKEVE\w*)"
 
@@ -200,7 +205,8 @@ def _acting_now(up: str) -> str:
         if _CONDITIONAL.search(sent):
             continue
         for cl in _clauses(sent):
-            if _FUTURE.search(cl) and not re.search(r"\bNOW+\b|\bRIGHT AWAY\b|\bIMMEDIATELY\b", cl):
+            if _FUTURE.search(cl) and not re.search(r"\bNOW+\b|\bRIGHT AWAY\b|\bIMMEDIATELY\b", cl) \
+                    and not (_IMMINENT.search(cl) and not _DEFER.search(cl)):
                 continue
             keep.append(cl)
     return " | ".join(keep)
@@ -266,7 +272,7 @@ def _management(up: str) -> ParsedSignal | None:
     if not _NEGATED.search(up):
         frac = 0.0
         if re.search(r"\bI'?M OUT (OF )?(THIS|THE|MY|ALL) (SETUP|TRADE|TRADES|POSITION|POSITIONS|ENTRIES)", now) or \
-                re.search(r"\b(CLOS(E|ING)|EXIT\w*)\b\s*(ALL|EVERYTHING|THE TRADE|THIS TRADE|ALL (MY |THE )?(ENTRIES|POSITIONS|TRADES))\b(?!\s+(TOP|WORST|BOTTOM|BEST|BAD)\b)", now) or \
+                re.search(r"\b(CLOS(E|ING)|EXIT\w*)\b\s*(ALL|EVERYTHING|THE TRADE|THIS TRADE|ALL (MY |THE )?(ENTRIES|POSITIONS|TRADES)|(MY|OUR) (ENTRIES|POSITIONS|TRADES))\b(?!\s+(TOP|WORST|BOTTOM|BEST|BAD)\b)", now) or \
                 re.search(r"\b(CLOSE|CLOSING)\b\s*(IT|NOW|EVERYTHING)?\s*(NOW)?\s*$", now):
             frac = 1.0
         elif (m2 := re.search(r"\b(CLOS\w*|TAKE|TAKING|TOOK|SECURE\w*|BOOK\w*)\b[^|]{0,25}?\b(HALF|(\d{2})\s*%)", now)):

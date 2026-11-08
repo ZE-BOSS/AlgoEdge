@@ -420,3 +420,15 @@ def test_close_half_and_breakeven_and_typo_stop(env):
 def test_defaults_cover_every_rule_key():
     assert set(merge_rules({"bogus": 1})) == set(DEFAULT_RULES)
     assert DEFAULT_RULES["magic"] > 1101           # outside the bot's magic range
+
+
+def test_gts_vip_imminent_actions():
+    # "I'm going to ..." is what he is doing now, unless the clause says when
+    assert parse_message("I’m going to close my entries for this setup 🎯").kind == "CLOSE"
+    p = parse_message("GTS VIP, news is just over an hour away. I’m going to cancel my limit orders "
+                      "as we could start seeing volatility")
+    assert p.kind == "CANCEL"
+    assert parse_message("I’m going to close half at TP3").kind != "CLOSE"
+    assert parse_message("We’re going to close if we break 3300").kind != "CLOSE"
+    assert parse_message("I closed my positions after TP4 as I’m not with my usual set up").kind != "CLOSE"
+    assert parse_message("I will update on this signal before the market closes").kind in ("NONE", "INFO")
