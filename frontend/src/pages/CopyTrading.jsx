@@ -354,7 +354,7 @@ const RULES = [
   ['Follow-ups', [
     ['follow_breakeven', 'Follow breakeven / "risk free"', 'bool'],
     ['cancel_pending_on_be', '"Risk free" also cancels unfilled orders', 'bool', 'No risk left means no orders left either.'],
-    ['be_offset_pct', 'Breakeven offset', 'num', 'Entry ± this, to cover spread and commission.', '%'],
+    ['be_offset_pct', 'Breakeven offset', 'num', 'Entry ± this % of price, for spread and commission. Gold: 0.01 ≈ $0.40. Max 0.1.', '%'],
     ['follow_move_sl', 'Follow move SL', 'bool'],
     ['allow_widen_sl', 'Allow widening the stop', 'bool'],
     ['follow_move_tp', 'Follow move TP', 'bool'],

@@ -49,6 +49,7 @@ def load_channel(path: str):
     rows = [l.rstrip("\n").split("\t") for l in open(path, encoding="utf-8") if l.strip() and not l.startswith("#")]
     sigs, fups = [], []
     for kind, mid, t, ref, text in rows:
+        text = text.replace("\\n", "\n")
         if kind == "S":
             rep = ref.split(":")[0].lstrip("A") if ":" in ref else ref
             sigs.append({"id": int(mid), "t": ts(t), "reported_tp": int(rep or 0), "reported": ref, "text": text,

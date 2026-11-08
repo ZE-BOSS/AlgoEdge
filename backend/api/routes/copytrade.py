@@ -203,7 +203,7 @@ async def channel_history(cid: int, limit: int = 100, user: User = Depends(get_c
     if row is None or row.user_id != user.id:
         raise HTTPException(404, "channel not found")
     try:
-        msgs = await telegram_manager.history(user.id, row.chat_id, min(max(limit, 1), 500))
+        msgs = await telegram_manager.history(user.id, row.chat_id, min(max(limit, 1), 5000))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e)) from e
     for m in msgs:

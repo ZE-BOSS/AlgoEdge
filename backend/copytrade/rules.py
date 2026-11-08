@@ -417,8 +417,14 @@ def _layer_plan(p: OpenPlan, sig: dict, mkt: float, s: int, lo: float, hi: float
     return p
 
 
+MAX_BE_OFFSET_PCT = 0.1
+
+
 def breakeven_price(entry: float, side: str, rules: dict) -> float:
-    off = float(rules.get("be_offset_pct") or 0) / 100.0
+    # capped: the offset only has to cover spread + commission. A value like 2
+    # (meant as pips or $) would put a gold "breakeven" stop $80 past the entry,
+    # on the wrong side of price, and the broker would refuse every one.
+    off = min(max(float(rules.get("be_offset_pct") or 0), 0.0), MAX_BE_OFFSET_PCT) / 100.0
     return entry * (1 + off) if side == "BUY" else entry * (1 - off)
 
 
