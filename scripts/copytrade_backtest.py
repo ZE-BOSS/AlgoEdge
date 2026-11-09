@@ -40,6 +40,13 @@ from backend.copytrade.rules import breakeven_price, build_open_plan, merge_rule
 
 GOLD = {"point": 0.01, "tick_size": 0.01, "tick_value": 1.0, "volume_min": 0.01, "volume_step": 0.01,
         "volume_max": 100, "digits": 2, "contract": 100.0}
+SPEC = GOLD     # the symbol being tested; other symbols get a free-volume spec so R stays comparable
+
+
+def use_symbol(symbol: str) -> None:
+    global SPEC
+    SPEC = GOLD if symbol == "XAUUSD" else {**GOLD, "volume_min": 1e-6, "volume_step": 1e-6, "volume_max": 1e12,
+                                            "point": 1e-5, "tick_size": 1e-5, "tick_value": 1e-3, "digits": 5}
 
 
 def ts(s: str) -> int:
@@ -126,7 +133,7 @@ def simulate(sig, fups, bars, rules, follow=True, auto_be_tp=0, expiry_h=24.0, m
     s = 1 if sig["p"]["side"] == "BUY" else -1
     spr0 = bars["spread"][i0]
     bid0 = float(bars["open"][i0])
-    plan = build_open_plan(sig["p"], {"bid": bid0, "ask": bid0 + spr0}, GOLD, balance, rules, "XAUUSD")
+    plan = build_open_plan(sig["p"], {"bid": bid0, "ask": bid0 + spr0}, SPEC, balance, rules, "XAUUSD")
     if not plan.ok:
         return {"status": "SKIPPED", "reason": plan.reason}
     legs = []
@@ -253,10 +260,11 @@ def simulate(sig, fups, bars, rules, follow=True, auto_be_tp=0, expiry_h=24.0, m
     pnl = 0.0
     for g in legs:
         if g["exit"] is not None:
-            g["pnl"] = (g["exit"] - g["entry"]) * s * g["vol"] * GOLD["contract"]
+            g["pnl"] = (g["exit"] - g["entry"]) * s * g["vol"] * SPEC["tick_value"] / SPEC["tick_size"]
             pnl += g["pnl"]
     filled = [g for g in legs if g["exit"] is not None]
     return {"status": "FILLED" if filled else "NO_FILL", "pnl": pnl, "R": pnl / budget, "legs": legs,
+            "end_t": int(T[min(i, len(T) - 1)]),
             "tps": sorted(g["leg"] for g in legs if g["why"] == "TP"), "risk": plan.risk_dollars,
             "order_type": plan.order_type}
 
@@ -300,6 +308,11 @@ def main() -> int:
     a = ap.parse_args()
 
     sigs, by_sig = load_channel(a.channel)
+    use_symbol(a.symbol)
+    n_all = len(sigs)
+    sigs = [x for x in sigs if (x["p"].get("symbol") or a.symbol) == a.symbol]
+    if len(sigs) != n_all:
+        print(f"# {len(sigs)}/{n_all} signals are {a.symbol}")
     if a.bars == "mt5":
         bars = load_bars_mt5(a.symbol, a.tf, sigs[0]["t"] - 3600, sigs[-1]["t"] + 3 * 86400,
                              Path("/tmp") / f"ct_{a.symbol}_{a.tf}_{os.getuid()}.npz")

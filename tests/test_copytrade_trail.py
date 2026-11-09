@@ -133,3 +133,36 @@ def test_dry_run_ladder(env):  # noqa: F811
     _run(env.service.monitor_once())
     legs = _orders(env)
     assert legs[0].status == "CLOSED" and legs[1].sl == pytest.approx(2349.0)
+
+
+# ── groups, add-ons, default symbol ───────────────────────────────────────────
+def test_sender_allowed_in_groups():
+    from backend.copytrade.telegram_client import sender_allowed
+    admins = {111}
+    assert sender_allowed(True, -100, 999, None, None, {})                       # broadcast channel
+    assert sender_allowed(False, -100, 111, "mo", admins, {"only_admins": True})  # group admin
+    assert not sender_allowed(False, -100, 222, "member", admins, {"only_admins": True})
+    assert sender_allowed(False, -100, -100, None, admins, {})                   # anonymous admin = the group
+    assert sender_allowed(False, -100, 222, "Member", admins, {"allowed_senders": ["@member"]})
+    assert not sender_allowed(False, -100, 111, "mo", admins, {"allowed_senders": ["someone"]})
+    assert not sender_allowed(False, -100, 111, "mo", None, {"only_admins": True})   # admins unknown: nothing
+
+
+def test_add_on_entry_joins_the_running_trade(env):  # noqa: F811
+    _run(env.service.handle_message("u1", env.ch, 80, "Take Entry XAUUSD BUY 2350/ 2347.00\nStop Loss\n2340\nTP 2355\nTP 2360"))
+    first = [o.ticket for o in _orders(env)]
+    env.fake.bid, env.fake.ask = 2345.0, 2345.2
+    r = _run(env.service.handle_message("u1", env.ch, 81, "ADD MORE BUY 2345.00\n\nUPDATE SL 2338.00"))
+    assert r["status"] == "EXECUTED", r
+    assert all(env.fake.positions[t].sl == pytest.approx(2338.0) for t in first if t in env.fake.positions)
+    added = [o for o in _orders(env) if o.ticket not in first]
+    assert added and all(o.symbol == "XAUUSD" and o.sl == pytest.approx(2338.0) for o in added)
+    assert {o.tp for o in added} <= {2355.0, 2360.0}
+
+
+def test_default_symbol(env):  # noqa: F811
+    r = _run(env.service.handle_message("u1", env.ch, 82, "Take Entry SELL 2349.00\nStop Loss\n2356\nTP 2345\nTP 2341"))
+    assert r["status"] == "SKIPPED"
+    _set_rules(env, default_symbol="XAUUSD")
+    r = _run(env.service.handle_message("u1", env.ch, 83, "Take Entry SELL 2349.00\nStop Loss\n2356\nTP 2345\nTP 2341"))
+    assert r["status"] == "EXECUTED", r

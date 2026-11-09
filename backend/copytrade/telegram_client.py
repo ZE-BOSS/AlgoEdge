@@ -27,6 +27,7 @@ from sqlalchemy import select
 
 from backend.copytrade import crypto
 from backend.copytrade.models import CopyTradeChannel, CopyTradeSettings
+from backend.copytrade.rules import merge_rules
 from backend.data.database import async_session
 from backend.utils.logger import get_logger
 
@@ -38,6 +39,7 @@ try:
     from telethon.sessions import StringSession
     from telethon.tl.functions.channels import JoinChannelRequest
     from telethon.tl.functions.messages import CheckChatInviteRequest, ImportChatInviteRequest
+    from telethon.tl.types import ChannelParticipantsAdmins
     HAS_TELETHON = True
 except ImportError:  # pragma: no cover
     HAS_TELETHON = False
@@ -58,6 +60,25 @@ class _UserClient:
         self.channels: dict[int, int] = {}      # telegram chat id -> CopyTradeChannel.id
         self.last_error: str | None = None
         self.last_message_at: float | None = None
+        self.admins: dict[int, tuple[float, set[int]]] = {}   # group chat id -> (fetched at, admin user ids)
+
+
+def sender_allowed(chat_is_broadcast: bool, chat_id: int, sender_id: int | None, sender_username: str | None,
+                   admins: set[int] | None, rules: dict) -> bool:
+    """Who may move your money in a watched chat. A broadcast channel: only its
+    admins can post, so everything. A group: members chat there too ("closed
+    all", "move SL to ..."), so only the senders listed in allowed_senders, or
+    else the group's admins (and admins posting anonymously as the group)."""
+    if chat_is_broadcast:
+        return True
+    if sender_id is not None and int(sender_id) == int(chat_id):
+        return True                                    # an anonymous admin posts as the group itself
+    allowed = [str(x).lower().lstrip("@") for x in (rules.get("allowed_senders") or []) if str(x).strip()]
+    if allowed:
+        return str(sender_id) in allowed or (sender_username or "").lower() in allowed
+    if not rules.get("only_admins", True):
+        return True
+    return sender_id is not None and admins is not None and int(sender_id) in admins
 
 
 class TelegramManager:
@@ -215,9 +236,33 @@ class TelegramManager:
             await c.get_dialogs()          # fills the entity cache
             entity = await c.get_entity(chat_id)
         msgs = await c.get_messages(entity, limit=limit)
-        return [{"id": m.id, "date": m.date.isoformat() if m.date else None, "text": m.message or "",
-                 "reply_to": getattr(m.reply_to, "reply_to_msg_id", None),
-                 "edited": bool(m.edit_date)} for m in msgs if (m.message or "").strip()]
+        broadcast = bool(getattr(entity, "broadcast", False))
+        admins = None if broadcast else await self._admins(self._uc(user_id), int(chat_id), entity)
+        out = []
+        for m in msgs:
+            if not (m.message or "").strip():
+                continue
+            sid = getattr(m, "sender_id", None)
+            out.append({"id": m.id, "date": m.date.isoformat() if m.date else None, "text": m.message or "",
+                        "reply_to": getattr(m.reply_to, "reply_to_msg_id", None), "edited": bool(m.edit_date),
+                        "sender_id": sid,
+                        "from_admin": broadcast or (sid is not None and (int(sid) == int(chat_id) or
+                                                                           int(sid) in (admins or set())))})
+        return out
+
+    async def _admins(self, uc: _UserClient, chat_id: int, chat: Any) -> set[int] | None:
+        """Admin user ids of a group, cached for an hour. None if they can't be listed."""
+        now = asyncio.get_running_loop().time()
+        hit = uc.admins.get(chat_id)
+        if hit and now - hit[0] < 3600:
+            return hit[1]
+        try:
+            ids = {int(u.id) async for u in uc.client.iter_participants(chat, filter=ChannelParticipantsAdmins)}
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[COPYTRADE] can't list the admins of chat {chat_id}: {e} - set allowed_senders for it")
+            ids = None
+        uc.admins[chat_id] = (now, ids or set())
+        return ids
 
     # ── watching ────────────────────────────────────────────────────────────
     async def reload_channels(self, user_id: str) -> None:
@@ -246,6 +291,15 @@ class TelegramManager:
                 st = await s.get(CopyTradeSettings, user_id)
                 if not st or not st.enabled:
                     return
+                ch = await s.get(CopyTradeChannel, ch_id)
+                rules = merge_rules(st.rules, ch.rules if ch else None)
+            chat = await event.get_chat()
+            broadcast = bool(getattr(chat, "broadcast", False))
+            if not broadcast:
+                sender = await event.get_sender()
+                admins = await self._admins(uc, chat_id, chat)
+                if not sender_allowed(False, chat_id, event.sender_id, getattr(sender, "username", None), admins, rules):
+                    return                      # a member of the group, not the signal provider
             m = event.message
             uc.last_message_at = asyncio.get_running_loop().time()
             await copytrade_service.handle_message(

@@ -151,8 +151,24 @@ class CopyTradeService:
             sig.status, sig.detail = "SKIPPED", f"{len(active)} signals already open on this channel (max {rules['max_open_signals']})"
             return
         if not pd.get("symbol"):
+            if pd.get("add_on") and active:
+                # "ADD MORE BUY 4198 / NEW SL 4190": another entry on the running trade, and its new stop
+                root = max(active, key=lambda x: x.created_at or _now())
+                rp = root.parsed or {}
+                pd = {**pd, "symbol": rp.get("symbol")}
+                if not pd.get("tps"):
+                    pd["tps"], pd["tp_open"] = rp.get("tps") or [], rp.get("tp_open")
+                if pd.get("sl") is not None and rules.get("follow_move_sl", True):
+                    acts0: list[str] = []
+                    await self._apply("MOVE_SL", {"kind": "MOVE_SL", "new_price": pd["sl"]}, root,
+                                      await self._live_orders(s, root.id), rules, acts0, dry)
+                    root.actions = list(root.actions or []) + [f"add-on #{sig.msg_id}: " + a for a in acts0]
+            elif rules.get("default_symbol"):
+                pd = {**pd, "symbol": str(rules["default_symbol"])}
+        if not pd.get("symbol"):
             sig.status, sig.detail = "SKIPPED", "no symbol in the message"
             return
+        sig.parsed = pd
         if rules.get("close_on_opposite"):
             for prev in active:
                 pp = prev.parsed or {}

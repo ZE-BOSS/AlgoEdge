@@ -86,6 +86,7 @@ class ParsedSignal:
     new_price: float | None = None           # MOVE_SL / MOVE_TP target
     applies_to: str = "reply_or_last"        # reply_or_last / symbol / all
     also_breakeven: bool = False             # CLOSE that also says "and set breakeven" ("closed half & set BE")
+    add_on: bool = False                     # OPEN that adds to the running trade: "ADD MORE BUY 4198 / NEW SL 4190"
     confidence: float = 0.0
     notes: list[str] = field(default_factory=list)
 
@@ -142,7 +143,7 @@ def _entry(up: str, side: str | None) -> tuple[float | None, float | None, float
 
 
 def _sl(up: str) -> float | None:
-    m = re.search(r"\b(?:SL|S/L|STOP\s*LOSS|STOPLOSS|STOP)\s*[:=@\-]?\s*" + NUM, up)
+    m = re.search(r"\b(?:SL|S/L|STOP\s*LOSS|STOPLOSS|STOP)\s*[:=@\-.]?\s*" + NUM, up)
     return _num(m.group(1)) if m else None
 
 
@@ -164,11 +165,15 @@ def _tps(up: str) -> tuple[list[float], bool]:
     if not tps:
         # "TP: 4021 TP: 4019 TP. 4017 TP: open" - one unindexed TP per target
         rep = [_num(x) for x in re.findall(r"\bT\.?P\s*[:.=]\s*" + NUM, up)]
+        if len(rep) < 2:
+            # "TP 4131 TP 4135 TP 4138" - unindexed, no separator (the indexed forms were handled above)
+            rep = [_num(x) for x in re.findall(r"\bT\.?P\s+(\d{3,7}(?:[.,]\d{1,6})?|\d{1,2}[.,]\d{2,6})\b", up)]
         if len(rep) >= 2:
             tps = rep
     if not tps:
         # "TP 2350 / 2340 / 2330", "Targets: 2350, 2340" - prices of 3+ digits, not "TP7 ✅"
-        m = re.search(r"\b(?:TP|T/P|TAKE\s*PROFITS?|TARGETS?)(?!\s*\d{1,2}\b)\s*[:=@]?\s*((?:\d{3,7}(?:[.,]\d{1,6})?\s*(?:/|,|-|\||&|AND)?\s*)+)", up)
+        m = re.search(r"\b(?:TP|T/P|TAKE\s*PROFITS?|TARGETS?)(?!\s*\d{1,2}\b(?![.,]\d))\s*[:=@.]?\s*"
+                      r"((?:(?:\d{3,7}(?:[.,]\d{1,6})?|\d{1,2}[.,]\d{2,6})\s*(?:/|,|-|\||&|AND)?\s*)+)", up)
         if m:
             tps = [_num(x) for x in re.findall(NUM, m.group(1))]
     tp_open = bool(re.search(r"\bTP\s*\d*\s*[:.=]?\s*OPEN\b", up)) and not mo
@@ -183,7 +188,11 @@ _IMMINENT = re.compile(r"\b(I'?M|I AM|WE'?RE|WE ARE)\s+(GOING TO|GONNA)\b")
 _DEFER = re.compile(r"\b(AT|IF|ONCE|WHEN|AFTER|BEFORE|LATER|TOMORROW|TONIGHT|NEXT|SOON|UNTIL|MONDAY|TUESDAY|"
                     r"WEDNESDAY|THURSDAY|FRIDAY|WEEK)\b|\bTP\s*\d|\bIN \d+\s*(MIN|HOUR)|\bWILL\b|\bI'LL\b")
 _NEGATED = re.compile(r"\b(NOT|DON'?T|DONT|DO NOT|NEVER|NO NEED TO|WON'?T|WOULDN'?T|I'?M NOT)\b\W*(\w+\W+){0,2}?(CLOSE|CLOSING|ADJUST\w*|MOVE|MOVING|CANCEL\w*|EXIT|SET)")
-BE_WORD = r"(?:B/?E|BRE?A?K\s*-?\s*E?VEN\w*|BREKAEVEN\w*|BREAKEVE\w*)"
+# A bare "BE" is breakeven only when nothing follows it but punctuation or a
+# breakeven word ("stops to BE 💡", "SL to BE now", "BE on all") - never in
+# "be disciplined", "what needs to be done", "let be patient".
+BE_WORD = (r"(?:B/E|B\.E\b|\bBE\b(?=\s*(?:$|[^\w\s]|NOW\b|SET\b|ON\b|ACTIVE\b|ALL\b|HIT\b|TRIGGERED\b|AT\b|AND\b|"
+           r"FOR\b|PLEASE\b|GUYS\b|EVERYONE\b))|BRE?A?K\s*-?\s*E?VEN\w*|BREKAEVEN\w*|BREAKEVE\w*)")
 
 
 def _sentences(up: str) -> list[str]:
@@ -217,7 +226,14 @@ def _management(up: str) -> ParsedSignal | None:
     _acting_now); results, progress reports and "breakeven got hit" are
     information; "not close", "I'm not adjusting" never act."""
     p = ParsedSignal()
+    # a question ("Hold or close?", "Everyone closed his trades yes?") is never an instruction
+    up = re.sub(r"[^.!?|]*\?", " ", up).strip()
+    if not up:
+        return None
     now = _acting_now(up)
+    # "3 minutes from M15 to close", "candle close", "market will close for the week": not about the trade
+    now = " | ".join(c for c in now.split(" | ") if not re.search(
+        r"\b(CANDLE|M\d{1,2}|H\d{1,2}|D1|BAR|MARKET|SESSION|WEEK|DAILY|MINUTES?|MINS?)\b[^|]{0,14}\bCLOS", c))
 
     # trade-tracking bots (Cornix etc.) and results recaps: never an instruction
     if re.search(r"#\w+/USDT|CLOSED AT STOPLOSS|CLOSED DUE TO OPPOSITE|AVERAGE ENTRY PRICE|ALL TARGETS ACHIEVED|"
@@ -260,7 +276,9 @@ def _management(up: str) -> ParsedSignal | None:
     if not re.search(r"\b(NOT|NO|WON'?T|WILL NOT)\b[^|]{0,15}\b(ADJUST\w*|MOVE|MOVING)\b", up):
         m = re.search(r"\b(?:MOVE|MOVING|SET|SETTING|NEW|ADJUST\w*|CHANGE|CHANGING|UPDATE|PUT|TRAIL)\b[^\d|]{0,45}?\b(?:SL|S/L|STOP\s*LOSS|STOPS?)\b[^\d]{0,60}?" + NUM, up) \
             or re.search(r"\b(?:SL|STOP\s*LOSS)\s*(?:MOVED|NOW|UPDATED|CHANGED)?\s*(?:TO|AT|:|=)\s*" + NUM, up) \
-            or re.search(r"\bLAST\s+(?:SL\s+)?ADJUST\w*\b[^\d]{0,30}?" + NUM, up)
+            or re.search(r"\bLAST\s+(?:SL\s+)?ADJUST\w*\b[^\d]{0,30}?" + NUM, up) \
+            or re.search(r"\b(?:MOVED|CHANGED|UPDATED|EXTEND\w*)\s+(?:SL|S/L|STOP\s*LOSS)\s*[:=]?\s*" + NUM, up) \
+            or re.search(r"\b(?:SL|STOP\s*LOSS)\s*(?:UPDATE|CHANGE)\s*[:=]?\s*" + NUM, up)
         if m and 100 <= _num(m.group(1)):
             p.kind, p.new_price = "MOVE_SL", _num(m.group(1))
             return p
@@ -273,7 +291,9 @@ def _management(up: str) -> ParsedSignal | None:
         frac = 0.0
         if re.search(r"\bI'?M OUT (OF )?(THIS|THE|MY|ALL) (SETUP|TRADE|TRADES|POSITION|POSITIONS|ENTRIES)", now) or \
                 re.search(r"\b(CLOS(E|ING)|EXIT\w*)\b\s*(ALL|EVERYTHING|THE TRADE|THIS TRADE|ALL (MY |THE )?(ENTRIES|POSITIONS|TRADES)|(MY|OUR) (ENTRIES|POSITIONS|TRADES))\b(?!\s+(TOP|WORST|BOTTOM|BEST|BAD)\b)", now) or \
-                re.search(r"\b(CLOSE|CLOSING)\b\s*(IT|NOW|EVERYTHING)?\s*(NOW)?\s*$", now):
+                re.search(r"\b(CLOSE|CLOSING)\b\s*(IT|NOW|EVERYTHING)?\s*(NOW)?\s*$", now) or \
+                re.search(r"\bALL\s+(MY\s+|THE\s+|OUR\s+)?(ENTRIES|POSITIONS|TRADES)\s+(ARE\s+|NOW\s+)?CLOSED\b|"
+                          r"\bI\s*(HAVE\s+|'VE\s+)?(JUST\s+)?CLOSED\s+(ALL|EVERYTHING)\b(?!\s+(MY\s+|THE\s+|OUR\s+|OF\s+(MY|THE)\s+)?(TOP|WORST|BOTTOM|BEST|BAD)\b)", now):
             frac = 1.0
         elif (m2 := re.search(r"\b(CLOS\w*|TAKE|TAKING|TOOK|SECURE\w*|BOOK\w*)\b[^|]{0,25}?\b(HALF|(\d{2})\s*%)", now)):
             frac = 0.5 if m2.group(2) == "HALF" else int(m2.group(3)) / 100.0
@@ -297,7 +317,7 @@ def _management(up: str) -> ParsedSignal | None:
         r"|\b(SET|SETTING)\s+" + BE_WORD +
         r"|" + BE_WORD + r"\s+ON\s+ALL\b|\bRISK[\s-]*FREE\b|\bZERO+\s*RISK\w*|\bREDUCE\s*(THE\s*)?RISK\b[^|]{0,15}\bZERO\b"
         r"|\bNO (MORE )?RISK\b|\bSL\b[^|]{0,15}\b(ABOVE|BELOW)\b[^|]{0,15}\bENTR\w*"
-        r"|\bMAKE SURE\b[^|]{0,30}" + BE_WORD + r"|^\W*" + BE_WORD + r"\W*(NOW+)?\W*$"
+        r"|\bMAKE SURE\b[^|]{0,30}" + BE_WORD + r"|^\W*" + BE_WORD + r"\W*(NOW+)?\W*$|(?:^|\|)\W*" + BE_WORD + r"\W*NOW+\W*(?=\||$)"
         r"|\b(ON|AT|RUNNING|ABOVE|BELOW)\s+" + BE_WORD, now)
     if be and not _NEGATED.search(now):
         p.kind = "BREAKEVEN"
@@ -323,7 +343,7 @@ def parse_message(text: str) -> ParsedSignal:
         return ParsedSignal()
     up = text.upper().replace("—", "-").replace("–", "-").replace("’", "'").replace("‘", "'")
     # "4495Stop Loss 4483TP1 4497TP2" (line breaks lost when copied): split number|word
-    up = re.sub(r"(\d)([A-Z])", r"\1 \2", up)
+    up = re.sub(r"(\d)([A-Z])", r"\1 \2", up).replace("_", " ")
     up = " ".join(up.split())
     up = re.sub(r"(?<=\d)\s+(?=\d{3}\b)", "", up) if re.search(r"\d \d{3}\b", up) else up
     symbol = find_symbol(up)
@@ -334,11 +354,14 @@ def parse_message(text: str) -> ParsedSignal:
     # follow-up (or chat).
     if side and (sl is not None or tps) and not re.search(
             r"\b(CLOS\w*|CANCEL\w*|ADJUST\w* (BUY|SELL)|HIT|SMASHED)\b|^\s*OVER\s*\$", up):
-        p = ParsedSignal(kind="OPEN", symbol=symbol, side=side, order_type=otype, sl=sl, tps=tps, tp_open=tp_open)
+        p = ParsedSignal(kind="OPEN", symbol=symbol, side=side, order_type=otype, sl=sl, tps=tps, tp_open=tp_open,
+                         add_on=bool(re.match(r"^\W*ADD(ING)?\s+(MORE\s+)?(BUY|SELL)", up)))
         p.entry, p.entry_low, p.entry_high = _entry(up, side)
         if otype == "MARKET" and p.entry is None:
             p.notes.append("market entry, no price written")
         p.confidence = 0.4 + 0.2 * bool(symbol) + 0.2 * (sl is not None) + 0.2 * bool(tps)
+        if p.add_on and sl is not None:
+            p.confidence = max(p.confidence, 0.8)   # symbol and targets come from the trade it adds to
         _sanity(p)
         return p
     m = _management(up)

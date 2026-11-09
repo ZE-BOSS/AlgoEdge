@@ -58,6 +58,9 @@ DEFAULT_RULES: dict[str, Any] = {
     "close_on_opposite": False,   # a new signal in the other direction closes this channel's open trades on that symbol
     "max_sl_move_pct": 3.0,       # ignore a "move SL to X" more than this % from the entry (a typo: 4113 for 4413)
     # filters
+    "only_admins": True,          # in a GROUP, act only on messages from its admins (members chat there too)
+    "allowed_senders": [],        # or only these senders (@username or user id) - overrides only_admins
+    "default_symbol": "",         # symbol for signals that don't name one ("Take Entry SELL 4430 ...")
     "allowed_symbols": [],        # canonical names; empty = everything
     "max_open_signals": 5,        # open signals at once (per channel)
     "min_confidence": 0.8,

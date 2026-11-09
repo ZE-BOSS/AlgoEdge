@@ -270,7 +270,10 @@ function Channels({ loggedIn, onHistory, historyId }) {
 
 function ChannelRow({ c, active, onPatch, onDelete, onHistory }) {
   const [open, setOpen] = useState(false);
-  const [r, setR] = useState({ risk_pct: c.rules?.risk_pct ?? '', split_weights: (c.rules?.split_weights || []).join(', '), symbol_map: mapText(c.rules?.symbol_map) });
+  const [r, setR] = useState({
+    risk_pct: c.rules?.risk_pct ?? '', split_weights: (c.rules?.split_weights || []).join(', '), symbol_map: mapText(c.rules?.symbol_map),
+    default_symbol: c.rules?.default_symbol ?? '', allowed_senders: (c.rules?.allowed_senders || []).join(', '),
+  });
   const save = () => {
     const rules = { ...c.rules };
     if (r.risk_pct === '') delete rules.risk_pct; else rules.risk_pct = Number(r.risk_pct);
@@ -278,10 +281,13 @@ function ChannelRow({ c, active, onPatch, onDelete, onHistory }) {
     if (w.length) rules.split_weights = w; else delete rules.split_weights;
     const m = parseMap(r.symbol_map);
     if (Object.keys(m).length) rules.symbol_map = m; else delete rules.symbol_map;
+    if (r.default_symbol.trim()) rules.default_symbol = r.default_symbol.trim(); else delete rules.default_symbol;
+    const snd = r.allowed_senders.split(',').map((x) => x.trim()).filter(Boolean);
+    if (snd.length) rules.allowed_senders = snd; else delete rules.allowed_senders;
     onPatch({ rules });
     setOpen(false);
   };
-  const overrides = ['risk_pct', 'split_weights', 'symbol_map'].filter((k) => c.rules?.[k] != null).length;
+  const overrides = ['risk_pct', 'split_weights', 'symbol_map', 'default_symbol', 'allowed_senders'].filter((k) => c.rules?.[k] != null).length;
   return (
     <div className="ct-chan">
       <div className="ct-chan__row">
@@ -312,6 +318,16 @@ function ChannelRow({ c, active, onPatch, onDelete, onHistory }) {
               </Field>
               <Field label="TP weights" hint="Volume split across TP1, TP2… e.g. 40, 30, 20, 10.">
                 <input className="ct-input ct-mono" placeholder="equal" value={r.split_weights} onChange={(e) => setR({ ...r, split_weights: e.target.value })} />
+              </Field>
+            </div>
+            <div className="ct-row">
+              <Field label="Symbol when the signal names none" hint={'e.g. XAUUSD for "Take Entry SELL 4430 …"'}>
+                <input className="ct-input ct-mono" placeholder="none" value={r.default_symbol}
+                  onChange={(e) => setR({ ...r, default_symbol: e.target.value })} />
+              </Field>
+              <Field label="Only these senders" hint="Groups: @username or user id. Blank = the group's admins.">
+                <input className="ct-input ct-mono" placeholder="admins" value={r.allowed_senders}
+                  onChange={(e) => setR({ ...r, allowed_senders: e.target.value })} />
               </Field>
             </div>
             <Field label="Symbol map" hint="One per line: name in the channel = name at your broker.">
@@ -346,6 +362,7 @@ const RULES = [
     ['market_tolerance_pct', 'Market entry tolerance', 'num', 'How far past the written entry a market signal is still taken.', '%'],
     ['chase_rule', 'If price ran past the entry', 'select', null, [['limit', 'Wait with a limit'], ['skip', 'Skip'], ['market', 'Enter anyway']]],
     ['skip_if_tp1_passed', 'Skip if price is beyond TP1', 'bool'],
+    ['on_first_fill', 'When the first zone order fills', 'select', 'Market = cancel the deeper orders and take their volume now, so a quick tap of the zone still carries the full size.', [['keep', 'Keep the rest waiting'], ['market', 'Take the rest at market']]],
     ['pending_expiry_hours', 'Cancel unfilled orders after', 'num', '0 = never.', 'h'],
     ['missing_sl', 'Signal without a stop', 'select', null, [['skip', 'Skip it'], ['default', 'Use default stop']]],
     ['default_sl_pct', 'Default stop distance', 'num', null, '%'],
@@ -354,7 +371,7 @@ const RULES = [
   ['Follow-ups', [
     ['follow_breakeven', 'Follow breakeven / "risk free"', 'bool'],
     ['cancel_pending_on_be', '"Risk free" also cancels unfilled orders', 'bool', 'No risk left means no orders left either.'],
-    ['be_offset_pct', 'Breakeven offset', 'num', 'Entry ± this % of price, for spread and commission. Gold: 0.01 ≈ $0.40. Max 0.1.', '%'],
+    ['be_offset_pct', 'Breakeven offset', 'num', 'Entry ± this % of price, for spread and commission. Gold: 0.01 ≈ $0.40. Max 0.1. If it would sit past the price, plain entry is used.', '%'],
     ['follow_move_sl', 'Follow move SL', 'bool'],
     ['allow_widen_sl', 'Allow widening the stop', 'bool'],
     ['follow_move_tp', 'Follow move TP', 'bool'],
@@ -364,10 +381,12 @@ const RULES = [
     ['edit_updates', 'Edited signal updates SL / TP', 'bool'],
     ['cancel_pending_after_tp', 'Cancel unfilled orders once TP n fills', 'num', '0 = keep them.', 'TP'],
     ['be_after_tp', 'Auto breakeven once TP n fills', 'num', '0 = off.', 'TP'],
+    ['trail_ladder', 'Trail the stop up the TP ladder', 'bool', 'TP1 → breakeven, TP2 → TP1, TP3 → TP2 … as price reaches each target. Never loosens.'],
   ]],
   ['Filters & broker', [
     ['max_open_signals', 'Max open signals per channel', 'num', null, 'signals'],
     ['min_confidence', 'Min parse confidence', 'num', '0 - 1. Lower reads looser formats.'],
+    ['only_admins', 'In groups, follow only the admins', 'bool', 'Members chat in groups too ("closed all", "move SL…"). Channels are unaffected.'],
     ['allowed_symbols', 'Only these symbols', 'list-str', 'Comma separated. Empty = all.'],
     ['symbol_suffix', 'Broker symbol suffix', 'text', 'e.g. .m or .pro'],
     ['symbol_map', 'Symbol map', 'map', 'One per line: channel name = broker name.'],
