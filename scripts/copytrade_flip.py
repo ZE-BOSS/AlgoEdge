@@ -104,7 +104,7 @@ def run_path(sig, bars, i_fill, entry, vol0, mode, close_at=4, give=0.0, rr=10.0
         best = h if s == 1 else l_ + sp
         if (worst - stop) * s <= 0 and i > i_fill:
             return sum(v * (stop - e) * s for e, v in pos) * PER_LOT, T[i]
-        while k < len(tps) and (best - tps[k]) * s >= 0:
+        while i > i_fill and k < len(tps) and (best - tps[k]) * s >= 0:   # not in the fill bar: order unknown
             lvl = tps[k]
             k += 1
             if mode == "pyramid" and k >= close_at:
@@ -122,7 +122,7 @@ def run_path(sig, bars, i_fill, entry, vol0, mode, close_at=4, give=0.0, rr=10.0
                     add = lots(min(room / dist, add_mult * sum(v for _, v in pos)))
                     if add >= LOT_STEP:
                         pos.append((lvl + s * 0.2, add))     # a little slippage on the stacked fill
-        if mode == "runner" and (best - cap) * s >= 0:
+        if mode == "runner" and i > i_fill and (best - cap) * s >= 0:
             return sum(v * (cap - e) * s for e, v in pos) * PER_LOT, T[i]
     last = float(bars["close"][min(i, len(T) - 1)])
     return sum(v * (last - e) * s for e, v in pos) * PER_LOT, T[min(i, len(T) - 1)]
@@ -193,6 +193,7 @@ def flip(sigs, by_sig, bars, frac, how, start=100.0, target=1000.0):
 HOWS = [
     ("copier", {"ladder": True}),
     ("copier", {"ladder": True, "first_fill": "market_rest"}),
+    ("copier", {"ladder": True, "first_fill": "market_add"}),
     ("pyramid", {"close_at": 3}),
     ("pyramid", {"close_at": 4}),
     ("pyramid", {"close_at": 5}),
