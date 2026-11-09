@@ -49,8 +49,17 @@ fi
 # add_instance.sh copies the new bridge code into each Wine prefix but does not
 # restart the bridge. Restart it, then the API AFTER it, so the API attaches to
 # the fresh bridge at startup.
+# The API must not start before its bridge listens: if it does, it comes up in
+# mock mode (seen on live, 9 Nov). Wait up to 2 minutes for the port.
+bridge_port() { case "$1" in demo) echo 18811;; live) echo 18812;; flip) echo 18813;; esac; }
 for n in $NAMES; do
     systemctl restart "algoedge-bridge@$n"
+    port=$(bridge_port "$n")
+    for _ in $(seq 1 60); do
+        ss -ltn 2>/dev/null | grep -q ":$port " && break
+        sleep 2
+    done
+    ss -ltn 2>/dev/null | grep -q ":$port " || echo "   WARNING: bridge $n not listening on $port yet"
     sleep 3
     systemctl restart "algoedge-api@$n"
 done
