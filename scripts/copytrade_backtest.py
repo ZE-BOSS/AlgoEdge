@@ -138,8 +138,10 @@ def simulate(sig, fups, bars, rules, follow=True, auto_be_tp=0, expiry_h=24.0, m
         return {"status": "SKIPPED", "reason": plan.reason}
     legs = []
     for L in plan.legs:
-        legs.append({"leg": L["leg"], "vol": L["volume"], "entry": L["entry"], "tp": L["tp"], "sl": plan.sl,
-                     "state": "OPEN" if L["kind"] == "MARKET" else "PENDING", "fill_i": i0 if L["kind"] == "MARKET" else None,
+        kind = L.get("kind") or plan.order_type
+        entry = L.get("entry") if L.get("entry") is not None else plan.entry
+        legs.append({"leg": L["leg"], "vol": L["volume"], "entry": entry, "tp": L["tp"], "sl": plan.sl, "kind": kind,
+                     "state": "OPEN" if kind == "MARKET" else "PENDING", "fill_i": i0 if kind == "MARKET" else None,
                      "exit": None, "why": None})
     evs = [(f["t"] + offset, f) for f in (fups if follow else [])]
     if opposite_t is not None:
@@ -201,7 +203,14 @@ def simulate(sig, fups, bars, rules, follow=True, auto_be_tp=0, expiry_h=24.0, m
                     g["state"], g["why"] = "CANCELLED", "expired"
         ask_l, ask_h = l + sp, h + sp
         for g in legs:
-            if g["state"] == "PENDING":
+            if g["state"] == "PENDING" and g.get("kind") == "STOP":
+                if (s == 1 and ask_h >= g["entry"]) or (s == -1 and l <= g["entry"]):
+                    g["state"], g["fill_i"] = "OPEN", i
+                    if s == 1 and o + sp > g["entry"]:
+                        g["entry"] = o + sp          # gapped through: filled at the open, worse
+                    if s == -1 and o < g["entry"]:
+                        g["entry"] = o
+            elif g["state"] == "PENDING":
                 if (s == 1 and ask_l <= g["entry"]) or (s == -1 and h >= g["entry"]):
                     g["state"], g["fill_i"] = "OPEN", i
                     if s == 1 and o + sp < g["entry"]:
