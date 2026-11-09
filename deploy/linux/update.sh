@@ -38,11 +38,18 @@ echo "== demo"
 bash "$SRC/deploy/linux/add_instance.sh" demo 8001 18811 1
 echo "== live"
 bash "$SRC/deploy/linux/add_instance.sh" live 8002 18812 2
+# the separate flip account, once it has been created (deploy/linux/FLIP_ACCOUNT.md)
+NAMES="demo live"
+if [ -d /opt/algoedge/flip ]; then
+    echo "== flip"
+    bash "$SRC/deploy/linux/add_instance.sh" flip 8003 18813 3
+    NAMES="demo live flip"
+fi
 
 # add_instance.sh copies the new bridge code into each Wine prefix but does not
 # restart the bridge. Restart it, then the API AFTER it, so the API attaches to
 # the fresh bridge at startup.
-for n in demo live; do
+for n in $NAMES; do
     systemctl restart "algoedge-bridge@$n"
     sleep 3
     systemctl restart "algoedge-api@$n"
