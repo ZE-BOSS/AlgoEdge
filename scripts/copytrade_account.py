@@ -111,7 +111,7 @@ def trades_for(path, bars, mode):
                 continue
             out.append((sg["t"], r["end_t"], r["R"], None))
         else:
-            f = first_fill(sg, bars)
+            f = first_fill(sg, bars, by_sig.get(sg["id"], []))
             if f is None:
                 continue
             i, entry = f

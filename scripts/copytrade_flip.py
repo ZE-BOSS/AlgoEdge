@@ -51,35 +51,20 @@ def lots(x: float) -> float:
     return max(0.0, np.floor(x / LOT_STEP + 1e-9) * LOT_STEP)
 
 
-def first_fill(sig, bars, expiry_h=24.0, max_wait_h=24.0):
-    """Index and price of the first entry: the zone's near edge (or market if
-    price is already in/through the zone when the message lands)."""
-    T = bars["time"]
+def first_fill(sig, bars, fups=None):
+    """Index and price of the first entry, exactly as the copier would get it:
+    its zone legs (limits at the zone, market if price is already there), his
+    cancel / close messages and the 24 h expiry - the earliest leg that fills."""
     p = sig["p"]
-    s = 1 if p["side"] == "BUY" else -1
-    i0 = int(np.searchsorted(T, sig["t"] + 1))
-    if i0 >= len(T) or T[i0] - sig["t"] > 6 * 3600:
+    if p.get("sl") is None or not p.get("tps"):
         return None
-    hi, lo = p.get("entry_high"), p.get("entry_low")
-    near = (hi if s == 1 else lo) if hi and lo else p.get("entry")
-    sl = p.get("sl")
-    tps = [float(t) for t in (p.get("tps") or [])]
-    if sl is None or not tps:
+    rules = merge_rules({"risk_pct": 1.0, "cancel_pending_after_tp": 1})
+    r = bt.simulate(sig, fups or [], bars, rules, follow=True, ladder=False, first_fill="keep")
+    filled = [g for g in r.get("legs") or [] if g.get("fill_i") is not None]
+    if r["status"] != "FILLED" or not filled:
         return None
-    sp = float(bars["spread"][i0])
-    mkt = float(bars["open"][i0]) + (sp if s == 1 else 0.0)
-    if near is None or (mkt - near) * s <= 0:
-        if (mkt - sl) * s <= 0 or (tps[0] - mkt) * s <= 0:
-            return None
-        return i0, mkt
-    end = int(np.searchsorted(T, sig["t"] + max_wait_h * 3600))
-    for i in range(i0, min(end, len(T))):
-        h, l_, sp = float(bars["high"][i]), float(bars["low"][i]), float(bars["spread"][i])
-        if (s == 1 and l_ + sp <= near) or (s == -1 and h >= near):
-            return i, float(near)
-        if (s == 1 and h >= tps[0]) or (s == -1 and l_ + sp <= tps[0]):
-            return None          # ran to TP1 without us: the copier cancels after TP1
-    return None
+    g = min(filled, key=lambda x: (x["fill_i"], x["leg"]))
+    return int(g["fill_i"]), float(g["entry"])
 
 
 def run_path(sig, bars, i_fill, entry, vol0, mode, close_at=4, give=0.0, rr=10.0, max_hold_h=48.0,
@@ -140,7 +125,7 @@ def trade(sig, fups, bars, pot, frac, how):
         if r["status"] != "FILLED":
             return None, None
         return r["pnl"], r["end_t"]
-    f = first_fill(sig, bars)
+    f = first_fill(sig, bars, fups)
     if f is None:
         return None, None
     i, entry = f
