@@ -152,7 +152,7 @@ function SignIn({ server, onDone }) {
         {busy ? (creating ? 'Creating…' : 'Signing in…')
           : creating ? `Create account on ${server.label}` : `Sign in to ${server.label}`}
       </button>
-      <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}
+      <button type="button" className="btn btn-secondary btn-sm"
               onClick={() => { setCreating(!creating); setError(''); }}>
         {creating ? 'I already have an account here' : 'New server? Create the first account'}
       </button>
