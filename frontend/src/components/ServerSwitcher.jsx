@@ -114,6 +114,8 @@ function SignIn({ server, onDone }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  const [creating, setCreating] = useState(false);
+
   const go = async (e) => {
     e.preventDefault();
     setBusy(true); setError('');
@@ -121,7 +123,11 @@ function SignIn({ server, onDone }) {
       // Straight to that server, not through the shared client: this is how
       // the token for THIS server is obtained in the first place.
       const base = server.baseUrl.replace(/\/$/, '');
-      const { data } = await axios.post(`${base}/api/auth/login`, { email, password });
+      // A new server has no accounts yet; it accepts ONE registration (the
+      // owner) and then closes it.
+      const { data } = creating
+        ? await axios.post(`${base}/api/auth/register`, { email, password, name: email.split('@')[0] })
+        : await axios.post(`${base}/api/auth/login`, { email, password });
       storeServerAuth(server.id, data.access_token, data.refresh_token, data.user);
       onDone();
     } catch (err) {
@@ -140,10 +146,15 @@ function SignIn({ server, onDone }) {
       <input type="email" placeholder="Email" value={email} autoComplete="username"
              onChange={(e) => setEmail(e.target.value)} />
       <input type="password" placeholder="Password" value={password}
-             autoComplete="current-password"
+             autoComplete={creating ? 'new-password' : 'current-password'}
              onChange={(e) => setPassword(e.target.value)} />
       <button className="btn btn-primary btn-sm" disabled={busy || !email || !password}>
-        {busy ? 'Signing in…' : `Sign in to ${server.label}`}
+        {busy ? (creating ? 'Creating…' : 'Signing in…')
+          : creating ? `Create account on ${server.label}` : `Sign in to ${server.label}`}
+      </button>
+      <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}
+              onClick={() => { setCreating(!creating); setError(''); }}>
+        {creating ? 'I already have an account here' : 'New server? Create the first account'}
       </button>
       {error && <div style={{ color: 'var(--red)', fontSize: '0.78rem' }}>{error}</div>}
     </form>
