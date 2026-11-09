@@ -452,11 +452,13 @@ async def health_identity():
 
         from backend.mt5.executor import run_mt5
 
-        info = await run_mt5(mt5.account_info)
+        # bounded: a terminal that is not logged in yet can hang these calls, and
+        # the server switcher polls this before sign-in (seen on the new flip box)
+        info = await asyncio.wait_for(run_mt5(mt5.account_info), timeout=3)
         if info is not None:
             account = int(info.login)
             server_name = getattr(info, "server", None)
-        terminal = await run_mt5(mt5.terminal_info)
+        terminal = await asyncio.wait_for(run_mt5(mt5.terminal_info), timeout=3)
         if terminal is not None:
             broker = getattr(terminal, "company", None)
     except Exception as exc:                      # a detached terminal is a state, not an error
