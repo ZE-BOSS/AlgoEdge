@@ -50,6 +50,10 @@ DEFAULT_RULES: dict[str, Any] = {
     "cancel_pending_on_be": True, # "risk free" means no risk left: a breakeven instruction also cancels the signal's unfilled orders
     "cancel_pending_after_tp": 1, # once TPn fills, cancel the signal's unfilled zone orders (0 = keep them)
     "be_after_tp": 0,             # 0 = off; 1 = move the remaining legs to breakeven once TP1 fills; 2 = after TP2 ...
+    "trail_ladder": False,        # trail every open leg as the signal's targets are reached: TP1 -> breakeven,
+                                  # TP2 -> TP1, TP3 -> TP2 ... (stops only ever tighten)
+    "on_first_fill": "keep",      # zone legs when the first one fills: keep (wait at their levels) /
+                                  # market (cancel them, take the same volume at market at once)
     "edit_updates": True,         # an edited signal updates SL/TP of the trade it opened
     "close_on_opposite": False,   # a new signal in the other direction closes this channel's open trades on that symbol
     "max_sl_move_pct": 3.0,       # ignore a "move SL to X" more than this % from the entry (a typo: 4113 for 4413)
@@ -426,6 +430,33 @@ def breakeven_price(entry: float, side: str, rules: dict) -> float:
     # on the wrong side of price, and the broker would refuse every one.
     off = min(max(float(rules.get("be_offset_pct") or 0), 0.0), MAX_BE_OFFSET_PCT) / 100.0
     return entry * (1 + off) if side == "BUY" else entry * (1 - off)
+
+
+def trail_target(level: int, entry: float, side: str, tps: list, rules: dict, ladder: bool) -> float | None:
+    """Where the stop of a leg opened at `entry` belongs once the signal's TP`level`
+    has been reached: breakeven at TP1 (or at be_after_tp without the ladder),
+    then the previous target with the ladder. None = nothing to do yet."""
+    s = 1 if side == "BUY" else -1
+    be_after = int(rules.get("be_after_tp") or 0)
+    if ladder:
+        if level < 1:
+            return None
+        if level == 1 or not tps:
+            return breakeven_price(entry, side, rules)
+        t = float(tps[min(level - 2, len(tps) - 1)])
+        return t if (t - entry) * s > 0 else breakeven_price(entry, side, rules)
+    if be_after and level >= be_after:
+        return breakeven_price(entry, side, rules)
+    return None
+
+
+def stop_fits(sl: float, side: str, quote: dict, spec: dict | None) -> bool:
+    """A protective stop must sit on the losing side of the price it closes at,
+    at least the broker's stops level away (MT5 refuses it otherwise)."""
+    s = 1 if side == "BUY" else -1
+    px = float(quote["bid"] if side == "BUY" else quote["ask"])
+    gap = float((spec or {}).get("stops_level") or 0) * float((spec or {}).get("point") or 0)
+    return (px - sl) * s > gap
 
 
 def legs_to_close(legs: list[dict], fraction: float) -> list[tuple[int, float]]:

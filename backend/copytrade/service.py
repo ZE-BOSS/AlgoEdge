@@ -35,7 +35,8 @@ from sqlalchemy import desc, select
 from backend.copytrade import mt5ops
 from backend.copytrade.models import CopyTradeChannel, CopyTradeOrder, CopyTradeSettings, CopyTradeSignal
 from backend.copytrade.parser import parse_message
-from backend.copytrade.rules import breakeven_price, build_open_plan, legs_to_close, merge_rules, resolve_symbol
+from backend.copytrade.rules import (breakeven_price, build_open_plan, legs_to_close, merge_rules, resolve_symbol,
+                                     stop_fits, trail_target)
 from backend.data.database import async_session
 from backend.utils.logger import get_logger
 
@@ -52,6 +53,10 @@ def _now() -> datetime:
 class CopyTradeService:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()        # one message at a time: follow-ups must see the orders of the signal before them
+        self._tp_closed: dict[int, bool] = {}   # ticket -> closed by its take profit (history never changes)
+        self._reached: dict[int, int] = {}      # signal id -> highest of its TPs price has reached
+        self._trail_note: dict[int, float] = {} # order id -> stop we last failed to set (log once)
+        self._pending_be: dict[int, float] = {} # order id -> breakeven he asked for that didn't fit the price yet
 
     # ── settings ────────────────────────────────────────────────────────────
     async def get_settings(self, s, user_id: str) -> CopyTradeSettings:
@@ -236,7 +241,13 @@ class CopyTradeService:
         if state == "OPEN" and r.status == "PENDING":
             r.status = "OPEN"
         elif state == "GONE":
-            r.status = "CLOSED" if r.status == "OPEN" else "CANCELLED"
+            if r.status == "OPEN":
+                r.status = "CLOSED"
+            elif await mt5ops.was_filled(r.ticket):
+                # filled and closed between two checks (a fast move straight to its TP or stop)
+                r.status, r.detail = "CLOSED", (r.detail or "") + " | filled and closed between checks"
+            else:
+                r.status = "CANCELLED"
 
     # ── follow-ups ──────────────────────────────────────────────────────────
     async def _follow_up(self, s, sig, ch, pd, rules, dry) -> None:
@@ -341,12 +352,24 @@ class CopyTradeService:
                     await cancel(o)
             if not positions:
                 acts.append(f"signal #{root.msg_id}: no filled position to move to breakeven")
+            q = await mt5ops.quote(root.symbol) if (root.symbol and not dry) else None
+            spec_ = await mt5ops.symbol_spec(root.symbol) if q else None
             for o in positions:
                 entry = o.entry
                 if not dry and not o.status.startswith("PAPER"):
                     pos = await mt5ops.get_position(o.ticket)
                     entry = pos.price_open if pos is not None else entry
-                await set_sl(o, breakeven_price(entry, side, rules), "breakeven")
+                tgt = breakeven_price(entry, side, rules)
+                if q and o.status == "OPEN" and not stop_fits(tgt, side, q, spec_):
+                    if stop_fits(float(entry), side, q, spec_):
+                        tgt = float(entry)          # the offset is past the price: plain breakeven
+                    else:
+                        # price is back behind the entry: the broker would refuse it. Set it as soon as it fits.
+                        self._pending_be[o.id] = tgt
+                        acts.append(f"leg {o.leg}: breakeven {tgt:g} is past the price now - set as soon as it fits")
+                        changed = True
+                        continue
+                await set_sl(o, tgt, "breakeven")
         elif kind == "MOVE_SL":
             new = pd.get("new_price")
             if new is None:
@@ -471,33 +494,141 @@ class CopyTradeService:
                     # unfilled zone orders after TPn filled
                     cancel_after = int(rules.get("cancel_pending_after_tp") or 0)
                     if cancel_after:
-                        for r in [r for r in rows if before[r.id] == "OPEN" and r.status == "CLOSED" and r.leg >= cancel_after]:
-                            if r.ticket and await mt5ops.closed_by_tp(r.ticket):
+                        for r in [r for r in rows if before[r.id] in ("OPEN", "PENDING") and r.status == "CLOSED"
+                                  and r.leg >= cancel_after]:
+                            if r.ticket and await self._closed_tp(r.ticket):
                                 for o in rows:
                                     if o.status == "PENDING" and o.ticket:
                                         ok, _ = await mt5ops.cancel_order(o.ticket)
                                         if ok:
                                             o.status, o.detail = "CANCELLED", f"TP{r.leg} filled"
                                 break
-                    # breakeven after TPn
-                    be_after = int(rules.get("be_after_tp") or 0)
-                    if be_after:
-                        newly_closed = [r for r in rows if before[r.id] == "OPEN" and r.status == "CLOSED"]
-                        for r in newly_closed:
-                            if r.leg >= be_after and r.ticket and await mt5ops.closed_by_tp(r.ticket):
-                                side = (root.parsed or {}).get("side")
-                                for o in rows:
-                                    if o.status == "OPEN" and o.leg > r.leg:
-                                        pos = await mt5ops.get_position(o.ticket)
-                                        if pos is not None:
-                                            be = breakeven_price(pos.price_open, side, rules)
-                                            ok, _ = await mt5ops.modify_position(o.ticket, sl=be)
-                                            if ok:
-                                                o.sl = be
-                                logger.info(f"[COPYTRADE] TP{r.leg} filled on signal #{root.msg_id} - rest at breakeven")
+                    # first fill: the rest of the zone at market
+                    if str(rules.get("on_first_fill") or "keep") == "market" and \
+                            not any(before[r.id] in ("OPEN", "CLOSED") for r in rows) and \
+                            any(before[r.id] == "PENDING" and r.status in ("OPEN", "CLOSED") for r in rows):
+                        await self._rest_at_market(root, rows, rules)
+                    # breakeven he asked for while price was behind the entry
+                    if self._pending_be:
+                        await self._apply_pending_be(root, rows)
+                    # breakeven after TPn / TP ladder trail - every round until the stop sticks
+                    if int(rules.get("be_after_tp") or 0) or rules.get("trail_ladder"):
+                        await self._trail(root, rows, rules)
                     if all(r.status not in LIVE_ORDER for r in rows):
                         root.status = "CLOSED"
                 await s.commit()
+
+    async def _closed_tp(self, ticket: int) -> bool:
+        if ticket not in self._tp_closed:
+            self._tp_closed[ticket] = bool(await mt5ops.closed_by_tp(ticket))
+        return self._tp_closed[ticket]
+
+    async def _rest_at_market(self, root: CopyTradeSignal, rows: list[CopyTradeOrder], rules: dict) -> None:
+        """The first zone leg filled: cancel the legs still waiting deeper in the
+        zone and take their volume at market now, so a move that only touches
+        the top of the zone still carries the whole position."""
+        spec = await mt5ops.symbol_spec(root.symbol) if root.symbol else None
+        if not spec:
+            return
+        for r in rows:
+            if r.status != "PENDING" or not r.ticket:
+                continue
+            ok, _ = await mt5ops.cancel_order(r.ticket)
+            if not ok:
+                continue
+            ok, detail, ticket = await mt5ops.place(root.symbol, r.side, "MARKET", r.volume, 0.0, r.sl, r.tp,
+                                                    int(rules["magic"]), f"AE_CT_{root.msg_id % 100000}_TP{r.leg}m",
+                                                    spec)
+            if ok:
+                pos = await mt5ops.get_position(ticket)
+                r.ticket, r.kind, r.status = ticket, "MARKET", "OPEN"
+                r.entry = float(pos.price_open) if pos is not None else r.entry
+                r.detail = f"first leg filled - taken at market {r.entry:g}"
+            else:
+                r.status, r.detail = "CANCELLED", f"first leg filled; market entry failed: {detail}"
+            logger.info(f"[COPYTRADE] signal #{root.msg_id} leg {r.leg}: {r.detail}")
+
+    async def _apply_pending_be(self, root: CopyTradeSignal, rows: list[CopyTradeOrder]) -> None:
+        side = (root.parsed or {}).get("side")
+        mine = [r for r in rows if r.id in self._pending_be]
+        if not mine or side not in ("BUY", "SELL") or not root.symbol:
+            return
+        q = await mt5ops.quote(root.symbol)
+        spec = await mt5ops.symbol_spec(root.symbol)
+        s = 1 if side == "BUY" else -1
+        for r in mine:
+            tgt = self._pending_be[r.id]
+            if r.status != "OPEN":
+                self._pending_be.pop(r.id, None)
+                continue
+            if not q or not stop_fits(tgt, side, q, spec):
+                continue
+            if r.sl is not None and (tgt - r.sl) * s <= 0:
+                self._pending_be.pop(r.id, None)
+                continue
+            ok, msg = await mt5ops.modify_position(r.ticket, sl=tgt)
+            if ok:
+                r.sl = tgt
+                self._pending_be.pop(r.id, None)
+                logger.info(f"[COPYTRADE] signal #{root.msg_id} leg {r.leg}: breakeven {tgt:g} set (it fits now)")
+
+    async def _trail(self, root: CopyTradeSignal, rows: list[CopyTradeOrder], rules: dict) -> None:
+        """Breakeven after TPn, or with the ladder TP1 -> breakeven, TP2 -> TP1 ...
+        Recomputed every round from what has happened (legs closed at their TP,
+        the furthest target price reached), so a stop the broker refused - too
+        close to the price - is simply tried again on the next round."""
+        side = (root.parsed or {}).get("side")
+        if side not in ("BUY", "SELL") or not root.symbol:
+            return
+        s = 1 if side == "BUY" else -1
+        open_rows = [r for r in rows if r.status == "OPEN" and r.ticket]
+        if not open_rows:
+            return
+        ladder = bool(rules.get("trail_ladder"))
+        tps = [float(t) for t in ((root.parsed or {}).get("tps") or [])]
+        level = 0
+        for r in rows:
+            if r.status == "CLOSED" and r.ticket and await self._closed_tp(r.ticket):
+                level = max(level, int(r.leg))
+        q = await mt5ops.quote(root.symbol)
+        if q and ladder:
+            px = float(q["bid"] if s == 1 else q["ask"])
+            k = self._reached.get(root.id, 0)
+            while k < len(tps) and (px - tps[k]) * s >= 0:
+                k += 1
+            self._reached[root.id] = k
+            level = max(level, k)
+        if level < 1 or not q:
+            return
+        spec = await mt5ops.symbol_spec(root.symbol)
+        for r in open_rows:
+            pos = await mt5ops.get_position(r.ticket)
+            if pos is None:
+                continue
+            entry = float(pos.price_open)
+            cur = float(pos.sl or 0) or None
+            tgt = trail_target(level, entry, side, tps, rules, ladder)
+            if tgt is None or (cur is not None and (tgt - cur) * s <= 1e-9):
+                continue
+            if not stop_fits(tgt, side, q, spec):
+                # the offset (or the target) is past the price right now: plain breakeven if that fits, else wait
+                alt = entry
+                if stop_fits(alt, side, q, spec) and (cur is None or (alt - cur) * s > 1e-9):
+                    tgt = alt
+                else:
+                    if self._trail_note.get(r.id) != tgt:
+                        self._trail_note[r.id] = tgt
+                        logger.info(f"[COPYTRADE] signal #{root.msg_id} leg {r.leg}: stop {tgt:g} is past the price "
+                                    f"now - retrying")
+                    continue
+            ok, msg = await mt5ops.modify_position(r.ticket, sl=tgt)
+            if ok:
+                r.sl = tgt
+                self._trail_note.pop(r.id, None)
+                logger.info(f"[COPYTRADE] signal #{root.msg_id} leg {r.leg}: TP{level} reached - stop to {tgt:g}")
+            elif self._trail_note.get(r.id) != tgt:
+                self._trail_note[r.id] = tgt
+                logger.warning(f"[COPYTRADE] signal #{root.msg_id} leg {r.leg}: stop to {tgt:g} refused: {msg}")
 
     async def _simulate_paper(self, root: CopyTradeSignal, rows: list[CopyTradeOrder], rules: dict) -> None:
         """Dry run: fill paper pending orders and close paper positions at their
@@ -536,11 +667,29 @@ class CopyTradeService:
                     for o in live:
                         if o.status == "PAPER_PENDING":
                             o.status, o.detail = "CANCELLED", f"TP{r.leg} filled"
-                be_after = int(rules.get("be_after_tp") or 0)
-                if hit_tp and be_after and r.leg >= be_after:
-                    for o in live:
-                        if o.status == "PAPER" and o.leg > r.leg:
-                            o.sl = breakeven_price(o.entry, side, rules)
+        # paper first fill: the rest of the zone at market
+        if str(rules.get("on_first_fill") or "keep") == "market" and any(r.status == "PAPER" for r in live) \
+                and not any("first leg filled" in (r.detail or "") for r in live):
+            for r in live:
+                if r.status == "PAPER_PENDING":
+                    r.status, r.entry, r.detail = "PAPER", px_open, f"first leg filled - paper market at {px_open:g}"
+        # paper breakeven after TPn / ladder trail
+        if int(rules.get("be_after_tp") or 0) or rules.get("trail_ladder"):
+            s_ = 1 if buy else -1
+            ladder = bool(rules.get("trail_ladder"))
+            tps = [float(t) for t in ((root.parsed or {}).get("tps") or [])]
+            level = max([int(r.leg) for r in rows if r.status == "CLOSED" and "paper TP" in (r.detail or "")] or [0])
+            if ladder:
+                k = self._reached.get(root.id, 0)
+                while k < len(tps) and (px_close - tps[k]) * s_ >= 0:
+                    k += 1
+                self._reached[root.id] = k
+                level = max(level, k)
+            for o in live:
+                if o.status == "PAPER" and level >= 1:
+                    tgt = trail_target(level, o.entry, side, tps, rules, ladder)
+                    if tgt is not None and (o.sl is None or (tgt - o.sl) * s_ > 0) and (px_close - tgt) * s_ > 0:
+                        o.sl = tgt
         if all(r.status not in LIVE_ORDER for r in rows):
             root.status = "CLOSED"
 

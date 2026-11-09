@@ -223,6 +223,7 @@ class FakeMT5:
         self.positions: dict[int, SimpleNamespace] = {}
         self.orders: dict[int, SimpleNamespace] = {}
         self.calls: list[tuple] = []
+        self.history: set[int] = set()      # tickets that were positions at some point
 
     def install(self, mp):
         async def available_symbols():
@@ -252,6 +253,8 @@ class FakeMT5:
         async def modify_position(t, sl=None, tp=None, spec=None):
             self.calls.append(("modpos", t, sl, tp))
             p = self.positions[t]
+            if sl is not None and ((p.type == 0 and sl >= self.bid) or (p.type == 1 and sl <= self.ask)):
+                return False, "10016 Invalid stops"
             p.sl = sl if sl is not None else p.sl
             p.tp = tp if tp is not None else p.tp
             return True, "ok"
@@ -279,6 +282,9 @@ class FakeMT5:
 
         async def closed_by_tp(t):
             return True
+
+        async def was_filled(t):
+            return t in self.history
 
         for name, fn in list(locals().items()):
             if callable(fn) and hasattr(mt5ops, name):
@@ -321,10 +327,22 @@ def test_open_then_breakeven_by_reply(env):
     assert [c[3] for c in places] == [2355.0, 2360.0, 2365.0]
     assert places[0][2] >= places[1][2] >= places[2][2]        # 50/30/20 weights
     assert all(c[4].startswith("AE_CT") for c in places)
+    env.fake.bid, env.fake.ask = 2351.0, 2351.2
     r = _run(env.service.handle_message("u1", env.ch, 11, "move SL to entry", reply_to=10))
     assert r["status"] == "EXECUTED"
     mods = [c for c in env.fake.calls if c[0] == "modpos"]
     assert len(mods) == 3 and all(c[2] == pytest.approx(2349.0) for c in mods)
+
+
+def test_breakeven_while_price_is_behind_entry_waits_until_it_fits(env):
+    _run(env.service.handle_message("u1", env.ch, 12, "XAUUSD BUY NOW\nSL 2340\nTP1 2355\nTP2 2360"))
+    env.fake.bid, env.fake.ask = 2347.0, 2347.2          # under the 2349 entry: MT5 would refuse it
+    r = _run(env.service.handle_message("u1", env.ch, 13, "set breakeven", reply_to=12))
+    assert r["status"] == "EXECUTED"
+    assert all(p.sl == 2340 for p in env.fake.positions.values())
+    env.fake.bid, env.fake.ask = 2350.0, 2350.2
+    _run(env.service.monitor_once())
+    assert all(p.sl == pytest.approx(2349.0) for p in env.fake.positions.values())
 
 
 def test_follow_up_without_reply_uses_latest_signal_and_widen_rule(env):

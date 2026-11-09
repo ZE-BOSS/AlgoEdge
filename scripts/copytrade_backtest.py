@@ -111,7 +111,13 @@ def load_bars_mt5(symbol: str, tf: str, start: int, end: int, cache: Path):
 
 
 def simulate(sig, fups, bars, rules, follow=True, auto_be_tp=0, expiry_h=24.0, max_hold_h=48.0,
-             balance=10_000.0, offset=0, opposite_t=None):
+             balance=10_000.0, offset=0, opposite_t=None, ladder=False, first_fill="keep", slip=0.3):
+    """ladder: trail the stop of every open leg as the signal's targets are reached -
+    TP1 -> breakeven, TP2 -> TP1, TP3 -> TP2 ... (only ever tightens).
+    first_fill: what happens to the other zone legs when the first one fills -
+    "keep" (wait at their levels), "market_rest" (cancel them and take the same
+    volume at market right away), "market_add" (keep them AND add the same volume
+    at market: more size than the risk budget)."""
     T = bars["time"]
     t0 = sig["t"] + offset
     i0 = int(np.searchsorted(T, t0 + 1))           # first bar that opens after the message
@@ -136,6 +142,9 @@ def simulate(sig, fups, bars, rules, follow=True, auto_be_tp=0, expiry_h=24.0, m
     end_i = int(np.searchsorted(T, t0 + max_hold_h * 3600))
     budget = balance * float(rules.get("risk_pct") or 1.0) / 100.0
     tp_filled = set()
+    sig_tps = [float(t) for t in (sig["p"].get("tps") or [])]
+    reached = 0                 # highest signal TP price has reached since the first fill
+    first_done = False
     for i in range(i0, min(end_i, len(T))):
         o, h, l, c, sp = (float(bars[k][i]) for k in ("open", "high", "low", "close", "spread"))
         # follow-ups posted before this bar opened
@@ -194,6 +203,14 @@ def simulate(sig, fups, bars, rules, follow=True, auto_be_tp=0, expiry_h=24.0, m
                         g["entry"] = o
             if g["state"] != "OPEN":
                 continue
+            if first_fill != "keep" and not first_done:
+                first_done = True
+                px = g["entry"] + s * slip
+                for o2 in [x for x in legs if x["state"] == "PENDING"]:
+                    if first_fill == "market_rest":
+                        o2["state"], o2["fill_i"], o2["entry"] = "OPEN", i, px
+                    else:
+                        legs.append({**o2, "state": "OPEN", "fill_i": i, "entry": px, "leg": o2["leg"]})
             hit_sl = (l <= g["sl"]) if s == 1 else (ask_h >= g["sl"])
             hit_tp = g["tp"] is not None and g["fill_i"] != i and ((h >= g["tp"]) if s == 1 else (ask_l <= g["tp"]))
             if hit_sl:
@@ -207,6 +224,20 @@ def simulate(sig, fups, bars, rules, follow=True, auto_be_tp=0, expiry_h=24.0, m
             for g in legs:
                 if g["state"] == "PENDING":
                     g["state"], g["why"] = "CANCELLED", "TP filled"
+        if ladder and any(g["fill_i"] is not None for g in legs):
+            best = h if s == 1 else ask_l
+            while reached < len(sig_tps) and (best - sig_tps[reached]) * s >= 0:
+                reached += 1
+            k = max([reached] + list(tp_filled))
+            if k >= 1:
+                for g in legs:
+                    if g["state"] != "OPEN":
+                        continue
+                    tgt = g["entry"] if k == 1 or k - 2 >= len(sig_tps) else sig_tps[k - 2]
+                    if k >= 2 and (tgt - g["entry"]) * s < 0:
+                        tgt = g["entry"]            # a leg filled after TP1 (rare): never below its entry
+                    if (tgt - g["sl"]) * s > 0:
+                        g["sl"] = tgt
         if auto_be_tp and any(lg >= auto_be_tp for lg in tp_filled):
             for g in legs:
                 if g["state"] == "OPEN" and g["leg"] > max(tp_filled):
@@ -329,6 +360,10 @@ def main() -> int:
         ("Signals only, auto-BE after TP1, pending expire after 1h", dict(follow=False, auto_be_tp=1, expiry_h=1)),
         ("Follows his messages + auto-BE after TP1", dict(follow=True, auto_be_tp=1)),
         ("Follows his messages + closes on an opposite signal", dict(follow=True, use_opp=True)),
+        ("Follows + TP ladder trail (TP1->BE, TP2->TP1 ...)", dict(follow=True, ladder=True)),
+        ("Follows + first fill: rest of the zone at market", dict(follow=True, first_fill="market_rest")),
+        ("Follows + ladder + first fill: rest at market", dict(follow=True, ladder=True, first_fill="market_rest")),
+        ("Follows + ladder + first fill: ADD market legs (extra size)", dict(follow=True, ladder=True, first_fill="market_add")),
     ]
     out = {}
     for name, kw in runs:

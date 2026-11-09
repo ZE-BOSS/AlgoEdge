@@ -232,6 +232,15 @@ async def ticket_state(ticket: int) -> str:
     return "GONE"
 
 
+async def was_filled(ticket: int) -> bool:
+    """Whether an order that is gone had filled (it became a position that has
+    since closed) rather than being cancelled or expired."""
+    if mt5 is None:
+        return False
+    deals = await run_mt5(mt5.history_deals_get, position=int(ticket))
+    return bool(deals)
+
+
 async def closed_by_tp(ticket: int) -> bool:
     """Whether a position that is gone was closed by its take profit."""
     if mt5 is None:
