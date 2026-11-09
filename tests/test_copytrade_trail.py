@@ -166,3 +166,38 @@ def test_default_symbol(env):  # noqa: F811
     _set_rules(env, default_symbol="XAUUSD")
     r = _run(env.service.handle_message("u1", env.ch, 83, "Take Entry SELL 2349.00\nStop Loss\n2356\nTP 2345\nTP 2341"))
     assert r["status"] == "EXECUTED", r
+
+
+def test_first_fill_adds_market_legs_and_keeps_the_limits(env):  # noqa: F811
+    _set_rules(env, zone_entry="layer", on_first_fill="market_add", cancel_pending_after_tp=1)
+    env.fake.bid, env.fake.ask = 2352.8, 2353.0
+    _run(env.service.handle_message("u1", env.ch, 76, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    legs = _orders(env)
+    _fill(env, legs[0].ticket, 2350.0)
+    env.fake.bid, env.fake.ask = 2350.6, 2350.8
+    _run(env.service.monitor_once())
+    rows = _orders(env)
+    assert len(rows) == 5                                         # 3 legs + 2 market adds
+    assert sorted((o.leg, o.kind, o.status) for o in rows) == [
+        (1, "LIMIT", "OPEN"), (2, "LIMIT", "PENDING"), (2, "MARKET", "OPEN"), (3, "LIMIT", "PENDING"), (3, "MARKET", "OPEN")]
+    assert len(env.fake.orders) == 2                              # the limits still wait
+    _run(env.service.monitor_once())                              # no second round of adds
+    assert len(_orders(env)) == 5
+    # TP1 fills: the waiting limits go, the market legs ride to TP2 / TP3
+    _tp_out(env, legs[0].ticket)
+    env.fake.bid, env.fake.ask = 2355.2, 2355.4
+    _run(env.service.monitor_once())
+    st = sorted((o.leg, o.kind, o.status) for o in _orders(env))
+    assert (2, "LIMIT", "CANCELLED") in st and (3, "LIMIT", "CANCELLED") in st
+    assert (2, "MARKET", "OPEN") in st and (3, "MARKET", "OPEN") in st
+
+
+def test_first_fill_add_skipped_once_price_is_at_tp1(env):  # noqa: F811
+    _set_rules(env, zone_entry="layer", on_first_fill="market_add")
+    env.fake.bid, env.fake.ask = 2352.8, 2353.0
+    _run(env.service.handle_message("u1", env.ch, 77, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    legs = _orders(env)
+    _fill(env, legs[0].ticket, 2350.0)
+    env.fake.bid, env.fake.ask = 2355.4, 2355.6                   # already at TP1 when we notice the fill
+    _run(env.service.monitor_once())
+    assert len(_orders(env)) == 3

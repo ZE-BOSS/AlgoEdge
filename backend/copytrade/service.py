@@ -493,7 +493,7 @@ class CopyTradeService:
                     rules = merge_rules(st.rules, ch.rules if ch else None)
                     rows = await self._all_orders(s, root.id)
                     if root.status == "DRY_RUN":
-                        await self._simulate_paper(root, rows, rules)
+                        await self._simulate_paper(root, rows, rules, s)
                         continue
                     before = {r.id: r.status for r in rows}
                     for r in rows:
@@ -520,10 +520,10 @@ class CopyTradeService:
                                             o.status, o.detail = "CANCELLED", f"TP{r.leg} filled"
                                 break
                     # first fill: the rest of the zone at market
-                    if str(rules.get("on_first_fill") or "keep") == "market" and \
+                    if str(rules.get("on_first_fill") or "keep") in ("market", "market_add") and \
                             not any(before[r.id] in ("OPEN", "CLOSED") for r in rows) and \
                             any(before[r.id] == "PENDING" and r.status in ("OPEN", "CLOSED") for r in rows):
-                        await self._rest_at_market(root, rows, rules)
+                        await self._rest_at_market(s, root, rows, rules)
                     # breakeven he asked for while price was behind the entry
                     if self._pending_be:
                         await self._apply_pending_be(root, rows)
@@ -539,30 +539,55 @@ class CopyTradeService:
             self._tp_closed[ticket] = bool(await mt5ops.closed_by_tp(ticket))
         return self._tp_closed[ticket]
 
-    async def _rest_at_market(self, root: CopyTradeSignal, rows: list[CopyTradeOrder], rules: dict) -> None:
-        """The first zone leg filled: cancel the legs still waiting deeper in the
-        zone and take their volume at market now, so a move that only touches
-        the top of the zone still carries the whole position."""
+    async def _rest_at_market(self, s, root: CopyTradeSignal, rows: list[CopyTradeOrder], rules: dict) -> None:
+        """The first zone leg filled. "market": cancel the legs still waiting deeper
+        in the zone and take their volume at market now. "market_add": take the
+        same volume at market now AND leave the limits waiting (they still go once
+        TP1 fills, with cancel_pending_after_tp) - a tap of the zone that runs
+        straight to TP3 carries every leg. Not done once price is already at TP1."""
+        mode = str(rules.get("on_first_fill") or "keep")
         spec = await mt5ops.symbol_spec(root.symbol) if root.symbol else None
-        if not spec:
+        q = await mt5ops.quote(root.symbol) if root.symbol else None
+        if not spec or not q:
             return
-        for r in rows:
+        side = (root.parsed or {}).get("side")
+        sgn = 1 if side == "BUY" else -1
+        px = float(q["ask"] if side == "BUY" else q["bid"])
+        tp1 = min((float(r.tp) for r in rows if r.tp), key=lambda t: (t - px) * sgn, default=None)
+        if tp1 is not None and (tp1 - px) * sgn <= 0:
+            logger.info(f"[COPYTRADE] signal #{root.msg_id}: first fill, but price is already at TP1 - no market legs")
+            return
+        for r in list(rows):
             if r.status != "PENDING" or not r.ticket:
                 continue
-            ok, _ = await mt5ops.cancel_order(r.ticket)
-            if not ok:
-                continue
+            if r.tp and (float(r.tp) - px) * sgn <= 0:
+                continue                                   # its target is already behind the price
+            if mode == "market":
+                ok, _ = await mt5ops.cancel_order(r.ticket)
+                if not ok:
+                    continue
             ok, detail, ticket = await mt5ops.place(root.symbol, r.side, "MARKET", r.volume, 0.0, r.sl, r.tp,
                                                     int(rules["magic"]), f"AE_CT_{root.msg_id % 100000}_TP{r.leg}m",
                                                     spec)
-            if ok:
-                pos = await mt5ops.get_position(ticket)
-                r.ticket, r.kind, r.status = ticket, "MARKET", "OPEN"
-                r.entry = float(pos.price_open) if pos is not None else r.entry
-                r.detail = f"first leg filled - taken at market {r.entry:g}"
+            pos = await mt5ops.get_position(ticket) if ok else None
+            entry = float(pos.price_open) if pos is not None else px
+            if mode == "market":
+                if ok:
+                    r.ticket, r.kind, r.status, r.entry = ticket, "MARKET", "OPEN", entry
+                    r.detail = f"first leg filled - taken at market {entry:g}"
+                else:
+                    r.status, r.detail = "CANCELLED", f"first leg filled; market entry failed: {detail}"
+                logger.info(f"[COPYTRADE] signal #{root.msg_id} leg {r.leg}: {r.detail}")
             else:
-                r.status, r.detail = "CANCELLED", f"first leg filled; market entry failed: {detail}"
-            logger.info(f"[COPYTRADE] signal #{root.msg_id} leg {r.leg}: {r.detail}")
+                if not ok:
+                    logger.warning(f"[COPYTRADE] signal #{root.msg_id} leg {r.leg}: market add failed: {detail}")
+                    continue
+                add = CopyTradeOrder(user_id=r.user_id, signal_id=r.signal_id, channel_id=r.channel_id, leg=r.leg,
+                                     ticket=ticket, kind="MARKET", symbol=r.symbol, side=r.side, volume=r.volume,
+                                     entry=entry, sl=r.sl, tp=r.tp, status="OPEN",
+                                     detail=f"first leg filled - added at market {entry:g}, limit {r.entry:g} still waits")
+                s.add(add)
+                logger.info(f"[COPYTRADE] signal #{root.msg_id} leg {r.leg}: {add.detail}")
 
     async def _apply_pending_be(self, root: CopyTradeSignal, rows: list[CopyTradeOrder]) -> None:
         side = (root.parsed or {}).get("side")
@@ -646,7 +671,7 @@ class CopyTradeService:
                 self._trail_note[r.id] = tgt
                 logger.warning(f"[COPYTRADE] signal #{root.msg_id} leg {r.leg}: stop to {tgt:g} refused: {msg}")
 
-    async def _simulate_paper(self, root: CopyTradeSignal, rows: list[CopyTradeOrder], rules: dict) -> None:
+    async def _simulate_paper(self, root: CopyTradeSignal, rows: list[CopyTradeOrder], rules: dict, s=None) -> None:
         """Dry run: fill paper pending orders and close paper positions at their
         SL/TP against the live price, so a dry-run channel shows how its signals
         would have played out (and frees the open-signal slots)."""
@@ -684,11 +709,20 @@ class CopyTradeService:
                         if o.status == "PAPER_PENDING":
                             o.status, o.detail = "CANCELLED", f"TP{r.leg} filled"
         # paper first fill: the rest of the zone at market
-        if str(rules.get("on_first_fill") or "keep") == "market" and any(r.status == "PAPER" for r in live) \
-                and not any("first leg filled" in (r.detail or "") for r in live):
+        mode_ff = str(rules.get("on_first_fill") or "keep")
+        if mode_ff in ("market", "market_add") and any(r.status == "PAPER" for r in live) \
+                and not any("first leg filled" in (r.detail or "") for r in rows) \
+                and not any(r.status == "CLOSED" for r in rows):
             for r in live:
-                if r.status == "PAPER_PENDING":
+                if r.status != "PAPER_PENDING" or (r.tp and (float(r.tp) - px_open) * (1 if buy else -1) <= 0):
+                    continue
+                if mode_ff == "market":
                     r.status, r.entry, r.detail = "PAPER", px_open, f"first leg filled - paper market at {px_open:g}"
+                elif s is not None:
+                    s.add(CopyTradeOrder(user_id=r.user_id, signal_id=r.signal_id, channel_id=r.channel_id, leg=r.leg,
+                                         kind="MARKET", symbol=r.symbol, side=r.side, volume=r.volume, entry=px_open,
+                                         sl=r.sl, tp=r.tp, status="PAPER",
+                                         detail=f"first leg filled - paper add at market {px_open:g}"))
         # paper breakeven after TPn / ladder trail
         if int(rules.get("be_after_tp") or 0) or rules.get("trail_ladder"):
             s_ = 1 if buy else -1

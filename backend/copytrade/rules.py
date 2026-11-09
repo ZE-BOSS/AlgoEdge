@@ -53,7 +53,8 @@ DEFAULT_RULES: dict[str, Any] = {
     "trail_ladder": False,        # trail every open leg as the signal's targets are reached: TP1 -> breakeven,
                                   # TP2 -> TP1, TP3 -> TP2 ... (stops only ever tighten)
     "on_first_fill": "keep",      # zone legs when the first one fills: keep (wait at their levels) /
-                                  # market (cancel them, take the same volume at market at once)
+                                  # market (cancel them, take the same volume at market at once) /
+                                  # market_add (take the same volume at market AND keep the limits until TPn)
     "edit_updates": True,         # an edited signal updates SL/TP of the trade it opened
     "close_on_opposite": False,   # a new signal in the other direction closes this channel's open trades on that symbol
     "max_sl_move_pct": 3.0,       # ignore a "move SL to X" more than this % from the entry (a typo: 4113 for 4413)

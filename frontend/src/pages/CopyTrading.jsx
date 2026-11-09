@@ -362,7 +362,7 @@ const RULES = [
     ['market_tolerance_pct', 'Market entry tolerance', 'num', 'How far past the written entry a market signal is still taken.', '%'],
     ['chase_rule', 'If price ran past the entry', 'select', null, [['limit', 'Wait with a limit'], ['skip', 'Skip'], ['market', 'Enter anyway']]],
     ['skip_if_tp1_passed', 'Skip if price is beyond TP1', 'bool'],
-    ['on_first_fill', 'When the first zone order fills', 'select', 'Market = cancel the deeper orders and take their volume now, so a quick tap of the zone still carries the full size.', [['keep', 'Keep the rest waiting'], ['market', 'Take the rest at market']]],
+    ['on_first_fill', 'When the first zone order fills', 'select', 'A quick tap of the zone often fills only the first order. Market: cancel the deeper orders and take their volume now. Also at market: take it now and keep the limits too (more size if they fill later; they are cancelled at TP1).', [['keep', 'Keep the rest waiting'], ['market', 'Take the rest at market (cancel the limits)'], ['market_add', 'Also take the rest at market (limits stay until TP1)']]],
     ['pending_expiry_hours', 'Cancel unfilled orders after', 'num', '0 = never.', 'h'],
     ['missing_sl', 'Signal without a stop', 'select', null, [['skip', 'Skip it'], ['default', 'Use default stop']]],
     ['default_sl_pct', 'Default stop distance', 'num', null, '%'],
