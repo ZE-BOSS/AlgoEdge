@@ -1,14 +1,13 @@
 # Copy trading — changes waiting for deploy (9 Nov 2026)
 
-**Status:** built and tested on branch `copytrade-next`. **Not deployed.** The VPS still runs
-`dev` @ d8e52e7. Deploy only after today's session ends, during gold's daily close
-(22:00–23:00 UTC = 23:00–00:00 Lagos).
+**Status:** merged into `dev` (eb4bbeb) and pushed. **Not yet running on the VPS:** the automated deploy was
+blocked by this session's safety check on production deploys. Run step 3 yourself (Chris said trading
+was over for the day at 14:07 Lagos).
 
 ## Deploy steps (after the session)
 
 1. Check that no copied trade is half-way through a follow-up (Signal log is quiet).
-2. Merge: `git checkout dev && git merge --ff-only copytrade-next && git push origin dev`
-   (or merge without ff if dev moved).
+2. ~~Merge~~ done: `dev` already has everything.
 3. In the Hostinger web console:
    `curl -fsSL https://raw.githubusercontent.com/ZE-BOSS/AlgoEdge/dev/deploy/linux/update.sh | bash`
 4. Check that `/api/health` is ok on both instances and that Copy Trading shows *Connected* and watching 5 chats.
@@ -17,7 +16,10 @@
    - **Trail the stop up the TP ladder → on** (new).
    - **In groups, follow only the admins → on** (new, default on). Needed for **GTMoFx**, which is a group.
    - **Jamson** channel → *Symbol when the signal names none* = `XAUUSD` (some posts say "Take Entry SELL 4430" with no symbol).
-   - *When the first zone order fills* → leave on **Keep** (see results: it only helped GTS VIP).
+   - *When the first zone order fills* → **Also take the rest at market (limits stay until TP1)**. Chris asked for
+     this; it was the best variant on GTS VIP, GTS public and Jamson (see the account study below).
+   - *Cancel unfilled orders once TP n fills* = 1 (already set).
+   - Flip account only: optionally *Stack at TP1* = 1 and *Last leg runs without a target* = on.
 
 ## What changed
 
@@ -35,8 +37,15 @@
 ### New features
 - **TP ladder trail** (`trail_ladder`): TP1 → breakeven, TP2 → TP1, TP3 → TP2 … for every open leg, as
   price reaches each posted target, even targets beyond the legs placed. Never loosens. Works in dry run too.
-- **First fill → rest of the zone at market** (`on_first_fill = market`): when the first zone limit fills,
-  the deeper unfilled limits are cancelled and their volume is taken at market at once.
+- **First fill → rest of the zone at market** (`on_first_fill`):
+  - `market`: cancel the deeper limits and take their volume at market.
+  - `market_add` (added in the afternoon): take the remaining legs' volume at market AND leave the limits
+    waiting. They are cancelled once TP1 fills, as before. Nothing is added if price is already at TP1, and a
+    leg whose own TP is already behind the price is skipped. More size: if the limits fill later, those legs
+    are doubled.
+- **Runner leg** (`runner_leg`): the last leg has no target; the ladder trail (or his close) ends it.
+- **Stack at TP1** (`stack_at_tp1` = multiple of the open volume): at TP1, add a market position with its stop
+  at the first entry (it risks only the TP1 distance) and no target; the ladder trails it with the rest.
 - **Groups: admin-only** (`only_admins`, default on; per-channel `allowed_senders`). Previously any member's
   message in a watched group was acted on.
 - **Add-on entries** ("ADD MORE BUY 4198 / UPDATE SL 4190", Jamson): joins the running trade, keeps its
@@ -86,6 +95,43 @@ Jamson made +22R of its total in August (Oct −7.5R). GTMoFx/Platinum was posit
   ~5 months each at 50% (2 flips, 1 bust) and ~13 months at 25%. With first-fill stacking at 50% it took ~39 days
   (5 flips, 10 busts). Pyramids did flip a few times there, but busted 2–5× as often as they flipped (best case:
   4 flips / 22 busts). Jamson flipped once in ~83 days at 25%, with no busts.
+
+## FIB re-test, signal by signal (afternoon)
+1-minute bars, 3 Aug – 9 Nov, every symbol it posted, copier as configured (1% per signal). "≈0R" meant the
+net across symbols, not that nothing traded: about 103 trades, ~50 wins and ~50 losses.
+
+| Symbol | Filled | Net | Symbol | Filled | Net |
+|---|---|---|---|---|---|
+| USDJPY | 12 | +3.5R | GBPUSD | 11 | −1.9R |
+| GBPAUD | 9 | +3.5R | GBPJPY | 4 | −2.5R |
+| EURAUD | 2 | +2.0R | USDCHF | 8 | −2.9R |
+| USDCAD | 4 | +1.6R | EURJPY | 3 | −3.0R |
+| XAUUSD | 19 | +1.4R | BTCUSD | 6 | −4.9R |
+| EURCAD / EURUSD | 3 / 7 | +1.0R each | CHFJPY / EURNZD | 2 / 2 | −0.6R / −0.8R |
+| GBPNZD / GBPCAD | 2 / 9 | +0.7R / +0.3R | | | |
+
+Net ≈ −1.5R; without BTCUSD ≈ +3.3R. Its targets are tiny (TP1 often 0.2–0.4R), so a TP1-then-stop trade loses
+~0.7R: many of the losses are "hit TP1, then stopped". The copier has not executed any FIB signal live; the
+channel was added at 11:40 UTC today. With 5-minute bars back to Jul 2025: EURUSD +3.9R, GBPAUD +5.6R and
+USDJPY +3.7R hold up; BTCUSD −5.6R, USDCHF −3.4R and EURJPY −3.0R stay negative.
+→ If kept, follow only USDJPY, GBPAUD, EURUSD and gold (*Only these symbols* on the channel).
+
+## Flip account traded like a normal account (`scripts/copytrade_account.py`)
+$1,000, a fixed % of the balance risked per signal, never reset; overlapping trades allowed.
+1-minute data, 29 Jul – 5 Nov, Jamson + GTS public + GTS VIP together:
+
+| How | Trades | Sum R | 2% risk | 5% risk | 10% risk |
+|---|---|---|---|---|---|
+| copier (ladder on) | 154 | +33.9 | $1,873, DD 6% | $4,180, DD 16% | $12,641, DD 32% |
+| **copier + first-fill market add** | 154 | +46.3 | $2,363, DD 13% | $7,079, DD 32% | $30,045, DD 60% |
+| one position, ladder only | 151 | +34.2 | $1,571, DD 9% | $3,852, DD 30% | $11,471, DD 55% |
+| one position, half at TP1 | 151 | +24.1 | $1,392, DD 11% | $2,785, DD 31% | $7,217, DD 56% |
+| one position + stack at TP1 | 151 | +52.3 | $1,807, DD 12% | $5,762, DD 36% | $16,780, DD 61% |
+
+17-month check (5-minute data, Jun 2025 – Nov 2026), GTS VIP + Jamson:
+copier +44.5R (5%: $6,859, DD 20%); **copier + market add +69.2R (5%: $18,624, DD 29%)**; ladder + stack +55.7R
+(5%: $5,345, DD 34%). The VIP alone: copier with the ladder +22.5R, where yesterday (no ladder) it was −4.6R.
+The ladder trail is what turns the VIP positive. GTMoFx loses in every variant.
 
 ## Still open
 - Telegram history from groups (GTMoFx) includes member messages. Re-export after deploy (it now marks
