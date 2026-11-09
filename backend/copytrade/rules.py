@@ -52,6 +52,9 @@ DEFAULT_RULES: dict[str, Any] = {
     "be_after_tp": 0,             # 0 = off; 1 = move the remaining legs to breakeven once TP1 fills; 2 = after TP2 ...
     "trail_ladder": False,        # trail every open leg as the signal's targets are reached: TP1 -> breakeven,
                                   # TP2 -> TP1, TP3 -> TP2 ... (stops only ever tighten)
+    "runner_leg": False,          # the last leg has no target: the TP ladder trail (or his close) ends it
+    "stack_at_tp1": 0.0,          # when TP1 is reached, add this multiple of the open volume at market, stop at
+                                  # the first entry (it risks only the TP1 distance); 0 = off
     "on_first_fill": "keep",      # zone legs when the first one fills: keep (wait at their levels) /
                                   # market (cancel them, take the same volume at market at once) /
                                   # market_add (take the same volume at market AND keep the limits until TPn)
@@ -181,6 +184,15 @@ def _weights_for(n: int, rules: dict) -> list[float]:
 
 def build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: dict,
                     broker_symbol: str) -> OpenPlan:
+    p = _build_open_plan(sig, quote, spec, balance, rules, broker_symbol)
+    if p.ok and p.legs and rules.get("runner_leg"):
+        p.legs[-1]["tp"] = None
+        p.notes.append(f"leg {p.legs[-1]['leg']} is a runner: no target, the ladder trail closes it")
+    return p
+
+
+def _build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: dict,
+                     broker_symbol: str) -> OpenPlan:
     """Decide what to place for an OPEN signal.
 
     sig: ParsedSignal.to_dict(); quote: {"bid", "ask"}; spec: symbol spec

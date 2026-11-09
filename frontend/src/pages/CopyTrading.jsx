@@ -382,6 +382,8 @@ const RULES = [
     ['cancel_pending_after_tp', 'Cancel unfilled orders once TP n fills', 'num', '0 = keep them.', 'TP'],
     ['be_after_tp', 'Auto breakeven once TP n fills', 'num', '0 = off.', 'TP'],
     ['trail_ladder', 'Trail the stop up the TP ladder', 'bool', 'TP1 → breakeven, TP2 → TP1, TP3 → TP2 … as price reaches each target. Never loosens.'],
+    ['runner_leg', 'Last leg runs without a target', 'bool', 'The ladder trail (or his close) ends it - catches the moves that run past the posted TPs.'],
+    ['stack_at_tp1', 'Stack at TP1', 'num', 'When TP1 is reached, add this many times the open volume at market, stop at the entry (risks only the TP1 distance). 0 = off.', '×'],
   ]],
   ['Filters & broker', [
     ['max_open_signals', 'Max open signals per channel', 'num', null, 'signals'],

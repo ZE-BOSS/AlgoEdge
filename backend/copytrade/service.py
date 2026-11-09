@@ -529,7 +529,7 @@ class CopyTradeService:
                         await self._apply_pending_be(root, rows)
                     # breakeven after TPn / TP ladder trail - every round until the stop sticks
                     if int(rules.get("be_after_tp") or 0) or rules.get("trail_ladder"):
-                        await self._trail(root, rows, rules)
+                        await self._trail(root, rows, rules, s)
                     if all(r.status not in LIVE_ORDER for r in rows):
                         root.status = "CLOSED"
                 await s.commit()
@@ -613,7 +613,36 @@ class CopyTradeService:
                 self._pending_be.pop(r.id, None)
                 logger.info(f"[COPYTRADE] signal #{root.msg_id} leg {r.leg}: breakeven {tgt:g} set (it fits now)")
 
-    async def _trail(self, root: CopyTradeSignal, rows: list[CopyTradeOrder], rules: dict) -> None:
+    async def _stack(self, root, rows, open_rows, rules, q, spec, mult, sess=None) -> None:
+        """TP1 reached: add `mult` x the open volume at market, its stop at the
+        first entry (breakeven of the trade) - it risks only the TP1 distance -
+        and no target: the ladder trail closes it with the rest."""
+        side = (root.parsed or {}).get("side")
+        first = min(open_rows, key=lambda r: r.leg)
+        pos = await mt5ops.get_position(first.ticket)
+        be = float(pos.price_open) if pos is not None else float(first.entry or 0)
+        if not be or not stop_fits(be, side, q, spec):
+            return
+        step = float(spec.get("volume_step") or 0.01)
+        vol = round(int(sum(float(r.volume) for r in open_rows) * mult / step + 1e-9) * step, 8)
+        if vol < float(spec.get("volume_min") or step):
+            return
+        ok, detail, ticket = await mt5ops.place(root.symbol, side, "MARKET", vol, 0.0, be, None, int(rules["magic"]),
+                                                f"AE_CT_{root.msg_id % 100000}_STK", spec)
+        if not ok:
+            logger.warning(f"[COPYTRADE] signal #{root.msg_id}: stack at TP1 failed: {detail}")
+            return
+        p2 = await mt5ops.get_position(ticket)
+        add = CopyTradeOrder(user_id=first.user_id, signal_id=first.signal_id, channel_id=first.channel_id,
+                             leg=max(r.leg for r in rows) + 1, ticket=ticket, kind="MARKET", symbol=root.symbol,
+                             side=side, volume=vol, entry=float(p2.price_open) if p2 is not None else None, sl=be,
+                             tp=None, status="OPEN", detail=f"stack at TP1: {vol} lots, stop {be:g}")
+        if sess is not None:
+            sess.add(add)
+        rows.append(add)
+        logger.info(f"[COPYTRADE] signal #{root.msg_id}: {add.detail}")
+
+    async def _trail(self, root: CopyTradeSignal, rows: list[CopyTradeOrder], rules: dict, sess=None) -> None:
         """Breakeven after TPn, or with the ladder TP1 -> breakeven, TP2 -> TP1 ...
         Recomputed every round from what has happened (legs closed at their TP,
         the furthest target price reached), so a stop the broker refused - too
@@ -642,6 +671,9 @@ class CopyTradeService:
         if level < 1 or not q:
             return
         spec = await mt5ops.symbol_spec(root.symbol)
+        mult = float(rules.get("stack_at_tp1") or 0)
+        if mult > 0 and spec and not any("stack at TP1" in (r.detail or "") for r in rows):
+            await self._stack(root, rows, open_rows, rules, q, spec, mult, sess)
         for r in open_rows:
             pos = await mt5ops.get_position(r.ticket)
             if pos is None:

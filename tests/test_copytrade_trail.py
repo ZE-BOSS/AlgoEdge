@@ -201,3 +201,24 @@ def test_first_fill_add_skipped_once_price_is_at_tp1(env):  # noqa: F811
     env.fake.bid, env.fake.ask = 2355.4, 2355.6                   # already at TP1 when we notice the fill
     _run(env.service.monitor_once())
     assert len(_orders(env)) == 3
+
+
+def test_runner_leg_and_stack_at_tp1(env):  # noqa: F811
+    _set_rules(env, trail_ladder=True, runner_leg=True, stack_at_tp1=1.0, max_legs=2, split_weights=[])
+    _run(env.service.handle_message("u1", env.ch, 78, "XAUUSD BUY NOW\nSL 2340\nTP1 2355\nTP2 2360\nTP3 2365\nTP4 2370"))
+    legs = _orders(env)
+    assert [o.tp for o in legs] == [2355.0, None]                     # the last leg runs
+    t1, t2 = legs[0].ticket, legs[1].ticket
+    _tp_out(env, t1)
+    env.fake.bid, env.fake.ask = 2355.5, 2355.7
+    _run(env.service.monitor_once())
+    rows = _orders(env)
+    stack = [o for o in rows if "stack at TP1" in (o.detail or "")]
+    assert len(stack) == 1 and stack[0].sl == pytest.approx(2349.0) and stack[0].tp is None
+    assert stack[0].volume == pytest.approx(env.fake.positions[t2].volume)
+    _run(env.service.monitor_once())                                   # only once
+    assert len([o for o in _orders(env) if "stack at TP1" in (o.detail or "")]) == 1
+    env.fake.bid, env.fake.ask = 2366.0, 2366.2                        # TP3 reached: everything trails to TP2
+    _run(env.service.monitor_once())
+    assert env.fake.positions[t2].sl == pytest.approx(2360.0)
+    assert env.fake.positions[stack[0].ticket].sl == pytest.approx(2360.0)
