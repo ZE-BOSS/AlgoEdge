@@ -9,9 +9,15 @@ accounts.
 | API port | 8001 | 8002 | **8003** |
 | MT5 bridge port | 18811 | 18812 | **18813** |
 | Redis DB | 1 | 2 | **3** |
-| API address | api-demo.… | api.… | **api-flip.alphavantiqcapital.com** |
+| API address | api-demo.… | api.… | **https://admin.alphavantiqcapital.com/s/flip** |
 
-## Steps (you run these; they change the live server and need your broker login)
+## Status (9 Nov 2026)
+Done on the VPS: instance created (`/opt/algoedge/flip`); its MT5 terminal and bridge are running; the API is
+running with its own JWT and encryption keys (other settings copied from demo), role *demo*, label *Flip*;
+Caddy routes `admin.alphavantiqcapital.com/s/flip` to it, so no DNS is needed.
+**Left for you:** steps 1, 4 (the MT5 login, which needs your password) and 6–7 below. Steps 2, 3 and 5 are done.
+
+## Steps
 
 1. **Open the MT5 account** at your broker (start on a demo account for the first weeks). Note the login, server
    and password. Never paste them into chat.
@@ -20,11 +26,11 @@ accounts.
    ```
    sudo bash /opt/algoedge/src/deploy/linux/add_instance.sh flip 8003 18813 3
    ```
-4. **Log its MT5 terminal in**: edit `/opt/algoedge/flip/instance.env` (MT5_LOGIN / MT5_PASSWORD / MT5_SERVER),
-   then run
+4. **Log its MT5 terminal in.** In the web console, run the command below. The password is typed at a hidden
+   prompt, never echoed or stored by AlgoEdge, and MT5 remembers the login itself.
    ```
    bash /opt/algoedge/src/deploy/linux/mt5_login.sh flip
-   systemctl restart algoedge-bridge@flip && sleep 3 && systemctl restart algoedge-api@flip
+   systemctl restart algoedge-api@flip
    ```
 5. **Route it**: append this to `/etc/caddy/Caddyfile`, then run `systemctl reload caddy`:
    ```
@@ -33,7 +39,8 @@ accounts.
    }
    ```
 6. **Add it to the admin site**: open the server switcher (bottom-left), add a server with URL
-   `https://api-flip.alphavantiqcapital.com` and label *Flip*, then sign in there. Each server has its own users.
+   `https://admin.alphavantiqcapital.com/s/flip` and label *Flip*, then register / sign in there with
+   ikchristo19@gmail.com (the admin email on that server). Each server has its own users.
 7. **Copy Trading on the flip server**: log Telegram in again there (separate session), add GTS VIP, Jamson and
    Gold Trader Sunny, and set the rules:
    - Total risk per signal: **5%** (the account study's best balance of speed and drop; 10% doubled the

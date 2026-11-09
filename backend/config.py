@@ -16,10 +16,17 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 load_dotenv(_PROJECT_ROOT / ".env")
 
 
+def _int_env(name: str) -> int:
+    """An account number from the environment; a placeholder ("CHANGE_ME") or blank is 0 (not configured),
+    instead of crashing the API at import."""
+    v = (os.getenv(name) or "").strip()
+    return int(v) if v.isdigit() else 0
+
+
 @dataclass
 class MT5Config:
     """MetaTrader 5 connection configuration."""
-    account: int = int(os.getenv("MT5_ACCOUNT", "0"))
+    account: int = _int_env("MT5_ACCOUNT")
     password: str = os.getenv("MT5_PASSWORD", "")
     server: str = os.getenv("MT5_SERVER", "")
     path: str = os.getenv("MT5_PATH", "")
@@ -28,7 +35,7 @@ class MT5Config:
 @dataclass
 class DerivMT5Config:
     """Deriv MT5 (Synthetics) connection — optional."""
-    account: int = int(os.getenv("DERIV_MT5_ACCOUNT", "0"))
+    account: int = _int_env("DERIV_MT5_ACCOUNT")
     password: str = os.getenv("DERIV_MT5_PASSWORD", "")
     server: str = os.getenv("DERIV_MT5_SERVER", "")
     path: str = os.getenv("DERIV_MT5_PATH", "")

@@ -32,6 +32,11 @@ admin.alphavantiqcapital.com {
 	# password - written by deploy/linux/mt5_web_view.sh. No file, no route, so
 	# the screens are never exposed without one.
 	import /etc/caddy/mt5_view.d/*.caddy
+	# the flip account API (instance "flip", port 8003), same origin as the
+	# admin site: add the server in the switcher as https://admin.alphavantiqcapital.com/s/flip
+	handle_path /s/flip/* {
+		reverse_proxy 127.0.0.1:8003
+	}
 	# `handle` keeps the app's try_files fallback from swallowing /mt5/ paths.
 	handle {
 		import spa /var/www/admin
