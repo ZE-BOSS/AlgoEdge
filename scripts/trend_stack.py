@@ -101,7 +101,7 @@ class Prep:
         return self._cache[k]
 
 
-def simulate(P, lo, hi, fam, n, trail, add, max_pos, session, risk, start=1000.0, slip=0.05):
+def simulate(P, lo, hi, fam, n, trail, add, max_pos, session, risk, start=1000.0, slip=0.05, fixed=None):
     b = P.b
     o, h, l_, c, sp, at, tr = b["open"], b["high"], b["low"], b["close"], b["spread"], P.atr, P.tr
     if fam == "breakout":
@@ -132,7 +132,7 @@ def simulate(P, lo, hi, fam, n, trail, add, max_pos, session, risk, start=1000.0
                 else:
                     stp = stop
                 dist = abs(e - stp)
-                lots = np.floor(bal * risk / 100.0 / (dist * PER_LOT) / 0.01 + 1e-9) * 0.01 if dist > 0 else 0
+                lots = (fixed if fixed else np.floor(bal * risk / 100.0 / (dist * PER_LOT) / 0.01 + 1e-9) * 0.01) if dist > 0 else 0
                 if lots >= 0.01 and (e - stp) * s > 0:
                     pos.append((e, lots))
                     side = s

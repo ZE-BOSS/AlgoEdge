@@ -41,6 +41,17 @@ sys.path.insert(0, str(ROOT / "scripts"))
 PER_LOT = 100.0
 
 
+def resample(b, minutes: int):
+    """1m bars -> `minutes` bars (spread: the median of the 1m spreads)."""
+    k = b["time"] // (minutes * 60)
+    idx = np.flatnonzero(np.diff(k) != 0) + 1
+    starts = np.concatenate([[0], idx])
+    ends = np.concatenate([idx, [len(k)]])
+    return {"time": k[starts] * minutes * 60, "open": b["open"][starts], "close": b["close"][ends - 1],
+            "high": np.maximum.reduceat(b["high"], starts), "low": np.minimum.reduceat(b["low"], starts),
+            "spread": np.array([np.median(b["spread"][a:z]) for a, z in zip(starts, ends)])}
+
+
 def load(path: str):
     d = np.load(path)
     pt = float(np.atleast_1d(d["point"])[0]) if "point" in d else 0.01

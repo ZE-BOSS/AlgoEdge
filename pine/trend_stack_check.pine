@@ -1,0 +1,50 @@
+//@version=6
+// AlgoEdge trend-stack check: the same rule as scripts/trend_stack.py ("supertrend" family),
+// to compare TradingView's numbers with AlgoEdge's backtester.
+// Trend: 15m EMA20 > EMA50 and close > EMA20 (completed 15m bars only). Entry: Supertrend(10, mult)
+// turns in the trend's direction. Stack: one more position every `add` x ATR in favour, max `maxPos`.
+// Stop: the Supertrend line for all. Close all when Supertrend turns back or the trend changes.
+strategy("AlgoEdge trend-stack check", overlay = true, pyramiding = 5, initial_capital = 100000,
+     default_qty_type = strategy.fixed, default_qty_value = 1,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 0.075,
+     process_orders_on_close = false, calc_on_every_tick = false)
+
+htf     = input.timeframe("15", "Trend timeframe")
+stLen   = input.int(10, "Supertrend ATR length")
+mult    = input.float(3.0, "Supertrend multiplier")
+addAtr  = input.float(1.0, "Add every x ATR")
+maxPos  = input.int(3, "Max positions")
+useSess = input.bool(true, "London+NY only (07-20 UTC)")
+
+// completed higher-timeframe bar only (no repainting)
+[e20, e50, hc] = request.security(syminfo.tickerid, htf, [ta.ema(close, 20)[1], ta.ema(close, 50)[1], close[1]],
+     lookahead = barmerge.lookahead_on)
+trend = e20 > e50 and hc > e20 ? 1 : e20 < e50 and hc < e20 ? -1 : 0
+
+[st, dir] = ta.supertrend(mult, stLen)
+stDir = dir < 0 ? 1 : -1           // TradingView: dir < 0 is an up trend
+atr = ta.atr(14)
+inSess = not useSess or (hour(time, "UTC") >= 7 and hour(time, "UTC") < 20)
+
+var float lastAdd = na
+var int nPos = 0
+side = strategy.position_size > 0 ? 1 : strategy.position_size < 0 ? -1 : 0
+if side == 0
+    nPos := 0
+
+// close all on a turn or a trend change
+if side != 0 and (stDir != side or trend != side)
+    strategy.close_all(comment = "reversal")
+    nPos := 0
+else if side != 0
+    strategy.exit("stop", stop = st)
+    if nPos < maxPos and (close - lastAdd) * side >= addAtr * atr
+        strategy.entry("add" + str.tostring(nPos), side == 1 ? strategy.long : strategy.short)
+        lastAdd := close
+        nPos += 1
+else if trend != 0 and inSess and stDir == trend and stDir[1] != trend
+    strategy.entry("first", trend == 1 ? strategy.long : strategy.short)
+    lastAdd := close
+    nPos := 1
+
+plot(st, "Supertrend", color = stDir == 1 ? color.teal : color.red)
