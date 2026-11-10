@@ -28,7 +28,7 @@ alphavantiqcapital.com, www.alphavantiqcapital.com {
 }
 
 admin.alphavantiqcapital.com {
-	# The MT5 screens in the browser, /mt5/demo/ and /mt5/live/, behind a
+	# The MT5 screens in the browser, /mt5/<instance>/ (demo, live, flip), behind a
 	# password - written by deploy/linux/mt5_web_view.sh. No file, no route, so
 	# the screens are never exposed without one.
 	import /etc/caddy/mt5_view.d/*.caddy
