@@ -199,8 +199,11 @@ class TelegramManager:
         out = []
         async for d in self._uc(user_id).client.iter_dialogs(limit=limit):
             if d.is_channel or d.is_group:
+                joined = getattr(d.entity, "date", None)       # for a channel/supergroup: when we joined
                 out.append({"chat_id": d.id, "title": d.name, "username": getattr(d.entity, "username", None),
-                            "is_channel": bool(d.is_channel and not d.is_group), "unread": d.unread_count})
+                            "is_channel": bool(d.is_channel and not d.is_group), "unread": d.unread_count,
+                            "joined": joined.isoformat() if joined else None,
+                            "last_message": d.date.isoformat() if getattr(d, "date", None) else None})
         return out
 
     async def resolve(self, user_id: str, link: str, join: bool = True) -> dict:

@@ -9,6 +9,7 @@ Telegram copy trading.
   POST   /api/copytrade/login/code          code (+ 2FA password) -> logged in, watching
   POST   /api/copytrade/logout
   GET    /api/copytrade/dialogs             channels/groups the account is in
+  GET    /api/copytrade/dialogs/{chat_id}/history  read-only history of one of them
   GET    /api/copytrade/channels            watched channels
   POST   /api/copytrade/channels            add by chat_id (from dialogs) or link
   PATCH  /api/copytrade/channels/{id}       enabled / rules overrides
@@ -119,6 +120,19 @@ async def dialogs(user: User = Depends(get_current_user)):
         return await telegram_manager.dialogs(user.id)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e)) from e
+
+
+@router.get("/dialogs/{chat_id}/history")
+async def dialog_history(chat_id: int, limit: int = 100, user: User = Depends(get_current_user)):
+    """Read-only history of any chat the account is in, without adding it as a
+    copied channel (adding one turns copying on) - for evaluating a new group."""
+    try:
+        msgs = await telegram_manager.history(user.id, chat_id, min(max(limit, 1), 5000))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
+    for m in msgs:
+        m["parsed"] = parse_message(m["text"]).to_dict()
+    return msgs
 
 
 @router.get("/channels")
