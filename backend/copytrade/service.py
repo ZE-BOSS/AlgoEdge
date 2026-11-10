@@ -36,7 +36,7 @@ from backend.copytrade import mt5ops
 from backend.copytrade.models import CopyTradeChannel, CopyTradeOrder, CopyTradeSettings, CopyTradeSignal
 from backend.copytrade.parser import parse_message
 from backend.copytrade.rules import (breakeven_price, build_open_plan, legs_to_close, merge_rules, resolve_symbol,
-                                     stop_fits, trail_target)
+                                     pending_at_market, stop_fits, trail_target)
 from backend.data.database import async_session
 from backend.utils.logger import get_logger
 
@@ -203,10 +203,34 @@ class CopyTradeService:
                 acts.append(f"[dry run] leg {leg['leg']}: {kind} {leg['volume']} lots @ {entry:g} TP {leg['tp']}")
                 placed += 1
             else:
+                note = ""
+                if kind != "MARKET":
+                    # Price already sits on this leg's entry (10 Nov GBPJPY: a buy limit at
+                    # 212.495 with the ask at 212.49x - "10015 Invalid price", the leg lost).
+                    q = await mt5ops.quote(plan.symbol)
+                    if q and pending_at_market(kind, plan.side, float(entry), q, spec) and \
+                            self._tp_ahead(leg["tp"], plan.side, q):
+                        kind, note = "MARKET", f" (its {row.kind.lower()} {entry:g} was at the market - taken at market)"
+                        row.kind = kind
                 ok, detail, ticket = await mt5ops.place(
                     plan.symbol, plan.side, kind, leg["volume"], entry, plan.sl, leg["tp"],
                     int(rules["magic"]), comment, spec, float(rules.get("pending_expiry_hours") or 0))
-                row.ticket, row.detail = ticket, detail
+                if not ok and kind != "MARKET":
+                    # refused anyway: if price is now at / through the entry, take it at market
+                    q = await mt5ops.quote(plan.symbol)
+                    if q and pending_at_market(kind, plan.side, float(entry), q, spec) and \
+                            self._tp_ahead(leg["tp"], plan.side, q):
+                        ok, detail, ticket = await mt5ops.place(
+                            plan.symbol, plan.side, "MARKET", leg["volume"], entry, plan.sl, leg["tp"],
+                            int(rules["magic"]), comment, spec)
+                        if ok:
+                            note = f" ({kind.lower()} {entry:g} refused, price was there - taken at market)"
+                            kind = row.kind = "MARKET"
+                if ok and kind == "MARKET":
+                    pos = await mt5ops.get_position(ticket)
+                    if pos is not None and note:
+                        row.entry = float(pos.price_open)
+                row.ticket, row.detail = ticket, (detail or "") + note
                 row.status = ("OPEN" if kind == "MARKET" else "PENDING") if ok else "FAILED"
                 acts.append(f"leg {leg['leg']}: {kind} {leg['volume']} lots @ {entry:g} TP {leg['tp']} -> "
                             f"{'#' + str(ticket) if ok else 'FAILED ' + detail}")
@@ -551,6 +575,14 @@ class CopyTradeService:
                     if all(r.status not in LIVE_ORDER for r in rows):
                         root.status = "CLOSED"
                 await s.commit()
+
+    @staticmethod
+    def _tp_ahead(tp, side: str, q: dict) -> bool:
+        """The leg's target is still in front of the price (or it has none)."""
+        if tp is None:
+            return True
+        px = float(q["ask"] if side == "BUY" else q["bid"])
+        return (float(tp) - px) * (1 if side == "BUY" else -1) > 0
 
     async def _closed_tp(self, ticket: int) -> bool:
         if ticket not in self._tp_closed:

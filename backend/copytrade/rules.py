@@ -489,3 +489,19 @@ def legs_to_close(legs: list[dict], fraction: float) -> list[tuple[int, float]]:
         out.append((l["ticket"], round(take, 8)))
         want -= take
     return out
+
+
+def pending_at_market(kind: str, side: str, entry: float, quote: dict, spec: dict | None) -> bool:
+    """Whether a LIMIT / STOP entry is already at (or through) the market, so MT5
+    would refuse it ("10015 Invalid price") - the price it waits for is here now.
+    Within the broker's stops level, or one spread, counts as here."""
+    if kind not in ("LIMIT", "STOP") or not quote:
+        return False
+    ask, bid = float(quote["ask"]), float(quote["bid"])
+    pt = float((spec or {}).get("point") or 0)
+    tol = max(float((spec or {}).get("stops_level") or 0) * pt, ask - bid, pt)
+    px = ask if side == "BUY" else bid
+    s = 1 if side == "BUY" else -1
+    if kind == "LIMIT":           # buy limit waits BELOW the ask, sell limit ABOVE the bid
+        return (px - entry) * s <= tol
+    return (entry - px) * s <= tol  # buy stop waits ABOVE the ask, sell stop BELOW the bid

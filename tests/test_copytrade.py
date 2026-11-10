@@ -225,6 +225,7 @@ class FakeMT5:
         self.calls: list[tuple] = []
         self.history: set[int] = set()      # tickets that were positions at some point
         self.down = False                   # terminal disconnected / re-authorising
+        self.refuse_pending_then_ask = None # refuse the next LIMIT/STOP and move the ask here (price ran to it)
 
     def install(self, mp):
         async def available_symbols():
@@ -240,6 +241,11 @@ class FakeMT5:
             return 10_000.0
 
         async def place(symbol, side, kind, volume, price, sl, tp, magic, comment, spec, expiry_hours=0):
+            if kind != "MARKET" and self.refuse_pending_then_ask is not None:
+                self.ask, self.bid = self.refuse_pending_then_ask, self.refuse_pending_then_ask - 0.2
+                self.refuse_pending_then_ask = None
+                self.calls.append(("refused", kind, volume, tp, comment))
+                return False, "10015 Invalid price", None
             self.next += 1
             t = self.next
             ns = SimpleNamespace(ticket=t, symbol=symbol, volume=volume, price_open=price, sl=sl, tp=tp or 0,

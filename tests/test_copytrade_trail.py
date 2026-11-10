@@ -280,3 +280,37 @@ def test_first_fill_market_mode_converts_limits_when_leg1_was_market(env):  # no
     rows = _orders(env)
     assert not any(o.status == "PENDING" for o in rows)
     assert not env.fake.orders                                              # no limits left behind
+
+
+def test_limit_already_at_the_price_is_taken_at_market(env):  # noqa: F811
+    """10 Nov GBPJPY #4826: leg 2's buy limit sat on the ask, MT5 said "10015
+    Invalid price" and the leg was lost - no position, no market add for it."""
+    _set_rules(env, zone_entry="layer")
+    env.fake.bid, env.fake.ask = 2348.0, 2348.2                      # leg 2's limit is 2348
+    _run(env.service.handle_message("u1", env.ch, 84, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    legs = {o.leg: o for o in _orders(env)}
+    assert legs[2].kind == "MARKET" and legs[2].status == "OPEN" and "taken at market" in legs[2].detail
+    assert legs[3].kind == "LIMIT" and legs[3].status == "PENDING"            # deeper one still waits
+
+
+def test_refused_limit_retried_at_market_when_price_reached_it(env):  # noqa: F811
+    _set_rules(env, zone_entry="layer")
+    env.fake.bid, env.fake.ask = 2349.8, 2350.0
+    env.fake.refuse_pending_then_ask = 2347.9                         # price fell through 2348 as we sent it
+    _run(env.service.handle_message("u1", env.ch, 85, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    legs = {o.leg: o for o in _orders(env)}
+    assert legs[2].kind == "MARKET" and legs[2].status == "OPEN" and "refused" in legs[2].detail
+    assert not any(o.status == "FAILED" for o in legs.values())
+
+
+def test_pending_at_market_rule():
+    from backend.copytrade.rules import pending_at_market
+    spec = {"point": 0.001, "stops_level": 0}
+    q = {"bid": 212.48, "ask": 212.496}
+    assert pending_at_market("LIMIT", "BUY", 212.495, q, spec)          # the #4826 leg
+    assert not pending_at_market("LIMIT", "BUY", 212.44, q, spec)       # a real limit below
+    assert pending_at_market("LIMIT", "SELL", 212.49, q, spec)
+    assert not pending_at_market("LIMIT", "SELL", 212.60, q, spec)
+    assert pending_at_market("STOP", "BUY", 212.50, q, spec)
+    assert not pending_at_market("STOP", "BUY", 212.60, q, spec)
+    assert not pending_at_market("MARKET", "BUY", 212.495, q, spec)
