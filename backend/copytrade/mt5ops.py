@@ -223,13 +223,66 @@ async def close_volume(ticket: int, volume: float | None = None) -> tuple[bool, 
     return ok, detail
 
 
+async def _query(fn, **kw):
+    """One MT5 lookup. Returns the tuple (possibly empty), or None when the
+    terminal could not answer (disconnected, re-authorising, bridge down) -
+    MT5 itself returns None on error and () for "nothing"."""
+    try:
+        return await run_mt5(fn, **kw)
+    except Exception as e:  # bridge/IPC failures raise
+        logger.warning(f"[COPYTRADE] MT5 query {getattr(fn, '__name__', fn)} failed: {e}")
+        return None
+
+
+async def terminal_ready() -> bool:
+    """The terminal is connected to the trade server and logged in."""
+    if mt5 is None:
+        return False
+    try:
+        ti = await run_mt5(mt5.terminal_info)
+        ai = await run_mt5(mt5.account_info)
+    except Exception:
+        return False
+    return ti is not None and bool(getattr(ti, "connected", True)) and ai is not None
+
+
 async def ticket_state(ticket: int) -> str:
-    """PENDING if still an order, OPEN if a position, else GONE (filled-and-closed, cancelled or expired)."""
-    if await get_order(ticket) is not None:
+    """PENDING if still an order, OPEN if a position, GONE only when MT5 answered
+    both lookups, the terminal is connected AND the ticket is in the history
+    (every fill, close, cancel or expiry leaves a record there). Anything else is
+    UNKNOWN - the caller leaves the row as it is and looks again next round.
+
+    Before this, a terminal that dropped its connection (\"Authorization failed\",
+    reconnecting) answered "no order, no position", every live leg was marked
+    CLOSED, and the signal stopped being managed: no breakeven, no trail, no
+    cancel-after-TP1, limits left behind."""
+    if mt5 is None:
+        return "UNKNOWN"
+    orders = await _query(mt5.orders_get, ticket=int(ticket))
+    if orders is None:
+        return "UNKNOWN"
+    if orders:
         return "PENDING"
-    if await get_position(ticket) is not None:
+    positions = await _query(mt5.positions_get, ticket=int(ticket))
+    if positions is None:
+        return "UNKNOWN"
+    if positions:
         return "OPEN"
-    return "GONE"
+    if not await terminal_ready():
+        return "UNKNOWN"
+    deals = await _query(mt5.history_deals_get, position=int(ticket))
+    if deals is None:
+        return "UNKNOWN"
+    out = getattr(mt5, "DEAL_ENTRY_OUT", 1)
+    out_by = getattr(mt5, "DEAL_ENTRY_OUT_BY", 3)
+    if any(getattr(d, "entry", None) in (out, out_by) for d in deals):
+        return "GONE"                       # it was a position and it has been closed
+    if deals:
+        return "UNKNOWN"                    # opened, never closed, yet not listed - terminal still syncing
+    hist_orders = await _query(mt5.history_orders_get, ticket=int(ticket))
+    if hist_orders:
+        return "GONE"                       # an order that left without filling: cancelled / expired / rejected
+    return "UNKNOWN"
 
 
 async def was_filled(ticket: int) -> bool:
@@ -237,17 +290,20 @@ async def was_filled(ticket: int) -> bool:
     since closed) rather than being cancelled or expired."""
     if mt5 is None:
         return False
-    deals = await run_mt5(mt5.history_deals_get, position=int(ticket))
+    deals = await _query(mt5.history_deals_get, position=int(ticket))
     return bool(deals)
 
 
-async def closed_by_tp(ticket: int) -> bool:
-    """Whether a position that is gone was closed by its take profit."""
+async def closed_by_tp(ticket: int) -> bool | None:
+    """Whether a position that is gone was closed by its take profit; None when
+    the terminal could not answer (ask again later - don't remember "no")."""
     if mt5 is None:
         return False
-    deals = await run_mt5(mt5.history_deals_get, position=int(ticket))
-    for d in deals or []:
+    deals = await _query(mt5.history_deals_get, position=int(ticket))
+    if deals is None:
+        return None
+    for d in deals:
         if getattr(d, "entry", None) == getattr(mt5, "DEAL_ENTRY_OUT", 1) and \
                 getattr(d, "reason", None) == getattr(mt5, "DEAL_REASON_TP", 5):
             return True
-    return False
+    return False if deals else None

@@ -57,6 +57,8 @@ class CopyTradeService:
         self._reached: dict[int, int] = {}      # signal id -> highest of its TPs price has reached
         self._trail_note: dict[int, float] = {} # order id -> stop we last failed to set (log once)
         self._pending_be: dict[int, float] = {} # order id -> breakeven he asked for that didn't fit the price yet
+        self._gone_seen: dict[int, int] = {}    # ticket -> rounds in a row MT5 said it is gone
+        self._ff_done: set[int] = set()         # signal ids whose first fill has been handled
 
     # ── settings ────────────────────────────────────────────────────────────
     async def get_settings(self, s, user_id: str) -> CopyTradeSettings:
@@ -254,9 +256,17 @@ class CopyTradeService:
         if r.status in ("PAPER", "PAPER_PENDING") or not r.ticket:
             return
         state = await mt5ops.ticket_state(r.ticket)
+        if state != "GONE":
+            self._gone_seen.pop(r.ticket, None)
         if state == "OPEN" and r.status == "PENDING":
             r.status = "OPEN"
         elif state == "GONE":
+            # Two rounds in a row before it counts: a terminal that is reconnecting
+            # can answer "not there" for a moment while the trade is still live.
+            self._gone_seen[r.ticket] = self._gone_seen.get(r.ticket, 0) + 1
+            if self._gone_seen[r.ticket] < 2:
+                return
+            self._gone_seen.pop(r.ticket, None)
             if r.status == "OPEN":
                 r.status = "CLOSED"
             elif await mt5ops.was_filled(r.ticket):
@@ -520,10 +530,18 @@ class CopyTradeService:
                                             o.status, o.detail = "CANCELLED", f"TP{r.leg} filled"
                                 break
                     # first fill: the rest of the zone at market
+                    # Once per signal, as soon as ANY leg is in - including leg 1 filled
+                    # at market the moment the signal was copied (price already in the
+                    # zone). The old test needed a PENDING leg to turn OPEN, so a signal
+                    # whose first leg went in at market never got its market adds and
+                    # the limits were left waiting behind price.
                     if str(rules.get("on_first_fill") or "keep") in ("market", "market_add") and \
-                            not any(before[r.id] in ("OPEN", "CLOSED") for r in rows) and \
-                            any(before[r.id] == "PENDING" and r.status in ("OPEN", "CLOSED") for r in rows):
-                        await self._rest_at_market(s, root, rows, rules)
+                            root.id not in self._ff_done and \
+                            any(r.status == "PENDING" and r.ticket for r in rows) and \
+                            any(r.status in ("OPEN", "CLOSED") for r in rows):
+                        self._ff_done.add(root.id)
+                        if not any("first leg filled" in (r.detail or "") for r in rows):   # not done before a restart
+                            await self._rest_at_market(s, root, rows, rules)
                     # breakeven he asked for while price was behind the entry
                     if self._pending_be:
                         await self._apply_pending_be(root, rows)
@@ -536,7 +554,10 @@ class CopyTradeService:
 
     async def _closed_tp(self, ticket: int) -> bool:
         if ticket not in self._tp_closed:
-            self._tp_closed[ticket] = bool(await mt5ops.closed_by_tp(ticket))
+            res = await mt5ops.closed_by_tp(ticket)
+            if res is None:
+                return False                  # terminal didn't answer - ask again next round
+            self._tp_closed[ticket] = bool(res)
         return self._tp_closed[ticket]
 
     async def _rest_at_market(self, s, root: CopyTradeSignal, rows: list[CopyTradeOrder], rules: dict) -> None:
@@ -624,7 +645,12 @@ class CopyTradeService:
         if not be or not stop_fits(be, side, q, spec):
             return
         step = float(spec.get("volume_step") or 0.01)
-        vol = round(int(sum(float(r.volume) for r in open_rows) * mult / step + 1e-9) * step, 8)
+        live_vol = 0.0
+        for r in open_rows:                  # only what is really still open (a leg may have just hit TP1)
+            p = await mt5ops.get_position(r.ticket)
+            if p is not None:
+                live_vol += float(p.volume)
+        vol = round(int(live_vol * mult / step + 1e-9) * step, 8)
         if vol < float(spec.get("volume_min") or step):
             return
         ok, detail, ticket = await mt5ops.place(root.symbol, side, "MARKET", vol, 0.0, be, None, int(rules["magic"]),

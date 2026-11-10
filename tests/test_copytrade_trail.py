@@ -47,6 +47,7 @@ def test_breakeven_after_tp1_when_fill_and_tp_happen_between_checks(env):  # noq
     _fill(env, t2, 2348.0)
     env.fake.bid, env.fake.ask = 2350.2, 2350.4
     _run(env.service.monitor_once())
+    _run(env.service.monitor_once())      # "gone" has to be seen twice before it counts
     st = {o.leg: o.status for o in _orders(env)}
     assert st[1] == "CLOSED"              # was marked CANCELLED before, so nothing after it fired
     assert st[3] == "CANCELLED"
@@ -187,6 +188,7 @@ def test_first_fill_adds_market_legs_and_keeps_the_limits(env):  # noqa: F811
     _tp_out(env, legs[0].ticket)
     env.fake.bid, env.fake.ask = 2355.2, 2355.4
     _run(env.service.monitor_once())
+    _run(env.service.monitor_once())                              # gone twice -> TP1 counts
     st = sorted((o.leg, o.kind, o.status) for o in _orders(env))
     assert (2, "LIMIT", "CANCELLED") in st and (3, "LIMIT", "CANCELLED") in st
     assert (2, "MARKET", "OPEN") in st and (3, "MARKET", "OPEN") in st
@@ -222,3 +224,59 @@ def test_runner_leg_and_stack_at_tp1(env):  # noqa: F811
     _run(env.service.monitor_once())
     assert env.fake.positions[t2].sl == pytest.approx(2360.0)
     assert env.fake.positions[stack[0].ticket].sl == pytest.approx(2360.0)
+
+
+def test_mt5_disconnect_does_not_close_live_legs(env):  # noqa: F811
+    """9 Nov 21:24: the terminal lost its login for 20 s; every leg of #51331 was
+    marked CLOSED while it was still live, so nothing managed it afterwards."""
+    _set_rules(env, zone_entry="layer", be_after_tp=1, cancel_pending_after_tp=1)
+    env.fake.bid, env.fake.ask = 2349.8, 2350.0
+    _run(env.service.handle_message("u1", env.ch, 80, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2352\nTP: 2354\nTP: 2356"))
+    before = {o.id: o.status for o in _orders(env)}
+    env.fake.down = True
+    for _ in range(3):
+        _run(env.service.monitor_once())
+    assert {o.id: o.status for o in _orders(env)} == before
+    env.fake.down = False
+    _run(env.service.monitor_once())
+    assert all(o.status in ("OPEN", "PENDING") for o in _orders(env))
+
+
+def test_gone_must_be_seen_twice(env):  # noqa: F811
+    _set_rules(env)
+    _run(env.service.handle_message("u1", env.ch, 81, "XAUUSD BUY NOW\nSL 2340\nTP1 2355"))
+    t1 = _orders(env)[0].ticket
+    _tp_out(env, t1)
+    _run(env.service.monitor_once())
+    assert _orders(env)[0].status == "OPEN"
+    _run(env.service.monitor_once())
+    assert _orders(env)[0].status == "CLOSED"
+
+
+def test_market_add_when_first_leg_went_in_at_market(env):  # noqa: F811
+    """#51331: price was inside the zone, leg 1 was a market order at once - the
+    old first-fill test waited for a LIMIT to turn OPEN and never fired."""
+    _set_rules(env, zone_entry="layer", on_first_fill="market_add", cancel_pending_after_tp=1)
+    env.fake.bid, env.fake.ask = 2349.0, 2349.2                     # inside 2350 - 2346
+    _run(env.service.handle_message("u1", env.ch, 82, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    legs = _orders(env)
+    assert legs[0].kind == "MARKET" and legs[0].status == "OPEN"
+    pending = [o for o in legs if o.status == "PENDING"]
+    assert pending
+    _run(env.service.monitor_once())
+    rows = _orders(env)
+    adds = [o for o in rows if "added at market" in (o.detail or "")]
+    assert len(adds) == len(pending)
+    assert all(o.status == "PENDING" for o in rows if o.kind == "LIMIT")   # limits still wait
+    _run(env.service.monitor_once())
+    assert len(_orders(env)) == len(rows)                                   # once only
+
+
+def test_first_fill_market_mode_converts_limits_when_leg1_was_market(env):  # noqa: F811
+    _set_rules(env, zone_entry="layer", on_first_fill="market")
+    env.fake.bid, env.fake.ask = 2349.0, 2349.2
+    _run(env.service.handle_message("u1", env.ch, 83, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    _run(env.service.monitor_once())
+    rows = _orders(env)
+    assert not any(o.status == "PENDING" for o in rows)
+    assert not env.fake.orders                                              # no limits left behind

@@ -224,6 +224,7 @@ class FakeMT5:
         self.orders: dict[int, SimpleNamespace] = {}
         self.calls: list[tuple] = []
         self.history: set[int] = set()      # tickets that were positions at some point
+        self.down = False                   # terminal disconnected / re-authorising
 
     def install(self, mp):
         async def available_symbols():
@@ -278,6 +279,8 @@ class FakeMT5:
             return True, "ok"
 
         async def ticket_state(t):
+            if self.down:
+                return "UNKNOWN"
             return "PENDING" if t in self.orders else "OPEN" if t in self.positions else "GONE"
 
         async def closed_by_tp(t):
