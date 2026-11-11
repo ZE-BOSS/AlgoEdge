@@ -314,3 +314,26 @@ def test_pending_at_market_rule():
     assert pending_at_market("STOP", "BUY", 212.50, q, spec)
     assert not pending_at_market("STOP", "BUY", 212.60, q, spec)
     assert not pending_at_market("MARKET", "BUY", 212.495, q, spec)
+
+
+def test_channel_can_copy_gold_only(env):  # noqa: F811
+    """'Only these symbols' set on one channel (its override), not globally."""
+    from sqlalchemy import select
+
+    from backend.copytrade.models import CopyTradeChannel, CopyTradeSignal
+
+    async def go():
+        async with env.Session() as s:
+            ch = (await s.execute(select(CopyTradeChannel))).scalars().first()
+            ch.rules = {"allowed_symbols": ["XAUUSD"]}
+            await s.commit()
+    _run(go())
+    _run(env.service.handle_message("u1", env.ch, 90, "VOLATILITY 75 INDEX \n\nBUY NOW \n\nTP. 54800\n\nSL. 53400"))
+    _run(env.service.handle_message("u1", env.ch, 91, "XAUUSD BUY NOW\nSL 2340\nTP1 2355"))
+
+    async def sigs():
+        async with env.Session() as s:
+            return {r.msg_id: (r.status, r.detail) for r in (await s.execute(select(CopyTradeSignal))).scalars()}
+    got = _run(sigs())
+    assert got[90][0] == "SKIPPED" and "allowed symbols" in got[90][1]
+    assert got[91][0] != "SKIPPED"

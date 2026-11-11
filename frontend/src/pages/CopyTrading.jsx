@@ -273,6 +273,7 @@ function ChannelRow({ c, active, onPatch, onDelete, onHistory }) {
   const [r, setR] = useState({
     risk_pct: c.rules?.risk_pct ?? '', split_weights: (c.rules?.split_weights || []).join(', '), symbol_map: mapText(c.rules?.symbol_map),
     default_symbol: c.rules?.default_symbol ?? '', allowed_senders: (c.rules?.allowed_senders || []).join(', '),
+    allowed_symbols: (c.rules?.allowed_symbols || []).join(', '),
   });
   const save = () => {
     const rules = { ...c.rules };
@@ -284,10 +285,13 @@ function ChannelRow({ c, active, onPatch, onDelete, onHistory }) {
     if (r.default_symbol.trim()) rules.default_symbol = r.default_symbol.trim(); else delete rules.default_symbol;
     const snd = r.allowed_senders.split(',').map((x) => x.trim()).filter(Boolean);
     if (snd.length) rules.allowed_senders = snd; else delete rules.allowed_senders;
+    const syms = r.allowed_symbols.split(',').map((x) => x.trim()).filter(Boolean)
+      .map((x) => (/^[a-z0-9/]+$/i.test(x) ? x.toUpperCase().replace('/', '') : x));
+    if (syms.length) rules.allowed_symbols = syms; else delete rules.allowed_symbols;
     onPatch({ rules });
     setOpen(false);
   };
-  const overrides = ['risk_pct', 'split_weights', 'symbol_map', 'default_symbol', 'allowed_senders'].filter((k) => c.rules?.[k] != null).length;
+  const overrides = ['risk_pct', 'split_weights', 'symbol_map', 'default_symbol', 'allowed_senders', 'allowed_symbols'].filter((k) => c.rules?.[k] != null).length;
   return (
     <div className="ct-chan">
       <div className="ct-chan__row">
@@ -297,6 +301,7 @@ function ChannelRow({ c, active, onPatch, onDelete, onHistory }) {
           <div className="ct-chan__meta">
             {c.username ? `@${c.username}` : 'private'}
             {c.rules?.risk_pct != null && ` · ${c.rules.risk_pct}% risk`}
+            {c.rules?.allowed_symbols?.length > 0 && ` · only ${c.rules.allowed_symbols.join(', ')}`}
             {overrides > 0 && ` · ${overrides} override${overrides > 1 ? 's' : ''}`}
           </div>
         </div>
@@ -330,6 +335,10 @@ function ChannelRow({ c, active, onPatch, onDelete, onHistory }) {
                   onChange={(e) => setR({ ...r, allowed_senders: e.target.value })} />
               </Field>
             </div>
+            <Field label="Only these symbols" hint="Copy just these from this channel, e.g. XAUUSD. Blank = every symbol (or the list in Rules).">
+              <input className="ct-input ct-mono" placeholder="all" value={r.allowed_symbols}
+                onChange={(e) => setR({ ...r, allowed_symbols: e.target.value })} />
+            </Field>
             <Field label="Symbol map" hint="One per line: name in the channel = name at your broker.">
               <textarea className="ct-textarea ct-mono" rows={2} placeholder={'GOLD=XAUUSD\nNAS100=US Tech 100'} value={r.symbol_map}
                 onChange={(e) => setR({ ...r, symbol_map: e.target.value })} />
