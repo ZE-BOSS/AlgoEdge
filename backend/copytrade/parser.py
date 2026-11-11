@@ -55,7 +55,8 @@ for a in _FX:
 # Deriv synthetic indices, written many ways ("Boom 1000", "BOOM1000", "V75", "Vol 75")
 _SYNTH = [
     (r"BOOM\s*(\d{2,4})", "Boom {} Index"), (r"CRASH\s*(\d{2,4})", "Crash {} Index"),
-    (r"(?:VOLATILITY|VOL|V)\s*(\d{1,3})\s*\(?1S\)?", "Volatility {} (1s) Index"),
+    # "1S" reaches here as "1 S" (number|letter is split before this runs)
+    (r"(?:VOLATILITY|VOL|V)\s*(\d{1,3})\s*\(?\s*1\s?S\b\)?", "Volatility {} (1s) Index"),
     (r"(?:VOLATILITY|VOL|V)\s*(\d{1,3})(?!\d)", "Volatility {} Index"),
     (r"JUMP\s*(\d{2,3})", "Jump {} Index"), (r"STEP\s*(?:INDEX)?\s*(\d{3})?", "Step Index {}"),
 ]
