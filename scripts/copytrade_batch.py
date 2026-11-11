@@ -40,6 +40,7 @@ def main():
     ap.add_argument("tsv", nargs="+")
     ap.add_argument("--min", type=int, default=20)
     ap.add_argument("--tf", default="M1")
+    ap.add_argument("--full", action="store_true", help="every variant, not one line per symbol")
     a = ap.parse_args()
     for path in a.tsv:
         cnt = collections.Counter()
@@ -57,6 +58,20 @@ def main():
             if r.returncode or not rng:
                 err = (r.stderr.strip().splitlines() or ["?"])[-1]
                 print(f"  {sym}: {n} signals - no result ({err[:120]})", flush=True)
+                continue
+            res = {}
+            for block in out.split("\n== ")[1:]:
+                t = re.search(r"total ([+-][\d.]+)R.*?PF ([\d.inf]+).*?maxDD ([\d.]+)R", block)
+                f = re.search(r"filled (\d+)", block)
+                if t:
+                    res[short(block.splitlines()[0])] = (int(f.group(1)), float(t.group(1)), t.group(2), float(t.group(3)))
+            if not a.full:
+                best = max(res.items(), key=lambda kv: kv[1][1]) if res else None
+                cp = res.get("copier (follows him)")
+                sb = res.get("signals + BE@TP1")
+                fmt = lambda v: f"{v[1]:+6.1f}R PF {v[2]:>4} DD {v[3]:4.1f}R" if v else "-"
+                print(f"  {sym[:26]:26s} {rng.group(1):>4}/{rng.group(2):<4} filled {cp[0] if cp else 0:>3} | copier {fmt(cp)} | "
+                      f"sig+BE {fmt(sb)} | best {best[0] if best else '-'} {fmt(best[1]) if best else ''}", flush=True)
                 continue
             print(f"  {sym}: {rng.group(1)}/{rng.group(2)} signals in bars {rng.group(3)}", flush=True)
             for block in out.split("\n== ")[1:]:
