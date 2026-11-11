@@ -44,6 +44,47 @@ _FALSE_ON_FAILURE = {"initialize", "login", "symbol_select", "market_book_add", 
 _NEVER_RESEND = {"order_send"}
 _NT_CACHE: dict[tuple, type] = {}
 
+# Brokers name the same instrument differently: Exness "XAUUSDm", others
+# "XAUUSD.m", "XAUUSD.pro", "XAUUSDc". The backend asks for "XAUUSD" in many
+# places (dashboard chart, ticks, the bot's orders). When the name it asks for
+# does not exist at this broker, the call is sent with the broker's name.
+_SYMBOL_ARG0 = {"symbol_info", "symbol_info_tick", "symbol_select", "copy_rates_from", "copy_rates_from_pos",
+                "copy_rates_range", "copy_ticks_from", "copy_ticks_range", "market_book_add", "market_book_get",
+                "market_book_release"}
+_SYMBOL_ARG1 = {"order_calc_margin", "order_calc_profit"}            # (action, symbol, ...)
+_SYMBOL_REQUEST = {"order_send", "order_check"}                       # request["symbol"]
+_SYMBOL_KW = {"positions_get", "orders_get", "positions_total", "orders_total"}
+_RESET_SYMBOLS = {"initialize", "login", "shutdown"}
+_SUFFIX_RE = None
+
+
+def _suffix_ok(rest: str) -> bool:
+    """What a broker adds to a name: "m", ".m", ".pro", "_i", "c", "-ecn"."""
+    global _SUFFIX_RE
+    if _SUFFIX_RE is None:
+        import re
+        _SUFFIX_RE = re.compile(r"^[._#-]?[A-Za-z0-9]{1,4}$")
+    return bool(_SUFFIX_RE.match(rest))
+
+
+def pick_broker_symbol(wanted: str, names: list[str], suffix: str = "") -> str | None:
+    """The broker's name for `wanted` among `names` (it is known not to exist as
+    spelled), or None. A configured suffix wins; otherwise the one name that is
+    `wanted` plus a short suffix, preferring the shortest."""
+    if not wanted:
+        return None
+    up = wanted.upper()
+    by_up = {n.upper(): n for n in names}
+    if suffix and (up + suffix.upper()) in by_up:
+        return by_up[up + suffix.upper()]
+    hits = [n for n in names if n.upper().startswith(up) and n.upper() != up and _suffix_ok(n[len(wanted):])]
+    if not hits:
+        return None
+    hits.sort(key=lambda n: (len(n), n))
+    if len(hits) > 1 and len(hits[0]) == len(hits[1]):
+        logger.warning("[MT5 bridge] %s is ambiguous at this broker (%s) - using %s", wanted, ", ".join(hits[:4]), hits[0])
+    return hits[0]
+
 
 def _decode(v: Any) -> Any:
     if isinstance(v, dict):
@@ -78,6 +119,9 @@ class BridgedMT5(types.ModuleType):
         self.__dict__["_lock"] = threading.Lock()
         self.__dict__["_last_bridge_error"] = None
         self.__dict__["_next_attempt"] = 0.0
+        self.__dict__["_sym_map"] = {}          # name asked for -> broker's name (only when they differ)
+        self.__dict__["_sym_ok"] = set()        # names that exist as spelled
+        self.__dict__["_sym_names"] = (0.0, [])
         data = json.loads(_CONSTANTS_FILE.read_text(encoding="utf-8"))
         self.__dict__.update(data.get("constants", {}))
         self.__dict__["__version__"] = data.get("version", "") + "+bridge"
@@ -134,12 +178,70 @@ class BridgedMT5(types.ModuleType):
                 raise RuntimeError(value)
         raise ConnectionError(self.__dict__["_last_bridge_error"] or "MT5 bridge unavailable")
 
+    # -- broker symbol names --------------------------------------------------------
+    def _raw(self, name: str, *args, **kwargs):
+        try:
+            return self._request(("call", name, args, kwargs))
+        except (ConnectionError, RuntimeError):
+            return None
+
+    def broker_symbol(self, wanted: str) -> str:
+        """`wanted` as this broker spells it ("XAUUSD" -> "XAUUSDm" on Exness).
+        Unchanged when it exists as spelled or nothing matches."""
+        if not isinstance(wanted, str) or not wanted:
+            return wanted
+        m = self.__dict__["_sym_map"]
+        if wanted in m:
+            return m[wanted]
+        if wanted in self.__dict__["_sym_ok"]:
+            return wanted
+        if self._raw("symbol_info", wanted) is not None:
+            self.__dict__["_sym_ok"].add(wanted)
+            return wanted
+        at, names = self.__dict__["_sym_names"]
+        if not names or time.monotonic() - at > 600:
+            res = self._raw("symbols_get")
+            if not res:
+                return wanted                       # terminal not answering - try again next call
+            names = [getattr(s, "name", "") for s in res]
+            self.__dict__["_sym_names"] = (time.monotonic(), names)
+        got = pick_broker_symbol(wanted, names, os.environ.get("MT5_SYMBOL_SUFFIX", ""))
+        if got:
+            logger.info("[MT5 bridge] %s is called %s at this broker - using that", wanted, got)
+            m[wanted] = got
+            return got
+        return wanted
+
+    def _with_broker_symbols(self, name: str, args: tuple, kwargs: dict):
+        try:
+            if name in _SYMBOL_ARG0 and args:
+                args = (self.broker_symbol(args[0]),) + tuple(args[1:])
+            elif name in _SYMBOL_ARG1 and len(args) > 1:
+                args = (args[0], self.broker_symbol(args[1])) + tuple(args[2:])
+            elif name in _SYMBOL_REQUEST and args and isinstance(args[0], dict) and args[0].get("symbol"):
+                req = dict(args[0])
+                req["symbol"] = self.broker_symbol(req["symbol"])
+                args = (req,) + tuple(args[1:])
+            if name in _SYMBOL_KW and kwargs.get("symbol"):
+                kwargs = {**kwargs, "symbol": self.broker_symbol(kwargs["symbol"])}
+            if name in _SYMBOL_ARG0 and kwargs.get("symbol"):
+                kwargs = {**kwargs, "symbol": self.broker_symbol(kwargs["symbol"])}
+        except Exception as exc:                        # noqa: BLE001 - never block the call itself
+            logger.warning("[MT5 bridge] symbol name lookup failed for %s(): %s", name, exc)
+        return args, kwargs
+
     # -- the MetaTrader5 surface ---------------------------------------------------
     def __getattr__(self, name: str):
         if name.startswith("_"):
             raise AttributeError(name)
 
         def call(*args, **kwargs):
+            if name in _RESET_SYMBOLS:                  # another account / broker: names may differ
+                self.__dict__["_sym_map"].clear()
+                self.__dict__["_sym_ok"].clear()
+                self.__dict__["_sym_names"] = (0.0, [])
+            else:
+                args, kwargs = self._with_broker_symbols(name, args, kwargs)
             try:
                 return self._request(("call", name, args, kwargs), resend=name not in _NEVER_RESEND)
             except ConnectionError as exc:

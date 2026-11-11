@@ -127,6 +127,7 @@ def test_order_send_is_never_resent_after_a_lost_reply():
     threading.Thread(target=one_shot_then_die, daemon=True).start()
     time.sleep(0.3)
     mt5 = BridgedMT5(("127.0.0.1", port), KEY, timeout_s=2)
+    mt5.__dict__["_sym_ok"].add("X")                    # name already known: no lookup before the order
     assert mt5.order_send({"action": 1, "symbol": "X", "volume": 0.1}) is None
     assert [m[1] for m in received if m[0] == "call"] == ["order_send"], "order_send was resent"
 
