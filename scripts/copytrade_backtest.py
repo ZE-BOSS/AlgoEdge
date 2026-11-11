@@ -347,6 +347,8 @@ def main() -> int:
                 continue
             p = sg["p"]
             near = p["entry_high"] if p["side"] == "BUY" else p["entry_low"]
+            if near is None:                # "BUY NOW" with no price: nothing to check
+                continue
             i0 = np.searchsorted(bars["time"], sg["t"] + off)
             i1 = np.searchsorted(bars["time"], sg["t"] + off + 3600)
             if i1 <= i0:
@@ -362,6 +364,8 @@ def main() -> int:
         for sg in sigs:
             p = sg["p"]
             first = p["entry_high"] if p["side"] == "BUY" else p["entry_low"]
+            if first is None:
+                continue
             i = np.searchsorted(bars["time"], sg["t"] + off)
             if 0 < i < len(bars["time"]) and abs(bars["time"][i] - sg["t"] - off) < 600:
                 d.append(abs(float(bars["open"][i]) - float(first)))
