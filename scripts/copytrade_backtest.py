@@ -323,8 +323,18 @@ def main() -> int:
     if len(sigs) != n_all:
         print(f"# {len(sigs)}/{n_all} signals are {a.symbol}")
     if a.bars == "mt5":
-        bars = load_bars_mt5(a.symbol, a.tf, sigs[0]["t"] - 3600, sigs[-1]["t"] + 3 * 86400,
-                             Path("/tmp") / f"ct_{a.symbol}_{a.tf}_{os.getuid()}.npz")
+        # the broker may call it something else (Deriv: NAS100 -> "US Tech 100")
+        from backend.copytrade.rules import BROKER_CANDIDATES
+        bars, last = None, None
+        for name in BROKER_CANDIDATES.get(a.symbol, [a.symbol]):
+            try:
+                bars = load_bars_mt5(name, a.tf, sigs[0]["t"] - 3600, sigs[-1]["t"] + 3 * 86400,
+                                     Path("/tmp") / f"ct_{name}_{a.tf}_{os.getuid()}.npz")
+                break
+            except SystemExit as e:
+                last = e
+        if bars is None:
+            raise last
     else:
         bars = load_bars_npz(a.bars)
     # only signals the bars cover (MT5 serves a limited history, e.g. ~100k M1 bars)
