@@ -282,7 +282,13 @@ async def ticket_state(ticket: int) -> str:
     hist_orders = await _query(mt5.history_orders_get, ticket=int(ticket))
     if hist_orders:
         return "GONE"                       # an order that left without filling: cancelled / expired / rejected
-    return "UNKNOWN"
+    if hist_orders is None:
+        return "UNKNOWN"
+    # Connected, logged in, and MT5 has never heard of this ticket: no order, no
+    # position, no deal, no history. It was placed on ANOTHER account (the MT5
+    # login was switched, e.g. Deriv -> Exness). The caller decides when that
+    # has lasted long enough to stop waiting for it.
+    return "MISSING"
 
 
 async def was_filled(ticket: int) -> bool:

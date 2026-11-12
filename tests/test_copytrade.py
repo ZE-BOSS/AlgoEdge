@@ -225,6 +225,7 @@ class FakeMT5:
         self.calls: list[tuple] = []
         self.history: set[int] = set()      # tickets that were positions at some point
         self.down = False                   # terminal disconnected / re-authorising
+        self.missing: set[int] = set()      # tickets from another MT5 account (login switched)
         self.refuse_pending_then_ask = None # refuse the next LIMIT/STOP and move the ask here (price ran to it)
 
     def install(self, mp):
@@ -287,6 +288,8 @@ class FakeMT5:
         async def ticket_state(t):
             if self.down:
                 return "UNKNOWN"
+            if t in self.missing:
+                return "MISSING"
             return "PENDING" if t in self.orders else "OPEN" if t in self.positions else "GONE"
 
         async def closed_by_tp(t):

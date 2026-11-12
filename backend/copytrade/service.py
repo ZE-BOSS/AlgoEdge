@@ -43,6 +43,7 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 
 ACTIVE_SIGNAL = ("EXECUTED", "PARTIAL", "DRY_RUN")
+MISSING_GRACE = timedelta(minutes=15)   # a ticket the account has no trace of for this long was placed elsewhere
 LIVE_ORDER = ("OPEN", "PENDING", "PAPER", "PAPER_PENDING")
 
 
@@ -58,6 +59,7 @@ class CopyTradeService:
         self._trail_note: dict[int, float] = {} # order id -> stop we last failed to set (log once)
         self._pending_be: dict[int, float] = {} # order id -> breakeven he asked for that didn't fit the price yet
         self._gone_seen: dict[int, int] = {}    # ticket -> rounds in a row MT5 said it is gone
+        self._missing_since: dict[int, datetime] = {}  # ticket -> first time this account had no trace of it
         self._ff_done: set[int] = set()         # signal ids whose first fill has been handled
 
     # ── settings ────────────────────────────────────────────────────────────
@@ -282,6 +284,22 @@ class CopyTradeService:
         state = await mt5ops.ticket_state(r.ticket)
         if state != "GONE":
             self._gone_seen.pop(r.ticket, None)
+        if state != "MISSING":
+            self._missing_since.pop(r.ticket, None)
+        else:
+            # 12 Nov: live moved from Deriv to Exness; its Deriv trades are on no
+            # account it can see, stayed "open" here for ever and filled every
+            # channel's max-open-signals, so live skipped the channels' new signals.
+            first = self._missing_since.setdefault(r.ticket, _now())
+            if _now() - first < MISSING_GRACE:
+                return
+            self._missing_since.pop(r.ticket, None)
+            was = r.status
+            r.status = "CLOSED" if was == "OPEN" else "CANCELLED"
+            r.detail = (r.detail or "") + " | not on this MT5 account (login switched?) - no longer tracked"
+            logger.warning(f"[COPYTRADE] ticket {r.ticket} is on no account this terminal can see - "
+                           f"marked {r.status} (was {was})")
+            return
         if state == "OPEN" and r.status == "PENDING":
             r.status = "OPEN"
         elif state == "GONE":

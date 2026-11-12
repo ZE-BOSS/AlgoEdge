@@ -62,7 +62,8 @@ OUT_TP = SimpleNamespace(entry=1, reason=5)
     (dict(deals=(IN, OUT_TP)), "GONE"),                             # opened and closed
     (dict(deals=(IN,)), "UNKNOWN"),                                 # opened, never closed: still syncing
     (dict(hist_orders=(1,)), "GONE"),                               # cancelled / expired order
-    (dict(), "UNKNOWN"),                                            # no trace anywhere
+    (dict(), "MISSING"),                                            # no trace anywhere: another account's ticket
+    (dict(hist_orders=None), "UNKNOWN"),                            # history did not answer
     (dict(deals=(IN, OUT_TP), connected=False), "UNKNOWN"),          # disconnected
     (dict(deals=(IN, OUT_TP), logged_in=False), "UNKNOWN"),          # "Authorization failed"
     (dict(deals=None), "UNKNOWN"),

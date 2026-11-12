@@ -337,3 +337,47 @@ def test_channel_can_copy_gold_only(env):  # noqa: F811
     got = _run(sigs())
     assert got[90][0] == "SKIPPED" and "allowed symbols" in got[90][1]
     assert got[91][0] != "SKIPPED"
+
+
+def test_trades_from_a_previous_mt5_account_free_their_slots(env, monkeypatch):  # noqa: F811
+    """12 Nov: live switched from Deriv to Exness. The Deriv trades exist on no
+    account the terminal can see, stayed 'open' for ever, filled the channel's
+    max_open_signals, and every new signal on that channel was skipped."""
+    from datetime import timedelta
+
+    from backend.copytrade import service as svc
+
+    _set_rules(env, max_open_signals=1)
+    _run(env.service.handle_message("u1", env.ch, 95, "XAUUSD BUY NOW\nSL 2340\nTP1 2355"))
+    tickets = [o.ticket for o in _orders(env)]
+    for tk in tickets:                                      # the login moved to another broker
+        env.fake.positions.pop(tk, None)
+        env.fake.orders.pop(tk, None)
+        env.fake.missing.add(tk)
+    _run(env.service.monitor_once())
+    assert all(o.status in ("OPEN", "PENDING") for o in _orders(env))          # not before the grace period
+    _run(env.service.handle_message("u1", env.ch, 96, "XAUUSD SELL NOW\nSL 2360\nTP1 2345"))
+    assert len(_orders(env)) == len(tickets)                                  # still blocked: slot taken
+
+    real_now = svc._now
+    monkeypatch.setattr(svc, "_now", lambda: real_now() + timedelta(minutes=20))
+    _run(env.service.monitor_once())
+    assert all(o.status in ("CLOSED", "CANCELLED") and "not on this MT5 account" in o.detail
+               for o in _orders(env) if o.ticket in tickets)
+    _run(env.service.handle_message("u1", env.ch, 97, "XAUUSD SELL NOW\nSL 2360\nTP1 2345"))
+    assert len(_orders(env)) > len(tickets)                                   # the channel trades again
+
+
+def test_a_disconnect_is_not_mistaken_for_another_account(env, monkeypatch):  # noqa: F811
+    from datetime import timedelta
+
+    from backend.copytrade import service as svc
+
+    _set_rules(env)
+    _run(env.service.handle_message("u1", env.ch, 98, "XAUUSD BUY NOW\nSL 2340\nTP1 2355"))
+    env.fake.down = True
+    real_now = svc._now
+    monkeypatch.setattr(svc, "_now", lambda: real_now() + timedelta(hours=3))
+    _run(env.service.monitor_once())
+    _run(env.service.monitor_once())
+    assert all(o.status in ("OPEN", "PENDING") for o in _orders(env))
