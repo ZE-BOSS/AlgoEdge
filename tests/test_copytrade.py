@@ -203,8 +203,25 @@ def test_plan_refusals():
     # price below the stop: stale
     assert "stale" in build_open_plan(_sig(order_type="MARKET", entry=None), {"bid": 2339, "ask": 2339.2},
                                       GOLD, 1e4, r, "X").reason
-    # tiny account: min lot risks $9.20 > 2% of $100 -> refused
-    assert not build_open_plan(_sig(), {"bid": 2349, "ask": 2349.2}, GOLD, 100, r, "X").ok
+    # tiny account, min_lot_floor off: min lot risks $9.20 > 2% of $100 -> refused
+    off = merge_rules({"min_lot_floor": False})
+    assert not build_open_plan(_sig(), {"bid": 2349, "ask": 2349.2}, GOLD, 100, off, "X").ok
+
+
+def test_min_lot_floor_trades_every_leg_at_the_min_lot():
+    """13 Nov: "if lot size too small, instead of rejecting trade, default to
+    minimum lot size on each leg regardless of capital"."""
+    r = merge_rules({})
+    p = build_open_plan(_sig(), {"bid": 2349, "ask": 2349.2}, GOLD, 100, r, "X")     # $100 account, 1% risk
+    assert p.ok and len(p.legs) == 3 and all(l["volume"] == pytest.approx(0.01) for l in p.legs)
+    assert any("traded at 0.01" in n for n in p.notes)
+    m = build_open_plan(_sig(order_type="MARKET", entry=2349.2, entry_low=None, entry_high=None),
+                        {"bid": 2349, "ask": 2349.2}, GOLD, 50, r, "X")                # single entry, 3 TPs
+    assert m.ok and [l["volume"] for l in m.legs] == pytest.approx([0.01] * len(m.legs)) and len(m.legs) >= 2
+    big = build_open_plan(_sig(), {"bid": 2349, "ask": 2349.2}, GOLD, 1e4, r, "X")      # big enough: unchanged
+    assert sum(l["volume"] for l in big.legs) == pytest.approx(
+        sum(l["volume"] for l in build_open_plan(_sig(), {"bid": 2349, "ask": 2349.2}, GOLD, 1e4,
+                                                 merge_rules({"min_lot_floor": False}), "X").legs))
 
 
 def test_legs_to_close_nearest_first():

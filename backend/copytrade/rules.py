@@ -27,6 +27,9 @@ DEFAULT_RULES: dict[str, Any] = {
     "max_legs": 10,               # use at most this many TPs (the nearest ones)
     "allow_min_lot": True,        # if the risk budget is below the broker's min lot, trade the min lot...
     "min_lot_max_risk_pct": 2.0,  # ...but only if that risk is at most this % of balance
+    "min_lot_floor": True,        # never skip or drop a leg for size: a leg the risk budget makes smaller than
+                                  # the broker's min lot is traded AT the min lot, whatever the balance
+                                  # (overrides the two rules above; the risk can then exceed risk_pct)
     # entries
     "zone_entry": "layer",        # an entry ZONE: layer = limit orders spread through it (first fill -> TP1,
                                   # deepest -> last TP; already-reached levels fill at market); market = one entry now
@@ -154,6 +157,22 @@ def split_volume(total: float, weights: list[float], spec: dict) -> list[float]:
             return legs
         n -= 1
     return []
+
+
+def floor_split(total: float, weights: list[float], spec: dict) -> list[float]:
+    """Like split_volume, but every leg is kept: a leg below the broker minimum
+    is raised to it (min_lot_floor). Capped at the broker maximum per leg."""
+    vmin = spec.get("volume_min") or 0.01
+    step = spec.get("volume_step") or vmin
+    vmax = spec.get("volume_max") or 0
+    w = [max(float(x), 0.0) for x in weights] or [1.0]
+    if sum(w) <= 0:
+        w = [1.0] * len(w)
+    s = sum(w)
+    legs = [max(floor_step(total * x / s, step), vmin) for x in w]
+    if vmax:
+        legs = [min(v, vmax) for v in legs]
+    return [round(v, 8) for v in legs]
 
 
 @dataclass
@@ -306,7 +325,9 @@ def _build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: 
             return p
         budget = balance * float(rules.get("risk_pct") or 0) / 100.0
         total = budget / lpl
-        if total < vmin:
+        if rules.get("min_lot_floor", True):
+            pass                              # every leg at least the min lot - handled at the split below
+        elif total < vmin:
             cap = balance * float(rules.get("min_lot_max_risk_pct") or 0) / 100.0
             if rules.get("allow_min_lot", True) and vmin * lpl <= cap:
                 p.notes.append(f"risk budget ${budget:.2f} is below one min lot (${vmin*lpl:.2f}) - trading the min lot")
@@ -318,7 +339,11 @@ def _build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: 
     vmax = spec.get("volume_max") or 0
     if vmax and total > vmax * len(targets):
         total = vmax * len(targets)
-    vols = split_volume(total, _weights_for(len(targets), rules), spec)
+    w = _weights_for(len(targets), rules)
+    vols = split_volume(total, w, spec)
+    if len(vols) < len(targets) and rules.get("min_lot_floor", True) and rules.get("risk_mode") != "fixed_lots":
+        vols = floor_split(total, w, spec)          # every leg, at least the min lot
+        p.notes.append(f"risk budget buys {total:.4f} lots - legs below the min lot are traded at {vmin}")
     if not vols:
         p.reason = f"{total:.4f} lots is below the minimum {vmin}"
         return p
@@ -356,6 +381,15 @@ def _size_legs(p: OpenPlan, entries: list[float], targets: list, sl: float, spec
                 p.notes.append(f"risk budget below one min lot - trading the min lot")
                 total = vmin
         vols = split_volume(total, w, spec)
+        if len(vols) < n and n == len(targets) and rules.get("min_lot_floor", True) \
+                and rules.get("risk_mode") != "fixed_lots":
+            # the budget can't give every leg the min lot: give them the min lot anyway
+            vols = floor_split(total, w, spec)
+            p.notes.append(f"risk budget buys {total:.4f} lots - legs below the min lot are traded at {vmin}")
+            p.legs = [{"leg": i + 1, "volume": vols[i], "tp": targets[i], "entry": round(entries[i], int(spec.get("digits") or 5)),
+                       "kind": p.legs_kind[i] if hasattr(p, "legs_kind") else p.order_type} for i in range(n)]
+            p.risk_dollars = round(sum(vols[i] * lpls[i] for i in range(n)), 2)
+            return True
         if len(vols) == n and rules.get("risk_mode") != "fixed_lots":
             # never above the budget: take a step off the legs that risk most per lot
             step = spec.get("volume_step") or vmin

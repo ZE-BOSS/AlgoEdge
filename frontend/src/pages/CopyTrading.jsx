@@ -363,6 +363,7 @@ const RULES = [
     ['fixed_lots', 'Fixed total volume', 'num', 'Used when sizing is fixed.', 'lots'],
     ['split_weights', 'TP weights', 'list', 'Volume share per leg, e.g. 40, 30, 20, 10. Empty = equal.'],
     ['max_legs', 'Max TP legs', 'num', 'Use at most this many targets (the nearest).', 'legs'],
+    ['min_lot_floor', 'Never skip for lot size: min lot on every leg', 'bool', 'A leg the risk % makes smaller than the broker minimum is traded at the minimum, whatever the balance. Risk can then exceed the risk %. Turn off to use the two rules below.'],
     ['allow_min_lot', 'Trade the min lot if the budget is smaller', 'bool'],
     ['min_lot_max_risk_pct', '…only if that risk is at most', 'num', null, '%'],
   ]],
