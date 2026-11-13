@@ -152,6 +152,7 @@ class MultiTPManager:
         # Callers (engine.py) can read this immediately after calling
         # calculate_tp_levels() to produce a clearer rejection reason. Reset on every call.
         self._last_overshoot_reason: str | None = None
+        self._min_lot_floored = False
 
     @staticmethod
     def slot_key(symbol: str, strategy_id: str) -> str:
@@ -184,6 +185,7 @@ class MultiTPManager:
         max_risk_cap_dollars: float = 0.0,  # 2% of balance; 0 = no cap
         use_live_mt5: bool = True,
         signal_tp1_rr: float | None = None,
+        min_lot_floor: bool = False,
     ) -> list[TPLevel]:
         """
         Calculates prices and volumes for up to 5 TP levels.
@@ -193,6 +195,7 @@ class MultiTPManager:
           2. Then scaling remaining volumes proportionally
         """
         self._last_overshoot_reason = None
+        self._min_lot_floored = False   # a leg was raised to the broker minimum (min_lot_floor)
 
         risk = abs(entry - sl)
         if risk == 0:
@@ -313,6 +316,8 @@ class MultiTPManager:
             split_pct = splits[i] / total_split
             raw_vol = total_volume * split_pct
             vol = math.floor(raw_vol / lot_step) * lot_step
+            if vol < lot_min - 1e-12:
+                self._min_lot_floored = True
             # Clamp to minimum lot to prevent collapse
             vol = max(lot_min, round(vol, 4))
             # Clamp to max lot size per position
@@ -350,6 +355,12 @@ class MultiTPManager:
         # ── 2% Risk Cap Enforcement ──────────────────────────────────────────────────
         # After lot_min enforcement, the actual total volume may exceed what the
         # position sizer intended. Enforce the hard 2% cap here.
+        # min_lot_floor: every leg at the minimum lot is allowed, whatever it risks -
+        # the cap may only trim volume ABOVE that floor, never drop a TP leg for it.
+        if min_lot_floor and max_risk_cap_dollars > 0 and levels:
+            floor_risk = calculate_risk_dollars(lot_min * len(levels), entry, sl, symbol, use_live_mt5=use_live_mt5)
+            if floor_risk > max_risk_cap_dollars:
+                max_risk_cap_dollars = floor_risk * 1.0001
         if max_risk_cap_dollars > 0 and levels:
             actual_total_risk = calculate_risk_dollars(
                 sum(tp.volume for tp in levels), entry, sl, symbol, use_live_mt5=use_live_mt5

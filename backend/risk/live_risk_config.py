@@ -116,6 +116,7 @@ def build_live_risk_config(config: Any, strategy_id: str) -> tuple[dict[str, Any
         "confluence_risk_tiers": getattr(risk, "confluence_risk_tiers", None),
         "reject_below_confluence": getattr(risk, "reject_below_confluence", True),
         "post_split_risk_tolerance_pct": getattr(risk, "post_split_risk_tolerance_pct", 5.0),
+        "min_lot_floor": getattr(risk, "min_lot_floor", True),
         "exit_slippage_pips": getattr(risk, "exit_slippage_pips", None),
         "open_risk_weight": getattr(risk, "open_risk_weight", 0.5),
         "allow_pyramiding": getattr(risk, "allow_pyramiding", False),

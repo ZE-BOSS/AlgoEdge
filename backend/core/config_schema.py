@@ -259,6 +259,16 @@ class RiskParams:
     the intended risk — immediately before the regime change that ended the
     quiet. These bound the damage in both directions."""
 
+    min_lot_floor: bool = True
+    """
+    Never skip a trade because the account is too small for its size. When the
+    risk % (or the hard cap) makes the lot, or a TP leg, smaller than the
+    broker's minimum, that position / leg is opened AT the minimum lot instead,
+    whatever the balance - every TP leg is kept. The trade can then risk more
+    than risk_per_trade_pct (and more than max_risk_hard_cap_pct). Off: the old
+    behaviour - refuse below the minimum ("below_broker_min_lot" /
+    "account_too_small_for_sl_distance") and drop TP legs to fit the cap.
+    """
     post_split_risk_tolerance_pct: float = 5.0
     """
     [2.12/A9] Replaces the hardcoded 1.05/1.10/1.01 post-split risk-cap

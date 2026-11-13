@@ -180,3 +180,44 @@ def test_m5_backfills_intrabar_where_m1_history_ends(monkeypatch):
     # an M5 strategy gains nothing from M5 bars
     assert asyncio.run(route._with_m5_backfill("X", "M5", m1, pd.Timestamp("2026-01-01"),
                                                pd.Timestamp("2026-01-10"))) is m1
+
+
+def _floor_engine(tp_count=1, **extra):
+    from backend.risk.engine import RiskEngine
+    cfg = {"risk_per_trade_pct": 1.0, "max_daily_drawdown_pct": 50.0, "max_weekly_drawdown_pct": 80.0,
+           "max_concurrent_positions": 5, "max_positions_per_symbol": 1, "max_daily_trades": 20,
+           "tp_count": tp_count, "tp1_rr": 2.0, "tp2_rr": 4.0, "tp3_rr": 6.0, "tp_splits": [40, 30, 30],
+           "min_rr": 0.1, "max_risk_hard_cap_pct": 3.0, "use_live_mt5": False, "min_lot_floor": True, **extra}
+    return RiskEngine(cfg)
+
+
+def test_min_lot_floor_trades_the_minimum_whatever_the_balance(deriv_specs):
+    """13 Nov: "do the same thing for main bot trades" - a trade too small for
+    the account goes in at the broker minimum instead of being refused."""
+    base = {"symbol": "Boom 1000 Index", "direction": "SELL", "entry_price": 15_000.0,
+            "stop_loss": 15_060.0, "take_profit": 12_600.0, "timeframe": "M5", "metadata": {"strategy_id": "X"}}
+    # $300: the 0.2 minimum risks $12 = 4%, over the 3% hard cap - refused without the floor...
+    ok, _, _ = _floor_engine(min_lot_floor=False).evaluate_signal(dict(base, metadata={"strategy_id": "X"}), 300.0)
+    assert not ok
+    # ...traded at the minimum with it, even on $50 (24% risk)
+    for bal in (300.0, 50.0):
+        ok, reason, tps = _floor_engine().evaluate_signal(dict(base, metadata={"strategy_id": "X"}), bal)
+        assert ok, reason
+        assert sum(t.volume for t in tps) == pytest.approx(0.2)
+
+
+def test_min_lot_floor_keeps_every_tp_leg_at_the_minimum(deriv_specs):
+    base = {"symbol": "Boom 1000 Index", "direction": "SELL", "entry_price": 15_000.0,
+            "stop_loss": 15_060.0, "take_profit": 12_600.0, "timeframe": "M5", "metadata": {"strategy_id": "X"}}
+    ok, reason, tps = _floor_engine(tp_count=3).evaluate_signal(dict(base, metadata={"strategy_id": "X"}), 1_000.0)
+    assert ok, reason
+    assert [t.volume for t in tps] == pytest.approx([0.2, 0.2, 0.2])          # 3 legs, none dropped
+    # a big account is sized exactly as without the floor
+    a = _floor_engine(tp_count=3).evaluate_signal(dict(base, metadata={"strategy_id": "X"}), 1e6)
+    b = _floor_engine(tp_count=3, min_lot_floor=False).evaluate_signal(dict(base, metadata={"strategy_id": "X"}), 1e6)
+    assert [t.volume for t in a[2]] == pytest.approx([t.volume for t in b[2]])
+
+
+def test_min_lot_floor_is_on_in_the_app_settings():
+    from backend.core.config_schema import RiskParams
+    assert RiskParams().min_lot_floor is True

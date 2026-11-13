@@ -85,6 +85,10 @@ class RiskEngine:
         self.vol_target_min_scale = float(config.get("vol_target_min_scale", 0.5) or 0.5)
         self.vol_target_max_scale = float(config.get("vol_target_max_scale", 2.0) or 2.0)
         self.post_split_risk_tolerance_pct = config.get("post_split_risk_tolerance_pct", 5.0)
+        # Trade the broker's minimum lot (on every TP leg) instead of refusing a
+        # trade the account is too small for. RiskParams.min_lot_floor (on by
+        # default in the app); off when a config does not mention it.
+        self.min_lot_floor = bool(config.get("min_lot_floor", False))
         self.open_risk_weight = config.get("open_risk_weight", 0.5)
         # [per-slot] Drawdown brake. This slot's size falls linearly with the
         # slot's OWN realised drawdown (circuit.drawdown_r()), reaching
@@ -527,13 +531,16 @@ class RiskEngine:
         # minimum lot") instead of skipping. Honoured only for a signal that
         # asks, and only while the minimum lot still risks no more than the
         # hard cap - the general rule (never round up) is unchanged.
+        min_floored = False
         if (total_lots == 0.0 and not _notional_x
-                and (signal_data.get("metadata") or {}).get("round_up_to_min_lot")
+                and ((signal_data.get("metadata") or {}).get("round_up_to_min_lot") or self.min_lot_floor)
                 and sizer_diag.get("refused_reason") == "below_broker_min_lot"):
             from backend.risk.position_sizer import get_symbol_info
             _vmin = float(get_symbol_info(symbol).get("volume_min") or 0.0)
             _rmin = calculate_risk_dollars(_vmin, entry, sl, symbol) if _vmin > 0 else 0.0
-            if 0 < _rmin <= base_balance * max_risk_hard_cap_pct_val / 100.0:
+            # min_lot_floor: whatever the balance; the Pine script's own option: within the hard cap
+            if 0 < _rmin and (self.min_lot_floor or _rmin <= base_balance * max_risk_hard_cap_pct_val / 100.0):
+                min_floored = self.min_lot_floor
                 total_lots = _vmin
                 requested_risk_dollars = _rmin
                 sizer_diag = dict(sizer_diag, refused_reason=None, raised_to_min_lot=True)
@@ -615,6 +622,7 @@ class RiskEngine:
         tp_levels = self.multi_tp.calculate_tp_levels(
             entry, sl, direction, total_lots, symbol, liquidity_target, strategy_id,
             max_risk_cap_dollars=max_risk_cap_dollars, signal_tp1_rr=_rl_rr,
+            min_lot_floor=self.min_lot_floor,
         )
         # [2.13] requested vs. placed TP count — read back immediately, same
         # pattern as sizer_diag above, so a caller can tell "the risk cap
@@ -627,6 +635,23 @@ class RiskEngine:
 
         actual_total_lots = sum(tp.volume for tp in tp_levels)
         actual_risk_dollars = calculate_risk_dollars(actual_total_lots, entry, sl, symbol)
+
+        # min_lot_floor: the minimum lot on a leg (or the whole trade) is allowed to
+        # risk more than the budget - that is the point of the setting. Book what
+        # the trade really risks, so the daily budget / exposure caps see it.
+        if self.min_lot_floor and (min_floored or getattr(self.multi_tp, "_min_lot_floored", False)) \
+                and actual_risk_dollars > requested_risk_dollars:
+            self._signal_log({
+                "event": "risk_min_lot_floor",
+                "requested_risk_dollars": round(requested_risk_dollars, 2),
+                "actual_risk_dollars": round(actual_risk_dollars, 2),
+                "actual_total_lots": actual_total_lots,
+                "balance": account_balance,
+                "note": "below the broker minimum - traded at the minimum lot on every TP leg (min_lot_floor)",
+            })
+            logger.info(f"[RISK] {symbol}: min_lot_floor - {len(tp_levels)} leg(s) at the minimum lot, "
+                        f"risk ${actual_risk_dollars:.2f} (budget ${requested_risk_dollars:.2f})")
+            requested_risk_dollars = actual_risk_dollars
 
         # Reject outright if the post-split risk blew past the requested budget by more than a
         # small tolerance. A previous version of this check only logged a warning and let ANY

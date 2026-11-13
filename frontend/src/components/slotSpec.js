@@ -44,7 +44,7 @@ export const STRATEGY_LABEL = Object.fromEntries(STRATEGY_OPTIONS.map(([id, l]) 
 // The risk a slot owns, in the order a trade meets it. Everything else in
 // RiskParams is either an account fact (margin, leverage) or legacy.
 export const SLOT_RISK_SECTIONS = [
-  ['Sizing', ['risk_per_trade_pct', 'max_risk_hard_cap_pct', 'sizing_basis',
+  ['Sizing', ['risk_per_trade_pct', 'max_risk_hard_cap_pct', 'min_lot_floor', 'sizing_basis',
     'sizing_static_balance', 'slot_brake_r', 'min_sl_pips']],
   // max_concurrent_positions and the profit halts are read by THIS slot's
   // circuit breaker, so they cap this slot and nothing else.
