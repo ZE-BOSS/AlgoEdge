@@ -20,6 +20,16 @@ from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+
+def _price_digits(symbol: str) -> int:
+    """Price digits for a symbol's alerts: the broker's when known, else 5."""
+    try:
+        from backend.risk.position_sizer import get_symbol_info
+        return int(get_symbol_info(symbol).get("digits") or 5)
+    except Exception:  # noqa: BLE001 - an alert must never fail on formatting
+        return 5
+
+
 MAX_LOG_ENTRIES = 1000
 
 class BotService:
@@ -659,17 +669,29 @@ class BotService:
             msg += f"Direction: {direction}\n"
             msg += f"Entry: {price}\n"
             
-            sl = str(getattr(signal_domain, 'stop_loss', 'N/A'))
+            from backend.strategies.strategy_defaults import NO_MEASURED_TARGET
+            _digits = _price_digits(signal_domain.symbol)
+            _sl_raw = getattr(signal_domain, 'stop_loss', None)
+            sl = f"{float(_sl_raw):.{_digits}f}" if isinstance(_sl_raw, (int, float)) else str(_sl_raw or 'N/A')
             msg += f"SL: {telegram_service.escape_markdown(sl)}\n"
-            
+            # A rule-exit strategy's TP is a placeholder the engine needs, set far
+            # enough that it never fills. Printed as a price it read as a broken
+            # target ("+$10,917 on a $272 risk"), so say what actually closes it.
+            _no_target = str(getattr(signal_domain, 'strategy_id', '')) in NO_MEASURED_TARGET
+
             if tp_levels:
                 msg += f"Positions: {len(tp_levels)}\n"
                 for i, tp in enumerate(tp_levels):
                     tp_price = getattr(tp, 'tp_price', tp.get('tp_price') if isinstance(tp, dict) else 'N/A')
                     vol = getattr(tp, 'volume', tp.get('volume') if isinstance(tp, dict) else 'N/A')
                     if tp_price != 'N/A':
-                        tp_price = f"{float(tp_price):.5f}"
-                    msg += f"  - TP{i+1}: {telegram_service.escape_markdown(tp_price)} (Vol: {telegram_service.escape_markdown(str(vol))})\n"
+                        tp_price = f"{float(tp_price):.{_digits}f}"
+                    if _no_target:
+                        msg += (f"  - Exit: strategy rule (session close / opposite signal). "
+                                f"Safety TP {telegram_service.escape_markdown(tp_price)} is a placeholder "
+                                f"(Vol: {telegram_service.escape_markdown(str(vol))})\n")
+                    else:
+                        msg += f"  - TP{i+1}: {telegram_service.escape_markdown(tp_price)} (Vol: {telegram_service.escape_markdown(str(vol))})\n"
             else:
                 tp_fallback = str(getattr(signal_domain, 'take_profit', 'N/A'))
                 msg += f"TP: {telegram_service.escape_markdown(tp_fallback)}\n"

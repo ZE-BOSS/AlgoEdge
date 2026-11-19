@@ -302,6 +302,19 @@ class DataFetchError(Exception):
         super().__init__(f"Data fetch failed for {symbol} {timeframe}: {reason}")
 
 
+def _broker_name_hint(symbol: str) -> str | None:
+    """This terminal's own name for `symbol` (XAUUSD -> XAUUSDm, US100 -> "US Tech 100"),
+    found with the copy trader's resolver. A hint for the error only: silently
+    trading a different name than the slot says would hide the misconfiguration."""
+    try:
+        from backend.copytrade.rules import resolve_symbol
+        names = [s.name for s in (mt5.symbols_get() or [])]
+        hit = resolve_symbol(symbol.upper(), names, {})
+        return hit if hit and hit != symbol else None
+    except Exception:  # noqa: BLE001 - only an error message depends on it
+        return None
+
+
 def ensure_symbol(symbol: str) -> str:
     """Put `symbol` in Market Watch, reconnecting the terminal if need be.
 
@@ -328,8 +341,10 @@ def ensure_symbol(symbol: str) -> str:
         if mt5.symbol_select(symbol, True):
             si = mt5.symbol_info(symbol)
         if si is None:
+            hint = _broker_name_hint(symbol)
             return (f"Symbol '{symbol}' is not in this terminal's symbol list. "
-                    f"Check the exact name, including spaces and case.")
+                    + (f"This broker calls it '{hint}' - use that name in the slot."
+                       if hint else "Check the exact name, including spaces and case."))
     if not si.visible and not mt5.symbol_select(symbol, True):
         return (f"Symbol '{symbol}' exists but could not be added to Market "
                 f"Watch, so the terminal will not serve its history.")

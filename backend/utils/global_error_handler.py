@@ -7,6 +7,7 @@ a Telegram alert.
 """
 import asyncio
 import queue
+import re
 import sys
 import threading
 import traceback
@@ -163,14 +164,21 @@ def setup_global_error_handler():
                     "modify sl failed",
                     "failed to modify sl",
                     "invalid stops",
+                    "auto-reconnect failed",
+                    "initialize() failed",
+                    "not in this terminal's symbol list",
                 )
                 is_infra = any(p in msg_text.lower() for p in _INFRA_PATTERNS)
                 rate_limit_secs = 3600 if is_infra else 60
 
-                if msg_text in _telegram_rate_limit:
-                    if now - _telegram_rate_limit[msg_text] < rate_limit_secs:
+                # Key on the message with its numbers blanked: "Retrying in 18s"
+                # and "Retrying in 37s" are the same alert, and keying on the
+                # raw text let a reconnect loop send one alert per attempt.
+                _dedupe_key = f"{module}:{func}:" + re.sub(r"\d+(\.\d+)?", "#", msg_text)
+                if _dedupe_key in _telegram_rate_limit:
+                    if now - _telegram_rate_limit[_dedupe_key] < rate_limit_secs:
                         return # Skip duplicate within window
-                _telegram_rate_limit[msg_text] = now
+                _telegram_rate_limit[_dedupe_key] = now
 
                 # Demote known infra warnings to ⚠️ instead of 🚨 SYSTEM ERROR
                 if is_infra:

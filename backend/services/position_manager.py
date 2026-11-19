@@ -15,6 +15,7 @@ import MetaTrader5 as mt5
 from sqlalchemy import select
 
 from backend.api.websocket import manager as ws_manager
+from backend.notify.labels import close_reason_label
 from backend.risk.position_sizer import get_pip_size
 from backend.services.trade_ownership import is_bot_deal, is_bot_position
 from backend.utils.logger import get_logger
@@ -496,11 +497,16 @@ class PositionManager:
                                 from backend.services.telegram import telegram_service
                                 emoji = "✅" if net_profit >= 0 else "❌"
                                 reason_str = reason if 'reason' in locals() else "CLOSED"
-                                if reason_str == "SL": reason_str = "Stop Loss Hit"
-                                elif reason_str == "TRAIL": reason_str = "Trailing Stop Hit"
-                                elif reason_str.startswith("TP"): reason_str = "Take Profit Hit"
-                                elif reason_str == "CLIENT": reason_str = "Manual Close"
-                                msg = f"{emoji} *{reason_str}*\nSymbol: {trade.symbol if trade else 'Unknown'}\nTicket: {pos.mt5_ticket}\nExit Price: {exit_deal.price}\nP&L: ${net_profit:.2f}"
+                                reason_str = close_reason_label(reason_str, net_profit)
+                                _digits = 5
+                                try:
+                                    _si = mt5.symbol_info(exit_deal.symbol) if mt5 else None
+                                    _digits = int(_si.digits) if _si else 5
+                                except Exception:
+                                    pass
+                                msg = (f"{emoji} *{reason_str}*\nSymbol: {trade.symbol if trade else 'Unknown'}\n"
+                                       f"Ticket: {pos.mt5_ticket}\nExit Price: {float(exit_deal.price):.{_digits}f}\n"
+                                       f"P&L: ${net_profit:.2f}")
                                 asyncio.create_task(telegram_service.send_message(msg))
                             except Exception as tg_err:
                                 logger.warning(f"Telegram notification failed: {tg_err}")
