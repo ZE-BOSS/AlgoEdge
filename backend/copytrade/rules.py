@@ -370,6 +370,17 @@ def _size_legs(p: OpenPlan, entries: list[float], targets: list, sl: float, spec
         if any(x <= 0 for x in lpls):
             p.reason = f"cannot size: no tick value for {p.symbol}"
             return False
+        # on_first_fill = market_add: when leg 1 fills, every waiting limit leg is
+        # ALSO bought at market (near leg 1's price) and the limit stays. If price
+        # then runs through the zone to the stop, each of those legs is held twice.
+        # Size for that worst case, or the account loses up to 2x the budget
+        # (demo, 10-19 Nov 2026: planned $224, lost $443).
+        kinds = list(getattr(p, "legs_kind", []) or [])
+        if str(rules.get("on_first_fill") or "keep") == "market_add" and kinds[:1] == ["LIMIT"]:
+            lpls = [lpls[i] + (lpls[0] if i > 0 and i < len(kinds) and kinds[i] == "LIMIT" else 0.0)
+                    for i in range(n)]
+            if not any("worst case" in x for x in p.notes):
+                p.notes.append("sized for the worst case: 'also take at market' can hold each waiting leg twice")
         avg_lpl = sum(w[i] / sw * lpls[i] for i in range(n))
         if rules.get("risk_mode") == "fixed_lots":
             total = float(rules.get("fixed_lots") or vmin)
