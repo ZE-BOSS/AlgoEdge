@@ -126,3 +126,44 @@ def test_queue_spaces_messages_and_retries_429():
     assert q.sent == 3 and q.failed == 0
     gaps = [b - a for (_, a), (_, b) in zip(sent, sent[1:])]
     assert all(g >= 0.04 for g in gaps)
+
+
+# ── edited signals ──────────────────────────────────────────────────────────
+def test_edit_that_updated_the_trade():
+    sig = _sig(edited=True, status="EXECUTED", detail="edited SL 2335",
+               actions=["edited SL 2335", "leg 1: SL 2340.0 -> 2335 (moved) ok",
+                        "stop is further away than before: the $ risk of these lots went up"],
+               text="XAUUSD BUY SL 2335 TP1 2355", parsed={"side": "BUY", "symbol": "XAUUSD"})
+    m = notify.signal_message("Willy", sig, [])
+    assert "Signal edited - trade updated" in m and "Willy" in m
+    assert "SL 2340.0 -> 2335" in m and "risk" in m and "Now reads" in m
+    assert "Copy trade placed" not in m
+
+
+def test_edit_with_a_failed_change_is_flagged():
+    sig = _sig(edited=True, status="EXECUTED", actions=["leg 2: entry 2340 -> 2338 FAILED 10015 Invalid price"])
+    assert "partly FAILED" in notify.signal_message("X", sig, [])
+
+
+def test_edit_not_applied_says_why():
+    sig = _sig(edited=True, status="IGNORED", actions=[],
+               detail="edit of a skipped signal, too late to take it")
+    m = notify.signal_message("X", sig, [])
+    assert "not applied" in m and "too late" in m
+
+
+def test_cosmetic_edits_stay_silent():
+    for d in ("edit changed nothing that is traded", "edit does not change a signal",
+              "edit of a signal that is not open"):
+        assert notify.signal_message("X", _sig(edited=True, status="IGNORED", actions=[], detail=d), []) is None
+
+
+def test_trade_replaced_after_edit():
+    sig = _sig(edited=False, status="EXECUTED",
+               detail="replaced (SELL XAUUSD -> BUY XAUUSD): 1 legs placed",
+               parsed={"side": "BUY", "symbol": "XAUUSD", "sl": 2340.0},
+               actions=["edit changed the trade (SELL XAUUSD -> BUY XAUUSD): closing the old one, taking the corrected signal",
+                        "leg 1: close all ok", "risk $98.00"])
+    m = notify.signal_message("X", sig, [_o(1, 1, "OPEN", "MARKET")])
+    assert "Trade replaced - signal edited" in m
+    assert "SELL XAUUSD -> BUY XAUUSD" in m and "leg 1: close all ok" in m

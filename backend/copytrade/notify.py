@@ -91,10 +91,17 @@ def signal_message(channel: str, sig: Any, orders: list[Any], digits: int = 2) -
     what = " ".join(x for x in (pd.get("side"), pd.get("symbol")) if x) or "signal"
     quote = esc((getattr(sig, "text", "") or "").strip().replace("\n", " ")[:160])
 
+    if getattr(sig, "edited", False):
+        return edit_message(channel, sig, what)
+
     if kind == "OPEN":
         if status in ("EXECUTED", "DRY_RUN", "PARTIAL"):
             title = {"EXECUTED": "Copy trade placed", "PARTIAL": "Copy trade partly placed"}.get(
                 status, "Paper copy trade (dry run)")
+            if detail.startswith("replaced"):
+                title = "Trade replaced - signal edited"
+            elif detail.startswith("edited signal taken"):
+                title = "Copy trade placed - signal corrected by edit"
             icon = {"EXECUTED": "🟢", "PARTIAL": "🟠"}.get(status, "📝")
             lines = [_header(icon, title, channel), f"{esc(what)}"]
             sl = next((o.sl for o in orders if getattr(o, "sl", None)), pd.get("sl"))
@@ -108,6 +115,11 @@ def signal_message(channel: str, sig: Any, orders: list[Any], digits: int = 2) -
                 lines.append(f"Risk if stopped: {esc(risk)}")
             notes = [a[6:] for a in acts if a.startswith("note:")][:3]
             lines += [f"_{esc(n)}_" for n in notes]
+            if detail.startswith("replaced"):
+                lines.insert(2, f"Edit: {esc(detail.split(':')[0][len('replaced '):].strip('()'))}")
+                closed = [a for a in acts if ": close" in a or ": cancel" in a][:6]
+                if closed:
+                    lines.insert(3, "Old trade: " + "; ".join(esc(a) for a in closed))
             return "\n".join(lines)
         if status == "SKIPPED":
             return "\n".join([_header("⏭️", "Signal skipped", channel), esc(what),
@@ -121,8 +133,6 @@ def signal_message(channel: str, sig: Any, orders: list[Any], digits: int = 2) -
         return None
 
     label = KIND_LABEL.get(kind, kind.title() if kind else "Update")
-    if getattr(sig, "edited", False) and status in ("EXECUTED", "DRY_RUN") and acts:
-        return "\n".join([_header("✏️", "Signal edited - trade updated", channel)] + [f"  {esc(a)}" for a in acts[:6]])
     if status in ("EXECUTED", "DRY_RUN"):
         return "\n".join([_header("🔧", f"{label} applied", channel)] + [f"  {esc(a)}" for a in acts[:6]])
     if status == "IGNORED":
@@ -131,6 +141,36 @@ def signal_message(channel: str, sig: Any, orders: list[Any], digits: int = 2) -
         return "\n".join([_header("ℹ️", f"{label} not applied", channel), f"Why: {esc(detail)}", f"\"{quote}\""])
     if status == "ERROR":
         return "\n".join([_header("❌", f"{label} failed", channel), f"Why: {esc(detail)}"])
+    return None
+
+
+# Edits that changed nothing worth a phone buzz: formatting, results written into
+# a finished signal ("TP1 ✅"), status notes on chatter.
+QUIET_EDITS = ("edit changed nothing", "edit does not change a signal", "edit of a signal that is not open")
+
+
+def edit_message(channel: str, sig: Any, what: str) -> str | None:
+    """A provider edited a message we had already handled."""
+    status, detail = getattr(sig, "status", ""), getattr(sig, "detail", "") or ""
+    acts = [a for a in (getattr(sig, "actions", None) or []) if a and not a.startswith(("plan:", "note:"))]
+    quote = esc((getattr(sig, "text", "") or "").strip().replace("\n", " ")[:160])
+    if status in ("EXECUTED", "DRY_RUN", "PARTIAL") and acts:
+        failed = [a for a in acts if "FAILED" in a or "not followed" in a or "could not" in a]
+        title = "Signal edited - trade updated" + (" (dry run)" if status == "DRY_RUN" else "")
+        if failed:
+            title = "Signal edited - update partly FAILED"
+        lines = [_header("⚠️" if failed else "✏️", title, channel), esc(what)]
+        lines += [f"  {esc(a)}" for a in acts[:8]]
+        if len(acts) > 8:
+            lines.append(f"  ... {len(acts) - 8} more")
+        lines.append(f"Now reads: \"{quote}\"")
+        return "\n".join(lines)
+    if status == "ERROR":
+        return "\n".join([_header("❌", "Signal edited - update failed", channel), esc(what),
+                           f"Why: {esc(detail)}", f"Now reads: \"{quote}\""])
+    if status in ("IGNORED", "SKIPPED") and detail and not any(q in detail for q in QUIET_EDITS):
+        return "\n".join([_header("ℹ️", "Signal edited - not applied", channel), esc(what),
+                           f"Why: {esc(detail)}", f"Now reads: \"{quote}\""])
     return None
 
 

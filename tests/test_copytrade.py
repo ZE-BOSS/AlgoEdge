@@ -586,3 +586,16 @@ def test_added_lines_helper():
     assert svc_mod.added_lines("A\nSL 2340", "A\nSL 2340 ✅\nmove SL to entry") == ["move SL to entry"]
     assert svc_mod.remap_entry(2345.0, {"entry_low": 2340, "entry_high": 2350}, {"entry_low": 2330, "entry_high": 2340}) == 2335.0
     assert svc_mod.remap_entry(2340.0, {"entry": 2340}, {"entry": 2338}) == 2338.0
+
+
+def test_edit_sends_an_edit_alert(env, monkeypatch):
+    from backend.copytrade import notify
+    posted = []
+    monkeypatch.setattr(notify.alerts, "post", lambda text: text and posted.append(text))   # post() drops None
+    _run(env.service.handle_message("u1", env.ch, 90, "XAUUSD BUY\nSL 2340\nTP1 2355"))
+    assert "Copy trade placed" in posted[-1]
+    _run(env.service.handle_message("u1", env.ch, 90, "XAUUSD BUY\nSL 2342\nTP1 2355", edited=True))
+    assert "Signal edited - trade updated" in posted[-1] and "2342" in posted[-1]
+    n = len(posted)
+    _run(env.service.handle_message("u1", env.ch, 90, "🔥 XAUUSD BUY\nSL 2342\nTP1 2355", edited=True))
+    assert len(posted) == n, posted[n:]          # cosmetic edit: no buzz
