@@ -64,6 +64,9 @@ DEFAULT_RULES: dict[str, Any] = {
     "edit_updates": True,         # an edited signal updates SL/TP of the trade it opened
     "close_on_opposite": False,   # a new signal in the other direction closes this channel's open trades on that symbol
     "max_sl_move_pct": 3.0,       # ignore a "move SL to X" more than this % from the entry (a typo: 4113 for 4413)
+    "sl_fraction": 1.0,           # our stop as a fraction of the provider's distance from the entry (1.0 = his stop,
+                                  # 0.75 = a quarter tighter). The lot is sized to the tighter stop, so the $ risk is
+                                  # unchanged. Measured on 60 days of history: 0.75 helped, below 0.6 did not.
     # filters
     "only_admins": True,          # in a GROUP, act only on messages from its admins (members chat there too)
     "allowed_senders": [],        # or only these senders (@username or user id) - overrides only_admins
@@ -201,9 +204,42 @@ def _weights_for(n: int, rules: dict) -> list[float]:
     return w + [fill] * (n - len(w))
 
 
+def tighten_stop(sig: dict, quote: dict, rules: dict) -> tuple[dict, str | None]:
+    """Apply rules['sl_fraction'] to a signal's stop. The distance is measured from
+    the entry price nearest the market (the zone's near edge, the written entry, or
+    the market for 'buy now'). If the tighter stop lands inside an entry zone the
+    zone collapses to its near edge - a level beyond our own stop can't be bought."""
+    f = float(rules.get("sl_fraction") or 1.0)
+    sl = sig.get("sl")
+    if sl is None or not (0.0 < f < 1.0) or sig.get("side") not in ("BUY", "SELL"):
+        return sig, None
+    s = 1 if sig["side"] == "BUY" else -1
+    lo, hi = sig.get("entry_low"), sig.get("entry_high")
+    if lo is not None and hi is not None and float(hi) > float(lo):
+        ref = float(hi) if s == 1 else float(lo)
+    elif sig.get("entry") is not None:
+        ref = float(sig["entry"])
+    else:
+        ref = float(quote.get("ask") if s == 1 else quote.get("bid") or 0) or None
+    if not ref or (float(sl) - ref) * s >= 0:
+        return sig, None
+    new_sl = ref - s * f * abs(ref - float(sl))
+    out = dict(sig, sl=round(new_sl, 5))
+    note = f"stop tightened to {f:g}x the provider's distance: {float(sl):g} -> {new_sl:.5g}"
+    if lo is not None and hi is not None:
+        far = float(lo) if s == 1 else float(hi)
+        if (new_sl - far) * s >= 0:
+            out.update(entry=ref, entry_low=None, entry_high=None)
+            note += " (inside the zone: single entry at its near edge)"
+    return out, note
+
+
 def build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: dict,
                     broker_symbol: str) -> OpenPlan:
+    sig, tight_note = tighten_stop(sig, quote, rules)
     p = _build_open_plan(sig, quote, spec, balance, rules, broker_symbol)
+    if tight_note:
+        p.notes.insert(0, tight_note)
     if p.ok and p.legs and rules.get("runner_leg"):
         p.legs[-1]["tp"] = None
         p.notes.append(f"leg {p.legs[-1]['leg']} is a runner: no target, the ladder trail closes it")

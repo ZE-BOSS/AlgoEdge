@@ -43,3 +43,29 @@ def test_market_add_old_sizing_would_have_exceeded_budget():
     keep = build_open_plan(SIG, QUOTE, GOLD, 10_000,
                            merge_rules({"risk_pct": 2.0, "on_first_fill": "keep", "min_lot_floor": False}), "XAUUSD")
     assert worst_case(keep) > 200.0 * 1.2
+
+
+# ── sl_fraction ────────────────────────────────────────────────────────────
+def test_sl_fraction_tightens_and_keeps_dollar_risk():
+    sig = parse_message("XAUUSD SELL 3740 SL 3760 TP 3720 TP 3700").to_dict()
+    q = {"bid": 3740.0, "ask": 3740.3}
+    # a balance big enough that the 0.01 lot step doesn't dominate the comparison
+    full = build_open_plan(sig, q, GOLD, 100_000, merge_rules({"risk_pct": 1.0}), "XAUUSD")
+    tight = build_open_plan(sig, q, GOLD, 100_000, merge_rules({"risk_pct": 1.0, "sl_fraction": 0.75}), "XAUUSD")
+    assert full.ok and tight.ok
+    assert abs(tight.sl - 3755.0) < 1e-6                     # 3740 + 0.75 * 20
+    assert abs(tight.risk_dollars - full.risk_dollars) <= 0.03 * full.risk_dollars   # same $ risk...
+    assert sum(l["volume"] for l in tight.legs) > sum(l["volume"] for l in full.legs)   # ...on a bigger lot
+
+
+def test_sl_fraction_inside_zone_collapses_to_near_edge():
+    sig = parse_message("Gold buy now 4059.6 - 4055 SL: 4051 TP: 4062 TP: 4064").to_dict()
+    p = build_open_plan(sig, QUOTE, GOLD, 10_000, merge_rules({"risk_pct": 1.0, "sl_fraction": 0.5}), "XAUUSD")
+    assert p.ok and abs(p.sl - 4055.3) < 1e-6 and p.order_type != "LAYER"
+    assert any("near edge" in n for n in p.notes)
+
+
+def test_sl_fraction_default_is_unchanged():
+    sig = parse_message("XAUUSD SELL 3740 SL 3760 TP 3720").to_dict()
+    p = build_open_plan(sig, {"bid": 3740.0, "ask": 3740.3}, GOLD, 10_000, merge_rules({}), "XAUUSD")
+    assert p.sl == 3760
