@@ -37,7 +37,7 @@ from backend.copytrade import mt5ops, notify
 from backend.copytrade.models import CopyTradeChannel, CopyTradeOrder, CopyTradeSettings, CopyTradeSignal
 from backend.copytrade.parser import parse_message
 from backend.copytrade.rules import (breakeven_price, build_open_plan, legs_to_close, merge_rules, resolve_symbol,
-                                     pending_at_market, stop_fits, trail_target)
+                                     pending_at_market, stop_fits, tighten_stop, trail_target)
 from backend.data.database import async_session
 from backend.utils.logger import get_logger
 
@@ -50,6 +50,57 @@ LIVE_ORDER = ("OPEN", "PENDING", "PAPER", "PAPER_PENDING")
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+FOLLOW_UP_KINDS = ("BREAKEVEN", "MOVE_SL", "MOVE_TP", "CLOSE", "CANCEL")
+
+
+def _trade_fields(pd: dict) -> tuple:
+    """What an edit can change that matters for trading."""
+    return tuple((k, json_safe(pd.get(k))) for k in ("kind", "side", "symbol", "order_type", "entry", "entry_low",
+                                                    "entry_high", "sl", "tps", "new_price", "close_fraction",
+                                                    "tp_index"))
+
+
+def json_safe(v):
+    return tuple(v) if isinstance(v, list) else v
+
+
+def _follow_gate(pd: dict) -> str | None:
+    kind = pd.get("kind")
+    if kind == "CLOSE":
+        return "follow_close" if (pd.get("close_fraction") or 1.0) >= 0.999 else "follow_partial_close"
+    return {"BREAKEVEN": "follow_breakeven", "MOVE_SL": "follow_move_sl", "MOVE_TP": "follow_move_tp",
+            "CANCEL": "follow_cancel"}.get(kind)
+
+
+def added_lines(before: str, after: str) -> list[str]:
+    """Lines in `after` that were not in `before` (emoji and spacing ignored)."""
+    norm = lambda x: " ".join("".join(ch for ch in x if ch.isascii()).split()).upper()  # noqa: E731
+    seen = {norm(x) for x in (before or "").splitlines()}
+    return [x.strip() for x in (after or "").splitlines() if norm(x) and norm(x) not in seen]
+
+
+def _entry_ref(pd: dict) -> float | None:
+    lo, hi = pd.get("entry_low"), pd.get("entry_high")
+    if lo is not None and hi is not None:
+        return (float(lo) + float(hi)) / 2
+    return float(pd["entry"]) if pd.get("entry") is not None else None
+
+
+def remap_entry(price: float | None, old: dict, new: dict) -> float | None:
+    """Where a waiting leg goes when the entry is edited: its place in the old
+    zone mapped onto the new zone, else shifted by the entry's move."""
+    if price is None:
+        return None
+    olo, ohi, nlo, nhi = old.get("entry_low"), old.get("entry_high"), new.get("entry_low"), new.get("entry_high")
+    if None not in (olo, ohi, nlo, nhi) and float(ohi) > float(olo):
+        f = (float(price) - float(olo)) / (float(ohi) - float(olo))
+        return round(float(nlo) + f * (float(nhi) - float(nlo)), 5)
+    a, b = _entry_ref(old), _entry_ref(new)
+    if a is None or b is None:
+        return None
+    return round(float(price) + (b - a), 5)
 
 
 def latency_breakdown(posted_at: datetime | None, received_at: float | None, t_lock: float, t_in: float,
@@ -531,41 +582,165 @@ class CopyTradeService:
 
     # ── edited messages ─────────────────────────────────────────────────────
     async def _on_edit(self, s, sig, prior, pd, rules, dry) -> None:
+        """A message we already handled was edited.
+
+        Providers edit signals to: correct a number (stop, targets, entry - often a
+        typo such as 4777 for 3777); flip a wrong direction; fill in a stop/target
+        posted without one; or write an instruction into the signal itself ("TP1
+        hit - move SL to entry", "close now"). Each case is handled here; before,
+        only stop/target number changes were, and an edited stop that WIDENED was
+        refused by allow_widen_sl (that rule is for "move SL" messages, not for
+        corrections of the signal itself)."""
         sig.root_signal_id = prior.id
-        if prior.kind != "OPEN" or pd.get("kind") != "OPEN":
-            if prior.status in ("SKIPPED", "IGNORED") and pd.get("kind") == "OPEN" and \
-                    (_now() - (prior.created_at or _now())) < timedelta(minutes=15):
+        ch = await s.get(CopyTradeChannel, sig.channel_id)
+        window = timedelta(minutes=float(rules.get("edit_window_minutes") or 60))
+        young = (_now() - (prior.created_at or _now())) < window
+        new_kind = pd.get("kind")
+        old = prior.parsed or {}
+
+        # ── the original was not a signal we acted on ──
+        if prior.kind != "OPEN" or prior.status in ("SKIPPED", "ERROR", "IGNORED"):
+            if new_kind == "OPEN" and prior.status in ("SKIPPED", "ERROR", "IGNORED") and young and \
+                    (prior.kind != "OPEN" or _trade_fields(pd) != _trade_fields(old)):
+                # now complete / corrected: take it as the signal
                 prior.status, prior.kind, prior.parsed = "SUPERSEDED", "OPEN", pd
-                sig.edited = False   # treat as the signal itself
-                ch = await s.get(CopyTradeChannel, sig.channel_id)
+                sig.edited = False
                 await self._open(s, sig, ch, pd, rules, dry)
+                sig.detail = f"edited signal taken: {sig.detail}"
                 return
-            sig.status, sig.detail = "IGNORED", "edit does not change a signal"
-            return
-        if prior.status in ("SKIPPED",) and (_now() - (prior.created_at or _now())) < timedelta(minutes=15):
-            prior.status = "SUPERSEDED"
-            sig.edited = False
-            ch = await s.get(CopyTradeChannel, sig.channel_id)
-            await self._open(s, sig, ch, pd, rules, dry)
+            if prior.kind != "OPEN" and new_kind in FOLLOW_UP_KINDS and \
+                    _trade_fields(pd) != _trade_fields(old):
+                # an edited instruction ("SL to 4050" -> "SL to 4055")
+                prior.parsed = pd
+                await self._follow_up(s, sig, ch, pd, rules, dry)
+                sig.detail = f"edited instruction: {sig.detail}"
+                return
+            sig.status, sig.detail = "IGNORED", (
+                "edit of a skipped signal, too late to take it" if new_kind == "OPEN" and not young
+                else "edit does not change a signal")
             return
         if prior.status not in ACTIVE_SIGNAL or not rules.get("edit_updates", True):
             sig.status, sig.detail = "IGNORED", "edit of a signal that is not open"
             return
+
         orders = await self._live_orders(s, prior.id)
         acts: list[str] = []
-        old = prior.parsed or {}
-        if pd.get("sl") is not None and pd["sl"] != old.get("sl"):
-            await self._apply("MOVE_SL", {"new_price": pd["sl"]}, prior, orders, rules, acts, dry)
+
+        # ── an instruction written into the signal ──
+        # What was ADDED to the message is read on its own: "GOLD SELL ... SL 3739"
+        # + "TP1 HIT ✅ SL to entry" no longer reads as a signal as a whole (results
+        # words), and the added line is the instruction. Added lines count only when
+        # the signal's own numbers are unchanged, or the message stopped reading as a
+        # signal - a corrected "SL 4151" line would otherwise read as "move SL".
+        follow = None
+        if new_kind != "OPEN" or _trade_fields(pd) == _trade_fields(old):
+            added = added_lines(await self._previous_text(s, sig), sig.text or "")
+            if added:
+                fp = parse_message("\n".join(added)).to_dict()
+                if fp.get("kind") in FOLLOW_UP_KINDS:
+                    follow = fp
+        if follow is None and new_kind in FOLLOW_UP_KINDS:
+            follow = pd
+        if follow is not None and orders:
+            gate = _follow_gate(follow)
+            if gate and not rules.get(gate, True):
+                acts.append(f"edit says {follow['kind'].lower()} - {gate} is off")
+            else:
+                acts.append(f"edit says {follow['kind'].lower().replace('_', ' ')}")
+                await self._apply(follow["kind"], follow, prior, orders, rules, acts, dry)
+                orders = [o for o in orders if o.status in LIVE_ORDER]
+        if new_kind != "OPEN":
+            self._finish_edit(sig, acts, dry)
+            return
+
+        # ── direction or instrument changed: the original was wrong ──
+        if (pd.get("side"), pd.get("symbol")) != (old.get("side"), old.get("symbol")):
+            what = f"{old.get('side')} {old.get('symbol')} -> {pd.get('side')} {pd.get('symbol')}"
+            if not (young and rules.get("edit_replace", True)):
+                acts.append(f"edit changed the trade ({what}) after {window.seconds // 60} min - not followed")
+                self._finish_edit(sig, acts, dry)
+                return
+            acts.append(f"edit changed the trade ({what}): closing the old one, taking the corrected signal")
+            await self._apply("CLOSE", {"close_fraction": 1.0}, prior, orders, rules, acts, dry)
+            if all(o.status not in LIVE_ORDER for o in await self._all_orders(s, prior.id)):
+                prior.status = "SUPERSEDED"
+                prior.parsed = pd
+                sig.edited = False
+                await self._open(s, sig, ch, pd, rules, dry)
+                sig.actions = acts + list(sig.actions or [])
+                sig.detail = f"replaced ({what}): {sig.detail}"
+            else:
+                acts.append("some legs could not be closed - corrected signal NOT taken, old one still managed")
+                self._finish_edit(sig, acts, dry)
+            return
+
+        side = pd.get("side")
+        sgn = 1 if side == "BUY" else -1
+        q = await mt5ops.quote(prior.symbol) if (prior.symbol and not dry) else None
+        eff_new = tighten_stop(pd, q or {}, rules)[0]            # our stop for the edited numbers
+        eff_old = tighten_stop(old, q or {}, rules)[0]
+        sl_changed = pd.get("sl") is not None and pd.get("sl") != old.get("sl")
+        new_sl = float(eff_new["sl"]) if sl_changed and eff_new.get("sl") is not None else None
+
+        # ── entry changed: move the orders still waiting ──
+        moved: set[int] = set()
+        if _entry_ref(pd) is not None and _entry_ref(old) is not None and _entry_ref(pd) != _entry_ref(old):
+            pend = [o for o in orders if o.status in ("PENDING", "PAPER_PENDING")]
+            if not pend:
+                acts.append(f"entry edited {_entry_ref(old):g} -> {_entry_ref(pd):g}: every leg already filled, nothing to move")
+            for o in pend:
+                px = remap_entry(o.entry, old, pd)
+                if px is None:
+                    continue
+                if dry or o.status.startswith("PAPER"):
+                    ok, detail = True, "dry run"
+                else:
+                    ok, detail = await mt5ops.modify_order(o.ticket, price=px, sl=new_sl)
+                acts.append(f"leg {o.leg}: entry {o.entry:g} -> {px:g}"
+                            + (f", SL {o.sl} -> {new_sl:g}" if new_sl is not None else "")
+                            + f" {'ok' if ok else 'FAILED ' + detail}")
+                if ok:
+                    o.entry = px
+                    if new_sl is not None:
+                        o.sl = new_sl
+                    moved.add(o.id)
+            if moved:
+                acts.append("lots unchanged - the $ risk moves with the new entry")
+
+        # ── stop changed (a correction: widening allowed; our stop fraction applied) ──
+        if new_sl is not None:
+            rest = [o for o in orders if o.id not in moved and o.status in LIVE_ORDER]
+            if rest:
+                note = f"edited SL {pd['sl']:g}" + (f" (ours {new_sl:g})" if new_sl != pd["sl"] else "")
+                acts.append(note)
+                await self._apply("MOVE_SL", {"new_price": new_sl}, prior, rest,
+                                  dict(rules, allow_widen_sl=True), acts, dry)
+            if eff_old.get("sl") is not None and (new_sl - float(eff_old["sl"])) * sgn < 0:
+                acts.append("stop is further away than before: the $ risk of these lots went up")
+
+        # ── targets changed ──
         new_tps = pd.get("tps") or []
         if new_tps and new_tps != (old.get("tps") or []):
             for o in orders:
-                if o.leg <= len(new_tps) and o.tp != new_tps[o.leg - 1]:
+                if o.status in LIVE_ORDER and o.leg <= len(new_tps) and o.tp is not None \
+                        and o.tp != new_tps[o.leg - 1]:
                     await self._apply("MOVE_TP", {"new_price": new_tps[o.leg - 1], "tp_index": o.leg},
                                       prior, [o], rules, acts, dry)
         prior.parsed = pd
+        self._finish_edit(sig, acts, dry)
+
+    @staticmethod
+    def _finish_edit(sig, acts: list[str], dry: bool) -> None:
         sig.actions = acts
         sig.status = ("DRY_RUN" if dry else "EXECUTED") if acts else "IGNORED"
         sig.detail = "; ".join(acts[:4]) if acts else "edit changed nothing that is traded"
+
+    async def _previous_text(self, s, sig) -> str:
+        """The message as it read before this edit (the latest earlier version)."""
+        row = (await s.execute(select(CopyTradeSignal.text).where(
+            CopyTradeSignal.chat_id == sig.chat_id, CopyTradeSignal.msg_id == sig.msg_id,
+            CopyTradeSignal.id != sig.id).order_by(desc(CopyTradeSignal.id)).limit(1))).scalars().first()
+        return row or ""
 
     # ── Telegram alerts ─────────────────────────────────────────────────────
     @staticmethod

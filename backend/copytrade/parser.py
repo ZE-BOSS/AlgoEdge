@@ -253,8 +253,10 @@ def _management(up: str) -> ParsedSignal | None:
     already = re.search(BE_WORD + r"\s*(GOT\s*|HAS\s*|WAS\s*|JUST\s*)?(HIT|TAKEN|TRIGGERED)|"
                         r"\b(HIT|HITS|HITTING|ABOUT TO HIT|WILL HIT|OUT ON|OUT AT|WICKED ME OUT ON)\s+(MY\s+|THE\s+|ON\s+)?" + BE_WORD + r"|"
                         r"\b(SL|STOP\s*LOSS|STOP)\s*(GOT\s*|WAS\s*)?(HIT|TAKEN|TRIGGERED)\b|"
-                        r"\b(REACHED|HIT|TAPPED ME OUT)\b[^|]{0,20}\b(SL|STOP)\b|CLOSED THE TRADES ITSELVES", up)
-    instruct_be = re.search(r"\b(SET|SETTING|PUT|MOVE|MOVING)\b[^|]{0,20}" + BE_WORD, now)
+                        r"\b(REACHED|HIT|TAPPED ME OUT)\b(?![^|]{0,20}\b(MOVE|MOVING|SET|SETTING|PUT)\b)[^|]{0,20}\b(SL|STOP)\b(?!\s*(TO|AT|@|:|=)\b)"
+                        r"|CLOSED THE TRADES ITSELVES", up)
+    # "TP1 hit - move SL to entry": the TP is news, the stop move is an instruction
+    instruct_be = re.search(r"\b(SET|SETTING|PUT|MOVE|MOVING)\b[^|]{0,20}(" + BE_WORD + r"|\bENTRY\b|\bOPEN(?:ING)?\s*PRICE\b)", now)
     if already and not instruct_be:
         p.kind = "INFO"
         return p

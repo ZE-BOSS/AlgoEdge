@@ -286,6 +286,10 @@ class FakeMT5:
 
         async def modify_order(t, price=None, sl=None, tp=None, spec=None):
             self.calls.append(("modord", t, sl, tp))
+            if price is not None:
+                self.calls.append(("modord_price", t, price))
+                if t in self.orders:
+                    self.orders[t].price_open = price
             return True, "ok"
 
         async def cancel_order(t):
@@ -501,3 +505,84 @@ def test_monitor_reads_all_tickets_once_per_round(env):
     env.fake.calls.clear()
     _run(env.service.monitor_once())
     assert env.fake.calls.count(("live_tickets",)) == 1
+
+
+# ── edited signals ──────────────────────────────────────────────────────────
+def _set_rules(env, **rules):
+    async def go():
+        async with env.Session() as s:
+            ch = await s.get(CopyTradeChannel, env.ch)
+            ch.rules = dict(ch.rules or {}, **rules)
+            await s.commit()
+    _run(go())
+
+
+def test_edit_that_widens_the_stop_is_applied(env):
+    """A corrected stop is the signal itself, not a 'move SL' message: allow_widen_sl must not block it."""
+    _set_rules(env, allow_widen_sl=False)
+    _run(env.service.handle_message("u1", env.ch, 80, "XAUUSD BUY\nSL 2340\nTP1 2355"))
+    r = _run(env.service.handle_message("u1", env.ch, 80, "XAUUSD BUY\nSL 2335\nTP1 2355", edited=True))
+    assert r["status"] == "EXECUTED", r
+    assert any(c[0] == "modpos" and c[2] == 2335 for c in env.fake.calls)
+    assert any("risk" in a for a in r["actions"])
+
+
+def test_instruction_added_to_the_signal_by_edit(env):
+    """'TP1 HIT ✅ SL to entry' written into the signal moves the stop to breakeven."""
+    text = "XAUUSD BUY\nSL 2340\nTP1 2355\nTP2 2360"
+    _run(env.service.handle_message("u1", env.ch, 81, text))
+    env.fake.bid, env.fake.ask = 2352.0, 2352.2
+    r = _run(env.service.handle_message("u1", env.ch, 81, text + "\n\nTP1 HIT ✅ SL to entry", edited=True))
+    assert r["status"] == "EXECUTED", r
+    assert any("breakeven" in a for a in r["actions"]), r["actions"]
+    assert any(c[0] == "modpos" and c[2] is not None and c[2] > 2348 for c in env.fake.calls)
+
+
+def test_close_written_into_the_signal_by_edit(env):
+    text = "XAUUSD BUY\nSL 2340\nTP1 2355"
+    _run(env.service.handle_message("u1", env.ch, 82, text))
+    r = _run(env.service.handle_message("u1", env.ch, 82, text + "\nClose now", edited=True))
+    assert r["status"] == "EXECUTED", r
+    assert any(c[0] == "close" for c in env.fake.calls)
+
+
+def test_edited_entry_moves_waiting_orders(env):
+    _run(env.service.handle_message("u1", env.ch, 83, "XAUUSD BUY LIMIT 2340\nSL 2330\nTP1 2355\nTP2 2360"))
+    r = _run(env.service.handle_message("u1", env.ch, 83, "XAUUSD BUY LIMIT 2338\nSL 2330\nTP1 2355\nTP2 2360",
+                                        edited=True))
+    assert r["status"] == "EXECUTED", r
+    moves = [c for c in env.fake.calls if c[0] == "modord_price"]
+    assert moves and all(c[2] == 2338 for c in moves)
+
+
+def test_edited_direction_replaces_the_trade(env):
+    """SELL posted by mistake, edited to BUY: the SELL is closed and the BUY taken."""
+    _run(env.service.handle_message("u1", env.ch, 84, "XAUUSD SELL\nSL 2360\nTP1 2340"))
+    assert env.fake.positions
+    old = set(env.fake.positions)
+    r = _run(env.service.handle_message("u1", env.ch, 84, "XAUUSD BUY\nSL 2340\nTP1 2360", edited=True))
+    assert r["status"] == "EXECUTED", r
+    assert "replaced" in r["detail"]
+    assert all(t not in env.fake.positions for t in old)
+    assert any(p.type == 0 for p in env.fake.positions.values())
+
+
+def test_skipped_signal_corrected_by_edit_is_taken(env):
+    """A typo stop (4777 on a 2349 market) is skipped; the corrected edit is taken."""
+    r = _run(env.service.handle_message("u1", env.ch, 85, "XAUUSD SELL\nSL 2300\nTP1 2340"))
+    assert r["status"] == "SKIPPED", r
+    r = _run(env.service.handle_message("u1", env.ch, 85, "XAUUSD SELL\nSL 2360\nTP1 2340", edited=True))
+    assert r["status"] == "EXECUTED", r
+
+
+def test_cosmetic_edit_changes_nothing(env):
+    _run(env.service.handle_message("u1", env.ch, 86, "XAUUSD BUY\nSL 2340\nTP1 2355"))
+    n = len(env.fake.calls)
+    r = _run(env.service.handle_message("u1", env.ch, 86, "🔥 XAUUSD BUY 🔥\nSL 2340\nTP1 2355", edited=True))
+    assert r["status"] == "IGNORED" and len(env.fake.calls) == n
+
+
+def test_added_lines_helper():
+    assert svc_mod.added_lines("A\nSL 2340", "A\nSL 2340 ✅\nmove SL to entry") == ["move SL to entry"]
+    assert svc_mod.remap_entry(2345.0, {"entry_low": 2340, "entry_high": 2350}, {"entry_low": 2330, "entry_high": 2340}) == 2335.0
+    assert svc_mod.remap_entry(2340.0, {"entry": 2340}, {"entry": 2338}) == 2338.0
