@@ -63,6 +63,9 @@ def main() -> None:
     ap.add_argument("--days", type=int, default=0, help="only the last N stored days (0 = all)")
     ap.add_argument("--kind", default=None, help="S7: boom or crash (default from the symbol name)")
     ap.add_argument("--latency", type=int, default=250)
+    ap.add_argument("--chunk-days", type=int, default=0,
+                    help="run in pieces of N calendar days (with warm-up) so long histories fit in memory")
+    ap.add_argument("--only", default=None, help="JSON list of settings to run instead of the grid")
     a = ap.parse_args()
     days = T.stored_days(a.broker, a.symbol)
     if a.days:
@@ -70,6 +73,8 @@ def main() -> None:
     if not days:
         raise SystemExit("no ticks stored")
     t0 = time.time()
+    if a.chunk_days:
+        return chunked(a, days, t0)
     tk = T.load(a.broker, a.symbol, days[0], days[-1])
     cut_day = days[int(len(days) * 0.7)]
     cut_ms = int(T.datetime(cut_day.year, cut_day.month, cut_day.day, tzinfo=T.UTC).timestamp() * 1000)
@@ -88,13 +93,13 @@ def main() -> None:
     rows = []
     if a.strategy == "S7":
         kind = a.kind or ("boom" if "boom" in a.symbol.lower() else "crash")
-        for p in expand(GRIDS["S7"]):
+        for p in settings(a):
             fills = E.run(S.s7_spike_count(tk, {**p, "kind": kind}, inst), tk, costs, RULES["S7"])
             rows.append((p, fills))
     else:
         bc = S.BarCache(tk)
         fn = S.STRATEGIES[a.strategy]
-        for p in expand(GRIDS[a.strategy]):
+        for p in settings(a):
             fills = E.run(fn(bc, p, inst), tk, costs, RULES[a.strategy])
             rows.append((p, fills))
     for p, fills in rows:
@@ -102,6 +107,54 @@ def main() -> None:
         print("RES|" + json.dumps({"p": p, "tune": brief(sp["tune"]), "unseen": brief(sp["unseen"]),
                                    "exits": E.stats(fills).get("exits")}, default=str), flush=True)
     print("DONE|" + json.dumps({"seconds": round(time.time() - t0, 1), "settings": len(rows)}), flush=True)
+
+
+def settings(a) -> list[dict]:
+    return json.loads(a.only) if a.only else expand(GRIDS[a.strategy])
+
+
+def chunked(a, days, t0) -> None:
+    """Long histories: each piece of chunk_days is run with WARMUP days of bars
+    before it (indicators) and SPILL days after it (trades still open), and only
+    orders decided inside the piece are kept. Account rules restart at each
+    piece - a daily stop never spans pieces anyway."""
+    from datetime import timedelta
+    WARMUP, SPILL = 3, 1
+    cut_day = days[int(len(days) * 0.7)]
+    cut_ms = int(T.datetime(cut_day.year, cut_day.month, cut_day.day, tzinfo=T.UTC).timestamp() * 1000)
+    ps = settings(a)
+    fills: list[list] = [[] for _ in ps]
+    inst = S.Instrument(a.symbol)
+    costs = E.Costs(latency_ms=a.latency)
+    n_ticks = 0
+    start = days[0]
+    while start <= days[-1]:
+        end = start + timedelta(days=a.chunk_days)
+        tk = T.load(a.broker, a.symbol, start - timedelta(days=WARMUP), end + timedelta(days=SPILL))
+        lo = int(T.datetime(start.year, start.month, start.day, tzinfo=T.UTC).timestamp() * 1000)
+        hi = int(T.datetime(end.year, end.month, end.day, tzinfo=T.UTC).timestamp() * 1000)
+        n_ticks += len(tk.slice_ms(lo, hi))
+        bc = S.BarCache(tk) if a.strategy != "S7" else None
+        for k, p in enumerate(ps):
+            if a.strategy == "S7":
+                kind = a.kind or ("boom" if "boom" in a.symbol.lower() else "crash")
+                orders = S.s7_spike_count(tk, {**p, "kind": kind}, inst)
+            else:
+                orders = S.STRATEGIES[a.strategy](bc, p, inst)
+            orders = [o for o in orders if lo <= o.t_ms < hi]
+            fills[k] += E.run(orders, tk, costs, RULES[a.strategy])
+        del tk, bc
+        print("CHUNK|" + json.dumps({"from": str(start), "to": str(end), "s": round(time.time() - t0)}), flush=True)
+        start = end
+    print("HEAD|" + json.dumps({"broker": a.broker, "symbol": a.symbol, "strategy": a.strategy, "days": len(days),
+                                "from": str(days[0]), "to": str(days[-1]), "unseen_from": str(cut_day),
+                                "ticks": n_ticks, "chunk_days": a.chunk_days}), flush=True)
+    for p, f in zip(ps, fills):
+        sp = E.split_stats(f, cut_ms)
+        print("RES|" + json.dumps({"p": p, "tune": brief(sp["tune"]), "unseen": brief(sp["unseen"]),
+                                   "all": brief(E.stats(f)), "by_month_r": E.stats(f).get("by_month_r"),
+                                   "exits": E.stats(f).get("exits")}, default=str), flush=True)
+    print("DONE|" + json.dumps({"seconds": round(time.time() - t0, 1), "settings": len(ps)}), flush=True)
 
 
 if __name__ == "__main__":
