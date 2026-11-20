@@ -7,6 +7,7 @@ Broadcasts all events to the frontend via WebSocket for real-time visibility.
 """
 
 import asyncio
+import os
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -19,6 +20,7 @@ from backend.services.profit_tracker import profit_tracker
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
+SCAN_WAKE_AFTER_S = float(os.getenv("SCAN_WAKE_AFTER_S", "1.0"))   # after a bar opens: its first ticks are in
 
 
 def _price_digits(symbol: str) -> int:
@@ -1201,8 +1203,10 @@ class BotService:
                     if not self.running:
                         break
 
-                    # Throttle between symbols to avoid overwhelming MT5
-                    await asyncio.sleep(0.5)
+                    # No fixed pause between slots (was 0.5 s each): every MT5 call is
+                    # already serialised on the one MT5 thread, so the pause only
+                    # delayed the later slots' signals. Yield to the event loop.
+                    await asyncio.sleep(0)
 
                     self._log_event(f"Scanning {symbol} [{slot.strategy_id}]...", category="SCAN")
                     self._slot_seen(slot, "scan")
@@ -1366,7 +1370,7 @@ class BotService:
                         for tf in req_tfs:
                             tf_data = await DataFetcher.get_historical_data(
                                 symbol, tf, count=self._live_feed(slot, current_engine, symbol, req_tfs).fetch_count(tf))
-                            await asyncio.sleep(0.2)  # Throttle between timeframe fetches
+                            await asyncio.sleep(0)  # was a 0.2 s pause per timeframe - pure delay
                             if tf_data is None or tf_data.empty:
                                 has_missing_data = True
                                 break
@@ -2067,13 +2071,13 @@ class BotService:
                         f"checked — next scan in {self.scan_interval}s",
                         category="BOT"
                     )
-                    # Wake ~2 s after the next bar of the fastest timeframe opens, so an
+                    # Wake SCAN_WAKE_AFTER_S (1 s; was 2 s) after the next bar of the fastest timeframe opens, so an
                     # entry lands near that bar's open — the price a backtest fills at —
                     # instead of up to a whole scan interval later. Never sleeps longer
                     # than scan_interval.
                     _sleep = float(self.scan_interval)
                     if _budget:
-                        _sleep = max(1.0, min(_sleep, _budget - (time.time() % _budget) + 2.0))
+                        _sleep = max(0.5, min(_sleep, _budget - (time.time() % _budget) + SCAN_WAKE_AFTER_S))
                     await asyncio.sleep(_sleep)
 
             except asyncio.CancelledError:

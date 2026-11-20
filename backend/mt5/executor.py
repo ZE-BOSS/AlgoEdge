@@ -40,21 +40,107 @@ and do not add a second executor for MT5 work.
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
+import itertools
+import queue
+import threading
+from concurrent.futures import Executor, Future
 from typing import Any, Callable, TypeVar
 
 T = TypeVar("T")
 
 # One worker, process-wide. Every MT5 call in the backend goes through this.
-mt5_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mt5")
+# ── priority ────────────────────────────────────────────────────────────────
+# Still ONE thread (see above), but no longer first-come-first-served: a trade
+# waiting behind a 5,000-bar history download, a backtest's tick download or a
+# dashboard's deal history was the main source of order latency. Calls are
+# served by class, oldest first within a class:
+#   0  trading and the facts a trade decision needs right now
+#   1  everything else
+#   2  bulk history (bars, ticks, deal/order history, the full symbol list)
+HIGH, NORMAL, LOW = 0, 1, 2
+_HIGH = {"order_send", "order_check", "positions_get", "orders_get", "positions_total", "orders_total",
+         "symbol_info_tick", "account_info", "order_calc_margin", "order_calc_profit"}
+_LOW = {"copy_rates_from", "copy_rates_from_pos", "copy_rates_range", "copy_ticks_from", "copy_ticks_range",
+        "history_deals_get", "history_orders_get", "history_deals_total", "history_orders_total", "symbols_get"}
 
 
-async def run_mt5(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-    """Await `fn(*args, **kwargs)` on the single MT5 thread."""
-    loop = asyncio.get_running_loop()
-    if kwargs:
-        return await loop.run_in_executor(mt5_executor, lambda: fn(*args, **kwargs))
-    return await loop.run_in_executor(mt5_executor, fn, *args)
+def priority_of(fn: Callable[..., Any]) -> int:
+    """HIGH / NORMAL / LOW from the MT5 function a callable reaches: its own name
+    (bridged and real MT5 functions keep theirs), or the names a lambda uses
+    (`lambda: mt5.history_deals_get(a, b)`)."""
+    names = {getattr(fn, "__name__", "")}
+    inner = getattr(fn, "func", None)                     # functools.partial
+    if inner is not None:
+        names.add(getattr(inner, "__name__", ""))
+    code = getattr(fn, "__code__", None)
+    if code is not None:
+        names |= set(code.co_names)
+    if names & _HIGH:
+        return HIGH
+    if names & _LOW:
+        return LOW
+    return NORMAL
+
+
+class PriorityMT5Executor(Executor):
+    """A single worker thread serving a priority queue. Drop-in for the old
+    ThreadPoolExecutor(max_workers=1): `loop.run_in_executor(mt5_executor, ...)`
+    keeps working and gets its priority from the function it runs."""
+
+    def __init__(self, name: str = "mt5"):
+        self._q: queue.PriorityQueue = queue.PriorityQueue()
+        self._seq = itertools.count()
+        self._name = name
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._shutdown = False
+        self.served = [0, 0, 0]
+
+    def submit(self, fn, /, *args, **kwargs) -> Future:
+        return self.submit_with_priority(priority_of(fn), fn, *args, **kwargs)
+
+    def submit_with_priority(self, prio: int, fn, /, *args, **kwargs) -> Future:
+        if self._shutdown:
+            raise RuntimeError("cannot schedule new futures after shutdown")
+        f: Future = Future()
+        self._q.put((int(prio), next(self._seq), f, fn, args, kwargs))
+        with self._lock:
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._work, name=f"{self._name}_0", daemon=True)
+                self._thread.start()
+        return f
+
+    def _work(self) -> None:
+        while True:
+            prio, _, f, fn, args, kwargs = self._q.get()
+            if fn is None:
+                return
+            if not f.set_running_or_notify_cancel():
+                continue
+            try:
+                f.set_result(fn(*args, **kwargs))
+            except BaseException as e:  # noqa: BLE001 - handed to the awaiting caller
+                f.set_exception(e)
+            self.served[min(prio, 2)] += 1
+
+    def queued(self) -> int:
+        return self._q.qsize()
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        self._shutdown = True
+        self._q.put((99, next(self._seq), Future(), None, (), {}))
+        if wait and self._thread is not None:
+            self._thread.join(timeout=10)
+
+
+mt5_executor = PriorityMT5Executor("mt5")
+
+
+async def run_mt5(fn: Callable[..., T], *args: Any, priority: int | None = None, **kwargs: Any) -> T:
+    """Await `fn(*args, **kwargs)` on the single MT5 thread. The priority comes
+    from `fn` unless given."""
+    prio = priority_of(fn) if priority is None else priority
+    return await asyncio.wrap_future(mt5_executor.submit_with_priority(prio, fn, *args, **kwargs))
 
 
 # ── Which terminal this process belongs to ───────────────────────────────────
