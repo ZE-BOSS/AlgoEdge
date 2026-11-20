@@ -362,6 +362,7 @@ const RULES = [
     ['risk_pct', 'Total risk per signal', 'num', 'Split across all TP legs.', '%'],
     ['fixed_lots', 'Fixed total volume', 'num', 'Used when sizing is fixed.', 'lots'],
     ['split_weights', 'TP weights', 'list', 'Volume share per leg, e.g. 40, 30, 20, 10. Empty = equal.'],
+    ['sl_fraction', 'Stop as a fraction of the provider\'s', 'num', '1 = his stop. 0.75 = a quarter tighter, with a bigger lot so the $ risk stays the same. Below 0.6 tested badly.', 'x'],
     ['max_legs', 'Max TP legs', 'num', 'Use at most this many targets (the nearest).', 'legs'],
     ['min_lot_floor', 'Never skip for lot size: min lot on every leg', 'bool', 'A leg the risk % makes smaller than the broker minimum is traded at the minimum, whatever the balance. Risk can then exceed the risk %. Turn off to use the two rules below.'],
     ['allow_min_lot', 'Trade the min lot if the budget is smaller', 'bool'],
