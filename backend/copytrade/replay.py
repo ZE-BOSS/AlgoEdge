@@ -80,14 +80,19 @@ def _weights(scheme, n):
 
 
 def replay(s: Sig, bars, sl_frac: float = 1.0, scheme="equal", be_after_tp1: bool = True,
-           spread: float = 0.0) -> Result:
+           spread: float = 0.0, chase_rule: str = "market", tol_pct: float = 0.15,
+           skip_if_tp1_passed: bool = False) -> Result:
     """bars: dict of lists time/open/high/low/close, M1, time ascending (UTC seconds).
 
     sl_frac   our stop as a fraction of the provider's distance (1.0 = theirs). The
               result is in R of OUR stop, i.e. a fixed $ risk with the lot resized.
     scheme    how the position is split over the provider's targets (SCHEMES)
     be_after_tp1  move the rest to breakeven once TP1 fills
-    spread    one round-trip spread in price, charged to every filled trade"""
+    spread    one round-trip spread in price, charged to every filled trade
+    chase_rule  a MARKET signal with a written entry, when price is already more
+              than tol_pct % past it (a late signal) - as the live copier's rule:
+              market = take it anyway, limit = wait at the written entry, skip
+    skip_if_tp1_passed  a market entry with price already beyond TP1 is skipped"""
     T, O, H, L, C = bars["time"], bars["open"], bars["high"], bars["low"], bars["close"]
     i = _first_index(T, s.t + LATENCY_S)
     if i >= len(T) or T[i] - s.t > 3 * 3600:
@@ -101,7 +106,17 @@ def replay(s: Sig, bars, sl_frac: float = 1.0, scheme="equal", be_after_tp1: boo
         return Result("PRICE_MISMATCH")
     # ---- entry
     fill_i, entry = None, None
-    if s.order_type == "MARKET" or s.entry is None:
+    order_type = s.order_type
+    if order_type == "MARKET" and s.entry is not None and chase_rule != "market":
+        sg = 1 if buy else -1
+        if (mkt - s.entry * (1 + sg * tol_pct / 100.0)) * sg > 0:      # price already past the entry: late
+            if chase_rule == "skip":
+                return Result("SKIPPED_LATE", how=f"price {mkt:g} already past the entry {s.entry:g}")
+            order_type = "LIMIT"                                        # wait at the written entry
+    if skip_if_tp1_passed and order_type == "MARKET" and s.tps:
+        if (s.tps[0] - mkt) * (1 if buy else -1) <= 0:
+            return Result("SKIPPED_LATE", how=f"price {mkt:g} already beyond TP1 {s.tps[0]:g}")
+    if order_type == "MARKET" or s.entry is None:
         fill_i, entry = i, O[i]
     else:
         e = s.entry
@@ -110,7 +125,7 @@ def replay(s: Sig, bars, sl_frac: float = 1.0, scheme="equal", be_after_tp1: boo
                 break
             if any(ev[1] == "CANCEL" and ev[0] <= T[k] for ev in s.events):
                 break
-            if s.order_type == "LIMIT":
+            if order_type == "LIMIT":
                 if k == i and ((buy and O[k] <= e) or (not buy and O[k] >= e)):
                     fill_i, entry = k, O[k]          # already at/through the price: market fill
                     break
@@ -142,7 +157,7 @@ def replay(s: Sig, bars, sl_frac: float = 1.0, scheme="equal", be_after_tp1: boo
     evs = sorted(s.events)
     reason, exit_px = "", None
     ev_j = 0
-    k = fill_i + 1 if s.order_type != "MARKET" else fill_i
+    k = fill_i + 1 if order_type != "MARKET" else fill_i
     last = fill_i
     while k < len(T) and T[k] - T[fill_i] <= HORIZON_S and (any(legs_open) or not done_a):
         # provider follow-ups that happened before this bar
@@ -223,7 +238,8 @@ def summarise(rows: list[tuple[Sig, Result]]) -> dict:
     out = {"signals": len(rows), "filled": len(filled),
            "no_fill": sum(r.status == "NO_FILL" for _, r in rows),
            "no_price_data": sum(r.status == "NO_DATA" for _, r in rows),
-           "price_mismatch": sum(r.status == "PRICE_MISMATCH" for _, r in rows)}
+           "price_mismatch": sum(r.status == "PRICE_MISMATCH" for _, r in rows),
+           "skipped_late": sum(r.status == "SKIPPED_LATE" for _, r in rows)}
     if not filled:
         return out
     filled.sort(key=lambda x: x[1].exit_t or 0)
@@ -282,7 +298,7 @@ GRID_SCHEME = ("equal", "tp1", "front", "back")
 GRID_BE = (True, False)
 
 
-def optimise(sigs: list, bars_for, spread_for) -> dict | None:
+def optimise(sigs: list, bars_for, spread_for, **replay_kw) -> dict | None:
     """Tune on the first 70% of a channel's signals, judge on the last 30%."""
     sigs = sorted(sigs, key=lambda x: x.t)
     cut = int(len(sigs) * 0.7)
@@ -294,7 +310,7 @@ def optimise(sigs: list, bars_for, spread_for) -> dict | None:
             b = bars_for(x)
             if not b:
                 continue
-            r = replay(x, b, f, sc, be, spread_for(x))
+            r = replay(x, b, f, sc, be, spread_for(x), **replay_kw)
             if r.status == "FILLED":
                 rs.append(r.r_split)
         return rs

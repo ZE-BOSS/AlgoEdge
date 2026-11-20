@@ -664,7 +664,8 @@ const tone = (v) => (v == null ? undefined : v > 0 ? 'var(--success, #16a34a)' :
 function CopyBacktest({ channels }) {
   const [sel, setSel] = useState([]);
   const [f, setF] = useState({ days: 60, balance: 10000, risk_pct: 1, compound: true, own_rules: true,
-    sl_fraction: 1, scheme: 'equal', be_after_tp1: true, max_open_total: 0 });
+    sl_fraction: 1, scheme: 'equal', be_after_tp1: true, max_open_total: 0, chase_rule: 'limit', tol_pct: 0.15,
+    compare_chase: false, optimise_exits: false });
   const [strats, setStrats] = useState([]);
   const [job, setJob] = useState(null);
   const [res, setRes] = useState(null);
@@ -685,8 +686,9 @@ function CopyBacktest({ channels }) {
   const run = async () => {
     setErr(null); setRes(null);
     const body = { channel_ids: sel, strategy_backtest_ids: strats, days: +f.days, balance: +f.balance, risk_pct: +f.risk_pct,
-      compound: f.compound, max_open_total: +f.max_open_total || 0 };
-    if (!f.own_rules) Object.assign(body, { sl_fraction: +f.sl_fraction, scheme: f.scheme, be_after_tp1: f.be_after_tp1 });
+      compound: f.compound, max_open_total: +f.max_open_total || 0, compare_chase: f.compare_chase, optimise_exits: f.optimise_exits };
+    if (!f.own_rules) Object.assign(body, { sl_fraction: +f.sl_fraction, scheme: f.scheme, be_after_tp1: f.be_after_tp1,
+      chase_rule: f.chase_rule, tol_pct: +f.tol_pct });
     try { setJob((await copytrade.backtestStart(body)).data.job_id); } catch (e) { setErr(apiError(e)); }
   };
   const checkRange = async () => {
@@ -724,7 +726,9 @@ function CopyBacktest({ channels }) {
       </div>
       <div className="ct-controls" style={{ margin: '6px 0 10px' }}>
         <Switch checked={f.compound} onChange={(v) => setF({ ...f, compound: v })} label="Compound" sub={f.compound ? 'risk % of current equity' : 'risk % of the starting balance'} />
-        <Switch checked={f.own_rules} onChange={(v) => setF({ ...f, own_rules: v })} label="Each channel's own rules" sub="stop fraction, split, breakeven, follow-ups, max open" />
+        <Switch checked={f.own_rules} onChange={(v) => setF({ ...f, own_rules: v })} label="Each channel's own rules" sub="stop fraction, split, breakeven, late signals, follow-ups, max open" />
+        <Switch checked={f.compare_chase} onChange={(v) => setF({ ...f, compare_chase: v })} label="Compare late-signal settings" sub="take anyway / wait at the entry / skip, side by side" />
+        <Switch checked={f.optimise_exits} onChange={(v) => setF({ ...f, optimise_exits: v })} label="Tune exits" sub="stop fraction × split × breakeven, judged on unseen signals" />
       </div>
       {!f.own_rules && (
         <div className="ct-bt-form">
@@ -736,6 +740,12 @@ function CopyBacktest({ channels }) {
             </select>
           </Field>
           <Field label=" "><Switch checked={f.be_after_tp1} onChange={(v) => setF({ ...f, be_after_tp1: v })} label="Breakeven after TP1" /></Field>
+          <Field label="Late signal (price past the entry)">
+            <select className="ct-select" value={f.chase_rule} onChange={set('chase_rule')}>
+              <option value="limit">Wait at the entry (limit)</option><option value="skip">Skip it</option><option value="market">Take it at market</option>
+            </select>
+          </Field>
+          <Field label="Late after %" hint="past the written entry"><input className="ct-input" type="number" step="0.05" min="0" value={f.tol_pct} onChange={set('tol_pct')} /></Field>
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
@@ -804,6 +814,51 @@ function CopyBacktest({ channels }) {
               </tbody>
             </table>
           </div>
+          {res.channels.some((c) => c.chase_compare) && (
+            <>
+              <h4 className="ct-card__title" style={{ margin: '14px 0 6px' }}>Late signals <span className="ct-hint">what each setting would have made · ● = the channel's current rule</span></h4>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="ct-table">
+                  <thead><tr><th>Channel</th><th>Late signal</th><th>After</th><th>Filled</th><th>Skipped late</th><th>Never filled</th><th>Win rate</th><th>Avg R</th><th>Net R</th><th>Max DD R</th></tr></thead>
+                  <tbody>{res.channels.filter((c) => c.chase_compare).flatMap((c) => {
+                    const best = Math.max(...c.chase_compare.map((x) => x.net_r_split ?? -1e9));
+                    return c.chase_compare.map((x, i) => (
+                      <tr key={`${c.channel_id}-${i}`} style={x.net_r_split === best ? { fontWeight: 600 } : undefined}>
+                        <td>{i === 0 ? c.title : ''}</td>
+                        <td>{x.current ? '● ' : ''}{({ market: 'take anyway', limit: 'wait at entry', skip: 'skip' })[x.chase_rule]}</td>
+                        <td className="num">{x.chase_rule === 'market' ? '—' : `${x.tol_pct}%`}</td>
+                        <td className="num">{x.filled ?? 0}</td><td className="num">{x.skipped_late ?? 0}</td><td className="num">{x.no_fill ?? 0}</td>
+                        <td className="num">{pct(x.split_win_rate)}</td><td className="num">{x.avg_r_split ?? '—'}</td>
+                        <td className="num" style={{ color: tone(x.net_r_split) }}>{x.net_r_split ?? '—'}</td><td className="num">{x.max_dd_r ?? '—'}</td>
+                      </tr>));
+                  })}</tbody>
+                </table>
+              </div>
+            </>
+          )}
+          {res.channels.some((c) => c.optimise !== undefined) && (
+            <>
+              <h4 className="ct-card__title" style={{ margin: '14px 0 6px' }}>Exit tuning <span className="ct-hint">tuned on the first 70% of signals, scored on the last 30% it never saw</span></h4>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="ct-table">
+                  <thead><tr><th>Channel</th><th>As posted (avg R, unseen)</th><th>Best found</th><th>Avg R tuned → unseen</th><th>Neighbours on unseen</th><th>Unseen from</th></tr></thead>
+                  <tbody>{res.channels.filter((c) => c.optimise !== undefined).map((c) => {
+                    const o = c.optimise;
+                    if (!o) return <tr key={c.channel_id}><td>{c.title}</td><td colSpan={5} className="ct-hint">too few filled signals (needs 15+ in the tuning part)</td></tr>;
+                    const b = o.best;
+                    return (
+                      <tr key={c.channel_id}>
+                        <td>{c.title}</td><td className="num">{o.baseline?.test_R ?? '—'}</td>
+                        <td>stop ×{b.sl}, {b.split}, {b.be ? 'BE after TP1' : 'no auto-BE'}</td>
+                        <td className="num">{b.train_R} → <b style={{ color: tone(b.test_R - (o.baseline?.test_R ?? 0)) }}>{b.test_R}</b></td>
+                        <td className="num">{o.neighbours_test_R}</td><td className="num">{o.first_test_day}</td>
+                      </tr>);
+                  })}</tbody>
+                </table>
+                <p className="ct-hint">Trust a tuned setting only when it beats "as posted" on the unseen signals AND its neighbours (one step either side) do too.</p>
+              </div>
+            </>
+          )}
           <h4 className="ct-card__title" style={{ margin: '14px 0 6px' }}>Trades {srcFilter !== 'all' && `· ${srcFilter}`} <span className="ct-hint">signal vs market (click a source above to filter)</span></h4>
           <div style={{ overflowX: 'auto' }} className="ct-scroll">
             <table className="ct-table">

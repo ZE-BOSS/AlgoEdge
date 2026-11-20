@@ -301,6 +301,11 @@ class BacktestIn(BaseModel):
     scheme: str | list[float] | None = None
     be_after_tp1: bool | None = None
     max_open: int | None = None
+    chase_rule: str | None = None          # late signals: market / limit / skip
+    tol_pct: float | None = None
+    skip_if_tp1_passed: bool | None = None
+    compare_chase: bool = False            # also replay every late-signal setting side by side
+    optimise_exits: bool = False           # also tune stop fraction / split / breakeven (70% train, 30% test)
 
 
 _bt_jobs: dict[str, dict] = {}
@@ -333,13 +338,15 @@ async def backtest_start(body: BacktestIn, user: User = Depends(get_current_user
     job = {"user_id": user.id, "status": "running", "started": datetime.utcnow().isoformat(), "result": None, "error": None}
     _bt_jobs[jid] = job
     override = {"sl_fraction": body.sl_fraction, "scheme": body.scheme, "be_after_tp1": body.be_after_tp1,
-                "max_open": body.max_open}
+                "max_open": body.max_open, "chase_rule": body.chase_rule, "tol_pct": body.tol_pct,
+                "skip_if_tp1_passed": body.skip_if_tp1_passed}
 
     async def _go():
         try:
             job["result"] = await ctbt.run(user.id, body.channel_ids, body.days, body.balance, body.risk_pct,
                                            body.compound, override, body.strategy_backtest_ids,
-                                           body.max_open_total, body.refresh)
+                                           body.max_open_total, body.refresh, body.compare_chase,
+                                           body.optimise_exits)
             job["status"] = "done"
         except Exception as e:  # noqa: BLE001
             logger.exception(f"[CT-BT] failed: {e}")

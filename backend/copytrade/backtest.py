@@ -40,6 +40,9 @@ CACHE_DIR = Path(os.getenv("COPYTRADE_BT_CACHE", "data/copytrade_bt_cache"))
 CACHE_TTL_S = 3600
 FOLLOW_UP_WINDOW_S = 48 * 3600
 MAX_DAYS = 365
+# late-signal settings compared side by side: (chase_rule, tolerance %)
+CHASE_GRID = (("market", 0.0), ("limit", 0.05), ("limit", 0.15), ("limit", 0.3),
+              ("skip", 0.05), ("skip", 0.15), ("skip", 0.3))
 LIVE_LOOKUPS = 300
 
 
@@ -87,9 +90,12 @@ def settings_from_rules(rules: dict, override: dict | None = None) -> dict:
         "follow": {"BREAKEVEN": bool(rules.get("follow_breakeven", True)), "MOVE_SL": bool(rules.get("follow_move_sl", True)),
                    "CLOSE": bool(rules.get("follow_close", True)), "CANCEL": bool(rules.get("follow_cancel", True))},
         "max_open": int(rules.get("max_open_signals") or 0),
+        "chase_rule": str(rules.get("chase_rule") or "limit"),
+        "tol_pct": float(rules.get("market_tolerance_pct") if rules.get("market_tolerance_pct") is not None else 0.15),
+        "skip_if_tp1_passed": bool(rules.get("skip_if_tp1_passed", True)),
         "only_admins": bool(rules.get("only_admins", True)),
     }
-    for k in ("sl_fraction", "be_after_tp1", "max_open"):
+    for k in ("sl_fraction", "be_after_tp1", "max_open", "chase_rule", "tol_pct", "skip_if_tp1_passed"):
         if o.get(k) is not None:
             out[k] = o[k]
     if o.get("scheme"):
@@ -112,7 +118,7 @@ def trade_row(source: str, s: Sig, r: Result, bars: dict | None, risk_usd: float
         if i < len(bars["time"]) and bars["time"][i] - s.t < 3 * 3600:
             row["market_at_signal"] = bars["open"][i]
     if r.status != "FILLED":
-        row["note"] = r.how or {"NO_FILL": "price never reached the entry", "NO_DATA": "no price history",
+        row["note"] = r.how or {"NO_FILL": "price never reached the entry", "SKIPPED_LATE": "late signal - skipped", "NO_DATA": "no price history",
                                 "PRICE_MISMATCH": "signal prices far from this broker's market"}.get(r.status, "")
         return row
     buy = s.side == "BUY"
@@ -341,7 +347,7 @@ async def _live_results(chat_id: int, msg_ids: list[int]) -> dict[int, dict]:
 async def run(user_id: str, channel_ids: list[int], days: int = 60, balance: float = 10000.0,
               risk_pct: float = 1.0, compound: bool = True, override: dict | None = None,
               strategy_backtest_ids: list[str] | None = None, max_open_total: int = 0,
-              refresh: bool = False) -> dict:
+              refresh: bool = False, compare_chase: bool = False, optimise_exits: bool = False) -> dict:
     from sqlalchemy import select
 
     from backend.copytrade import mt5ops
@@ -381,10 +387,33 @@ async def run(user_id: str, channel_ids: list[int], days: int = 60, balance: flo
                 bars_cache[sym] = await load_m1(sym, start)
                 spreads[sym] = await spread_price(sym) if bars_cache[sym] else 0.0
             bars = bars_cache.get(sym) if sym else None
-            r = replay(x, bars, cfg["sl_fraction"], cfg["scheme"], cfg["be_after_tp1"], spreads.get(sym, 0.0)) \
+            r = replay(x, bars, cfg["sl_fraction"], cfg["scheme"], cfg["be_after_tp1"], spreads.get(sym, 0.0),
+                       cfg["chase_rule"], cfg["tol_pct"], cfg["skip_if_tp1_passed"]) \
                 if bars else Result("NO_DATA", how=f"{x.symbol} is not on this account" if not sym else "no price history")
             pairs.append((x, r))
             rows.append(trade_row(title, x, r, bars))
+        if compare_chase and sigs:
+            summ_cmp = []
+            for rule, tol in CHASE_GRID:
+                pr = []
+                for x in sigs:
+                    sym = resolve_symbol(str(x.symbol).upper(), names, rules) or None
+                    b = bars_cache.get(sym) if sym else None
+                    if b:
+                        pr.append((x, replay(x, b, cfg["sl_fraction"], cfg["scheme"], cfg["be_after_tp1"],
+                                             spreads.get(sym, 0.0), rule, tol, cfg["skip_if_tp1_passed"])))
+                sm = summarise(pr) if pr else {}
+                summ_cmp.append({"chase_rule": rule, "tol_pct": tol, "current": rule == cfg["chase_rule"] and tol == cfg["tol_pct"],
+                                 **{k: sm.get(k) for k in ("filled", "skipped_late", "no_fill", "split_win_rate", "avg_r_split",
+                                                           "net_r_split", "max_dd_r", "profit_factor_split")}})
+        if optimise_exits and sigs:
+            from backend.copytrade.replay import optimise
+
+            def _sym(x):
+                return resolve_symbol(str(x.symbol).upper(), names, rules) or None
+            opt = optimise(sigs, lambda x: bars_cache.get(_sym(x)), lambda x: spreads.get(_sym(x), 0.0),
+                           chase_rule=cfg["chase_rule"], tol_pct=cfg["tol_pct"],
+                           skip_if_tp1_passed=cfg["skip_if_tp1_passed"])
         live = await _live_results(ch.chat_id, [x.msg_id for x in sigs]) if sigs else {}
         for row in rows:
             if row["msg_id"] in live:
@@ -393,6 +422,10 @@ async def run(user_id: str, channel_ids: list[int], days: int = 60, balance: flo
         summ.update({"channel_id": ch.id, "title": title, "settings": {k: v for k, v in cfg.items() if k != "follow"},
                      "follow": cfg["follow"], "first_message": (h.get("first_message") or "")[:10] or None,
                      "history_capped": h.get("capped", False)})
+        if compare_chase and sigs:
+            summ["chase_compare"] = summ_cmp
+        if optimise_exits and sigs:
+            summ["optimise"] = opt
         channels_out.append(summ)
         all_trades += rows
     strategies_out = []

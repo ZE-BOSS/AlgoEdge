@@ -177,3 +177,29 @@ def test_run_end_to_end_with_fake_telegram_and_prices(monkeypatch, tmp_path):
     first = res["trades"][0]
     assert first["exit_reason"] == "TP1" and first["live"]["net"] == 42.0
     assert "_entry_t" not in first
+
+
+def test_late_market_signal_follows_the_chase_rule():
+    # BUY NOW 4000, but price is already 4010 when the message lands (0.25% past the entry)
+    s = Sig(1, int(T0.timestamp()) - 60, "BUY", "MARKET", 4000.0, 3990.0, [4030.0])
+    bars = _bars([(4010, 4011, 4009, 4010), (4010, 4010, 3999, 4000), (4000, 4031, 4000, 4030)])
+    taken = replay(s, bars, chase_rule="market")
+    assert taken.status == "FILLED" and taken.entry == 4010
+    waited = replay(s, bars, chase_rule="limit", tol_pct=0.15)
+    assert waited.status == "FILLED" and waited.entry == 4000 and waited.r_split == 3.0
+    assert replay(s, bars, chase_rule="skip", tol_pct=0.15).status == "SKIPPED_LATE"
+    # within tolerance it is not late
+    assert replay(s, bars, chase_rule="skip", tol_pct=0.5).status == "FILLED"
+
+
+def test_market_signal_beyond_tp1_is_skipped_when_asked():
+    s = Sig(1, int(T0.timestamp()) - 60, "SELL", "MARKET", None, 4010.0, [3995.0])
+    bars = _bars([(3990, 3991, 3989, 3990), (3990, 3991, 3980, 3981)])
+    assert replay(s, bars, skip_if_tp1_passed=True).status == "SKIPPED_LATE"
+    assert replay(s, bars, skip_if_tp1_passed=False).status == "FILLED"
+
+
+def test_settings_carry_the_live_late_signal_rule():
+    cfg = bt.settings_from_rules({"chase_rule": "skip", "market_tolerance_pct": 0.3})
+    assert cfg["chase_rule"] == "skip" and cfg["tol_pct"] == 0.3 and cfg["skip_if_tp1_passed"] is True
+    assert bt.settings_from_rules({})["chase_rule"] == "limit"        # the live default
