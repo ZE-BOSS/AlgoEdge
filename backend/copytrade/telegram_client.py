@@ -253,6 +253,45 @@ class TelegramManager:
                                                                            int(sid) in (admins or set())))})
         return out
 
+    async def history_since(self, user_id: str, chat_id: int, since, cap: int = 5000) -> dict:
+        """Read-only: every text message newer than `since` (oldest first, at most
+        `cap`), plus the date of the chat's very first message - the furthest a
+        backtest of this chat can reach."""
+        if not await self._connect_saved(user_id):
+            raise RuntimeError("not logged in to Telegram")
+        c = self._uc(user_id).client
+        try:
+            entity = await c.get_entity(chat_id)
+        except ValueError:
+            await c.get_dialogs()
+            entity = await c.get_entity(chat_id)
+        broadcast = bool(getattr(entity, "broadcast", False))
+        admins = None if broadcast else await self._admins(self._uc(user_id), int(chat_id), entity)
+        out, hit_cap, n = [], False, 0
+        async for m in c.iter_messages(entity, limit=cap):
+            n += 1
+            if m.date and m.date < since:
+                break
+            if not (m.message or "").strip():
+                continue
+            sid = getattr(m, "sender_id", None)
+            out.append({"id": m.id, "date": m.date.isoformat() if m.date else None, "text": m.message or "",
+                        "reply_to": getattr(m.reply_to, "reply_to_msg_id", None),
+                        "from_admin": broadcast or (sid is not None and (int(sid) == int(chat_id) or
+                                                                           int(sid) in (admins or set())))})
+        else:
+            hit_cap = n >= cap          # stopped by the cap, not by reaching `since`
+        first = None
+        try:
+            fm = await c.get_messages(entity, limit=1, reverse=True)
+            if fm:
+                first = fm[0].date.isoformat()
+        except Exception:  # noqa: BLE001
+            pass
+        out.reverse()
+        return {"messages": out, "first_message": first, "capped": hit_cap,
+                "title": getattr(entity, "title", None)}
+
     async def _admins(self, uc: _UserClient, chat_id: int, chat: Any) -> set[int] | None:
         """Admin user ids of a group, cached for an hour. None if they can't be listed."""
         now = asyncio.get_running_loop().time()

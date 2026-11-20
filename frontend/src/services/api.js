@@ -576,4 +576,8 @@ export const copytrade = {
   parse: (text, channel_id) => api.post(`${CT}/parse`, { text, channel_id }),
   signals: (params) => api.get(`${CT}/signals`, { params }),
   orders: (sid) => api.get(`${CT}/signals/${sid}/orders`),
+  backtestRange: (ids) => api.get(`${CT}/backtest/range`, { params: { channel_ids: ids.join(',') }, timeout: 180000 }),
+  backtestStart: (data) => api.post(`${CT}/backtest`, data),
+  backtestPoll: (jobId) => api.get(`${CT}/backtest/${jobId}`, { timeout: 60000 }),
+  dailyReport: (send) => api.post(`${CT}/daily-report`, null, { params: { send }, timeout: 120000 }),
 };

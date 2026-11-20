@@ -22,6 +22,8 @@ Telegram copy trading.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import desc, select
@@ -35,6 +37,9 @@ from backend.copytrade.service import copytrade_service
 from backend.copytrade.telegram_client import telegram_manager
 from backend.data.database import get_db
 from backend.data.models import User
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/copytrade", tags=["copytrade"])
 
@@ -279,3 +284,78 @@ async def daily_report_now(send: bool = True, user: User = Depends(get_current_u
     text = await notify.collect_and_send_daily_report(start, start + timedelta(days=1),
                                                       today.strftime("%a %d %b %Y") + " (so far)", send=send)
     return {"sent": send, "text": text}
+
+
+# ── backtest ────────────────────────────────────────────────────────────────
+class BacktestIn(BaseModel):
+    channel_ids: list[int]
+    days: int = 60
+    balance: float = 10000.0
+    risk_pct: float = 1.0
+    compound: bool = True
+    max_open_total: int = 0
+    strategy_backtest_ids: list[str] = []
+    refresh: bool = False
+    # None = each channel's own copy rules
+    sl_fraction: float | None = None
+    scheme: str | list[float] | None = None
+    be_after_tp1: bool | None = None
+    max_open: int | None = None
+
+
+_bt_jobs: dict[str, dict] = {}
+_bt_tasks: set = set()          # strong refs, so a running job is not garbage-collected
+
+
+@router.get("/backtest/range")
+async def backtest_range(channel_ids: str, user: User = Depends(get_current_user)):
+    """How far back each channel's messages and the prices for its symbols go."""
+    from backend.copytrade import backtest as ctbt
+    ids = [int(x) for x in channel_ids.split(",") if x.strip().isdigit()]
+    try:
+        return await ctbt.data_range(user.id, ids)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/backtest")
+async def backtest_start(body: BacktestIn, user: User = Depends(get_current_user)):
+    """Start a copy-trading backtest; poll GET /backtest/{job_id}."""
+    import asyncio as _asyncio
+    import uuid
+
+    from backend.copytrade import backtest as ctbt
+    if not body.channel_ids and not body.strategy_backtest_ids:
+        raise HTTPException(400, "pick at least one channel or strategy backtest")
+    if any(j["user_id"] == user.id and j["status"] == "running" for j in _bt_jobs.values()):
+        raise HTTPException(409, "a copy-trading backtest is already running")
+    jid = uuid.uuid4().hex[:12]
+    job = {"user_id": user.id, "status": "running", "started": datetime.utcnow().isoformat(), "result": None, "error": None}
+    _bt_jobs[jid] = job
+    override = {"sl_fraction": body.sl_fraction, "scheme": body.scheme, "be_after_tp1": body.be_after_tp1,
+                "max_open": body.max_open}
+
+    async def _go():
+        try:
+            job["result"] = await ctbt.run(user.id, body.channel_ids, body.days, body.balance, body.risk_pct,
+                                           body.compound, override, body.strategy_backtest_ids,
+                                           body.max_open_total, body.refresh)
+            job["status"] = "done"
+        except Exception as e:  # noqa: BLE001
+            logger.exception(f"[CT-BT] failed: {e}")
+            job["status"], job["error"] = "error", f"{type(e).__name__}: {e}"
+
+    task = _asyncio.create_task(_go())
+    _bt_tasks.add(task)
+    task.add_done_callback(_bt_tasks.discard)
+    for k in [k for k, j in _bt_jobs.items() if j["status"] != "running" and k != jid][:-5]:
+        _bt_jobs.pop(k, None)          # keep the last few results
+    return {"job_id": jid}
+
+
+@router.get("/backtest/{job_id}")
+async def backtest_poll(job_id: str, user: User = Depends(get_current_user)):
+    job = _bt_jobs.get(job_id)
+    if not job or job["user_id"] != user.id:
+        raise HTTPException(404, "no such backtest")
+    return {k: v for k, v in job.items() if k != "user_id"}

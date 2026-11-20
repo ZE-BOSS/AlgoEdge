@@ -198,3 +198,11 @@
 .ct-detail { padding: 12px; }
 .ct-detail pre { white-space: pre-wrap; margin: 0 0 8px; font-family: inherit; font-size: 0.8rem; background: none; border: 0; padding: 0; color: var(--text-primary); }
 .ct-detail ul { margin: 0 0 10px; padding-left: 18px; font-size: 0.76rem; color: var(--text-secondary); }
+
+/* backtest */
+.ct-bt-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 6px; }
+.ct-bt-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 6px 0 4px; }
+.ct-bt-tile { background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 2px; }
+.ct-bt-tile span { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.ct-bt-tile b { font-family: var(--font-mono); font-size: 0.9rem; color: var(--text-primary); }

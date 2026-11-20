@@ -17,7 +17,8 @@ import {
   LogOut, MessageSquare, Play, Plus, RefreshCw, Search, Send, Settings2, Trash2, Wand2, X,
 } from 'lucide-react';
 
-import { copytrade } from '../services/api';
+import { copytrade, getBacktests } from '../services/api';
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { qk } from '../services/servers';
 import './CopyTrading.css';
 
@@ -655,6 +656,184 @@ function SignalLog({ channels }) {
   );
 }
 
+// ── backtest ────────────────────────────────────────────────────────────────
+const usd = (v) => (v == null ? '—' : `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+const pct = (v) => (v == null ? '—' : `${(v * 100).toFixed(0)}%`);
+const tone = (v) => (v == null ? undefined : v > 0 ? 'var(--success, #16a34a)' : v < 0 ? 'var(--danger, #dc2626)' : undefined);
+
+function CopyBacktest({ channels }) {
+  const [sel, setSel] = useState([]);
+  const [f, setF] = useState({ days: 60, balance: 10000, risk_pct: 1, compound: true, own_rules: true,
+    sl_fraction: 1, scheme: 'equal', be_after_tp1: true, max_open_total: 0 });
+  const [strats, setStrats] = useState([]);
+  const [job, setJob] = useState(null);
+  const [res, setRes] = useState(null);
+  const [err, setErr] = useState(null);
+  const [range, setRange] = useState(null);
+  const [srcFilter, setSrcFilter] = useState('all');
+  const backtests = useQuery({ queryKey: qk('ct-bt-strats'), queryFn: () => getBacktests().then((r) => r.data), staleTime: 60000 });
+  useQuery({ // polls the running job; results land in state
+    queryKey: qk('ct-bt-job', job), enabled: !!job, refetchInterval: (q) => (q.state.data?.status === 'running' ? 2000 : false),
+    queryFn: () => copytrade.backtestPoll(job).then((r) => {
+      if (r.data.status === 'done') { setRes(r.data.result); setJob(null); }
+      if (r.data.status === 'error') { setErr(r.data.error); setJob(null); }
+      return r.data;
+    }),
+  });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const toggle = (arr, setArr, v) => setArr(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+  const run = async () => {
+    setErr(null); setRes(null);
+    const body = { channel_ids: sel, strategy_backtest_ids: strats, days: +f.days, balance: +f.balance, risk_pct: +f.risk_pct,
+      compound: f.compound, max_open_total: +f.max_open_total || 0 };
+    if (!f.own_rules) Object.assign(body, { sl_fraction: +f.sl_fraction, scheme: f.scheme, be_after_tp1: f.be_after_tp1 });
+    try { setJob((await copytrade.backtestStart(body)).data.job_id); } catch (e) { setErr(apiError(e)); }
+  };
+  const checkRange = async () => {
+    setErr(null); setRange('loading');
+    try { setRange((await copytrade.backtestRange(sel)).data); } catch (e) { setErr(apiError(e)); setRange(null); }
+  };
+  const pf = res?.portfolio;
+  const trades = (res?.trades || []).filter((t) => srcFilter === 'all' || t.source === srcFilter);
+  const curve = (pf?.curve || []).map((p) => ({ ...p, d: p.t?.slice(5, 16).replace('T', ' ') }));
+  return (
+    <Card icon={<History size={15} />} title="Backtest channels"
+      sub="Replays each channel's own Telegram messages on this account's MT5 prices, with its copy rules, then runs them with real money - alone, together, or alongside saved strategy backtests.">
+      <div className="ct-chips" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
+        {channels.map((c) => (
+          <button key={c.id} className={`ct-chip${sel.includes(c.id) ? ' is-on' : ''}`} onClick={() => toggle(sel, setSel, c.id)}>{c.title || c.chat_id}</button>
+        ))}
+        {channels.length > 1 && <button className="ct-chip" onClick={() => setSel(sel.length === channels.length ? [] : channels.map((c) => c.id))}>{sel.length === channels.length ? 'None' : 'All'}</button>}
+      </div>
+      {backtests.data?.length > 0 && (
+        <details style={{ marginBottom: 10 }}>
+          <summary className="ct-hint" style={{ cursor: 'pointer' }}>Add saved strategy backtests to the portfolio ({strats.length} picked)</summary>
+          <div className="ct-chips" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+            {backtests.data.slice(0, 40).map((b) => (
+              <button key={b.id} className={`ct-chip${strats.includes(b.id) ? ' is-on' : ''}`} onClick={() => toggle(strats, setStrats, b.id)}
+                title={`${b.total_trades ?? '?'} trades`}>{b.title || `${b.strategy_id} ${b.symbol}`}</button>
+            ))}
+          </div>
+        </details>
+      )}
+      <div className="ct-bt-form">
+        <Field label="Days back"><input className="ct-input" type="number" min="1" max="365" value={f.days} onChange={set('days')} /></Field>
+        <Field label="Starting balance"><input className="ct-input" type="number" value={f.balance} onChange={set('balance')} /></Field>
+        <Field label="Risk per signal %"><input className="ct-input" type="number" step="0.1" value={f.risk_pct} onChange={set('risk_pct')} /></Field>
+        <Field label="Max open (all sources)" hint="0 = no limit"><input className="ct-input" type="number" min="0" value={f.max_open_total} onChange={set('max_open_total')} /></Field>
+      </div>
+      <div className="ct-controls" style={{ margin: '6px 0 10px' }}>
+        <Switch checked={f.compound} onChange={(v) => setF({ ...f, compound: v })} label="Compound" sub={f.compound ? 'risk % of current equity' : 'risk % of the starting balance'} />
+        <Switch checked={f.own_rules} onChange={(v) => setF({ ...f, own_rules: v })} label="Each channel's own rules" sub="stop fraction, split, breakeven, follow-ups, max open" />
+      </div>
+      {!f.own_rules && (
+        <div className="ct-bt-form">
+          <Field label="Stop fraction" hint="1 = provider's stop"><input className="ct-input" type="number" step="0.05" min="0.3" max="1" value={f.sl_fraction} onChange={set('sl_fraction')} /></Field>
+          <Field label="Split over targets">
+            <select className="ct-select" value={f.scheme} onChange={set('scheme')}>
+              <option value="equal">Equal</option><option value="tp1">All at TP1</option>
+              <option value="front">Front 50/30/20</option><option value="back">Back 20/30/50</option>
+            </select>
+          </Field>
+          <Field label=" "><Switch checked={f.be_after_tp1} onChange={(v) => setF({ ...f, be_after_tp1: v })} label="Breakeven after TP1" /></Field>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        <button className="btn btn-primary btn-sm" disabled={!!job || (!sel.length && !strats.length)} onClick={run}>
+          <Play size={13} /> {job ? 'Running…' : 'Run backtest'}</button>
+        <button className="btn btn-secondary btn-sm" disabled={!sel.length || range === 'loading'} onClick={checkRange}>
+          <Search size={13} /> {range === 'loading' ? 'Checking…' : 'How far back can I go?'}</button>
+      </div>
+      {job && <Note>Reading Telegram history and MT5 prices… the first run of a channel takes longest (cached for an hour).</Note>}
+      {err && <Note tone="err">{err}</Note>}
+      {range && range !== 'loading' && (
+        <div style={{ overflowX: 'auto', marginBottom: 12 }}>
+          <table className="ct-table">
+            <thead><tr><th>Channel</th><th>First message</th><th>Signals, last 30 days</th><th>Symbols</th></tr></thead>
+            <tbody>{range.channels.map((c) => (
+              <tr key={c.channel_id}><td>{c.title}</td><td className="num">{c.first_message || '—'}</td><td className="num">{c.signals_last_30d}</td>
+                <td>{Object.entries(c.symbols).map(([s, n]) => `${s} ×${n}`).join(', ') || '—'}</td></tr>
+            ))}</tbody>
+          </table>
+          <p className="ct-hint">Prices: {Object.entries(range.prices).map(([s, p]) => `${s} → ${p.broker_symbol || 'not on this account'}${p.m1_from ? ` (M1 from ${p.m1_from})` : ''}`).join(' · ')}</p>
+        </div>
+      )}
+      {pf && (
+        <>
+          <div className="ct-bt-tiles">
+            {[['End balance', usd(pf.end_balance)], ['Net', usd(pf.net), pf.net], ['Return', pf.return_pct == null ? '—' : `${pf.return_pct}%`, pf.return_pct],
+              ['Max drawdown', `${usd(pf.max_dd_usd)} (${pf.max_dd_pct}%)`], ['Trades', pf.trades], ['Max open at once', `${pf.max_concurrent_trades} (${pf.max_concurrent_risk_pct}% risk)`],
+              ['Worst day', pf.worst_day ? `${pf.worst_day[0]} ${usd(pf.worst_day[1])}` : '—'], ['Losing days', `${pf.losing_days} of ${pf.trading_days}`]]
+              .map(([k, v, c]) => <div key={k} className="ct-bt-tile"><span>{k}</span><b style={{ color: tone(c) }}>{v}</b></div>)}
+          </div>
+          {curve.length > 1 && (
+            <div style={{ height: 220, margin: '8px 0 14px' }}>
+              <ResponsiveContainer>
+                <LineChart data={curve} margin={{ top: 6, right: 10, bottom: 0, left: 0 }}>
+                  <CartesianGrid stroke="var(--border-subtle)" vertical={false} />
+                  <XAxis dataKey="d" tick={{ fontSize: 10 }} minTickGap={40} />
+                  <YAxis tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={70} tickFormatter={(v) => v.toLocaleString()} />
+                  <Tooltip formatter={(v) => usd(v)} labelFormatter={(l, p) => `${l} ${p?.[0]?.payload?.source || ''}`} />
+                  <Line type="stepAfter" dataKey="equity" dot={false} strokeWidth={1.6} stroke="var(--accent, #6366f1)" isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div style={{ overflowX: 'auto' }}>
+            <table className="ct-table">
+              <thead><tr><th>Source</th><th>Signals</th><th>Filled</th><th>TP1 hit</th><th>Win rate</th><th>Net R</th><th>Portfolio P&L</th>
+                <th>Best / worst R</th><th>Max DD R</th><th>Losing streak</th><th>Settings</th></tr></thead>
+              <tbody>
+                {res.channels.map((c) => (
+                  <tr key={c.channel_id} className="is-click" onClick={() => setSrcFilter(srcFilter === c.title ? 'all' : c.title)}>
+                    <td>{c.title}{c.history_capped && <span className="ct-hint"> (history capped)</span>}</td>
+                    <td className="num">{c.signals}</td><td className="num">{c.filled}</td><td className="num">{pct(c.tp1_hit_rate)}</td>
+                    <td className="num">{pct(c.split_win_rate)}</td><td className="num" style={{ color: tone(c.net_r_split) }}>{c.net_r_split ?? '—'}</td>
+                    <td className="num" style={{ color: tone(pf.by_source[c.title]?.pnl) }}>{usd(pf.by_source[c.title]?.pnl)}</td>
+                    <td className="num">{c.best_r ?? '—'} / {c.worst_r ?? '—'}</td><td className="num">{c.max_dd_r ?? '—'}</td>
+                    <td className="num">{c.max_losing_streak ?? '—'}</td>
+                    <td className="ct-hint">stop ×{c.settings.sl_fraction}, {Array.isArray(c.settings.scheme) ? c.settings.scheme.join('/') : c.settings.scheme}{c.settings.be_after_tp1 ? ', BE@TP1' : ''}{c.settings.max_open ? `, max ${c.settings.max_open}` : ''}</td>
+                  </tr>
+                ))}
+                {res.strategies.map((s) => (
+                  <tr key={s.backtest_id} className="is-click" onClick={() => setSrcFilter(srcFilter === s.title ? 'all' : s.title)}>
+                    <td>{s.title} <span className="ct-hint">strategy</span></td><td className="num">{s.trades}</td><td colSpan={4} />
+                    <td className="num" style={{ color: tone(pf.by_source[s.title]?.pnl) }}>{usd(pf.by_source[s.title]?.pnl)}</td><td colSpan={4} className="ct-hint">{s.from} → {s.to}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <h4 className="ct-card__title" style={{ margin: '14px 0 6px' }}>Trades {srcFilter !== 'all' && `· ${srcFilter}`} <span className="ct-hint">signal vs market (click a source above to filter)</span></h4>
+          <div style={{ overflowX: 'auto' }} className="ct-scroll">
+            <table className="ct-table">
+              <thead><tr><th>Time</th><th>Source</th><th>Signal</th><th>Market then</th><th>Written entry</th><th>Our fill</th><th>Slippage</th>
+                <th>Wait</th><th>Ended</th><th>R</th><th>Portfolio $</th><th>Live copier</th></tr></thead>
+              <tbody>{trades.slice(0, 500).map((t, i) => (
+                <tr key={i} title={t.text}>
+                  <td className="num" style={{ whiteSpace: 'nowrap' }}>{t.time?.slice(5, 16).replace('T', ' ')}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{t.source}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{t.side} {t.symbol} {t.order_type ? t.order_type.toLowerCase() : ''}</td>
+                  <td className="num">{t.market_at_signal ?? '—'}</td><td className="num">{t.signal_entry ?? 'market'}</td>
+                  <td className="num">{t.fill_price ?? '—'}</td>
+                  <td className="num">{t.slippage == null ? '—' : `${t.slippage} (${t.slippage_r}R)`}</td>
+                  <td className="num">{t.wait_min == null ? '—' : `${t.wait_min}m`}</td>
+                  <td>{t.status === 'FILLED' ? (t.exit_reason || '—') : <span className="ct-hint">{t.note || t.status.toLowerCase()}</span>}</td>
+                  <td className="num" style={{ color: tone(t.r) }}>{t.r ?? '—'}</td>
+                  <td className="num" style={{ color: tone(t.portfolio_pnl) }}>{t.portfolio_skipped ? <span className="ct-hint">skipped (max open)</span> : usd(t.portfolio_pnl)}</td>
+                  <td>{t.live ? <span title={t.live.detail}>{t.live.status.toLowerCase()}{t.live.net != null ? ` ${usd(t.live.net)}` : ''}</span> : <span className="ct-hint">—</span>}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+            {trades.length > 500 && <p className="ct-hint">Showing the first 500 of {trades.length}.</p>}
+          </div>
+          <p className="ct-hint" style={{ marginTop: 8 }}>Method: {res.method}.</p>
+        </>
+      )}
+    </Card>
+  );
+}
+
 // ── page ────────────────────────────────────────────────────────────────────
 export default function CopyTrading() {
   const qc = useQueryClient();
@@ -685,6 +864,9 @@ export default function CopyTrading() {
             {tg?.logged_in && <Pill tone={tg.watching ? 'green' : 'red'}>{tg.watching ? `Watching ${tg.watched_chats} chat${tg.watched_chats === 1 ? '' : 's'}` : 'Not watching'}</Pill>}
             {st && <Pill tone={!st.enabled ? 'muted' : st.dry_run ? 'blue' : 'red'}>{!st.enabled ? 'Copying off' : st.dry_run ? 'Dry run' : 'Live orders'}</Pill>}
             <button className="ct-iconbtn" onClick={() => refetch()} title="Refresh"><RefreshCw size={13} className={isFetching ? 'spin' : ''} /></button>
+            <button className="btn btn-sm btn-secondary" title="The end-of-day report (sent automatically at 21:00 Lagos) for today so far"
+              onClick={() => copytrade.dailyReport(true).then(() => window.alert('Sent to Telegram.')).catch((e) => window.alert(apiError(e)))}>
+              <Send size={13} /> Send today&apos;s report</button>
           </div>
         </div>
         {st && (
@@ -731,6 +913,7 @@ export default function CopyTrading() {
 
       {st && <Rules rules={st.rules} defaults={st.defaults} onSave={(rules) => save({ rules })} />}
       <SignalLog channels={channels} />
+      <CopyBacktest channels={channels || []} />
     </div>
   );
 }
