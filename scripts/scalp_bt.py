@@ -66,8 +66,12 @@ def main() -> None:
     ap.add_argument("--chunk-days", type=int, default=0,
                     help="run in pieces of N calendar days (with warm-up) so long histories fit in memory")
     ap.add_argument("--only", default=None, help="JSON list of settings to run instead of the grid")
+    ap.add_argument("--dump", default=None, help="write the FIRST setting's trades to this CSV (parity checks)")
+    ap.add_argument("--from-day", default=None, help="first day (YYYY-MM-DD)")
     a = ap.parse_args()
     days = T.stored_days(a.broker, a.symbol)
+    if a.from_day:
+        days = [d for d in days if str(d) >= a.from_day]
     if a.days:
         days = days[-a.days:]
     if not days:
@@ -102,11 +106,25 @@ def main() -> None:
         for p in settings(a):
             fills = E.run(fn(bc, p, inst), tk, costs, RULES[a.strategy])
             rows.append((p, fills))
+    if a.dump and rows:
+        dump_csv(a.dump, rows[0][1])
     for p, fills in rows:
         sp = E.split_stats(fills, cut_ms)
         print("RES|" + json.dumps({"p": p, "tune": brief(sp["tune"]), "unseen": brief(sp["unseen"]),
                                    "exits": E.stats(fills).get("exits")}, default=str), flush=True)
     print("DONE|" + json.dumps({"seconds": round(time.time() - t0, 1), "settings": len(rows)}), flush=True)
+
+
+def dump_csv(path: str, fills) -> None:
+    import csv
+    from datetime import datetime, timezone
+    iso = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")  # noqa: E731
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["signal_utc", "entry_utc", "exit_utc", "side", "entry", "exit", "stop", "reason", "r"])
+        for x in fills:
+            w.writerow([iso(x.t_signal), iso(x.t_entry), iso(x.t_exit), "long" if x.side > 0 else "short",
+                        round(x.entry, 2), round(x.exit, 2), round(x.sl0, 2), x.reason, round(x.r, 3)])
 
 
 def settings(a) -> list[dict]:
