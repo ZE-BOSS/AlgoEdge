@@ -34,6 +34,10 @@ def _price_digits(symbol: str) -> int:
 
 MAX_LOG_ENTRIES = 1000
 
+# At most this many "seen late, not traded" Telegram alerts per slot per scan,
+# so a long outage does not flood the chat.
+MISSED_ALERTS_MAX = 3
+
 class BotService:
     """Singleton service managing the trading bot lifecycle."""
 
@@ -1411,12 +1415,24 @@ class BotService:
                                 self._log_event(
                                     f"[{symbol}] {strategy_id}: warmed up on {_fed.stepped} {_feed.primary} bars "
                                     f"(the same warm-up a backtest uses)", category="BOT")
-                            for _bar_time, _missed in _fed.missed:
+                            for _bar_time, _missed in _fed.missed[-MISSED_ALERTS_MAX:]:
                                 self._suppressed("missed_bar_signal", slot.slot_id)
                                 self._log_event(
                                     f"[{symbol}] {strategy_id}: {_missed.direction} signal on the bar opening "
                                     f"{pd.Timestamp(_bar_time)} was only seen late (bot offline or a slow scan) — "
                                     f"not traded; the backtest would have taken it", "WARN", "SIGNAL")
+                                # Said on Telegram too: a late drop used to reach only this
+                                # log, so on the phone one account traded and the other
+                                # simply stayed silent (VWAP_v1, US Tech 100, 20 Nov 2026).
+                                await self._save_signal_state(
+                                    _missed, "MISSED",
+                                    f"seen late (bot offline or a slow scan) on the bar opening "
+                                    f"{pd.Timestamp(_bar_time, unit='s') if isinstance(_bar_time, (int, float)) else pd.Timestamp(_bar_time)} UTC"
+                                    f" - not traded", category="late bar")
+                            if len(_fed.missed) > MISSED_ALERTS_MAX:
+                                self._log_event(
+                                    f"[{symbol}] {strategy_id}: {len(_fed.missed) - MISSED_ALERTS_MAX} older late "
+                                    f"signals not alerted", "WARN", "SIGNAL")
                             signal = _fed.signal
                                     
                             await asyncio.sleep(0.01)
