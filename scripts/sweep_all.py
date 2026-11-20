@@ -140,9 +140,11 @@ async def main_async(a) -> None:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "instruments.json").write_text(json.dumps(insts, indent=1))
-    jobs = [(s, i) for i in insts for s in strategies]
     k, n = (int(x) for x in a.shard.split("/"))
-    jobs = [j for idx, j in enumerate(jobs) if idx % n == k]
+    # shard by INSTRUMENT: a worker runs every strategy on its instruments, so the
+    # bars it fetched for one strategy are reused (in-process cache) by the next
+    mine = [i for idx, i in enumerate(insts) if idx % n == k]
+    jobs = [(s, i) for i in mine for s in strategies]
     print(f"SWEEP shard {a.shard}: {len(jobs)} jobs ({len(strategies)} strategies x {len(insts)} instruments total)",
           flush=True)
     for idx, (s, (canonical, sym, cls)) in enumerate(jobs):
