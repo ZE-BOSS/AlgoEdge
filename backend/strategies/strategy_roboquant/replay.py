@@ -165,6 +165,7 @@ class Ctx:
         self.bars: Bars | None = None
         self.orders: dict[int, dict] = {}     # bar time -> order sent on that bar
         self.closes: dict[int, str] = {}      # bar time -> reason the template closed on that bar
+        self.close_sides: dict[int, int] = {} # bar time -> side of the position that close was for
         self.closed: list[dict] = []          # closed sim trades, newest last
 
     # -- what templates call -------------------------------------------------
@@ -187,7 +188,9 @@ class Ctx:
         if self.pos.side:
             self.pending_close = True
             self.closes[self.time()] = reason
+            self.close_sides[self.time()] = self.pos.side
             self._trim(self.closes)
+            self._trim(self.close_sides)
         self.pending = None
 
     def cancel_all(self) -> None:
@@ -422,8 +425,16 @@ class ReplayStrategy(_RQBase):
         if r is None:
             return None
         ctx, _, bars = r
-        why = ctx.closes.get(tb) or self.forced_close(bars, len(bars) - 1, position)
         long_pos = str(position.get("direction", "BUY")).upper() == "BUY"
+        why = ctx.closes.get(tb)
+        # A template close on this bar belongs to the position the template held
+        # going into it. When the same bar also reverses (Sigma's band flip),
+        # the live position may already be the NEW one the reversal opened; it
+        # must not be closed by the close meant for the old side
+        # (US Tech 100, 20 Nov 2026: a fresh sell closed 8 s after opening).
+        if why and (ctx.close_sides.get(tb, 0) > 0) != long_pos:
+            why = None
+        why = why or self.forced_close(bars, len(bars) - 1, position)
         if why:
             return self._close(position, why)
         p = ctx.pos
