@@ -61,8 +61,17 @@ def _sig(x: CopyTradeSignal) -> dict:
 async def status(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     st = await copytrade_service.get_settings(db, user.id)
     await db.commit()
+    lat = copytrade_service.latency[-50:]
+
+    def _med(k):
+        xs = sorted(x[k] for x in lat if x.get(k) is not None)
+        return xs[len(xs) // 2] if xs else None
     return {"telegram": await telegram_manager.status(user.id), "enabled": st.enabled, "dry_run": st.dry_run,
-            "rules": merge_rules(st.rules), "defaults": DEFAULT_RULES}
+            "rules": merge_rules(st.rules), "defaults": DEFAULT_RULES,
+            "latency": {"signals": len(lat), "median_total_s": _med("total_s"),
+                        "median_telegram_delivery_s": _med("telegram_delivery_s"),
+                        "median_waited_for_lock_s": _med("waited_for_lock_s"),
+                        "median_processing_s": _med("processing_s"), "last": lat[-5:]}}
 
 
 class SettingsIn(BaseModel):

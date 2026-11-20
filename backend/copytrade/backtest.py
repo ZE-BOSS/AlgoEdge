@@ -252,13 +252,31 @@ async def load_m1(symbol: str, start: datetime) -> dict | None:
 
     mt5 = await _mt5()
     end = datetime.now(UTC) + timedelta(hours=3)
-    r = await run_mt5(mt5.copy_rates_range, symbol, mt5.TIMEFRAME_M1, start, end)
-    if r is None or len(r) == 0:
+    # Every MT5 call in the app shares ONE thread (backend/mt5/executor.py). A
+    # 60-day M1 download in one call would make live order sends wait behind
+    # it, so it is fetched in 5-day pieces with a pause between them: trading
+    # calls queued meanwhile go first.
+    out = {"time": [], "open": [], "high": [], "low": [], "close": []}
+    a = start
+    while a < end:
+        b = min(a + timedelta(days=5), end)
+        r = await run_mt5(mt5.copy_rates_range, symbol, mt5.TIMEFRAME_M1, a, b)
+        for x in (r if r is not None else ()):
+            t = int(x["time"])
+            if out["time"] and t <= out["time"][-1]:
+                continue                                   # piece edges overlap by a bar
+            out["time"].append(t)
+            out["open"].append(float(x["open"]))
+            out["high"].append(float(x["high"]))
+            out["low"].append(float(x["low"]))
+            out["close"].append(float(x["close"]))
+        a = b
+        await asyncio.sleep(0.05)
+    if not out["time"]:
         return None
-    off = int(round(float(await asyncio.to_thread(detect_server_utc_offset_hours)) * 3600))
-    return {"time": [int(x["time"]) - off for x in r], "open": [float(x["open"]) for x in r],
-            "high": [float(x["high"]) for x in r], "low": [float(x["low"]) for x in r],
-            "close": [float(x["close"]) for x in r]}
+    off = int(round(float(await run_mt5(detect_server_utc_offset_hours)) * 3600))   # MT5 thread: it may query a tick
+    out["time"] = [t - off for t in out["time"]]
+    return out
 
 
 async def spread_price(symbol: str) -> float:

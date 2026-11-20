@@ -65,27 +65,53 @@ def _filling(info: Any) -> int:
     return int(mt5.ORDER_FILLING_RETURN)
 
 
-async def available_symbols() -> list[str]:
+# Speed: symbols_get() returns EVERY symbol of the broker with all its fields
+# (thousands on Exness) through the Wine bridge - it was called on every signal.
+# The names barely change, so they are kept for SYMBOLS_TTL_S; specs for SPEC_TTL_S.
+SYMBOLS_TTL_S = 600.0
+SPEC_TTL_S = 60.0
+_symbols_cache: tuple[float, list[str]] = (0.0, [])
+_spec_cache: dict[str, tuple[float, dict]] = {}
+_selected: set[str] = set()
+
+
+async def available_symbols(max_age: float = SYMBOLS_TTL_S) -> list[str]:
+    global _symbols_cache
     if mt5 is None:
         return []
+    at, names = _symbols_cache
+    if names and time.monotonic() - at < max_age:
+        return names
     syms = await run_mt5(mt5.symbols_get)
-    return [s.name for s in (syms or [])]
+    fresh = [s.name for s in (syms or [])]
+    if fresh:
+        _symbols_cache = (time.monotonic(), fresh)
+        return fresh
+    return names                     # terminal didn't answer: the last good list, or [] if none
 
 
 async def symbol_spec(symbol: str) -> dict | None:
     if mt5 is None:
         return None
-    await run_mt5(mt5.symbol_select, symbol, True)
+    hit = _spec_cache.get(symbol)
+    if hit and time.monotonic() - hit[0] < SPEC_TTL_S:
+        return hit[1]
+    if symbol not in _selected:
+        await run_mt5(mt5.symbol_select, symbol, True)
+        _selected.add(symbol)
     info = await run_mt5(mt5.symbol_info, symbol)
     if info is None:
+        _selected.discard(symbol)
         return None
-    return {
+    spec = {
         "point": info.point, "tick_size": info.trade_tick_size or info.point,
         "tick_value": info.trade_tick_value, "volume_min": info.volume_min,
         "volume_step": info.volume_step, "volume_max": info.volume_max,
         "digits": info.digits, "stops_level": info.trade_stops_level,
         "trade_mode": getattr(info, "trade_mode", 4), "_info": info,
     }
+    _spec_cache[symbol] = (time.monotonic(), spec)
+    return spec
 
 
 async def quote(symbol: str) -> dict | None:
@@ -289,6 +315,24 @@ async def ticket_state(ticket: int) -> str:
     # login was switched, e.g. Deriv -> Exness). The caller decides when that
     # has lasted long enough to stop waiting for it.
     return "MISSING"
+
+
+async def live_tickets() -> tuple[set, set] | None:
+    """(pending order tickets, open position tickets) on this account, in two
+    calls. None when the terminal can't answer - callers fall back to asking
+    ticket by ticket."""
+    if mt5 is None:
+        return None
+    orders = await _query(mt5.orders_get)
+    if orders is None:
+        return None
+    positions = await _query(mt5.positions_get)
+    if positions is None:
+        return None
+    try:
+        return ({int(o.ticket) for o in orders}, {int(p.ticket) for p in positions})
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 async def was_filled(ticket: int) -> bool:

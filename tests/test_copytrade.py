@@ -309,6 +309,12 @@ class FakeMT5:
                 return "MISSING"
             return "PENDING" if t in self.orders else "OPEN" if t in self.positions else "GONE"
 
+        async def live_tickets():
+            self.calls.append(("live_tickets",))
+            if self.down:
+                return None
+            return set(self.orders), set(self.positions)
+
         async def closed_by_tp(t):
             return True
 
@@ -479,3 +485,19 @@ def test_gts_vip_imminent_actions():
     assert parse_message("We’re going to close if we break 3300").kind != "CLOSE"
     assert parse_message("I closed my positions after TP4 as I’m not with my usual set up").kind != "CLOSE"
     assert parse_message("I will update on this signal before the market closes").kind in ("NONE", "INFO")
+
+
+def test_latency_breakdown():
+    from datetime import datetime, timezone
+    posted = datetime.fromtimestamp(1000, timezone.utc)
+    lat = svc_mod.latency_breakdown(posted, 1001.5, 1001.6, 1001.9, 1002.7)
+    assert lat == {"waited_for_lock_s": 0.3, "processing_s": 0.8, "handler_s": 0.1,
+                   "telegram_delivery_s": 1.5, "total_s": 2.7}
+
+
+def test_monitor_reads_all_tickets_once_per_round(env):
+    _run(env.service.handle_message("u1", env.ch, 20, "XAUUSD BUY LIMIT 2340\nSL 2330\nTP1 2355\nTP2 2360"))
+    _run(env.service.handle_message("u1", env.ch, 21, "XAUUSD SELL LIMIT 2370\nSL 2380\nTP1 2360"))
+    env.fake.calls.clear()
+    _run(env.service.monitor_once())
+    assert env.fake.calls.count(("live_tickets",)) == 1

@@ -27,6 +27,7 @@ for a few days before any money is at risk.
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -51,8 +52,23 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def latency_breakdown(posted_at: datetime | None, received_at: float | None, t_lock: float, t_in: float,
+                      t_done: float) -> dict:
+    """Seconds spent in each step, from the provider pressing send to our
+    orders being at the broker. Telegram dates have 1 s resolution."""
+    out = {"waited_for_lock_s": round(t_in - t_lock, 3), "processing_s": round(t_done - t_in, 3)}
+    if received_at:
+        out["handler_s"] = round(t_lock - received_at, 3)
+        if posted_at is not None:
+            p = posted_at if posted_at.tzinfo else posted_at.replace(tzinfo=timezone.utc)
+            out["telegram_delivery_s"] = round(received_at - p.timestamp(), 1)
+            out["total_s"] = round(t_done - p.timestamp(), 1)
+    return out
+
+
 class CopyTradeService:
     def __init__(self) -> None:
+        self.latency: list[dict] = []           # last 200 signals: where the time went
         self._lock = asyncio.Lock()        # one message at a time: follow-ups must see the orders of the signal before them
         self._tp_closed: dict[int, bool] = {}   # ticket -> closed by its take profit (history never changes)
         self._reached: dict[int, int] = {}      # signal id -> highest of its TPs price has reached
@@ -74,12 +90,22 @@ class CopyTradeService:
     # ── entry point ─────────────────────────────────────────────────────────
     async def handle_message(self, user_id: str, channel_id: int, msg_id: int, text: str,
                              reply_to: int | None = None, edited: bool = False,
-                             force_dry_run: bool | None = None) -> dict:
+                             force_dry_run: bool | None = None, posted_at: datetime | None = None,
+                             received_at: float | None = None) -> dict:
+        t_lock = time.time()
         async with self._lock:
+            t_in = time.time()
             async with async_session() as s:
                 out = await self._handle(s, user_id, channel_id, msg_id, text, reply_to, edited, force_dry_run)
                 await s.commit()
-                return out
+            t_done = time.time()
+            if out.get("kind") in ("OPEN", "BREAKEVEN", "MOVE_SL", "MOVE_TP", "CLOSE", "CANCEL"):
+                lat = latency_breakdown(posted_at, received_at, t_lock, t_in, t_done)
+                out["latency"] = lat
+                self.latency.append(lat)
+                del self.latency[:-200]
+                logger.info(f"[COPYTRADE] latency #{msg_id} {out.get('kind')}: {lat}")
+            return out
 
     async def _handle(self, s, user_id, channel_id, msg_id, text, reply_to, edited, force_dry_run) -> dict:
         ch = await s.get(CopyTradeChannel, channel_id)
@@ -279,10 +305,17 @@ class CopyTradeService:
             await self._refresh(r)
         return [r for r in rows if r.status in LIVE_ORDER]
 
-    async def _refresh(self, r: CopyTradeOrder) -> None:
+    async def _refresh(self, r: CopyTradeOrder, live: tuple[set, set] | None = None) -> None:
         if r.status in ("PAPER", "PAPER_PENDING") or not r.ticket:
             return
-        state = await mt5ops.ticket_state(r.ticket)
+        # `live` = (pending order tickets, position tickets) read once for the round;
+        # only a ticket in neither needs the slower history lookup
+        if live is not None and int(r.ticket) in live[0]:
+            state = "PENDING"
+        elif live is not None and int(r.ticket) in live[1]:
+            state = "OPEN"
+        else:
+            state = await mt5ops.ticket_state(r.ticket)
         if state != "GONE":
             self._gone_seen.pop(r.ticket, None)
         if state != "MISSING":
@@ -586,67 +619,83 @@ class CopyTradeService:
 
     # ── housekeeping ────────────────────────────────────────────────────────
     async def monitor_once(self) -> None:
-        async with self._lock:
-            async with async_session() as s:
-                roots = list((await s.execute(select(CopyTradeSignal).where(
-                    CopyTradeSignal.kind == "OPEN", CopyTradeSignal.status.in_(ACTIVE_SIGNAL)))).scalars().all())
-                for root in roots:
-                    st = await self.get_settings(s, root.user_id)
-                    ch = await s.get(CopyTradeChannel, root.channel_id)
-                    rules = merge_rules(st.rules, ch.rules if ch else None)
-                    rows = await self._all_orders(s, root.id)
-                    if root.status == "DRY_RUN":
-                        await self._simulate_paper(root, rows, rules, s)
+        """One housekeeping round over every active signal.
+
+        Speed: every order's state comes from ONE orders_get() + ONE
+        positions_get() for the whole round (was 2-5 MT5 calls per order), and
+        the lock is taken per signal, not for the whole round - a Telegram
+        signal arriving mid-round waits for one signal's housekeeping, not all."""
+        async with async_session() as s:
+            root_ids = list((await s.execute(select(CopyTradeSignal.id).where(
+                CopyTradeSignal.kind == "OPEN", CopyTradeSignal.status.in_(ACTIVE_SIGNAL)))).scalars().all())
+        if not root_ids:
+            return
+        live = await mt5ops.live_tickets()
+        for rid in root_ids:
+            async with self._lock:
+                async with async_session() as s:
+                    root = await s.get(CopyTradeSignal, rid)
+                    if root is None or root.status not in ACTIVE_SIGNAL:
                         continue
-                    before = {r.id: r.status for r in rows}
-                    snap = notify.snapshot(rows)
-                    for r in rows:
-                        if r.status in ("OPEN", "PENDING"):
-                            await self._refresh(r)
-                    # pending orders past their expiry
-                    exp_h = float(rules.get("pending_expiry_hours") or 0)
-                    if exp_h > 0 and root.created_at and _now() - root.created_at > timedelta(hours=exp_h):
-                        for r in rows:
-                            if r.status == "PENDING" and r.ticket:
-                                ok, _ = await mt5ops.cancel_order(r.ticket)
-                                if ok:
-                                    r.status, r.detail = "CANCELLED", "expired"
-                    # unfilled zone orders after TPn filled
-                    cancel_after = int(rules.get("cancel_pending_after_tp") or 0)
-                    if cancel_after:
-                        for r in [r for r in rows if before[r.id] in ("OPEN", "PENDING") and r.status == "CLOSED"
-                                  and r.leg >= cancel_after]:
-                            if r.ticket and await self._closed_tp(r.ticket):
-                                for o in rows:
-                                    if o.status == "PENDING" and o.ticket:
-                                        ok, _ = await mt5ops.cancel_order(o.ticket)
-                                        if ok:
-                                            o.status, o.detail = "CANCELLED", f"TP{r.leg} filled"
-                                break
-                    # first fill: the rest of the zone at market
-                    # Once per signal, as soon as ANY leg is in - including leg 1 filled
-                    # at market the moment the signal was copied (price already in the
-                    # zone). The old test needed a PENDING leg to turn OPEN, so a signal
-                    # whose first leg went in at market never got its market adds and
-                    # the limits were left waiting behind price.
-                    if str(rules.get("on_first_fill") or "keep") in ("market", "market_add") and \
-                            root.id not in self._ff_done and \
-                            any(r.status == "PENDING" and r.ticket for r in rows) and \
-                            any(r.status in ("OPEN", "CLOSED") for r in rows):
-                        self._ff_done.add(root.id)
-                        if not any("first leg filled" in (r.detail or "") for r in rows):   # not done before a restart
-                            await self._rest_at_market(s, root, rows, rules)
-                    # breakeven he asked for while price was behind the entry
-                    if self._pending_be:
-                        await self._apply_pending_be(root, rows)
-                    # breakeven after TPn / TP ladder trail - every round until the stop sticks
-                    if int(rules.get("be_after_tp") or 0) or rules.get("trail_ladder"):
-                        await self._trail(root, rows, rules, s)
-                    was_active = root.status
-                    if all(r.status not in LIVE_ORDER for r in rows):
-                        root.status = "CLOSED"
-                    await self._notify_round(s, root, ch, rules, snap, was_active)
-                await s.commit()
+                    await self._monitor_root(s, root, live)
+                    await s.commit()
+
+    async def _monitor_root(self, s, root, live) -> None:
+        st = await self.get_settings(s, root.user_id)
+        ch = await s.get(CopyTradeChannel, root.channel_id)
+        rules = merge_rules(st.rules, ch.rules if ch else None)
+        rows = await self._all_orders(s, root.id)
+        if root.status == "DRY_RUN":
+            await self._simulate_paper(root, rows, rules, s)
+            return
+        before = {r.id: r.status for r in rows}
+        snap = notify.snapshot(rows)
+        for r in rows:
+            if r.status in ("OPEN", "PENDING"):
+                await self._refresh(r, live)
+        # pending orders past their expiry
+        exp_h = float(rules.get("pending_expiry_hours") or 0)
+        if exp_h > 0 and root.created_at and _now() - root.created_at > timedelta(hours=exp_h):
+            for r in rows:
+                if r.status == "PENDING" and r.ticket:
+                    ok, _ = await mt5ops.cancel_order(r.ticket)
+                    if ok:
+                        r.status, r.detail = "CANCELLED", "expired"
+        # unfilled zone orders after TPn filled
+        cancel_after = int(rules.get("cancel_pending_after_tp") or 0)
+        if cancel_after:
+            for r in [r for r in rows if before[r.id] in ("OPEN", "PENDING") and r.status == "CLOSED"
+                      and r.leg >= cancel_after]:
+                if r.ticket and await self._closed_tp(r.ticket):
+                    for o in rows:
+                        if o.status == "PENDING" and o.ticket:
+                            ok, _ = await mt5ops.cancel_order(o.ticket)
+                            if ok:
+                                o.status, o.detail = "CANCELLED", f"TP{r.leg} filled"
+                    break
+        # first fill: the rest of the zone at market
+        # Once per signal, as soon as ANY leg is in - including leg 1 filled
+        # at market the moment the signal was copied (price already in the
+        # zone). The old test needed a PENDING leg to turn OPEN, so a signal
+        # whose first leg went in at market never got its market adds and
+        # the limits were left waiting behind price.
+        if str(rules.get("on_first_fill") or "keep") in ("market", "market_add") and \
+                root.id not in self._ff_done and \
+                any(r.status == "PENDING" and r.ticket for r in rows) and \
+                any(r.status in ("OPEN", "CLOSED") for r in rows):
+            self._ff_done.add(root.id)
+            if not any("first leg filled" in (r.detail or "") for r in rows):   # not done before a restart
+                await self._rest_at_market(s, root, rows, rules)
+        # breakeven he asked for while price was behind the entry
+        if self._pending_be:
+            await self._apply_pending_be(root, rows)
+        # breakeven after TPn / TP ladder trail - every round until the stop sticks
+        if int(rules.get("be_after_tp") or 0) or rules.get("trail_ladder"):
+            await self._trail(root, rows, rules, s)
+        was_active = root.status
+        if all(r.status not in LIVE_ORDER for r in rows):
+            root.status = "CLOSED"
+        await self._notify_round(s, root, ch, rules, snap, was_active)
 
     @staticmethod
     def _tp_ahead(tp, side: str, q: dict) -> bool:

@@ -20,7 +20,9 @@ string is stored encrypted (copytrade.crypto) and never returned by the API.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import time
 from typing import Any
 
 from sqlalchemy import select
@@ -32,6 +34,7 @@ from backend.data.database import async_session
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
+MONITOR_EVERY_S = float(os.getenv("COPYTRADE_MONITOR_S", "3"))
 
 try:
     from telethon import TelegramClient, events, utils
@@ -325,6 +328,7 @@ class TelegramManager:
         from backend.copytrade.service import copytrade_service
 
         async def on_message(event, edited: bool) -> None:
+            t_recv = time.time()
             chat_id = int(event.chat_id or 0)
             ch_id = uc.channels.get(chat_id)
             if ch_id is None:
@@ -346,7 +350,8 @@ class TelegramManager:
             uc.last_message_at = asyncio.get_running_loop().time()
             await copytrade_service.handle_message(
                 user_id, ch_id, int(m.id), m.message or "",
-                reply_to=getattr(m.reply_to, "reply_to_msg_id", None), edited=edited)
+                reply_to=getattr(m.reply_to, "reply_to_msg_id", None), edited=edited,
+                posted_at=(m.edit_date if edited else m.date), received_at=t_recv)
 
         async def on_new(event):
             try:
@@ -390,10 +395,18 @@ class TelegramManager:
         from backend.copytrade.service import copytrade_service
         while True:
             try:
+                # keep the symbol list warm here, so a signal never pays for symbols_get()
+                from backend.copytrade import mt5ops
+                await mt5ops.available_symbols(max_age=mt5ops.SYMBOLS_TTL_S - 60)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
                 await copytrade_service.monitor_once()
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"[COPYTRADE] monitor: {e}")
-            await asyncio.sleep(10)
+            # 3 s (was 10): a round is now two MT5 calls for all tickets, so fills,
+            # breakevens and trails are noticed ~3x sooner for almost no load
+            await asyncio.sleep(MONITOR_EVERY_S)
 
     async def stop_all(self) -> None:
         if self._monitor_task:
