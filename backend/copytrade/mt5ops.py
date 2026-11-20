@@ -313,3 +313,37 @@ async def closed_by_tp(ticket: int) -> bool | None:
                 getattr(d, "reason", None) == getattr(mt5, "DEAL_REASON_TP", 5):
             return True
     return False if deals else None
+
+
+async def closed_deal(ticket: int) -> dict | None:
+    """Net result of a closed position: {"net", "price", "reason"} (net =
+    profit + swap + commission over all its deals). None when MT5 can't answer."""
+    if mt5 is None or not ticket:
+        return None
+    deals = await _query(mt5.history_deals_get, position=int(ticket))
+    if not deals:
+        return None
+    out_codes = (getattr(mt5, "DEAL_ENTRY_OUT", 1), getattr(mt5, "DEAL_ENTRY_OUT_BY", 3))
+    net = sum(float(getattr(d, "profit", 0) or 0) + float(getattr(d, "swap", 0) or 0)
+              + float(getattr(d, "commission", 0) or 0) + float(getattr(d, "fee", 0) or 0) for d in deals)
+    exits = [d for d in deals if getattr(d, "entry", None) in out_codes]
+    if not exits:
+        return None
+    last = exits[-1]
+    from backend.copytrade.notify import DEAL_REASON
+    return {"net": round(net, 2), "price": float(getattr(last, "price", 0) or 0) or None,
+            "reason": DEAL_REASON.get(int(getattr(last, "reason", -1)), "closed")}
+
+
+async def account_summary() -> dict | None:
+    if mt5 is None:
+        return None
+    try:
+        ai = await run_mt5(mt5.account_info)
+        pos = await run_mt5(mt5.positions_get)
+    except Exception:
+        return None
+    if ai is None:
+        return None
+    return {"balance": float(getattr(ai, "balance", 0) or 0), "equity": float(getattr(ai, "equity", 0) or 0),
+            "positions": len(pos or ())}

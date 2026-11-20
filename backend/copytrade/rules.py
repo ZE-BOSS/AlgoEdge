@@ -67,6 +67,7 @@ DEFAULT_RULES: dict[str, Any] = {
     "sl_fraction": 1.0,           # our stop as a fraction of the provider's distance from the entry (1.0 = his stop,
                                   # 0.75 = a quarter tighter). The lot is sized to the tighter stop, so the $ risk is
                                   # unchanged. Measured on 60 days of history: 0.75 helped, below 0.6 did not.
+    "notify": True,               # Telegram alerts for this channel's signals, fills, stop moves and closes
     # filters
     "only_admins": True,          # in a GROUP, act only on messages from its admins (members chat there too)
     "allowed_senders": [],        # or only these senders (@username or user id) - overrides only_admins

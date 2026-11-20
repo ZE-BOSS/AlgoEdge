@@ -32,7 +32,7 @@ from typing import Any
 
 from sqlalchemy import desc, select
 
-from backend.copytrade import mt5ops
+from backend.copytrade import mt5ops, notify
 from backend.copytrade.models import CopyTradeChannel, CopyTradeOrder, CopyTradeSettings, CopyTradeSignal
 from backend.copytrade.parser import parse_message
 from backend.copytrade.rules import (breakeven_price, build_open_plan, legs_to_close, merge_rules, resolve_symbol,
@@ -117,6 +117,7 @@ class CopyTradeService:
             sig.status, sig.detail = "ERROR", f"{type(e).__name__}: {e}"
         sig.actions = list(sig.actions or [])
         logger.info(f"[COPYTRADE] {ch.title or ch.chat_id} #{msg_id} {parsed.kind} -> {sig.status}: {sig.detail}")
+        await self._notify_signal(s, sig, ch, rules)
         return {"status": sig.status, "detail": sig.detail, "signal_id": sig.id, "kind": parsed.kind,
                 "parsed": pd, "actions": sig.actions}
 
@@ -533,6 +534,56 @@ class CopyTradeService:
         sig.status = ("DRY_RUN" if dry else "EXECUTED") if acts else "IGNORED"
         sig.detail = "; ".join(acts[:4]) if acts else "edit changed nothing that is traded"
 
+    # ── Telegram alerts ─────────────────────────────────────────────────────
+    @staticmethod
+    async def _digits(symbol: str | None) -> int:
+        if not symbol:
+            return 2
+        try:
+            spec = await mt5ops.symbol_spec(symbol)
+            return int((spec or {}).get("digits") or 2)
+        except Exception:  # noqa: BLE001
+            return 2
+
+    async def _notify_signal(self, s, sig, ch, rules) -> None:
+        if rules.get("notify") is False:
+            return
+        try:
+            orders = await self._all_orders(s, sig.id) if sig.kind == "OPEN" else []
+            sym = orders[0].symbol if orders else (sig.parsed or {}).get("symbol")
+            notify.alerts.post(notify.signal_message(ch.title or str(ch.chat_id), sig, orders,
+                                                     await self._digits(sym)))
+        except Exception as e:  # noqa: BLE001 - alerts never break trading
+            logger.warning(f"[COPYTRADE] signal alert failed: {e}")
+
+    async def _notify_round(self, s, root, ch, rules, snap, was_active) -> None:
+        if rules.get("notify") is False or root.status == "DRY_RUN":
+            return
+        try:
+            rows = await self._all_orders(s, root.id)       # includes legs added at market this round
+            changed = [r for r in rows if snap.get(r.id) != (r.status, r.sl, r.tp)]
+            if not changed and not (root.status == "CLOSED" and was_active != "CLOSED"):
+                return
+            closed: dict[int, dict] = {}
+            for r in changed:
+                prev = snap.get(r.id)
+                if prev and prev[0] in ("OPEN", "PENDING") and r.status == "CLOSED" and r.ticket:
+                    closed[r.id] = await mt5ops.closed_deal(r.ticket) or {}
+            digits = await self._digits(rows[0].symbol if rows else None)
+            lines = notify.order_events(snap, rows, closed, digits)
+            total = None
+            if root.status == "CLOSED" and was_active != "CLOSED":
+                nets = []
+                for r in rows:
+                    if r.ticket and r.status == "CLOSED":
+                        c = closed.get(r.id) or await mt5ops.closed_deal(r.ticket) or {}
+                        if c.get("net") is not None:
+                            nets.append(c["net"])
+                total = round(sum(nets), 2) if nets else None
+            notify.alerts.post(notify.round_message(ch.title if ch else str(root.chat_id), root, lines, total))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[COPYTRADE] order alert failed: {e}")
+
     # ── housekeeping ────────────────────────────────────────────────────────
     async def monitor_once(self) -> None:
         async with self._lock:
@@ -548,6 +599,7 @@ class CopyTradeService:
                         await self._simulate_paper(root, rows, rules, s)
                         continue
                     before = {r.id: r.status for r in rows}
+                    snap = notify.snapshot(rows)
                     for r in rows:
                         if r.status in ("OPEN", "PENDING"):
                             await self._refresh(r)
@@ -590,8 +642,10 @@ class CopyTradeService:
                     # breakeven after TPn / TP ladder trail - every round until the stop sticks
                     if int(rules.get("be_after_tp") or 0) or rules.get("trail_ladder"):
                         await self._trail(root, rows, rules, s)
+                    was_active = root.status
                     if all(r.status not in LIVE_ORDER for r in rows):
                         root.status = "CLOSED"
+                    await self._notify_round(s, root, ch, rules, snap, was_active)
                 await s.commit()
 
     @staticmethod

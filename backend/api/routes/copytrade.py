@@ -264,3 +264,18 @@ async def signal_orders(sid: int, user: User = Depends(get_current_user), db: As
     return [{"id": str(r.id), "leg": r.leg, "ticket": r.ticket, "kind": r.kind, "symbol": r.symbol, "side": r.side,
              "volume": r.volume, "entry": r.entry, "sl": r.sl, "tp": r.tp, "status": r.status, "detail": r.detail}
             for r in rows]
+
+
+@router.post("/daily-report")
+async def daily_report_now(send: bool = True, user: User = Depends(get_current_user)):
+    """Today's end-of-day report so far (Lagos day), sent to Telegram unless send=false."""
+    from datetime import datetime, time as dtime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    from backend.copytrade import notify
+    tz = ZoneInfo(notify.REPORT_TZ)
+    today = datetime.now(timezone.utc).astimezone(tz).date()
+    start = datetime.combine(today, dtime(0, 0), tz)
+    text = await notify.collect_and_send_daily_report(start, start + timedelta(days=1),
+                                                      today.strftime("%a %d %b %Y") + " (so far)", send=send)
+    return {"sent": send, "text": text}

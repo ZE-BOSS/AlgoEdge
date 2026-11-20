@@ -233,7 +233,17 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Copy trading not started: {e}")
 
+    # End-of-day Telegram report (strategies + copy trading per channel),
+    # 21:00 Africa/Lagos unless DAILY_REPORT_TIME / DAILY_REPORT_TZ say otherwise.
+    daily_report_task = None
+    if os.getenv("ALGOEDGE_AUDIT") != "1" and os.getenv("DAILY_REPORT", "1") != "0":
+        from backend.copytrade.notify import daily_report_loop
+        daily_report_task = asyncio.create_task(daily_report_loop())
+
     yield
+
+    if daily_report_task is not None:
+        daily_report_task.cancel()
 
     try:
         from backend.copytrade.telegram_client import telegram_manager as _tgm

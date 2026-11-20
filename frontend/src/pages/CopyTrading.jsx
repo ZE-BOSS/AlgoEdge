@@ -380,6 +380,7 @@ const RULES = [
     ['missing_tp_rr', 'Signal without a target', 'num', 'TP at this R multiple. 0 = no TP.', 'R'],
   ]],
   ['Follow-ups', [
+    ['notify', 'Telegram alerts for this channel', 'bool', 'Placed / skipped (with the reason) / filled / stop moved / closed with P&L. The end-of-day report at 21:00 includes every channel either way.'],
     ['follow_breakeven', 'Follow breakeven / "risk free"', 'bool'],
     ['cancel_pending_on_be', '"Risk free" also cancels unfilled orders', 'bool', 'No risk left means no orders left either.'],
     ['be_offset_pct', 'Breakeven offset', 'num', 'Entry ± this % of price, for spread and commission. Gold: 0.01 ≈ $0.40. Max 0.1. If it would sit past the price, plain entry is used.', '%'],
