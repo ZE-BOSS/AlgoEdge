@@ -170,6 +170,27 @@ def main():
     cands = [r for r in good if r["s"]["n"] >= 20]
     for r in cands:
         r["w"] = weekly(r["rows"])
+    def select(pool, metric, cap):
+        out = []
+        for r in pool:
+            if len(out) >= cap:
+                break
+            f = fam(r["symbol"])
+            if f is not None and any(c["strategy"] == r["strategy"] and fam(c["symbol"]) == f for c in out):
+                continue
+            if r["strategy"] == "RQ_TMeanReversion_v1" and any(c["strategy"] == r["strategy"] for c in out):
+                continue
+            if sum(c["strategy"] == r["strategy"] for c in out) >= 2:
+                continue
+            if any(c["symbol"] == r["symbol"] for c in out):
+                continue
+            if any(c["strategy"] == r["strategy"] and corr(c[metric], r[metric]) > 0.3 for c in out):
+                continue
+            if any(corr(c[metric], r[metric]) > 0.5 for c in out):
+                continue
+            out.append(r)
+        return out
+
     families = [{"US Tech 100", "Wall Street 30", "US SP 500", "US Small Cap 2000"},
                 {"Germany 40", "France 40", "Europe 50", "Netherlands 25", "UK 100", "Swiss 20", "Spain 35"},
                 {"XAUUSD", "XAGUSD", "XPTUSD", "XPDUSD"}]
@@ -177,24 +198,7 @@ def main():
     def fam(sym):
         return next((i for i, f in enumerate(families) if sym in f), None)
 
-    chosen = []
-    for r in cands:
-        f = fam(r["symbol"])
-        if f is not None and any(c["strategy"] == r["strategy"] and fam(c["symbol"]) == f for c in chosen):
-            continue                                   # same strategy on a co-moving market family
-        if r["strategy"] == "RQ_TMeanReversion_v1" and any(c["strategy"] == r["strategy"] for c in chosen):
-            continue                                   # 1x-notional weekend trade: one at a time
-        if sum(c["strategy"] == r["strategy"] for c in chosen) >= 2:
-            continue
-        if len(chosen) >= int(sys.argv[2] if len(sys.argv) > 2 else 10):
-            break
-        if any(c["symbol"] == r["symbol"] for c in chosen):
-            continue                                   # one strategy per instrument
-        if any(c["strategy"] == r["strategy"] and corr(c["w"], r["w"]) > 0.3 for c in chosen):
-            continue                                   # same strategy on a co-moving instrument
-        if any(corr(c["w"], r["w"]) > 0.5 for c in chosen):
-            continue
-        chosen.append(r)
+    chosen = select(cands, "w", int(sys.argv[2] if len(sys.argv) > 2 else 10))
     rows = sorted([dict(x, who=name(r)) for r in chosen for x in r["rows"]], key=lambda x: x["x"])
     ps = stats(rows)
     # concurrency
@@ -225,6 +229,32 @@ def main():
         cs = [corr(a["w"], b["w"]) for i, a in enumerate(chosen) for b in chosen[i + 1:]]
         print(f"\nAverage weekly P&L correlation between the chosen pairs: {sum(cs) / len(cs):.2f} "
               f"(highest {max(cs):.2f}).")
+
+    # walk-forward: choose on the first half only, score on the second half only
+    mid = datetime(2026, 5, 20, tzinfo=timezone.utc).timestamp()
+    pool = []
+    for r in base:
+        h1 = [x for x in r["rows"] if x["t"] < mid]
+        h2 = [x for x in r["rows"] if x["t"] >= mid]
+        if len(h1) < 10:
+            continue
+        s1 = stats(h1)
+        if s1["net"] <= 0 or s1["pf"] < 1.2:
+            continue
+        r2 = dict(r, s1=s1, h2rows=h2, w1=weekly(h1))
+        pool.append(r2)
+    pool.sort(key=lambda r: -(r["s1"]["rdd"] if r["s1"]["rdd"] != float("inf") else 99))
+    picked = select(pool, "w1", int(sys.argv[2] if len(sys.argv) > 2 else 10))
+    rows2 = [x for r in picked for x in r["h2rows"]]
+    s2 = stats(rows2) if rows2 else None
+    print("\n## Walk-forward check: portfolio chosen on Nov–May only, traded Jun–Nov\n")
+    print("| Pair (chosen on first half) | First half net | Second half net |\n|---|---|---|")
+    for r in picked:
+        print(f"| {name(r)} | {money(r['s1']['net'])} | {money(sum(x['pnl'] for x in r['h2rows']))} |")
+    if s2:
+        print(f"\n**Second half, never seen when choosing:** {s2['n']} trades, **{money(s2['net'])}**, "
+              f"max drawdown {s2['dd']:.1f}%, profit factor {s2['pf']:.2f}, {s2['mpos']}/{s2['mact']} months up, "
+              f"{sum(1 for r in picked if sum(x['pnl'] for x in r['h2rows']) > 0)}/{len(picked)} pairs profitable.")
 
 
 if __name__ == "__main__":
