@@ -34,10 +34,16 @@ async def main():
             except Exception:  # noqa: BLE001
                 point = None
         for tf in TFS:
-            try:
-                df = await DataFetcher.get_historical_data(sym, tf, 99999)
-            except Exception as e:  # noqa: BLE001
-                print(f"{sym} {tf}: ERROR {e}"[:200], flush=True)
+            df = None
+            # the terminal refuses a count deeper than the history it holds: step down
+            for n in (99999, 70000, 50000, 35000, 25000, 18000, 12000, 8000):
+                try:
+                    df = await DataFetcher.get_historical_data(sym, tf, n)
+                    break
+                except Exception:  # noqa: BLE001
+                    continue
+            if df is None:
+                print(f"{sym} {tf}: ERROR no data", flush=True)
                 continue
             keep = [c for c in ("time", "open", "high", "low", "close", "spread", "tick_volume") if c in df.columns]
             df = df[keep].copy()
