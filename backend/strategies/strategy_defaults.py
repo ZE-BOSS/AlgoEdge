@@ -77,7 +77,7 @@ NO_MEASURED_TARGET: frozenset[str] = frozenset({
     # ...and the 2026-10-20 ports whose exits are a band flip / an EMA cross
     "RQ_SigmaBreakout_v1", "RQ_DailyVWAP_v1",
     # quant lab: exits at the next cash close without a signal
-    "QL_IBS_v1",
+    "QL_IBS_v1", "QL_DipBuy_v1",
     # TradingView mirror: exits at the opposite zone / after 100 candles
     "ZeroLossBoomCrash_v32", })
 
@@ -273,6 +273,13 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
         "evidence": "Pagonidis (2013) IBS effect + 200-day filter: buy the US cash close when IBS<0.2 above SMA200, "
                     "exit the next close without a signal. Deriv 2024-26 PF 1.6-1.8, DD 2-3% at 1x; "
                     "QQQ/SPY/DIA 1993-2026 ~59% win, PF 1.26-1.48.",
+    },
+    "QL_DipBuy_v1": {
+        "tp_count": 1, "tp1_rr": 40.0,
+        "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
+        "evidence": "Union of IBS<0.2 / Connors cumulative RSI2<35 / 3 lower closes above SMA200, exit first close "
+                    "above SMA5 (max 10 sessions). QQQ 1999-2026 +250% PF 1.90 73% win DD 18%; SPY 1993-2026 "
+                    "+209% PF 1.92 DD 14%; Deriv 2024-26 NAS PF 1.99, SPX PF 2.10 after financing.",
     },
     "RQ_SigmaBreakout_v1": {
         "tp_count": 1, "tp1_rr": 40.0,

@@ -18,7 +18,7 @@ from backend.strategies.strategy_kronos.params import KronosStrategyParams
 from backend.strategies.strategy_zero_loss.params import ZeroLossBoomCrashParams
 from backend.strategies.strategy_roboquant.params import (
     RQNQPrecisionParams, RQNYORBParams, RQCrazyORBParams, RQTMeanReversionParams, RQCharlesMongerParams,
-    RQFlashTriggerORBParams, RQScarfaceORBParams, RQIVBParams, RQGigaORBParams, RQSigmaBreakoutParams, QLIBSParams, RQDailyAnchoredVWAPParams, RQFridayRevisitParams, RQM30ORBParams, RQSRSweepParams,
+    RQFlashTriggerORBParams, RQScarfaceORBParams, RQIVBParams, RQGigaORBParams, RQSigmaBreakoutParams, QLIBSParams, QLDipBuyParams, RQDailyAnchoredVWAPParams, RQFridayRevisitParams, RQM30ORBParams, RQSRSweepParams,
 )
 from backend.strategies.strategy_trend.params import TrendBreakoutParams
 from backend.strategies.strategy_fib.params import FibTrendParams
@@ -1294,6 +1294,7 @@ class UserConfigV2(UserConfig):
     rq_giga_orb: RQGigaORBParams = field(default_factory=RQGigaORBParams)
     rq_sigma_breakout: RQSigmaBreakoutParams = field(default_factory=RQSigmaBreakoutParams)
     ql_ibs: QLIBSParams = field(default_factory=QLIBSParams)
+    ql_dipbuy: QLDipBuyParams = field(default_factory=QLDipBuyParams)
     rq_daily_vwap: RQDailyAnchoredVWAPParams = field(default_factory=RQDailyAnchoredVWAPParams)
     rq_friday_revisit: RQFridayRevisitParams = field(default_factory=RQFridayRevisitParams)
     rq_m30_orb: RQM30ORBParams = field(default_factory=RQM30ORBParams)
@@ -1325,6 +1326,7 @@ class UserConfigV2(UserConfig):
         rq_giga_orb_data = data.pop("rq_giga_orb", {})
         rq_sigma_breakout_data = data.pop("rq_sigma_breakout", {})
         ql_ibs_data = data.pop("ql_ibs", {})
+        ql_dipbuy_data = data.pop("ql_dipbuy", {})
         rq_daily_vwap_data = data.pop("rq_daily_vwap", {})
         rq_friday_revisit_data = data.pop("rq_friday_revisit", {})
         rq_m30_orb_data = data.pop("rq_m30_orb", {})
@@ -1369,6 +1371,7 @@ class UserConfigV2(UserConfig):
         config.rq_giga_orb = RQGigaORBParams(**filter_kwargs(RQGigaORBParams, rq_giga_orb_data))
         config.rq_sigma_breakout = RQSigmaBreakoutParams(**filter_kwargs(RQSigmaBreakoutParams, rq_sigma_breakout_data))
         config.ql_ibs = QLIBSParams(**filter_kwargs(QLIBSParams, ql_ibs_data))
+        config.ql_dipbuy = QLDipBuyParams(**filter_kwargs(QLDipBuyParams, ql_dipbuy_data))
         config.rq_daily_vwap = RQDailyAnchoredVWAPParams(**filter_kwargs(RQDailyAnchoredVWAPParams, rq_daily_vwap_data))
         config.rq_friday_revisit = RQFridayRevisitParams(**filter_kwargs(RQFridayRevisitParams, rq_friday_revisit_data))
         config.rq_m30_orb = RQM30ORBParams(**filter_kwargs(RQM30ORBParams, rq_m30_orb_data))
@@ -1466,6 +1469,8 @@ class UserConfigV2(UserConfig):
             self.rq_sigma_breakout = RQSigmaBreakoutParams()
         if self.ql_ibs is None:
             self.ql_ibs = QLIBSParams()
+        if self.ql_dipbuy is None:
+            self.ql_dipbuy = QLDipBuyParams()
         if self.rq_daily_vwap is None:
             self.rq_daily_vwap = RQDailyAnchoredVWAPParams()
         if self.rq_friday_revisit is None:

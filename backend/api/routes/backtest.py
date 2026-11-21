@@ -427,6 +427,7 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
     "RQ_GigaORB_v1": "rq_giga_orb",
     "RQ_SigmaBreakout_v1": "rq_sigma_breakout",
     "QL_IBS_v1": "ql_ibs",
+    "QL_DipBuy_v1": "ql_dipbuy",
     "RQ_DailyVWAP_v1": "rq_daily_vwap",
     "RQ_FridayRevisit_v1": "rq_friday_revisit",
     "RQ_M30ORB_v1": "rq_m30_orb",
