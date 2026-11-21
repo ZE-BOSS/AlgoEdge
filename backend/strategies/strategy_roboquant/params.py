@@ -222,6 +222,9 @@ class RQSigmaBreakoutParams:
     disaster_stop_pct: float = 2.0
     """Only when sl_pct is 0: the stop the app sizes from and keeps as a crash
     guard. The template's own exits come first in practice."""
+    tp_r: float = 0.0
+    """0 = no target (the showcase: band flip / 16:00 ET exits). Otherwise a
+    take-profit at tp_r x the stop distance (sl_pct, else disaster_stop_pct)."""
 
 
 @dataclass
