@@ -8,6 +8,8 @@ import sys
 
 d = sys.argv[1]
 cap = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+MIN_N = int(sys.argv[3]) if len(sys.argv) > 3 else 10
+MIN_PF = float(sys.argv[4]) if len(sys.argv) > 4 else 1.2
 FAM = [{"US Tech 100", "Wall Street 30", "US SP 500", "US Small Cap 2000"},
        {"Germany 40", "France 40", "Europe 50", "Netherlands 25", "UK 100", "Swiss 20", "Spain 35"},
        {"XAUUSD", "XAGUSD", "XPTUSD", "XPDUSD"}]
@@ -23,7 +25,7 @@ for f in glob.glob(f"{d}/*__*.json"):
     if r.get("error"):
         continue
     h1, h2 = r.get("h1") or {}, r.get("h2") or {}
-    if h1.get("trades", 0) < 10 or (h1.get("net") or 0) <= 0 or (h1.get("pf") or 0) < 1.2:
+    if h1.get("trades", 0) < MIN_N or (h1.get("net") or 0) <= 0 or (h1.get("pf") or 0) < MIN_PF:
         continue
     rows.append(r)
 rows.sort(key=lambda r: -(r["h1"].get("return_over_dd") or 0))
