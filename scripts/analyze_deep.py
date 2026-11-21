@@ -1,0 +1,202 @@
+"""Analyse deep_runs output: per-pair monthly consistency, best assets per
+strategy, Sigma variants, and a low-correlation portfolio backtested together.
+
+    python3 analyze_deep.py /opt/algoedge/research_out/deep > report.md
+
+Portfolio: every trade keeps the P&L it made in its own run (1% of a static
+$10,000 per trade, so $100 per R; RQ_TMeanReversion is sized at 1x notional
+like its Pine script). Trades are added on one $10,000 account in exit order.
+"""
+from __future__ import annotations
+
+import glob
+import json
+import math
+import sys
+from collections import defaultdict
+from datetime import datetime, timezone
+
+D = sys.argv[1] if len(sys.argv) > 1 else "/opt/algoedge/research_out/deep"
+BAL = 10000.0
+MONTHS = [f"{y}-{m:02d}" for y, m in [(2025, 11), (2025, 12)] + [(2026, k) for k in range(1, 12)]]
+
+
+def load():
+    out = []
+    for f in glob.glob(f"{D}/*.json"):
+        r = json.load(open(f))
+        if r.get("error") or not r.get("rows"):
+            continue
+        out.append(r)
+    return out
+
+
+def stats(rows):
+    rows = sorted(rows, key=lambda x: x["x"])
+    bal = peak = BAL
+    mdd = 0.0
+    for x in rows:
+        bal += x["pnl"]
+        peak = max(peak, bal)
+        mdd = max(mdd, (peak - bal) / peak)
+    pnl = [x["pnl"] for x in rows]
+    gw, gl = sum(p for p in pnl if p > 0), -sum(p for p in pnl if p < 0)
+    mon = defaultdict(float)
+    for x in rows:
+        mon[datetime.fromtimestamp(x["x"], tz=timezone.utc).strftime("%Y-%m")] += x["pnl"]
+    act = [m for m in MONTHS if m in mon]
+    pos = sum(1 for m in act if mon[m] > 0)
+    net = sum(pnl)
+    return {"n": len(rows), "net": net, "dd": 100 * mdd, "pf": gw / gl if gl > 0 else float("inf"),
+            "win": sum(p > 0 for p in pnl) / len(pnl) if pnl else 0, "mon": dict(mon),
+            "mpos": pos, "mact": len(act), "worst_m": min((mon[m] for m in act), default=0.0),
+            "best_m": max((mon[m] for m in act), default=0.0), "rdd": (net / BAL * 100) / (100 * mdd) if mdd > 0 else float("inf")}
+
+
+def weekly(rows):
+    w = defaultdict(float)
+    for x in rows:
+        w[int(x["x"] // (7 * 86400))] += x["pnl"]
+    return w
+
+
+def corr(a, b):
+    keys = sorted(set(a) | set(b))
+    if len(keys) < 8:
+        return 0.0
+    xa = [a.get(k, 0.0) for k in keys]
+    xb = [b.get(k, 0.0) for k in keys]
+    ma, mb = sum(xa) / len(xa), sum(xb) / len(xb)
+    va = sum((v - ma) ** 2 for v in xa)
+    vb = sum((v - mb) ** 2 for v in xb)
+    if va <= 0 or vb <= 0:
+        return 0.0
+    return sum((p - ma) * (q - mb) for p, q in zip(xa, xb)) / math.sqrt(va * vb)
+
+
+def money(v):
+    return f"{'+' if v >= 0 else '−'}${abs(v):,.0f}"
+
+
+def name(r):
+    s = r["strategy"].replace("_v1", "").replace("_v32", " v32")
+    return f"{s} · {r['symbol']}"
+
+
+def main():
+    runs = load()
+    base = [r for r in runs if not r["tag"].startswith("SIGMA_VAR")]
+    for r in runs:
+        r["s"] = stats(r["rows"])
+        r["h1n"] = (r.get("h1") or {}).get("net") or 0
+        r["h2n"] = (r.get("h2") or {}).get("net") or 0
+    print(f"# Deep runs: {len(base)} pairs re-run with every trade kept\n")
+    print("A pair is **consistent** if it made money in both halves of the year, in at least 60% of the "
+          "months it traded, with profit factor ≥ 1.2 and ≥ 20 trades.\n")
+
+    def consistent(r):
+        s = r["s"]
+        return (r["h1n"] > 0 and r["h2n"] > 0 and s["n"] >= 20 and s["pf"] >= 1.2
+                and s["mact"] >= 6 and s["mpos"] / s["mact"] >= 0.6)
+
+    good = sorted([r for r in base if consistent(r)], key=lambda r: -r["s"]["rdd"])
+    print(f"**{len(good)} consistent pairs** (of {len(base)} that made money over the year).\n")
+
+    # per strategy: best assets
+    print("## Where each strategy works (consistent pairs, best first)\n")
+    print("| Strategy | Consistent on | Best pairs (net, max DD, months up) |\n|---|---|---|")
+    by = defaultdict(list)
+    for r in good:
+        by[r["strategy"]].append(r)
+    for strat, rs in sorted(by.items(), key=lambda kv: -len(kv[1])):
+        best = "; ".join(f"{r['symbol']} {money(r['s']['net'])}, {r['s']['dd']:.1f}%, {r['s']['mpos']}/{r['s']['mact']}"
+                         for r in rs[:4])
+        print(f"| {strat.replace('_v1', '')} | {len(rs)} | {best} |")
+    print()
+
+    print("## Top 40 consistent pairs\n")
+    print("| # | Pair | Class | Trades | Win | PF | Net | Max DD | Ret/DD | Months up | Worst month | Best month |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|")
+    for i, r in enumerate(good[:40], 1):
+        s = r["s"]
+        pf = "∞" if s["pf"] == float("inf") else f"{s['pf']:.2f}"
+        print(f"| {i} | {name(r)} | {r.get('asset_class', '')[:9]} | {s['n']} | {100 * s['win']:.0f}% | {pf} | "
+              f"{money(s['net'])} | {s['dd']:.1f}% | {s['rdd']:.1f} | {s['mpos']}/{s['mact']} | "
+              f"{money(s['worst_m'])} | {money(s['best_m'])} |")
+    print()
+
+    # synthetics specifically
+    syn = [r for r in good if (r.get("asset_class") or "").upper().startswith("SYNTH")]
+    print(f"## Synthetic indices: {len(syn)} consistent pairs\n")
+    print("| Pair | Trades | Net | Max DD | Months up | Worst month |\n|---|---|---|---|---|---|")
+    for r in syn[:25]:
+        s = r["s"]
+        print(f"| {name(r)} | {s['n']} | {money(s['net'])} | {s['dd']:.1f}% | {s['mpos']}/{s['mact']} | {money(s['worst_m'])} |")
+    print()
+
+    # Sigma variants
+    sig = [r for r in runs if r["tag"].startswith("SIGMA_VAR") or (r["strategy"] == "RQ_SigmaBreakout_v1" and r["symbol"] == "US Tech 100" and not r.get("params"))]
+    if sig:
+        print("## Sigma on US Tech 100: stop and take-profit variants\n")
+        print("| Stop | Take-profit | Trades | Win | Net | Max DD | Ret/DD | H1 / H2 | Months up |\n|---|---|---|---|---|---|---|---|---|")
+
+        def key(r):
+            p = r.get("params") or {}
+            return (p.get("sl_pct", 0), p.get("tp_r", 0))
+        for r in sorted(sig, key=key):
+            p = r.get("params") or {}
+            s = r["s"]
+            stop = f"{p['sl_pct']}%" if p.get("sl_pct") else "2% safety (default)"
+            tp = f"1:{p['tp_r']:g}" if p.get("tp_r") else "none (band flip / 16:00 ET)"
+            print(f"| {stop} | {tp} | {s['n']} | {100 * s['win']:.0f}% | {money(s['net'])} | {s['dd']:.1f}% | "
+                  f"{s['rdd']:.1f} | {money(r['h1n'])} / {money(r['h2n'])} | {s['mpos']}/{s['mact']} |")
+        print()
+
+    # portfolio
+    print("## Portfolio: low-correlation combination, backtested together\n")
+    cands = [r for r in good if r["s"]["n"] >= 20]
+    for r in cands:
+        r["w"] = weekly(r["rows"])
+    chosen = []
+    for r in cands:
+        if len(chosen) >= int(sys.argv[2] if len(sys.argv) > 2 else 10):
+            break
+        if any(c["symbol"] == r["symbol"] for c in chosen):
+            continue                                   # one strategy per instrument
+        if any(c["strategy"] == r["strategy"] and corr(c["w"], r["w"]) > 0.3 for c in chosen):
+            continue                                   # same strategy on a co-moving instrument
+        if any(corr(c["w"], r["w"]) > 0.5 for c in chosen):
+            continue
+        chosen.append(r)
+    rows = sorted([dict(x, who=name(r)) for r in chosen for x in r["rows"]], key=lambda x: x["x"])
+    ps = stats(rows)
+    # concurrency
+    ev = sorted([(x["t"], 1) for x in rows] + [(x["x"], -1) for x in rows])
+    cur = mx = 0
+    for _, d in ev:
+        cur += d
+        mx = max(mx, cur)
+    print("Chosen greedily by return/drawdown: one strategy per instrument, no two pairs whose weekly P&L "
+          "correlates above 0.5 (above 0.3 for the same strategy).\n")
+    print("| Pair | Trades | Net (alone) | Max DD (alone) |\n|---|---|---|---|")
+    for r in chosen:
+        print(f"| {name(r)} | {r['s']['n']} | {money(r['s']['net'])} | {r['s']['dd']:.1f}% |")
+    print(f"\n**Together on one $10,000 account at 1% risk per trade:** {ps['n']} trades, "
+          f"**{money(ps['net'])} ({ps['net'] / BAL * 100:.0f}%)**, max drawdown **{ps['dd']:.1f}%**, "
+          f"profit factor {ps['pf']:.2f}, {ps['mpos']}/{ps['mact']} months up, worst month {money(ps['worst_m'])}, "
+          f"up to {mx} trades open at once.\n")
+    print("| Month | P&L | Account |\n|---|---|---|")
+    bal = BAL
+    for m in MONTHS:
+        if m in ps["mon"]:
+            bal += ps["mon"][m]
+            print(f"| {m} | {money(ps['mon'][m])} | ${bal:,.0f} |")
+    # weekly correlation matrix summary
+    if len(chosen) > 1:
+        cs = [corr(a["w"], b["w"]) for i, a in enumerate(chosen) for b in chosen[i + 1:]]
+        print(f"\nAverage weekly P&L correlation between the chosen pairs: {sum(cs) / len(cs):.2f} "
+              f"(highest {max(cs):.2f}).")
+
+
+if __name__ == "__main__":
+    main()
