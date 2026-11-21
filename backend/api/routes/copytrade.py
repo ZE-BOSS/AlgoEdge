@@ -162,6 +162,9 @@ class ChannelIn(BaseModel):
     username: str | None = None
     link: str | None = None
     join: bool = True
+    # A newly added channel is NOT copied until switched on (21 Nov 2026: channels
+    # added only to backtest them started copying on the live account at once).
+    enabled: bool = False
 
 
 @router.post("/channels")
@@ -179,11 +182,13 @@ async def add_channel(body: ChannelIn, user: User = Depends(get_current_user), d
     existing = (await db.execute(select(CopyTradeChannel).where(
         CopyTradeChannel.user_id == user.id, CopyTradeChannel.chat_id == int(info["chat_id"])))).scalars().first()
     if existing:
-        existing.enabled = True
+        # re-adding never switches copying on by itself
+        if body.enabled:
+            existing.enabled = True
         row = existing
     else:
         row = CopyTradeChannel(user_id=user.id, chat_id=int(info["chat_id"]), title=info.get("title") or "",
-                               username=info.get("username"), enabled=True, rules={})
+                               username=info.get("username"), enabled=bool(body.enabled), rules={})
         db.add(row)
     await db.commit()
     await telegram_manager.reload_channels(user.id)
