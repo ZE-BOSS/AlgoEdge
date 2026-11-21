@@ -76,6 +76,8 @@ NO_MEASURED_TARGET: frozenset[str] = frozenset({
     "RQ_TMeanReversion_v1", "RQ_CharlesMonger_v1",
     # ...and the 2026-10-20 ports whose exits are a band flip / an EMA cross
     "RQ_SigmaBreakout_v1", "RQ_DailyVWAP_v1",
+    # quant lab: exits at the next cash close without a signal
+    "QL_IBS_v1",
     # TradingView mirror: exits at the opposite zone / after 100 candles
     "ZeroLossBoomCrash_v32", })
 
@@ -264,6 +266,13 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
         "tp_count": 1, "tp1_rr": 1.0, "min_rr": 1.0,
         "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
         "evidence": "roboquant.dev template Giga ORB, MNQ 15m preset: 09:30-09:45 range, stop at the far side, 1R, wick filter 13%, prior-day bias. Claimed +477.1%, 55.9% win, DD 21.5%, PF 1.22.",
+    },
+    "QL_IBS_v1": {
+        "tp_count": 1, "tp1_rr": 40.0,
+        "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
+        "evidence": "Pagonidis (2013) IBS effect + 200-day filter: buy the US cash close when IBS<0.2 above SMA200, "
+                    "exit the next close without a signal. Deriv 2024-26 PF 1.6-1.8, DD 2-3% at 1x; "
+                    "QQQ/SPY/DIA 1993-2026 ~59% win, PF 1.26-1.48.",
     },
     "RQ_SigmaBreakout_v1": {
         "tp_count": 1, "tp1_rr": 40.0,

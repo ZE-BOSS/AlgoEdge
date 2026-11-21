@@ -304,3 +304,24 @@ class RQSRSweepParams:
     tick_size: float = 0.25
     allow_long: bool = True
     allow_short: bool = True
+
+
+@dataclass
+class QLIBSParams:
+    """IBS mean reversion for US index CFDs (quant lab, 21 Nov 2026).
+
+    Pagonidis (2013) "The IBS effect"; 200-day trend filter as in Connors.
+    Buy at the US cash close (16:00 New York) when the session's
+    IBS = (close - low) / (high - low) is below `ibs_below` and the close is
+    above its `sma_days`-session average; hold while that stays true, exit at
+    the next cash close where it does not. Deriv 2024-26: PF 1.6-1.8, max DD
+    1.8-3.3% at 1x notional; TradingView QQQ/SPY/DIA 1993-2026: ~59% winners,
+    PF 1.26-1.48, max DD 16-28% at 1x (crashes)."""
+    timeframe: str = "M30"
+    ibs_below: float = 0.2
+    sma_days: int = 200
+    notional_x: float = 1.0
+    """Position VALUE as a multiple of the sizing balance (the rule has no stop
+    to size from). 0 = size from risk % against `disaster_stop_pct`."""
+    disaster_stop_pct: float = 10.0
+    """Crash guard only; the published rule has no stop."""
