@@ -82,17 +82,34 @@ def rsi(c: pd.Series, n: int) -> pd.Series:
 
 
 # ── strategies (each returns a list of trades: dict(t_exit, ret, side)) ─────────
-def s_ibs(D, sym, trend=False):
+def s_ibs(D, sym, trend=False, thr=0.2):
     ibs = (D.C - D.L) / (D.H - D.L)
     sma = D.C.rolling(200).mean()
     tr = []
     for i in range(len(D) - 1):
-        if not (ibs.iat[i] < 0.2):
+        if not (ibs.iat[i] < thr):
             continue
         if trend and not (D.C.iat[i] > sma.iat[i]):
             continue
         r = D.C.iat[i + 1] / D.C.iat[i] - 1 - cost(sym, D.C.iat[i]) - FIN_PER_NIGHT * nights(D.t_close.iat[i], D.t_close.iat[i + 1])
         tr.append({"t": D.t_close.iat[i + 1], "ret": r, "side": 1, "t0": D.t_close.iat[i]})
+    return tr
+
+
+def s_trend_hold(D, sym, n=200):
+    """Time-series trend: hold long while the close is above its n-day average (one trade per run)."""
+    sma = D.C.rolling(n).mean()
+    tr, i = [], n
+    while i < len(D) - 1:
+        if D.C.iat[i] > sma.iat[i]:
+            j = i + 1
+            while j < len(D) - 1 and D.C.iat[j] > sma.iat[j]:
+                j += 1
+            r = D.C.iat[j] / D.C.iat[i] - 1 - cost(sym, D.C.iat[i]) - FIN_PER_NIGHT * nights(D.t_close.iat[i], D.t_close.iat[j])
+            tr.append({"t": D.t_close.iat[j], "ret": r, "side": 1, "t0": D.t_close.iat[i]})
+            i = j + 1
+        else:
+            i += 1
     return tr
 
 
@@ -336,6 +353,8 @@ def main():
         print(f"== {sym} cash days {len(D)} {s:%Y-%m-%d}..{e:%Y-%m-%d} buy&hold {bh(D.C, None) * 100:+.1f}%")
         run(f"{sym}|IBS<0.2 (next close)", s_ibs(D, sym), s, e)
         run(f"{sym}|IBS<0.2 + >SMA200", s_ibs(D, sym, trend=True), s, e)
+        for thr in (0.1, 0.15, 0.25, 0.3):
+            run(f"{sym}|grid IBS<{thr} + >SMA200", s_ibs(D, sym, trend=True, thr=thr), s, e)
         run(f"{sym}|RSI2<10 >SMA200 exit>SMA5", s_rsi2(D, sym), s, e)
         run(f"{sym}|Turn of month (-2..+3)", s_tom(D, sym), s, e)
         run(f"{sym}|Last half-hour momentum", s_last_half_hour(D, sym), s, e)
@@ -350,6 +369,8 @@ def main():
     print(f"== XAUUSD NY days {len(G)} {s:%Y-%m-%d}..{e:%Y-%m-%d} buy&hold {bh(G.C, None) * 100:+.1f}%")
     run("XAUUSD|IBS<0.2 (next close)", s_ibs(G, "XAUUSD"), s, e)
     run("XAUUSD|RSI2<10 >SMA200 exit>SMA5", s_rsi2(G, "XAUUSD"), s, e)
+    run("XAUUSD|IBS<0.2 + >SMA200", s_ibs(G, "XAUUSD", trend=True), s, e)
+    run("XAUUSD|Trend hold >SMA200", s_trend_hold(G, "XAUUSD"), s, e)
     run("XAUUSD|Overnight long 13:30->08:30", s_gold_window(g30, "XAUUSD", 13, 30, 8, 30, 1, True), s, e)
     run("XAUUSD|Day short 08:30->13:30", s_gold_window(g30, "XAUUSD", 8, 30, 13, 30, -1, False), s, e)
     run("XAUUSD|Asia long 19:00->02:00", s_gold_window(g30, "XAUUSD", 19, 0, 2, 0, 1, True), s, e)
