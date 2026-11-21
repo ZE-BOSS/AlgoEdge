@@ -38,6 +38,8 @@ MAX_LOG_ENTRIES = 1000
 # so a long outage does not flood the chat.
 MISSED_ALERTS_MAX = 3
 
+from backend.services.signal_sync import signal_sync  # noqa: E402
+
 class BotService:
     """Singleton service managing the trading bot lifecycle."""
 
@@ -703,6 +705,10 @@ class BotService:
                 msg += f"TP: {telegram_service.escape_markdown(tp_fallback)}\n"
 
             msg += f"Score: {score}/100\n"
+            _synced = (getattr(signal_domain, "metadata", None) or {}).get("synced_from")
+            if _synced:
+                msg += (f"🔁 Synced from {telegram_service.escape_markdown(str(_synced))}: its strategy "
+                        f"fired on this bar, this account's did not\n")
             if reason:
                 msg += f"Reason: {reason}\n"
                 
@@ -1048,6 +1054,11 @@ class BotService:
 
         while self.running:
             _cycle_started = time.monotonic()
+            if signal_sync.enabled:
+                signal_sync.poll()
+                if time.time() - self.__dict__.get("_sync_cleaned", 0) > 3600:
+                    self._sync_cleaned = time.time()
+                    signal_sync.cleanup()
             try:
                 import json
 
@@ -1434,6 +1445,24 @@ class BotService:
                                     f"[{symbol}] {strategy_id}: {len(_fed.missed) - MISSED_ALERTS_MAX} older late "
                                     f"signals not alerted", "WARN", "SIGNAL")
                             signal = _fed.signal
+                            # ── Demo <-> live sync (services/signal_sync.py) ──────────────
+                            # Every signal carries its bar time so both instances key it alike.
+                            if signal is not None and not getattr(signal, "timestamp", None):
+                                try:
+                                    signal.timestamp = float(pd.Timestamp(_feed.last_time).timestamp())
+                                except Exception:  # noqa: BLE001
+                                    pass
+                            if signal is not None:
+                                signal_sync.note_local(strategy_id, symbol, signal.timestamp)
+                            elif signal_sync.enabled:
+                                _peer = signal_sync.take(strategy_id, symbol, getattr(_feed, "primary", "") or "")
+                                if _peer is not None:
+                                    signal = signal_sync.to_signal(_peer)
+                                    self._log_event(
+                                        f"[SYNC] [{symbol}] {strategy_id}: {_peer.get('instance')} took a "
+                                        f"{_peer.get('direction')} on this bar and this account's strategy did "
+                                        f"not fire — placing it here with this account's own sizing",
+                                        "SIGNAL", "SIGNAL")
                                     
                             await asyncio.sleep(0.01)
                             
@@ -1904,6 +1933,7 @@ class BotService:
                                     
                                         if db_positions and self.user_id:
                                             sig_id = await self._save_signal_state(signal, "EXECUTED", tp_levels=db_positions)
+                                            signal_sync.publish(signal)
                                             self._last_signal_time[_dedupe_key] = _sig_fp
                                             try:
                                                 import json
@@ -2094,7 +2124,14 @@ class BotService:
                     _sleep = float(self.scan_interval)
                     if _budget:
                         _sleep = max(0.5, min(_sleep, _budget - (time.time() % _budget) + SCAN_WAKE_AFTER_S))
-                    await asyncio.sleep(_sleep)
+                    # Sleep in short steps so a trade the peer instance just took
+                    # (signal_sync) is placed here within ~a second, not next cycle.
+                    _deadline = time.monotonic() + _sleep
+                    while self.running and time.monotonic() < _deadline:
+                        await asyncio.sleep(max(0.05, min(1.0, _deadline - time.monotonic())))
+                        if signal_sync.enabled and signal_sync.poll():
+                            self._log_event("[SYNC] peer instance took a trade — scanning now", category="BOT")
+                            break
 
             except asyncio.CancelledError:
                 self._log_event("Scan loop cancelled", category="BOT")
