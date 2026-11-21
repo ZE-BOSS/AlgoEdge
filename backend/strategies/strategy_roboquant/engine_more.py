@@ -448,14 +448,18 @@ class RQSigmaBreakout(ReplayStrategy):
             pos = ctx.position()
             sl_long = cl * (1 - p.sl_pct / 100.0) if p.sl_pct > 0 else 0.0
             sl_short = cl * (1 + p.sl_pct / 100.0) if p.sl_pct > 0 else 0.0
+            tp_r = float(getattr(p, "tp_r", 0.0) or 0.0)
+            dist = cl * (p.sl_pct if p.sl_pct > 0 else p.disaster_stop_pct) / 100.0
+            tp_long = cl + tp_r * dist if tp_r > 0 else 0.0
+            tp_short = cl - tp_r * dist if tp_r > 0 else 0.0
             if cl > upper and pos <= 0:
                 if pos < 0:
                     ctx.close_position("RQ_BAND_FLIP")
-                ctx.buy(sl_long, 0.0, reference=ref, upper=upper, lower=lower)
+                ctx.buy(sl_long, tp_long, reference=ref, upper=upper, lower=lower)
             elif cl < lower and pos >= 0:
                 if pos > 0:
                     ctx.close_position("RQ_BAND_FLIP")
-                ctx.sell(sl_short, 0.0, reference=ref, upper=upper, lower=lower)
+                ctx.sell(sl_short, tp_short, reference=ref, upper=upper, lower=lower)
         typical = (float(b.h[k]) + float(b.l[k]) + cl) / 3.0
         st["pv"] += typical * float(b.v[k])
         st["pvol"] += float(b.v[k])

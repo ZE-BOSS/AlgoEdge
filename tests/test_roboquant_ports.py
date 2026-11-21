@@ -187,3 +187,50 @@ def test_daily_vwap_steps_on_three_minute_bars_from_an_m1_feed():
         t = int(f["time"].iloc[i - 1])
         tb = eng._last_template_bar(f.iloc[:i])
         assert (tb is None) == ((t // 60) % 3 != 2)
+
+
+def test_sigma_flip_close_does_not_close_the_new_position():
+    """The bar that flips closes the template's old long and opens a short.
+    Live, the short is already open when the position check runs on that same
+    bar: the flip's close is for the long only (20 Nov 2026, US Tech 100)."""
+    eng = get_strategy("RQ_SigmaBreakout_v1")(UserConfigV2())
+    days = pd.bdate_range("2026-03-02", periods=5)
+    times = pd.DatetimeIndex([pd.Timestamp(d) + pd.Timedelta(minutes=m)
+                              for d in days for m in range(0, 24 * 60, 30)])
+    et = times.tz_localize("UTC").tz_convert(ET)
+    base = np.full(len(times), 100.0)
+    rth = (et.hour * 100 + et.minute >= 930) & (et.hour * 100 + et.minute < 1600)
+    close = base + np.where(rth, 1.0, 0.0)
+    last = et.normalize() == pd.Timestamp(days[-1]).tz_localize(ET)
+    i0 = np.flatnonzero(last & rth)[0]
+    close[i0 + 1] = 103.0                             # long
+    close[i0 + 3] = 97.0                              # below open - 1.5 x 1.0: flip short
+    f = _bars(times, base, np.maximum(base, close) + 0.1, np.minimum(base, close) - 0.1, close)
+    w = f.iloc[:i0 + 4]
+    s = asyncio.run(eng.on_bar("NDX100", "M30", w))
+    assert s is not None and s.direction == "SELL"
+    assert eng.on_position_bar("NDX100", "", w, {"ticket": 2, "direction": "SELL"}) is None
+    act = eng.on_position_bar("NDX100", "", w, {"ticket": 1, "direction": "BUY"})
+    assert act is not None and act.action == "CLOSE"
+
+
+def test_sigma_take_profit_option():
+    """tp_r > 0 puts a real target at tp_r x the stop distance; 0 keeps the far placeholder."""
+    cfg = UserConfigV2()
+    cfg.rq_sigma_breakout.tp_r = 2.0
+    eng = get_strategy("RQ_SigmaBreakout_v1")(cfg)
+    days = pd.bdate_range("2026-03-02", periods=5)
+    times = pd.DatetimeIndex([pd.Timestamp(d) + pd.Timedelta(minutes=m)
+                              for d in days for m in range(0, 24 * 60, 30)])
+    et = times.tz_localize("UTC").tz_convert(ET)
+    base = np.full(len(times), 100.0)
+    rth = (et.hour * 100 + et.minute >= 930) & (et.hour * 100 + et.minute < 1600)
+    close = base + np.where(rth, 1.0, 0.0)
+    last = et.normalize() == pd.Timestamp(days[-1]).tz_localize(ET)
+    i0 = np.flatnonzero(last & rth)[0]
+    close[i0 + 1] = 103.0
+    f = _bars(times, base, np.maximum(base, close) + 0.1, np.minimum(base, close) - 0.1, close)
+    s = asyncio.run(eng.on_bar("NDX100", "M30", f.iloc[:i0 + 2]))
+    assert s is not None and s.direction == "BUY"
+    assert s.stop_loss == pytest.approx(103.0 * 0.98)
+    assert s.take_profit == pytest.approx(103.0 + 2.0 * 103.0 * 0.02)
