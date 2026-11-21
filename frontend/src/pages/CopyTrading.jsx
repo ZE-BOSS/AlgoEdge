@@ -212,7 +212,7 @@ function Channels({ loggedIn, onHistory, historyId }) {
     && (!search || `${d.title} ${d.username || ''}`.toLowerCase().includes(search.toLowerCase())));
 
   return (
-    <Card icon={<MessageSquare size={15} />} title="Channels" sub="Signals from these channels and groups are copied."
+    <Card icon={<MessageSquare size={15} />} title="Channels" sub="Channels are added switched off: backtest them freely. Only channels switched on are copied."
       actions={<button className="btn btn-sm btn-secondary" disabled={!loggedIn} onClick={() => setAdding(!adding)}
         title={loggedIn ? '' : 'Log in to Telegram first'}>{adding ? <><X size={13} /> Close</> : <><Plus size={13} /> Add channel</>}</button>}>
       {adding && (
@@ -306,7 +306,14 @@ function ChannelRow({ c, active, onPatch, onDelete, onHistory }) {
             {overrides > 0 && ` · ${overrides} override${overrides > 1 ? 's' : ''}`}
           </div>
         </div>
-        <Switch checked={c.enabled} onChange={(v) => onPatch({ enabled: v })} />
+        <span className={`ct-chan__state ${c.enabled ? 'is-live' : ''}`}
+          title={c.enabled ? 'New signals from this channel are copied to the account' : 'Watched only: backtest and history, no orders'}>
+          {c.enabled ? 'Copying' : 'Not copying'}
+        </span>
+        <Switch checked={c.enabled} onChange={(v) => {
+          if (v && !window.confirm(`Start copying "${c.title || c.chat_id}"? New signals from it will place real orders on this account.`)) return;
+          onPatch({ enabled: v });
+        }} />
         <button className={`ct-iconbtn${active ? ' is-on' : ''}`} onClick={onHistory} title="Read recent messages"><History size={15} /></button>
         <button className={`ct-iconbtn${open ? ' is-on' : ''}`} onClick={() => setOpen(!open)} title="Channel overrides"><Settings2 size={15} /></button>
         <button className="ct-iconbtn ct-iconbtn--danger" onClick={onDelete} title="Stop watching"><Trash2 size={15} /></button>

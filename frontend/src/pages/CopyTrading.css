@@ -206,3 +206,6 @@
   display: flex; flex-direction: column; gap: 2px; }
 .ct-bt-tile span { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
 .ct-bt-tile b { font-family: var(--font-mono); font-size: 0.9rem; color: var(--text-primary); }
+
+.ct-chan__state { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--bg-tertiary, #2a2a2a); color: var(--text-muted, #999); white-space: nowrap; }
+.ct-chan__state.is-live { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
