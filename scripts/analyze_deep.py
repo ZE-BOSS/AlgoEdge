@@ -100,11 +100,24 @@ def main():
                 and s["mact"] >= 6 and s["mpos"] / s["mact"] >= 0.6)
 
     good = sorted([r for r in base if consistent(r)], key=lambda r: -r["s"]["rdd"])
-    print(f"**{len(good)} consistent pairs** (of {len(base)} that made money over the year).\n")
+
+    def tier_b(r):
+        s = r["s"]
+        return not consistent(r) and r["h1n"] > 0 and r["h2n"] > 0 and s["n"] >= 20 and s["pf"] >= 1.1
+
+    tb = sorted([r for r in base if tier_b(r)], key=lambda r: -r["s"]["rdd"])
+    print(f"**Tier A: {len(good)} consistent pairs** (of {len(base)} that made money over the year). "
+          f"**Tier B: {len(tb)} more** that made money in both halves with profit factor 1.1 or better "
+          f"but fewer winning months.\n")
+    for r in good:
+        r["tier"] = "A"
+    for r in tb:
+        r["tier"] = "B"
+    good = sorted(good + tb, key=lambda r: -r["s"]["rdd"])
 
     # per strategy: best assets
-    print("## Where each strategy works (consistent pairs, best first)\n")
-    print("| Strategy | Consistent on | Best pairs (net, max DD, months up) |\n|---|---|---|")
+    print("## Where each strategy works (Tier A and B pairs, best first)\n")
+    print("| Strategy | Tier A+B pairs | Best pairs (net, max DD, months up) |\n|---|---|---|")
     by = defaultdict(list)
     for r in good:
         by[r["strategy"]].append(r)
@@ -114,24 +127,24 @@ def main():
         print(f"| {strat.replace('_v1', '')} | {len(rs)} | {best} |")
     print()
 
-    print("## Top 40 consistent pairs\n")
-    print("| # | Pair | Class | Trades | Win | PF | Net | Max DD | Ret/DD | Months up | Worst month | Best month |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|---|")
-    for i, r in enumerate(good[:40], 1):
+    print("## Top 45 pairs (Tier A and B), by return/drawdown\n")
+    print("| # | Tier | Pair | Class | Trades | Win | PF | Net | Max DD | Ret/DD | Months up | Worst month | Best month |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    for i, r in enumerate(good[:45], 1):
         s = r["s"]
         pf = "∞" if s["pf"] == float("inf") else f"{s['pf']:.2f}"
-        print(f"| {i} | {name(r)} | {r.get('asset_class', '')[:9]} | {s['n']} | {100 * s['win']:.0f}% | {pf} | "
+        print(f"| {i} | {r['tier']} | {name(r)} | {r.get('asset_class', '')[:9]} | {s['n']} | {100 * s['win']:.0f}% | {pf} | "
               f"{money(s['net'])} | {s['dd']:.1f}% | {s['rdd']:.1f} | {s['mpos']}/{s['mact']} | "
               f"{money(s['worst_m'])} | {money(s['best_m'])} |")
     print()
 
     # synthetics specifically
     syn = [r for r in good if (r.get("asset_class") or "").upper().startswith("SYNTH")]
-    print(f"## Synthetic indices: {len(syn)} consistent pairs\n")
-    print("| Pair | Trades | Net | Max DD | Months up | Worst month |\n|---|---|---|---|---|---|")
+    print(f"## Synthetic indices: {len(syn)} Tier A/B pairs\n")
+    print("| Tier | Pair | Trades | Net | Max DD | Months up | Worst month |\n|---|---|---|---|---|---|---|")
     for r in syn[:25]:
         s = r["s"]
-        print(f"| {name(r)} | {s['n']} | {money(s['net'])} | {s['dd']:.1f}% | {s['mpos']}/{s['mact']} | {money(s['worst_m'])} |")
+        print(f"| {r['tier']} | {name(r)} | {s['n']} | {money(s['net'])} | {s['dd']:.1f}% | {s['mpos']}/{s['mact']} | {money(s['worst_m'])} |")
     print()
 
     # Sigma variants
