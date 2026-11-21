@@ -58,6 +58,12 @@ def stats(d: pd.Series, start, end):
             "pos": float((mon > 0).mean()), "worst": float(mon.min())}
 
 
+# optional 4th argument: JSON {label: weight} overriding SLEEVES weights (0 drops a sleeve)
+if len(sys.argv) > 4:
+    over = json.loads(sys.argv[4])
+    SLEEVES = [(l, s_, k, float(over.get(l, w))) for l, s_, k, w in SLEEVES]
+    SLEEVES = [x for x in SLEEVES if x[3] > 0]
+
 ser = {}
 for lab, src, key, w in SLEEVES:
     s = daily(lab, src, key, w)
