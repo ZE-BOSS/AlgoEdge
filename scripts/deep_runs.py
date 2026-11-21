@@ -71,12 +71,20 @@ async def main_async(a) -> None:
         if f.exists():
             continue
         t0 = time.time()
-        try:
-            r = await one(m, job, a)
-        except asyncio.TimeoutError:
-            r = {**job, "error": "timeout"}
-        except Exception as e:  # noqa: BLE001
-            r = {**job, "error": f"{type(e).__name__}: {e}"[:300], "trace": traceback.format_exc()[-600:]}
+        for attempt in range(6):
+            try:
+                r = await one(m, job, a)
+            except asyncio.TimeoutError:
+                r = {**job, "error": "timeout"}
+            except Exception as e:  # noqa: BLE001
+                r = {**job, "error": f"{type(e).__name__}: {e}"[:300], "trace": traceback.format_exc()[-600:]}
+            # the terminal dropping its login for a few minutes (seen 21 Nov 07:47 UTC)
+            # must not turn every job in that window into an error: wait and retry
+            if "not in this terminal" in str(r.get("error", "")) or "DataFetchError" in str(r.get("error", "")):
+                print(f"  terminal unavailable ({attempt + 1}/6), waiting 60 s: {job['tag']}", flush=True)
+                await asyncio.sleep(60)
+                continue
+            break
         r["seconds"] = round(time.time() - t0, 1)
         f.write_text(json.dumps(r, default=str))
         y = r.get("year", {})
