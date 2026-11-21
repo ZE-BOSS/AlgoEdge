@@ -170,8 +170,22 @@ def main():
     cands = [r for r in good if r["s"]["n"] >= 20]
     for r in cands:
         r["w"] = weekly(r["rows"])
+    families = [{"US Tech 100", "Wall Street 30", "US SP 500", "US Small Cap 2000"},
+                {"Germany 40", "France 40", "Europe 50", "Netherlands 25", "UK 100", "Swiss 20", "Spain 35"},
+                {"XAUUSD", "XAGUSD", "XPTUSD", "XPDUSD"}]
+
+    def fam(sym):
+        return next((i for i, f in enumerate(families) if sym in f), None)
+
     chosen = []
     for r in cands:
+        f = fam(r["symbol"])
+        if f is not None and any(c["strategy"] == r["strategy"] and fam(c["symbol"]) == f for c in chosen):
+            continue                                   # same strategy on a co-moving market family
+        if r["strategy"] == "RQ_TMeanReversion_v1" and any(c["strategy"] == r["strategy"] for c in chosen):
+            continue                                   # 1x-notional weekend trade: one at a time
+        if sum(c["strategy"] == r["strategy"] for c in chosen) >= 2:
+            continue
         if len(chosen) >= int(sys.argv[2] if len(sys.argv) > 2 else 10):
             break
         if any(c["symbol"] == r["symbol"] for c in chosen):
@@ -189,8 +203,10 @@ def main():
     for _, d in ev:
         cur += d
         mx = max(mx, cur)
-    print("Chosen greedily by return/drawdown: one strategy per instrument, no two pairs whose weekly P&L "
-          "correlates above 0.5 (above 0.3 for the same strategy).\n")
+    print("Chosen greedily by return/drawdown: one strategy per instrument, at most two pairs per strategy "
+          "(one for RQ_TMeanReversion, sized at 1x notional), no strategy twice on a co-moving family "
+          "(US indices, EU indices, precious metals), no two pairs whose weekly P&L correlates above 0.5 "
+          "(0.3 for the same strategy).\n")
     print("| Pair | Trades | Net (alone) | Max DD (alone) |\n|---|---|---|---|")
     for r in chosen:
         print(f"| {name(r)} | {r['s']['n']} | {money(r['s']['net'])} | {r['s']['dd']:.1f}% |")
