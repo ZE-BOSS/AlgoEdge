@@ -325,3 +325,33 @@ class QLIBSParams:
     to size from). 0 = size from risk % against `disaster_stop_pct`."""
     disaster_stop_pct: float = 10.0
     """Crash guard only; the published rule has no stop."""
+
+
+@dataclass
+class QLDipBuyParams:
+    """Combined dip-buy for US index CFDs (quant lab round 3, 21 Nov 2026).
+
+    Buy at the US cash close when ANY enabled dip signal fires with the close
+    above its `sma_days` average: IBS < `ibs_below` (Pagonidis), Connors
+    cumulative RSI(2) 2-day sum < `cum_rsi_below`, or `down_days` lower closes
+    in a row (Connors). Exit at the first later cash close above its
+    `exit_sma_days` average, or after `max_hold_days` sessions.
+    TradingView 1993/1999-2026 at 1x: QQQ +250% PF 1.90 73% win DD 18% (IBS
+    alone +145% PF 1.39); SPY +209% PF 1.92 DD 14% (IBS alone +105% PF 1.34
+    DD 30%). Deriv 2024-26 with financing: NAS ann +5.7% PF 1.99 DD 4.8%;
+    SPX ann +5.5% PF 2.10 DD 6.8%. Weaker than IBS alone on Wall Street 30."""
+    timeframe: str = "M30"
+    sma_days: int = 200
+    ibs_below: float = 0.2
+    """0 disables the IBS signal."""
+    use_cum_rsi: bool = True
+    cum_rsi_below: float = 35.0
+    use_down_days: bool = True
+    down_days: int = 3
+    exit_sma_days: int = 5
+    max_hold_days: int = 10
+    notional_x: float = 1.0
+    """Position VALUE as a multiple of the sizing balance. 0 = size from risk %
+    against `disaster_stop_pct`."""
+    disaster_stop_pct: float = 10.0
+    """Crash guard only; the published rules have no stop."""
