@@ -31,6 +31,7 @@ export const STRATEGY_OPTIONS = [
   ['RQ_IVB_v1', 'IVB Initial Volatility Breakout (roboquant)', 'rq_ivb'],
   ['RQ_GigaORB_v1', 'Giga ORB (roboquant)', 'rq_giga_orb'],
   ['RQ_SigmaBreakout_v1', 'Sigma Breakout (roboquant)', 'rq_sigma_breakout'],
+  ['QL_IBS_v1', 'IBS Mean Reversion (quant lab, US indices)', 'ql_ibs'],
   ['RQ_DailyVWAP_v1', 'Daily Anchored VWAP (roboquant)', 'rq_daily_vwap'],
   ['RQ_FridayRevisit_v1', 'Friday Range Revisit Monday Short (roboquant)', 'rq_friday_revisit'],
   ['RQ_M30ORB_v1', 'M30 ORB + M5 Breakout (roboquant)', 'rq_m30_orb'],

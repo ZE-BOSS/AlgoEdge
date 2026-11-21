@@ -147,7 +147,7 @@ def build_full_schema() -> list[dict]:
     from backend.strategies.strategy_zero_loss.params import ZeroLossBoomCrashParams
     from backend.strategies.strategy_roboquant.params import (
         RQNQPrecisionParams, RQNYORBParams, RQCrazyORBParams, RQTMeanReversionParams, RQCharlesMongerParams,
-        RQFlashTriggerORBParams, RQScarfaceORBParams, RQIVBParams, RQGigaORBParams, RQSigmaBreakoutParams, RQDailyAnchoredVWAPParams, RQFridayRevisitParams, RQM30ORBParams, RQSRSweepParams,
+        RQFlashTriggerORBParams, RQScarfaceORBParams, RQIVBParams, RQGigaORBParams, RQSigmaBreakoutParams, QLIBSParams, RQDailyAnchoredVWAPParams, RQFridayRevisitParams, RQM30ORBParams, RQSRSweepParams,
     )
     from backend.strategies.strategy_trend.params import TrendBreakoutParams
     from backend.strategies.strategy_fib.params import FibTrendParams
@@ -172,6 +172,7 @@ def build_full_schema() -> list[dict]:
         (RQIVBParams, "rq_ivb"),
         (RQGigaORBParams, "rq_giga_orb"),
         (RQSigmaBreakoutParams, "rq_sigma_breakout"),
+        (QLIBSParams, "ql_ibs"),
         (RQDailyAnchoredVWAPParams, "rq_daily_vwap"),
         (RQFridayRevisitParams, "rq_friday_revisit"),
         (RQM30ORBParams, "rq_m30_orb"),
