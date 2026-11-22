@@ -13,7 +13,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Copy, Eye, EyeOff, History, Inbox, Info, Link2,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Copy, Eye, EyeOff, FlaskConical, History, Inbox, Info, Link2,
   LogOut, MessageSquare, Play, Plus, RefreshCw, Search, Send, Settings2, Trash2, Wand2, X,
 } from 'lucide-react';
 
@@ -53,18 +53,18 @@ function Switch({ checked, onChange, label, sub, danger, disabled }) {
   );
 }
 
-function Card({ icon, title, sub, actions, children, foot }) {
+function Card({ icon, title, sub, actions, children, foot, id, onHeadClick }) {
   return (
-    <section className="ct-card">
-      <header className="ct-card__head">
+    <section className="ct-card" id={id}>
+      <header className={`ct-card__head${onHeadClick ? ' is-click' : ''}`} onClick={onHeadClick}>
         <span className="ct-card__icon">{icon}</span>
         <div style={{ minWidth: 0 }}>
           <h3 className="ct-card__title">{title}</h3>
           {sub && <p className="ct-card__sub">{sub}</p>}
         </div>
-        {actions && <div className="ct-card__actions">{actions}</div>}
+        {actions && <div className="ct-card__actions" onClick={(e) => e.stopPropagation()}>{actions}</div>}
       </header>
-      <div className="ct-card__body">{children}</div>
+      {children != null && children !== false && <div className="ct-card__body">{children}</div>}
       {foot && <footer className="ct-card__foot">{foot}</footer>}
     </section>
   );
@@ -82,6 +82,10 @@ const Note = ({ tone, children }) => {
   const Icon = tone === 'ok' ? CheckCircle2 : tone === 'err' || tone === 'warn' ? AlertTriangle : Info;
   return <div className={`ct-note${tone ? ` ct-note--${tone}` : ''}`}><Icon size={14} /><div>{children}</div></div>;
 };
+
+const isoUtc = (s) => (s && !/[zZ]|[+-]\d\d:\d\d$/.test(s) ? `${s}Z` : s);
+const isNew = (c) => !!c.created_at && Date.now() - Date.parse(isoUtc(c.created_at)) < 3 * 86400e3;
+const jump = (id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
 const initials = (s) => (s || '?').replace(/[^\p{L}\p{N} ]/gu, '').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '#';
 
@@ -192,7 +196,7 @@ function parseMap(text) {
 }
 const mapText = (m) => Object.entries(m || {}).map(([k, v]) => `${k}=${v}`).join('\n');
 
-function Channels({ loggedIn, onHistory, historyId }) {
+function Channels({ loggedIn, onHistory, historyId, onBacktest }) {
   const qc = useQueryClient();
   const { data: channels = [] } = useQuery({ queryKey: qk('ct-channels'), queryFn: () => copytrade.channels().then((r) => r.data) });
   const [adding, setAdding] = useState(false);
@@ -212,7 +216,9 @@ function Channels({ loggedIn, onHistory, historyId }) {
     && (!search || `${d.title} ${d.username || ''}`.toLowerCase().includes(search.toLowerCase())));
 
   return (
-    <Card icon={<MessageSquare size={15} />} title="Channels" sub="Channels are added switched off: backtest them freely. Only channels switched on are copied."
+    <Card id="ct-channels" icon={<MessageSquare size={15} />} title="Channels"
+      sub={channels.length ? `${channels.filter((c) => c.enabled).length} copying · ${channels.filter((c) => !c.enabled).length} watched only. New channels start switched off: backtest first, then switch on.`
+        : 'New channels start switched off: backtest first, then switch on.'}
       actions={<button className="btn btn-sm btn-secondary" disabled={!loggedIn} onClick={() => setAdding(!adding)}
         title={loggedIn ? '' : 'Log in to Telegram first'}>{adding ? <><X size={13} /> Close</> : <><Plus size={13} /> Add channel</>}</button>}>
       {adding && (
@@ -261,15 +267,17 @@ function Channels({ loggedIn, onHistory, historyId }) {
         <div className="ct-empty"><Inbox size={26} /><div>{loggedIn ? 'No channels yet - add one to start copying.' : 'Log in to Telegram, then add the channels to copy.'}</div></div>
       ) : (
         <div className="ct-list">
-          {channels.map((c) => <ChannelRow key={c.id} c={c} active={historyId === c.id} onPatch={(d) => patch.mutate({ id: c.id, d })}
-            onDelete={() => window.confirm(`Stop watching ${c.title}?`) && del.mutate(c.id)} onHistory={() => onHistory(c)} />)}
+          {[...channels].sort((a, b) => (b.enabled - a.enabled) || String(b.created_at).localeCompare(String(a.created_at))).map((c) => (
+            <ChannelRow key={c.id} c={c} active={historyId === c.id} onPatch={(d) => patch.mutate({ id: c.id, d })}
+              onDelete={() => window.confirm(`Stop watching ${c.title}?`) && del.mutate(c.id)} onHistory={() => onHistory(c)}
+              onBacktest={() => onBacktest(c)} />))}
         </div>
       )}
     </Card>
   );
 }
 
-function ChannelRow({ c, active, onPatch, onDelete, onHistory }) {
+function ChannelRow({ c, active, onPatch, onDelete, onHistory, onBacktest }) {
   const [open, setOpen] = useState(false);
   const [r, setR] = useState({
     risk_pct: c.rules?.risk_pct ?? '', split_weights: (c.rules?.split_weights || []).join(', '), symbol_map: mapText(c.rules?.symbol_map),
@@ -298,7 +306,7 @@ function ChannelRow({ c, active, onPatch, onDelete, onHistory }) {
       <div className="ct-chan__row">
         <span className="ct-chan__avatar">{initials(c.title)}</span>
         <div className="ct-chan__main">
-          <div className="ct-chan__name">{c.title || c.chat_id}</div>
+          <div className="ct-chan__name">{c.title || c.chat_id}{isNew(c) && <span className="ct-new">new</span>}</div>
           <div className="ct-chan__meta">
             {c.username ? `@${c.username}` : 'private'}
             {c.rules?.risk_pct != null && ` · ${c.rules.risk_pct}% risk`}
@@ -314,6 +322,7 @@ function ChannelRow({ c, active, onPatch, onDelete, onHistory }) {
           if (v && !window.confirm(`Start copying "${c.title || c.chat_id}"? New signals from it will place real orders on this account.`)) return;
           onPatch({ enabled: v });
         }} />
+        <button className="ct-iconbtn" onClick={onBacktest} title="Backtest this channel"><FlaskConical size={15} /></button>
         <button className={`ct-iconbtn${active ? ' is-on' : ''}`} onClick={onHistory} title="Read recent messages"><History size={15} /></button>
         <button className={`ct-iconbtn${open ? ' is-on' : ''}`} onClick={() => setOpen(!open)} title="Channel overrides"><Settings2 size={15} /></button>
         <button className="ct-iconbtn ct-iconbtn--danger" onClick={onDelete} title="Stop watching"><Trash2 size={15} /></button>
@@ -443,22 +452,35 @@ function Rules({ rules, defaults, onSave }) {
   // once edited, the draft is kept until saved or discarded
   const [draft, setDraft] = useState(null);
   const [state, setState] = useState('clean');
+  const [open, setOpen] = useState(false);
   const r = draft ?? rules;
+  const shown = open || state === 'dirty';
+  const summary = r ? [
+    r.risk_mode === 'fixed_lots' ? `${r.fixed_lots} lots per signal` : `${r.risk_pct}% risk per signal`,
+    r.zone_entry === 'market' ? 'zones: one entry' : 'zones: layered limits',
+    `late: ${({ limit: 'wait at entry', skip: 'skip', market: 'take anyway' })[r.chase_rule] || r.chase_rule}`,
+    r.follow_breakeven ? 'follows breakeven' : null, r.trail_ladder ? 'ladder trail' : null,
+    r.max_open_signals ? `max ${r.max_open_signals} open per channel` : null,
+  ].filter(Boolean).join(' · ') : '';
   const set = (k, v) => { setDraft((d) => ({ ...(d ?? rules), [k]: v })); setState('dirty'); };
   const save = async () => {
     setState('saving');
     try { await onSave(r); setDraft(null); setState('saved'); } catch { setState('dirty'); }
   };
   return (
-    <Card icon={<Settings2 size={15} />} title="Rules" sub="How every signal is sized and placed, and which follow-ups are obeyed. Channel overrides take precedence."
-      foot={<>
+    <Card id="ct-rules" icon={<Settings2 size={15} />} title="Rules"
+      sub={shown ? 'How every signal is sized and placed, and which follow-ups are obeyed. Channel overrides take precedence.' : summary}
+      onHeadClick={() => setOpen(!shown)}
+      actions={<button className="btn btn-sm btn-secondary" onClick={() => setOpen(!shown)} disabled={state === 'dirty'}>
+        {shown ? <><ChevronUp size={13} /> Hide</> : <><ChevronDown size={13} /> Edit rules</>}</button>}
+      foot={shown && <>
         {state === 'dirty' && <span className="ct-dirty"><AlertTriangle size={13} /> Unsaved changes</span>}
         {state === 'saved' && <span className="ct-dirty" style={{ color: 'var(--green)' }}><CheckCircle2 size={13} /> Saved</span>}
         <button className="btn btn-sm btn-secondary" disabled={state !== 'dirty'} onClick={() => { setDraft(null); setState('clean'); }}>Discard</button>
         <button className="btn btn-sm btn-secondary" onClick={() => { setDraft({ ...defaults }); setState('dirty'); }}>Reset to defaults</button>
         <button className="btn btn-sm btn-primary" disabled={state !== 'dirty'} onClick={save}>{state === 'saving' ? 'Saving…' : 'Save rules'}</button>
       </>}>
-      <div className="ct-rules">
+      {shown && <div className="ct-rules">
         {RULES.map(([group, defs]) => (
           <div key={group} className="ct-group">
             <div className="ct-group__title">{group}</div>
@@ -476,7 +498,7 @@ function Rules({ rules, defaults, onSave }) {
             })}
           </div>
         ))}
-      </div>
+      </div>}
     </Card>
   );
 }
@@ -497,7 +519,7 @@ function ParseTester({ text, setText, channels }) {
   const p = res?.parsed;
   const plan = res?.plan;
   return (
-    <Card icon={<Wand2 size={15} />} title="Test a message" sub="See how a message is read and exactly what would be placed now at live prices. Places nothing.">
+    <Card id="ct-tester" icon={<Wand2 size={15} />} title="Test a message" sub="See how a message is read and exactly what would be placed now at live prices. Places nothing.">
       <div className="ct-form">
         <textarea className="ct-textarea ct-mono" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={SAMPLE} />
         <div style={{ display: 'flex', gap: 8 }}>
@@ -606,27 +628,45 @@ function HistoryPanel({ channel, onClose, onTest }) {
 function SignalLog({ channels }) {
   const [open, setOpen] = useState(null);
   const [filter, setFilter] = useState('all');
+  const [chan, setChan] = useState('');
+  const [q, setQ] = useState('');
+  const [limit, setLimit] = useState(50);
   const names = Object.fromEntries(channels.map((c) => [c.id, c.title]));
   const { data = [], refetch, isFetching } = useQuery({ queryKey: qk('ct-signals'), queryFn: () => copytrade.signals({ limit: 300 }).then((r) => r.data),
     refetchInterval: 10000 });
   const orders = useQuery({ queryKey: qk('ct-orders', open), queryFn: () => copytrade.orders(open).then((r) => r.data), enabled: !!open });
-  const base = data.filter((s) => s.kind !== 'NONE');
-  const rows = base.filter((s) => filter === 'all' || (filter === 'signals' ? s.kind === 'OPEN'
-    : filter === 'problems' ? ['ERROR', 'SKIPPED', 'PARTIAL'].includes(s.status) : s.kind !== 'OPEN'));
+  const base = data.filter((s) => s.kind !== 'NONE' && (!chan || String(s.channel_id) === chan)
+    && (!q || `${s.text} ${s.detail}`.toLowerCase().includes(q.toLowerCase())));
+  const count = (f) => base.filter(f).length;
+  const F = { all: () => true, signals: (s) => s.kind === 'OPEN', follow: (s) => s.kind !== 'OPEN',
+    problems: (s) => ['ERROR', 'SKIPPED', 'PARTIAL'].includes(s.status) };
+  const rows = base.filter(F[filter]);
   return (
-    <Card icon={<Send size={15} />} title="Signal log" sub="Every signal and follow-up seen and what was done. Chatter is hidden. Click a row for the orders."
+    <Card id="ct-log" icon={<Send size={15} />} title="Signal log" sub="Every signal and follow-up seen and what was done. Chatter is hidden. Click a row for the orders."
       actions={<button className="ct-iconbtn" onClick={() => refetch()} title="Reload"><RefreshCw size={14} className={isFetching ? 'spin' : ''} /></button>}>
-      <div className="ct-chips" style={{ marginBottom: 10 }}>
-        {[['all', 'All'], ['signals', 'Signals'], ['follow', 'Follow-ups'], ['problems', 'Skipped & errors']].map(([k, t]) => (
-          <button key={k} className={`ct-chip${filter === k ? ' is-on' : ''}`} onClick={() => setFilter(k)}>{t}</button>
-        ))}
+      <div className="ct-toolbar">
+        <div className="ct-chips">
+          {[['all', 'All'], ['signals', 'Signals'], ['follow', 'Follow-ups'], ['problems', 'Skipped & errors']].map(([k, t]) => (
+            <button key={k} className={`ct-chip${filter === k ? ' is-on' : ''}`} onClick={() => { setFilter(k); setLimit(50); }}>{t} <span className="ct-chip__n">{count(F[k])}</span></button>
+          ))}
+        </div>
+        <div className="ct-toolbar__right">
+          <select className="ct-select ct-select--sm" value={chan} onChange={(e) => { setChan(e.target.value); setLimit(50); }}>
+            <option value="">All channels</option>
+            {channels.map((c) => <option key={c.id} value={String(c.id)}>{c.title}</option>)}
+          </select>
+          <div className="ct-affix ct-affix--sm">
+            <input className="ct-input" placeholder="Search messages" value={q} onChange={(e) => { setQ(e.target.value); setLimit(50); }} />
+            <span className="ct-affix__unit"><Search size={13} /></span>
+          </div>
+        </div>
       </div>
-      {!rows.length ? <div className="ct-empty"><Inbox size={26} /><div>Nothing yet.</div></div> : (
-        <div style={{ overflowX: 'auto' }}>
+      {!rows.length ? <div className="ct-empty"><Inbox size={26} /><div>Nothing here.</div></div> : (
+        <div className="ct-logbox">
           <table className="ct-table">
             <thead><tr><th>Time</th><th>Channel</th><th>Type</th><th>Message</th><th>Result</th><th>Detail</th><th /></tr></thead>
             <tbody>
-              {rows.map((s) => (
+              {rows.slice(0, limit).map((s) => (
                 <Fragment key={s.id}>
                   <tr className={`is-click${open === s.id ? ' is-open' : ''}`} onClick={() => setOpen(open === s.id ? null : s.id)}>
                     <td className="num" style={{ whiteSpace: 'nowrap' }}>{s.created_at?.replace('T', ' ').slice(5, 16)}</td>
@@ -661,6 +701,12 @@ function SignalLog({ channels }) {
           </table>
         </div>
       )}
+      {rows.length > limit && (
+        <div className="ct-more">
+          <span className="ct-hint">Showing {limit} of {rows.length}</span>
+          <button className="btn btn-sm btn-secondary" onClick={() => setLimit(limit + 100)}>Show more</button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -670,8 +716,7 @@ const usd = (v) => (v == null ? '—' : `${v < 0 ? '-' : ''}$${Math.abs(v).toLoc
 const pct = (v) => (v == null ? '—' : `${(v * 100).toFixed(0)}%`);
 const tone = (v) => (v == null ? undefined : v > 0 ? 'var(--success, #16a34a)' : v < 0 ? 'var(--danger, #dc2626)' : undefined);
 
-function CopyBacktest({ channels }) {
-  const [sel, setSel] = useState([]);
+function CopyBacktest({ channels, sel, setSel }) {
   const [f, setF] = useState({ days: 60, balance: 10000, risk_pct: 1, compound: true, own_rules: true,
     sl_fraction: 1, scheme: 'equal', be_after_tp1: true, max_open_total: 0, chase_rule: 'limit', tol_pct: 0.15,
     compare_chase: false, optimise_exits: false });
@@ -693,7 +738,7 @@ function CopyBacktest({ channels }) {
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const toggle = (arr, setArr, v) => setArr(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const run = async () => {
-    setErr(null); setRes(null);
+    setErr(null); setRes(null); setSrcFilter('all');
     const body = { channel_ids: sel, strategy_backtest_ids: strats, days: +f.days, balance: +f.balance, risk_pct: +f.risk_pct,
       compound: f.compound, max_open_total: +f.max_open_total || 0, compare_chase: f.compare_chase, optimise_exits: f.optimise_exits };
     if (!f.own_rules) Object.assign(body, { sl_fraction: +f.sl_fraction, scheme: f.scheme, be_after_tp1: f.be_after_tp1,
@@ -707,66 +752,93 @@ function CopyBacktest({ channels }) {
   const pf = res?.portfolio;
   const trades = (res?.trades || []).filter((t) => srcFilter === 'all' || t.source === srcFilter);
   const curve = (pf?.curve || []).map((p) => ({ ...p, d: p.t?.slice(5, 16).replace('T', ' ') }));
+  // signals that never became a trade, by reason, per source
+  const notTaken = useMemo(() => {
+    const out = {};
+    (res?.trades || []).filter((t) => t.status !== 'FILLED').forEach((t) => {
+      const why = t.note || t.status?.toLowerCase().replace(/_/g, ' ') || 'not taken';
+      out[t.source] = out[t.source] || {};
+      out[t.source][why] = (out[t.source][why] || 0) + 1;
+    });
+    return out;
+  }, [res]);
+  const pickedNames = channels.filter((c) => sel.includes(c.id)).map((c) => c.title || c.chat_id);
   return (
-    <Card icon={<History size={15} />} title="Backtest channels"
-      sub="Replays each channel's own Telegram messages on this account's MT5 prices, with its copy rules, then runs them with real money - alone, together, or alongside saved strategy backtests.">
-      <div className="ct-chips" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
-        {channels.map((c) => (
-          <button key={c.id} className={`ct-chip${sel.includes(c.id) ? ' is-on' : ''}`} onClick={() => toggle(sel, setSel, c.id)}>{c.title || c.chat_id}</button>
-        ))}
-        {channels.length > 1 && <button className="ct-chip" onClick={() => setSel(sel.length === channels.length ? [] : channels.map((c) => c.id))}>{sel.length === channels.length ? 'None' : 'All'}</button>}
-      </div>
-      {backtests.data?.length > 0 && (
-        <details style={{ marginBottom: 10 }}>
-          <summary className="ct-hint" style={{ cursor: 'pointer' }}>Add saved strategy backtests to the portfolio ({strats.length} picked)</summary>
-          <div className="ct-chips" style={{ marginTop: 8, flexWrap: 'wrap' }}>
-            {backtests.data.slice(0, 40).map((b) => (
-              <button key={b.id} className={`ct-chip${strats.includes(b.id) ? ' is-on' : ''}`} onClick={() => toggle(strats, setStrats, b.id)}
-                title={`${b.total_trades ?? '?'} trades`}>{b.title || `${b.strategy_id} ${b.symbol}`}</button>
+    <Card id="ct-backtest" icon={<FlaskConical size={15} />} title="Backtest channels"
+      sub="Replays each channel's own Telegram messages on this account's MT5 prices with its copy rules, then runs them with money - alone, together, or alongside saved strategy backtests. Places nothing.">
+      <div className="ct-bt-layout">
+        <div className="ct-bt-panel">
+          <div className="ct-bt-panel__title">1 · What to test</div>
+          <div className="ct-chips">
+            {channels.map((c) => (
+              <button key={c.id} className={`ct-chip${sel.includes(c.id) ? ' is-on' : ''}`} onClick={() => toggle(sel, setSel, c.id)}
+                title={c.enabled ? 'Copying' : 'Watched only'}>
+                <span className={`ct-dot${c.enabled ? ' is-live' : ''}`} />{c.title || c.chat_id}{isNew(c) && <span className="ct-new">new</span>}
+              </button>
             ))}
+            {channels.length > 1 && <button className="ct-chip ct-chip--ghost" onClick={() => setSel(sel.length === channels.length ? [] : channels.map((c) => c.id))}>{sel.length === channels.length ? 'Clear' : 'All'}</button>}
           </div>
-        </details>
-      )}
-      <div className="ct-bt-form">
-        <Field label="Days back"><input className="ct-input" type="number" min="1" max="365" value={f.days} onChange={set('days')} /></Field>
-        <Field label="Starting balance"><input className="ct-input" type="number" value={f.balance} onChange={set('balance')} /></Field>
-        <Field label="Risk per signal %"><input className="ct-input" type="number" step="0.1" value={f.risk_pct} onChange={set('risk_pct')} /></Field>
-        <Field label="Max open (all sources)" hint="0 = no limit"><input className="ct-input" type="number" min="0" value={f.max_open_total} onChange={set('max_open_total')} /></Field>
-      </div>
-      <div className="ct-controls" style={{ margin: '6px 0 10px' }}>
-        <Switch checked={f.compound} onChange={(v) => setF({ ...f, compound: v })} label="Compound" sub={f.compound ? 'risk % of current equity' : 'risk % of the starting balance'} />
-        <Switch checked={f.own_rules} onChange={(v) => setF({ ...f, own_rules: v })} label="Each channel's own rules" sub="stop fraction, split, breakeven, late signals, follow-ups, max open" />
-        <Switch checked={f.compare_chase} onChange={(v) => setF({ ...f, compare_chase: v })} label="Compare late-signal settings" sub="take anyway / wait at the entry / skip, side by side" />
-        <Switch checked={f.optimise_exits} onChange={(v) => setF({ ...f, optimise_exits: v })} label="Tune exits" sub="stop fraction × split × breakeven, judged on unseen signals" />
-      </div>
-      {!f.own_rules && (
-        <div className="ct-bt-form">
-          <Field label="Stop fraction" hint="1 = provider's stop"><input className="ct-input" type="number" step="0.05" min="0.3" max="1" value={f.sl_fraction} onChange={set('sl_fraction')} /></Field>
-          <Field label="Split over targets">
-            <select className="ct-select" value={f.scheme} onChange={set('scheme')}>
-              <option value="equal">Equal</option><option value="tp1">All at TP1</option>
-              <option value="front">Front 50/30/20</option><option value="back">Back 20/30/50</option>
-            </select>
-          </Field>
-          <Field label=" "><Switch checked={f.be_after_tp1} onChange={(v) => setF({ ...f, be_after_tp1: v })} label="Breakeven after TP1" /></Field>
-          <Field label="Late signal (price past the entry)">
-            <select className="ct-select" value={f.chase_rule} onChange={set('chase_rule')}>
-              <option value="limit">Wait at the entry (limit)</option><option value="skip">Skip it</option><option value="market">Take it at market</option>
-            </select>
-          </Field>
-          <Field label="Late after %" hint="past the written entry"><input className="ct-input" type="number" step="0.05" min="0" value={f.tol_pct} onChange={set('tol_pct')} /></Field>
+          <p className="ct-hint" style={{ marginTop: 6 }}><span className="ct-dot is-live" /> copying now · <span className="ct-dot" /> watched only</p>
+          {backtests.data?.length > 0 && (
+            <details className="ct-bt-strats">
+              <summary className="ct-hint">Add saved strategy backtests to the portfolio ({strats.length} picked)</summary>
+              <div className="ct-chips" style={{ marginTop: 8 }}>
+                {backtests.data.slice(0, 40).map((b) => (
+                  <button key={b.id} className={`ct-chip${strats.includes(b.id) ? ' is-on' : ''}`} onClick={() => toggle(strats, setStrats, b.id)}
+                    title={`${b.total_trades ?? '?'} trades`}>{b.title || `${b.strategy_id} ${b.symbol}`}</button>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
-      )}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-        <button className="btn btn-primary btn-sm" disabled={!!job || (!sel.length && !strats.length)} onClick={run}>
-          <Play size={13} /> {job ? 'Running…' : 'Run backtest'}</button>
-        <button className="btn btn-secondary btn-sm" disabled={!sel.length || range === 'loading'} onClick={checkRange}>
-          <Search size={13} /> {range === 'loading' ? 'Checking…' : 'How far back can I go?'}</button>
+        <div className="ct-bt-panel">
+          <div className="ct-bt-panel__title">2 · Money and settings</div>
+          <div className="ct-bt-form">
+            <Field label="Days back"><input className="ct-input" type="number" min="1" max="365" value={f.days} onChange={set('days')} /></Field>
+            <Field label="Starting balance"><input className="ct-input" type="number" value={f.balance} onChange={set('balance')} /></Field>
+            <Field label="Risk per signal %"><input className="ct-input" type="number" step="0.1" value={f.risk_pct} onChange={set('risk_pct')} /></Field>
+            <Field label="Max open (all)" hint="0 = no limit"><input className="ct-input" type="number" min="0" value={f.max_open_total} onChange={set('max_open_total')} /></Field>
+          </div>
+          <div className="ct-bt-switches">
+            <Switch checked={f.compound} onChange={(v) => setF({ ...f, compound: v })} label="Compound" sub={f.compound ? 'risk % of current equity' : 'risk % of the starting balance'} />
+            <Switch checked={f.own_rules} onChange={(v) => setF({ ...f, own_rules: v })} label="Each channel's own rules" sub="stop, split, breakeven, late signals, follow-ups" />
+            <Switch checked={f.compare_chase} onChange={(v) => setF({ ...f, compare_chase: v })} label="Compare late-signal settings" sub="take anyway / wait at entry / skip" />
+            <Switch checked={f.optimise_exits} onChange={(v) => setF({ ...f, optimise_exits: v })} label="Tune exits" sub="judged on signals it never saw" />
+          </div>
+          {!f.own_rules && (
+            <div className="ct-bt-form" style={{ marginTop: 10 }}>
+              <Field label="Stop fraction" hint="1 = provider's stop"><input className="ct-input" type="number" step="0.05" min="0.3" max="1" value={f.sl_fraction} onChange={set('sl_fraction')} /></Field>
+              <Field label="Split over targets">
+                <select className="ct-select" value={f.scheme} onChange={set('scheme')}>
+                  <option value="equal">Equal</option><option value="tp1">All at TP1</option>
+                  <option value="front">Front 50/30/20</option><option value="back">Back 20/30/50</option>
+                </select>
+              </Field>
+              <Field label="Late signal">
+                <select className="ct-select" value={f.chase_rule} onChange={set('chase_rule')}>
+                  <option value="limit">Wait at the entry</option><option value="skip">Skip it</option><option value="market">Take it at market</option>
+                </select>
+              </Field>
+              <Field label="Late after %" hint="past the written entry"><input className="ct-input" type="number" step="0.05" min="0" value={f.tol_pct} onChange={set('tol_pct')} /></Field>
+              <Field label=" "><Switch checked={f.be_after_tp1} onChange={(v) => setF({ ...f, be_after_tp1: v })} label="Breakeven after TP1" /></Field>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="ct-bt-actions">
+        <button className="btn btn-primary" disabled={!!job || (!sel.length && !strats.length)} onClick={run}>
+          <Play size={14} /> {job ? 'Running…' : 'Run backtest'}</button>
+        <button className="btn btn-secondary" disabled={!sel.length || range === 'loading'} onClick={checkRange}>
+          <Search size={14} /> {range === 'loading' ? 'Checking…' : 'How far back can I go?'}</button>
+        <span className="ct-hint ct-bt-actions__what">
+          {sel.length || strats.length ? `${[...pickedNames, ...(strats.length ? [`${strats.length} strategy backtest${strats.length > 1 ? 's' : ''}`] : [])].join(', ')} · last ${f.days} days`
+            : 'Pick a channel above, or press the flask on a channel.'}
+        </span>
       </div>
       {job && <Note>Reading Telegram history and MT5 prices… the first run of a channel takes longest (cached for an hour).</Note>}
       {err && <Note tone="err">{err}</Note>}
       {range && range !== 'loading' && (
-        <div style={{ overflowX: 'auto', marginBottom: 12 }}>
+        <div style={{ overflowX: 'auto', margin: '12px 0' }}>
           <table className="ct-table">
             <thead><tr><th>Channel</th><th>First message</th><th>Signals, last 30 days</th><th>Symbols</th></tr></thead>
             <tbody>{range.channels.map((c) => (
@@ -778,7 +850,8 @@ function CopyBacktest({ channels }) {
         </div>
       )}
       {pf && (
-        <>
+        <div className="ct-bt-results">
+          <div className="ct-bt-panel__title">Results</div>
           <div className="ct-bt-tiles">
             {[['End balance', usd(pf.end_balance)], ['Net', usd(pf.net), pf.net], ['Return', pf.return_pct == null ? '—' : `${pf.return_pct}%`, pf.return_pct],
               ['Max drawdown', `${usd(pf.max_dd_usd)} (${pf.max_dd_pct}%)`], ['Trades', pf.trades], ['Max open at once', `${pf.max_concurrent_trades} (${pf.max_concurrent_risk_pct}% risk)`],
@@ -823,6 +896,13 @@ function CopyBacktest({ channels }) {
               </tbody>
             </table>
           </div>
+          {Object.keys(notTaken).length > 0 && (
+            <div className="ct-nottaken">
+              {Object.entries(notTaken).map(([src, why]) => (
+                <div key={src}><b>{src}</b> · not traded: {Object.entries(why).sort((x, y) => y[1] - x[1]).map(([w, n]) => `${w} ×${n}`).join(' · ')}</div>
+              ))}
+            </div>
+          )}
           {res.channels.some((c) => c.chase_compare) && (
             <>
               <h4 className="ct-card__title" style={{ margin: '14px 0 6px' }}>Late signals <span className="ct-hint">what each setting would have made · ● = the channel's current rule</span></h4>
@@ -892,7 +972,7 @@ function CopyBacktest({ channels }) {
             {trades.length > 500 && <p className="ct-hint">Showing the first 500 of {trades.length}.</p>}
           </div>
           <p className="ct-hint" style={{ marginTop: 8 }}>Method: {res.method}.</p>
-        </>
+        </div>
       )}
     </Card>
   );
@@ -906,6 +986,9 @@ export default function CopyTrading() {
   const { data: channels = [] } = useQuery({ queryKey: qk('ct-channels'), queryFn: () => copytrade.channels().then((r) => r.data) });
   const [history, setHistory] = useState(null);
   const [testText, setTestText] = useState('');
+  const [btSel, setBtSel] = useState([]);
+  const backtestChannel = (c) => { setBtSel([c.id]); setTimeout(() => jump('ct-backtest'), 0); };
+  const testMessage = (text) => { setTestText(text); setTimeout(() => jump('ct-tester'), 0); };
   const save = (d) => copytrade.saveSettings(d).then(() => qc.invalidateQueries({ queryKey: qk('ct-status') }));
   const tg = st?.telegram;
   const setLive = (live) => {
@@ -952,6 +1035,12 @@ export default function CopyTrading() {
       {tg?.last_error && <Note tone="warn">Last error: {tg.last_error}</Note>}
       {error && <Note tone="err">{apiError(error)}</Note>}
 
+      <nav className="ct-subnav">
+        {[['ct-channels', 'Channels'], ['ct-tester', 'Test a message'], ['ct-backtest', 'Backtest'], ['ct-log', 'Signal log'], ['ct-rules', 'Rules']].map(([id, t]) => (
+          <button key={id} onClick={() => jump(id)}>{t}</button>
+        ))}
+      </nav>
+
       <div className="ct-grid">
         <div className="ct-col">
           <Card icon={<Send size={15} />} title="Telegram account"
@@ -967,17 +1056,18 @@ export default function CopyTrading() {
               </div>
             ) : st && <TelegramLogin tg={tg} onDone={() => { refetch(); qc.invalidateQueries({ queryKey: qk('ct-dialogs') }); }} />}
           </Card>
-          <Channels loggedIn={!!tg?.logged_in} onHistory={(c) => setHistory(history?.id === c.id ? null : c)} historyId={history?.id} />
-          {history && <HistoryPanel channel={history} onClose={() => setHistory(null)} onTest={setTestText} />}
+          <Channels loggedIn={!!tg?.logged_in} onHistory={(c) => setHistory(history?.id === c.id ? null : c)} historyId={history?.id}
+            onBacktest={backtestChannel} />
         </div>
         <div className="ct-col">
           <ParseTester text={testText} setText={setTestText} channels={channels} />
+          {history && <HistoryPanel channel={history} onClose={() => setHistory(null)} onTest={testMessage} />}
         </div>
       </div>
 
-      {st && <Rules rules={st.rules} defaults={st.defaults} onSave={(rules) => save({ rules })} />}
+      <CopyBacktest channels={channels || []} sel={btSel} setSel={setBtSel} />
       <SignalLog channels={channels} />
-      <CopyBacktest channels={channels || []} />
+      {st && <Rules rules={st.rules} defaults={st.defaults} onSave={(rules) => save({ rules })} />}
     </div>
   );
 }

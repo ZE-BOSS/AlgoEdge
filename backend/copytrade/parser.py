@@ -110,12 +110,23 @@ def find_symbol(text: str) -> str | None:
             if fmt.startswith("Step"):
                 return "Step Index" if not g else f"Step Index {g}"
             return fmt.format(g)
-    # longest alias first so "US TECH 100" beats "US100", "XAU/USD" beats "XAU"
+    # Every alias mention, then: the one written next to BUY/SELL ("GBPCHF SELL",
+    # "SELL GBPCHF"), else the first one in the message. Promo footers ("Our
+    # XAUUSD Channel 👉") come after the signal, so they lose either way. At the
+    # same position the longer alias wins ("US TECH 100" over "US100").
     cleaned = re.sub(r"[#$]", " ", up)
-    for alias in sorted(SYMBOL_ALIASES, key=len, reverse=True):
-        if re.search(r"(?<![A-Z0-9])" + re.escape(alias) + r"(?![A-Z0-9])", cleaned):
-            return SYMBOL_ALIASES[alias]
-    return None
+    hits: list[tuple[int, int, str]] = []
+    for alias, canon in SYMBOL_ALIASES.items():
+        for m in re.finditer(r"(?<![A-Z0-9])" + re.escape(alias) + r"(?![A-Z0-9])", cleaned):
+            hits.append((m.start(), m.end(), canon))
+    if not hits:
+        return None
+    hits.sort(key=lambda h: (h[0], -(h[1] - h[0])))
+    for s, e, canon in hits:
+        if (re.match(r"\W{0,3}(?:BUY|SELL|LONG|SHORT)\b", cleaned[e:e + 8])
+                or re.search(r"\b(?:BUY|SELL|LONG|SHORT)(?:\s+(?:LIMIT|STOP|NOW))?\W{0,3}$", cleaned[max(0, s - 14):s])):
+            return canon
+    return hits[0][2]
 
 
 def _side_and_type(up: str) -> tuple[str | None, str]:
