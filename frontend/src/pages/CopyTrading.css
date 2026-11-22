@@ -209,3 +209,55 @@
 
 .ct-chan__state { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--bg-tertiary, #2a2a2a); color: var(--text-muted, #999); white-space: nowrap; }
 .ct-chan__state.is-live { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+
+/* ── redesign (22 Nov 2026): section nav, bounded log, collapsible rules ── */
+.ct-subnav { position: sticky; top: 0; z-index: 5; display: flex; gap: 4px; overflow-x: auto; padding: 6px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); scrollbar-width: none; }
+.ct-subnav::-webkit-scrollbar { display: none; }
+.ct-subnav button { flex: none; border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: 0.78rem;
+  font-weight: 600; padding: 6px 12px; border-radius: var(--radius-sm); cursor: pointer; }
+.ct-subnav button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.ct-card { scroll-margin-top: 64px; }
+.ct-card__head.is-click { cursor: pointer; }
+.ct-card__head.is-click:hover .ct-card__title { color: var(--text-accent); }
+
+.ct-new { margin-left: 6px; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 1px 6px;
+  border-radius: 999px; color: var(--blue); background: var(--blue-dim); border: 1px solid #5b9cf640; vertical-align: middle; }
+.ct-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); margin-right: 6px; vertical-align: middle; opacity: 0.7; }
+.ct-dot.is-live { background: var(--red); opacity: 1; }
+.ct-chip { display: inline-flex; align-items: center; }
+.ct-chip--ghost { background: transparent; border-style: dashed; }
+.ct-chip__n { margin-left: 6px; font-family: var(--font-mono); font-size: 0.66rem; color: var(--text-muted); }
+
+/* signal log */
+.ct-toolbar { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 10px; }
+.ct-toolbar__right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ct-select--sm, .ct-affix--sm .ct-input { height: 32px; font-size: 0.78rem; }
+.ct-select--sm { width: 200px; background-position: calc(100% - 15px) 13px, calc(100% - 10px) 13px; }
+.ct-affix--sm { width: 220px; }
+.ct-logbox { max-height: 520px; overflow: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+.ct-logbox .ct-table thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-card); }
+.ct-more { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+
+/* backtest */
+.ct-bt-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; }
+@media (max-width: 1000px) { .ct-bt-layout { grid-template-columns: minmax(0, 1fr); } }
+.ct-bt-panel { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); padding: 12px; min-width: 0; }
+.ct-bt-panel__title { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-accent); margin-bottom: 10px; }
+.ct-bt-strats { margin-top: 12px; }
+.ct-bt-strats summary { cursor: pointer; }
+.ct-bt-switches { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 8px; }
+.ct-bt-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 14px 0 10px; }
+.ct-bt-actions__what { margin-left: auto; text-align: right; }
+.ct-bt-results { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
+.ct-nottaken { margin: 10px 0 2px; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 0.74rem; line-height: 1.6;
+  background: var(--yellow-dim); border: 1px solid #d4a72c40; color: var(--text-secondary); }
+.ct-nottaken b { color: var(--text-primary); font-weight: 600; }
+
+@media (max-width: 640px) {
+  .ct-chan__row { flex-wrap: wrap; }
+  .ct-chan__main { flex-basis: calc(100% - 44px); }
+  .ct-select--sm, .ct-affix--sm { width: 100%; }
+  .ct-toolbar__right { width: 100%; }
+  .ct-bt-actions__what { margin-left: 0; text-align: left; width: 100%; }
+}
