@@ -1004,6 +1004,12 @@ html, body {
   max-width: 100%;
   overflow-x: hidden;
 }
+/* `hidden` makes body a scroll container that never scrolls, which silently
+   disables every position: sticky in the app. `clip` cuts the overflow the
+   same way without creating one. */
+@supports (overflow: clip) {
+  html, body { overflow-x: clip; }
+}
 
 /* ── Login Page ──────────────────────────────────────────────── */
 /* Same brand as the investor app and the website: gold on deep navy. */
