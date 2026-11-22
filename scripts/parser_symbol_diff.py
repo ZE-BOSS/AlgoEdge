@@ -13,6 +13,7 @@ from pathlib import Path
 def load(root, name):
     spec = importlib.util.spec_from_file_location(name, Path(root) / "backend/copytrade/parser.py")
     m = importlib.util.module_from_spec(spec)
+    sys.modules[name] = m          # dataclasses look their module up here
     spec.loader.exec_module(m)
     return m
 
@@ -21,8 +22,8 @@ old, new = load(sys.argv[1], "p_old"), load(sys.argv[2], "p_new")
 n = changed = 0
 for d in sys.argv[3:]:
     for f in sorted(Path(d).glob("*.json")):
-        msgs = json.loads(f.read_text()).get("messages", [])
-        title = json.loads(f.read_text()).get("title") or f.stem
+        c = json.loads(f.read_text())
+        msgs, title = c.get("messages", []), c.get("title") or f.stem
         for m in msgs:
             t = m.get("text") or ""
             if not t.strip():
