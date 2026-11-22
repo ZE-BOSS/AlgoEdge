@@ -20,10 +20,25 @@ def load(root, name):
 
 old, new = load(sys.argv[1], "p_old"), load(sys.argv[2], "p_new")
 n = changed = 0
-for d in sys.argv[3:]:
+def sources(d):
+    if d.endswith(".db"):                      # every message the copier logged
+        import sqlite3
+        con = sqlite3.connect(d)
+        names = dict(con.execute("select id, title from copytrade_channels"))
+        rows = con.execute("select id, channel_id, text from copytrade_signals").fetchall()
+        by = {}
+        for i, ch, t in rows:
+            by.setdefault(names.get(ch, ch), []).append({"id": i, "text": t})
+        for title, msgs in by.items():
+            yield title, msgs
+        return
     for f in sorted(Path(d).glob("*.json")):
         c = json.loads(f.read_text())
-        msgs, title = c.get("messages", []), c.get("title") or f.stem
+        yield c.get("title") or f.stem, c.get("messages", [])
+
+
+for d in sys.argv[3:]:
+    for title, msgs in sources(d):
         for m in msgs:
             t = m.get("text") or ""
             if not t.strip():
