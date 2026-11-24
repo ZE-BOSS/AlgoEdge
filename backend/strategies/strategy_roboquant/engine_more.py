@@ -423,6 +423,53 @@ class RQSigmaBreakout(ReplayStrategy):
         return dict(day=0, day_open=0.0, have_open=False, enabled=False, pv=0.0, pvol=0.0,
                     vwap_prev=0.0, have_vwap=False, slots={})
 
+    def watch(self, symbol, timeframe, candles):
+        """The bands the NEXT bar's close is judged against (pre-signal alerts).
+        Read from the replay state after the last closed bar, so they are the
+        same numbers step() will use."""
+        p = self.params
+        if (timeframe and timeframe != p.timeframe) or candles is None or len(candles) < 40:
+            return []
+        r = self._replay(symbol, candles)
+        if r is None:
+            return []
+        ctx, st, bars = r
+        k = len(bars) - 1
+        if not st.get("enabled") or not st.get("have_open"):
+            return []
+        gaps = np.diff(np.asarray(bars.t[-12:], dtype=np.int64)) // 60
+        gaps = gaps[(gaps > 0) & (gaps < 240)]
+        mins = int(np.median(gaps)) if len(gaps) else 5
+        hh, mm = divmod(int(bars.et_hhmm[k]), 100)
+        tot = hh * 60 + mm + mins
+        nxt = (tot // 60) * 100 + tot % 60
+        if not (930 <= nxt < 1600):
+            return []
+        hist = st["slots"].get(nxt)
+        if not hist:
+            return []
+        sigma = sum(hist) / len(hist)
+        ref = st["vwap_prev"] if (p.use_vwap and st["have_vwap"]) else st["day_open"]
+        upper, lower = ref + p.band_mult * sigma, ref - p.band_mult * sigma
+        pos = ctx.position()
+        # An order the template placed on the bar that just closed fills on the
+        # next one, so the position does not show it yet - but that bar was a
+        # signal and the next one starts from its side.
+        pend = ctx.orders.get(int(bars.t[k]))
+        if pend:
+            pos = 1 if pend["side"] > 0 else -1
+        note = f"bands {lower:.2f} / {upper:.2f} around {'VWAP' if p.use_vwap and st['have_vwap'] else 'the open'} {ref:.2f}"
+        out = []
+        if pos <= 0:
+            out.append({"direction": "BUY", "level": upper, "cross": "above",
+                        "stop": upper * (1 - p.sl_pct / 100.0) if p.sl_pct > 0 else None,
+                        "note": note + (" (flips the open sell)" if pos < 0 else "")})
+        if pos >= 0:
+            out.append({"direction": "SELL", "level": lower, "cross": "below",
+                        "stop": lower * (1 + p.sl_pct / 100.0) if p.sl_pct > 0 else None,
+                        "note": note + (" (flips the open buy)" if pos > 0 else "")})
+        return out
+
     def step(self, st, k, b, ctx):
         p = self.params
         hhmm, date = int(b.et_hhmm[k]), int(b.et_day[k])

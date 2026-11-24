@@ -242,6 +242,42 @@ class RQNYORB(_RQBase):
                             entry - s * dist, entry + s * p.rr_target * dist,
                             or_high=hi, or_low=lo, atr=float(atr[i]))
 
+    def watch(self, symbol, timeframe, candles):
+        """The opening-range levels a close must clear, once the range is set
+        and while today's one trade is still unused (pre-signal alerts)."""
+        p = self.params
+        if timeframe != p.timeframe or candles is None or len(candles) < 40:
+            return []
+        t = c.epochs(candles)
+        day, hhmm = c.et_parts(t)
+        i = len(t) - 1
+        if hhmm[i] >= min(p.flat_hhmm, p.cutoff_hhmm):
+            return []
+        today = np.where((day == day[i]) & (hhmm >= self.OR_START))[0]
+        if len(today) < p.range_bars or i < today[p.range_bars - 1]:
+            return []
+        rb = today[:p.range_bars]
+        hi = float(candles["high"].to_numpy()[rb].max())
+        lo = float(candles["low"].to_numpy()[rb].min())
+        if hi <= lo:
+            return []
+        close = candles["close"].to_numpy(dtype=float)
+        atr = c.atr_series(candles["high"].to_numpy(), candles["low"].to_numpy(), close, p.atr_period)
+        vol = c.volume(candles)
+        for j in today[today > rb[-1]]:
+            e = self._entry_at(j, hi, lo, close, atr, vol, rb[-1])
+            if e is not None and e[0] != "blocked":
+                return []                               # today's trade is taken
+        a = float(atr[i]) if np.isfinite(atr[i]) else 0.0
+        out = []
+        if p.allow_long:
+            out.append({"direction": "BUY", "level": hi, "cross": "above",
+                        "stop": hi - p.atr_stop_mult * a if a else None, "note": f"opening range {lo:.2f}-{hi:.2f}"})
+        if p.allow_short:
+            out.append({"direction": "SELL", "level": lo, "cross": "below",
+                        "stop": lo + p.atr_stop_mult * a if a else None, "note": f"opening range {lo:.2f}-{hi:.2f}"})
+        return out
+
     def on_position_bar(self, symbol, timeframe, candles, position):
         if c.et_hhmm_one(c.epochs(candles)[-1]) >= self.params.flat_hhmm:
             return self._close(position, "RQ_SESSION_FLAT")
@@ -313,6 +349,41 @@ class RQCrazyORB(_RQBase):
             ex = c.simulate_exit(high, low, j + 1, i + 1, want == "BUY", sl, tp)
             open_until = (ex if ex is not None else i + 1)
         return None
+
+    def watch(self, symbol, timeframe, candles):
+        """Range levels for the sides not yet used today (pre-signal alerts).
+        Simpler than on_bar's replay: a side counts as used once a close beyond
+        it happened today, and nothing is offered while max_trades is reached."""
+        p = self.params
+        if timeframe != p.timeframe or candles is None or len(candles) < 40:
+            return []
+        t = c.epochs(candles)
+        day, hhmm = c.et_parts(t)
+        i = len(t) - 1
+        if hhmm[i] >= p.flatten_hhmm or hhmm[i] >= p.trade_end_hhmm or hhmm[i] < p.range_end_hhmm:
+            return []
+        today = day == day[i]
+        rng = np.where(today & (hhmm >= p.range_start_hhmm) & (hhmm < p.range_end_hhmm))[0]
+        if not len(rng):
+            return []
+        high = candles["high"].to_numpy(dtype=float)
+        low = candles["low"].to_numpy(dtype=float)
+        close = candles["close"].to_numpy(dtype=float)
+        hi, lo = float(high[rng].max()), float(low[rng].min())
+        after = np.where(today & (hhmm >= p.range_end_hhmm))[0]
+        long_used = bool((close[after] > hi).any())
+        short_used = bool((close[after] < lo).any())
+        if int(long_used) + int(short_used) >= p.max_trades:
+            return []
+        a = c.atr_series(high, low, close, p.atr_period)[i]
+        a = float(a) if np.isfinite(a) else 0.0
+        note = f"opening range {lo:.2f}-{hi:.2f}"
+        out = []
+        if not long_used:
+            out.append({"direction": "BUY", "level": hi, "cross": "above", "stop": hi - p.atr_mult * a if a else None, "note": note})
+        if not short_used:
+            out.append({"direction": "SELL", "level": lo, "cross": "below", "stop": lo + p.atr_mult * a if a else None, "note": note})
+        return out
 
     def on_position_bar(self, symbol, timeframe, candles, position):
         if c.et_hhmm_one(c.epochs(candles)[-1]) >= self.params.flatten_hhmm:

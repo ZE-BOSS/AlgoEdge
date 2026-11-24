@@ -1414,6 +1414,12 @@ class BotService:
                                 _feed = _feeds[slot.slot_id] = LiveBarFeed(current_engine, symbol, req_tfs)
                             if hasattr(current_engine, 'context'):
                                 current_engine.context["news_blocked"] = self.news_filter.is_blocked(symbol) if hasattr(self, 'news_filter') else False
+                            # Pre-signal alerts (services/watch_service.py): a read-only tap on
+                            # the strategy's gate() checks, on before the bars are fed so the
+                            # warm-up teaches it which gates a real signal passes.
+                            from backend.services.watch_service import attach_tap, watch_service
+                            if watch_service.enabled:
+                                attach_tap(current_engine)
                             _fed = await _feed.advance({tf: _index_candles(fetched_data[tf]).sort_index() for tf in req_tfs})
                             if _fed.history_gap:
                                 self._log_event(
@@ -1452,6 +1458,29 @@ class BotService:
                                     signal.timestamp = float(pd.Timestamp(_feed.last_time).timestamp())
                                 except Exception:  # noqa: BLE001
                                     pass
+                            if watch_service.enabled and (getattr(_fed, "stepped", 0) or _fed.primed):
+                                try:
+                                    if watch_service.sender is None:
+                                        from backend.services.telegram import telegram_service as _tg
+                                        watch_service.sender = _tg.send_message
+                                    from backend.services.signal_sync import _instance_name
+                                    # Exactly the closed bars the engine's last on_bar saw: the
+                                    # feed's primary frame minus the row still forming. Passing the
+                                    # forming bar would advance a replay strategy's saved state.
+                                    from backend.strategies.bar_feed import window_bars as _wb
+                                    _wtf = _feed.primary
+                                    _wfr = _feed.frames.get(_wtf)
+                                    _wcan = None
+                                    if _wfr is not None and len(_wfr) > 1:
+                                        _wn = len(_wfr) - 1
+                                        _wcan = _wfr.iloc[max(0, _wn - _wb(_wtf, current_engine)):_wn]
+                                    if _wcan is not None:
+                                        await watch_service.after_bar(
+                                            slot_id=slot.slot_id, strategy_id=strategy_id, symbol=symbol,
+                                            engine=current_engine, candles=_wcan, timeframe=_wtf, signal=signal,
+                                            instance=_instance_name(), warming=bool(_fed.primed))
+                                except Exception as _we:  # noqa: BLE001 - alerts must never stop trading
+                                    logger.debug(f"[WATCH] {strategy_id}: {_we}")
                             if signal is not None:
                                 signal_sync.note_local(strategy_id, symbol, signal.timestamp)
                             elif signal_sync.enabled:

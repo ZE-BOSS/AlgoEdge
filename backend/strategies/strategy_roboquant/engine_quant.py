@@ -114,6 +114,27 @@ def dipbuy_signals(H, L, C, p) -> np.ndarray:
     return sig & trend
 
 
+def partial_today(candles):
+    """Completed sessions plus TODAY so far, when the last closed bar is the
+    15:00 ET bar (the half-hour before the decision bar): (H, L, C) arrays with
+    today last. None at any other time. Used for pre-signal alerts only."""
+    t = c.epochs(candles)
+    if c.et_hhmm_one(t[-1]) != LAST_BAR - 30:
+        return None
+    days, H, L, C = session_ohlc(candles)
+    day, hhmm = c.et_parts(t)
+    today = int(day[-1])
+    if days and days[-1] == today:
+        return None
+    m = (day == today) & (hhmm >= CASH_OPEN) & (hhmm <= LAST_BAR - 30)
+    if m.sum() < 10:
+        return None
+    h = float(candles["high"].to_numpy(dtype=float)[m].max())
+    lo = float(candles["low"].to_numpy(dtype=float)[m].min())
+    cl = float(candles["close"].to_numpy(dtype=float)[-1])
+    return np.append(H, h), np.append(L, lo), np.append(C, cl)
+
+
 @register_strategy("QL_IBS_v1")
 class QLIBSMeanReversion(_RQBase):
     strategy_id = "QL_IBS_v1"
@@ -150,6 +171,23 @@ class QLIBSMeanReversion(_RQBase):
         if p.notional_x and p.notional_x > 0:
             meta["size_notional_x"] = float(p.notional_x)
         return self._signal(symbol, timeframe, candles, "BUY", entry, sl, entry + 40.0 * (entry - sl), **meta)
+
+    def watch(self, symbol, timeframe, candles):
+        """At 15:30 ET, half an hour before the decision: if the session so far
+        already qualifies, the close is likely to (pre-signal alerts)."""
+        p = self.params
+        if timeframe != p.timeframe or candles is None or len(candles) < 40:
+            return []
+        part = partial_today(candles)
+        if part is None:
+            return []
+        H, L, C = part
+        if not (_ibs(H[-1:], L[-1:], C[-1:])[0] < p.ibs_below and _sma_above(C, p.sma_days)[-1]):
+            return []
+        level = float(L[-1] + p.ibs_below * (H[-1] - L[-1]))
+        return [{"direction": "BUY", "level": level, "cross": "below",
+                 "note": f"decided at the 16:00 New York close: IBS now {(_ibs(H[-1:], L[-1:], C[-1:])[0]):.2f}, "
+                         f"needs under {p.ibs_below}; a close below {level:.2f} keeps it"}]
 
     def on_position_bar(self, symbol, timeframe, candles, position):
         """At each later cash close: hold while the signal repeats, else close."""
@@ -198,6 +236,33 @@ class QLDipBuy(_RQBase):
         if p.notional_x and p.notional_x > 0:
             meta["size_notional_x"] = float(p.notional_x)
         return self._signal(symbol, timeframe, candles, "BUY", entry, sl, entry + 40.0 * (entry - sl), **meta)
+
+    def watch(self, symbol, timeframe, candles):
+        """At 15:30 ET: would today's close give a dip signal if the market
+        closed here? (pre-signal alerts)."""
+        p = self.params
+        if timeframe != p.timeframe or candles is None or len(candles) < 40:
+            return []
+        part = partial_today(candles)
+        if part is None:
+            return []
+        H, L, C = part
+        if not bool(dipbuy_signals(H, L, C, p)[-1]):
+            return []
+        trend = _sma_above(C, p.sma_days)[-1]
+        why, level = [], None
+        if p.ibs_below and _ibs(H[-1:], L[-1:], C[-1:])[0] < p.ibs_below:
+            level = float(L[-1] + p.ibs_below * (H[-1] - L[-1]))
+            why.append(f"IBS under {p.ibs_below}")
+        if p.use_down_days and len(C) > p.down_days and all(C[-k] < C[-k - 1] for k in range(1, p.down_days + 1)):
+            level = max(level or 0.0, float(C[-2]))
+            why.append(f"{p.down_days} lower closes")
+        if not why:
+            why.append("cumulative RSI(2) low")
+        if level is None:
+            level = float(C[-1])
+        return [{"direction": "BUY", "level": level, "cross": "below",
+                 "note": f"decided at the 16:00 New York close: {', '.join(why)}" + ("" if trend else " (trend filter off)")}]
 
     def on_position_bar(self, symbol, timeframe, candles, position):
         """At each later cash close: exit above SMA(exit_sma_days) or after max_hold_days sessions."""
