@@ -29,3 +29,24 @@ def test_first_symbol_wins_without_a_side_next_to_it():
     assert find_symbol("EURCAD: SELL @1.57910 SL 1.58209 TP 1.57627. Our XAUUSD channel") == "EURCAD"
     assert find_symbol("US TECH 100 sell 21000 sl 21100 tp 20800") == "NAS100"
     assert find_symbol("BUY XAU/USD 2350") == "XAUUSD"
+
+
+def test_vip_teaser_with_withheld_target_is_not_a_signal():
+    from backend.copytrade.parser import parse_message
+    msg = ("XAUUSD SELL NOW 3656\nSL. 3660\nTp \nONLY 30 PEOPLE ALLOWED😮\n➖➖➖➖➖\nGold GROUP \n➖➖➖➖➖➖➖➖\n"
+           "https://t.me/+AbCdEf123\n\nJOIN VIP GROUP")
+    p = parse_message(msg)
+    assert p.kind == "NONE" and any("teaser" in n for n in p.notes)
+
+
+def test_real_signal_with_a_sales_footer_is_still_a_signal():
+    from backend.copytrade.parser import parse_message
+    msg = ("GBPCHF SELL\nENTRY @ 1.09802\nSL: 1.09989\nTP1: 1.09625\nTP2: 1.09409\n"
+           "Become a VIP member > easyforexpips.com\nJOIN VIP GROUP https://t.me/+AbCdEf123")
+    assert parse_message(msg).kind == "OPEN"
+
+
+def test_signal_without_any_target_label_is_still_a_signal():
+    from backend.copytrade.parser import parse_message
+    p = parse_message("GOLD SELL NOW 3656 SL 3660 JOIN VIP GROUP")
+    assert p.kind == "OPEN" and p.sl == 3660

@@ -352,6 +352,17 @@ def _management(up: str) -> ParsedSignal | None:
     return None
 
 
+_TP_LABEL = re.compile(r"\b(?:TP\s*\d{0,2}|T/P|TAKE\s*PROFITS?|TARGETS?)\b")
+_PROMO = re.compile(
+    r"\bJOIN\s+(?:OUR\s+|THE\s+|MY\s+)?(?:VIP|PREMIUM|PAID|PRIVATE)\b"
+    r"|\b(?:VIP|PREMIUM)\s+(?:GROUP|CHANNEL|MEMBERS?|ACCESS|SLOTS?)\b"
+    r"|\bONLY\s+\d+\s+(?:PEOPLE|SLOTS?|SPOTS?|MEMBERS?|PERSONS?)\b"
+    r"|\b(?:PEOPLE|SLOTS?|SPOTS?)\s+(?:ALLOWED|LEFT|REMAINING|AVAILABLE)\b"
+    r"|\b(?:FULL|COMPLETE)\s+(?:SIGNAL|TARGETS?|TPS?)\s+(?:IN|ON)\s+(?:VIP|PREMIUM)\b"
+    r"|\bTPS?\s+(?:IN|ON)\s+(?:VIP|PREMIUM)\b"
+    r"|T\.ME/(?:\+|JOINCHAT/)")
+
+
 def parse_message(text: str) -> ParsedSignal:
     if not text or not text.strip():
         return ParsedSignal()
@@ -364,6 +375,14 @@ def parse_message(text: str) -> ParsedSignal:
     side, otype = _side_and_type(up)
     sl = _sl(up)
     tps, tp_open = _tps(up)
+    # A VIP teaser: a target label left blank ("Tp" with no number, the target
+    # withheld) next to a sales line ("JOIN VIP GROUP", "ONLY 30 PEOPLE
+    # ALLOWED"). Copied on 24 Nov 2026 from XAUUSD PROFIT TRADER as a real
+    # signal. A sales footer on its own does not count: real signals carry them.
+    if side and not tps and not tp_open and _TP_LABEL.search(up) and _PROMO.search(up):
+        p = ParsedSignal()
+        p.notes.append("VIP teaser: the target is withheld behind a sales line - not copied")
+        return p
     # An OPEN names a side and at least a stop or a target; otherwise it is a
     # follow-up (or chat).
     if side and (sl is not None or tps) and not re.search(

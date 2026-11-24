@@ -21,6 +21,14 @@ def load(root, name):
 old, new = load(sys.argv[1], "p_old"), load(sys.argv[2], "p_new")
 n = changed = 0
 def sources(d):
+    if d.endswith(".tsv"):                     # copytrade_export.py output: every message, text last
+        msgs = []
+        for line in open(d, encoding="utf-8"):
+            parts = line.rstrip("\n").split("\t", 4)
+            if len(parts) == 5:
+                msgs.append({"id": parts[1], "text": parts[4].replace("\\n", "\n")})
+        yield Path(d).stem, msgs
+        return
     if d.endswith(".db"):                      # every message the copier logged
         import sqlite3
         con = sqlite3.connect(d)
