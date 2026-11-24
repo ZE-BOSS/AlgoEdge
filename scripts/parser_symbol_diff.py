@@ -55,5 +55,5 @@ for d in sys.argv[3:]:
             a, b = old.parse_message(t), new.parse_message(t)
             if (a.kind, a.symbol, a.side) != (b.kind, b.symbol, b.side):
                 changed += 1
-                print(f"{d.split('/')[3]:5s} {str(title)[:22]:22s} #{m.get('id')}: {a.kind}/{a.symbol}/{a.side} -> {b.kind}/{b.symbol}/{b.side} | {' '.join(t.split())[:90]}")
+                print(f"{(d.split('/')[3] if d.startswith('/opt/') else 'tsv'):5s} {str(title)[:22]:22s} #{m.get('id')}: {a.kind}/{a.symbol}/{a.side} -> {b.kind}/{b.symbol}/{b.side} | {' '.join(t.split())[:90]}")
 print(f"messages {n}, changed {changed}")
