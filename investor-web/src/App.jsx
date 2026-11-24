@@ -16,6 +16,7 @@ import Home from './pages/Home';
 import Money from './pages/Money';
 import Activity from './pages/Activity';
 import Referrals from './pages/Referrals';
+import Bot from './pages/Bot';
 import Trades from './pages/Trades';
 import How from './pages/How';
 import Account from './pages/Account';
@@ -121,6 +122,7 @@ export default function App() {
           <Route path="/money/*" element={guard(<Money />)} />
           <Route path="/activity" element={guard(<Activity />)} />
           <Route path="/referrals" element={guard(<Referrals />)} />
+          <Route path="/bot" element={guard(<Bot />)} />
           <Route path="/trades" element={guard(<Trades />)} />
           <Route path="/how" element={guard(<How />)} />
           <Route path="/account" element={guard(<Account />)} />

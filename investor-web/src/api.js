@@ -113,6 +113,9 @@ export const api = {
     call('/withdrawals', { method: 'POST', body: { amount, justification: justification || null } }),
   requestClosure: (reason) => call('/closure', { method: 'POST', body: { reason: reason || null } }),
   myReferrals: () => call('/referrals'),
+  vvipMe: () => call('/vvip/me'),
+  vvipConnect: (body) => call('/vvip/connect', { method: 'POST', body }),
+  vvipSettings: (body) => call('/vvip/settings', { method: 'PATCH', body }),
   // Public, so not under BASE (which is /api/investor). Says whether a code is
   // ours and what joining through it costs - never who owns it.
   referralCheck: async (code) => {

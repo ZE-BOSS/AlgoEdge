@@ -240,10 +240,25 @@ async def lifespan(app: FastAPI):
         from backend.copytrade.notify import daily_report_loop
         daily_report_task = asyncio.create_task(daily_report_loop())
 
+    # Signal groups bot (General / VIP / VVIP). Only where GROUP_BOT_TOKEN is
+    # set - the live instance - and never on an audit copy.
+    if os.getenv("ALGOEDGE_AUDIT") != "1" and os.getenv("GROUP_BOT_TOKEN", "").strip():
+        try:
+            from backend.groups.bot import group_bot
+            await group_bot.start()
+        except Exception as e:
+            logger.warning(f"Group bot not started: {e}")
+
     yield
 
     if daily_report_task is not None:
         daily_report_task.cancel()
+
+    try:
+        from backend.groups.bot import group_bot as _gb
+        await _gb.stop()
+    except Exception:
+        pass
 
     try:
         from backend.copytrade.telegram_client import telegram_manager as _tgm
@@ -367,6 +382,11 @@ app.include_router(system.router)  # Telegram status/test, live account, state r
 app.include_router(cash.router)
 app.include_router(rl.router)                # [W4] RL agents, charters, proposals
 app.include_router(copytrade.router)          # Telegram copy trading
+from backend.api.routes import groups as _groups_routes   # noqa: E402
+from backend.groups import vvip as _vvip                    # noqa: E402
+app.include_router(_groups_routes.router)     # signal groups admin
+app.include_router(_vvip.portal)              # VVIP, investor audience
+app.include_router(_vvip.payments)            # Paystack webhook (off until keyed)
 app.include_router(kronos.router)            # Kronos forecasts: jobs in their own process
 
 

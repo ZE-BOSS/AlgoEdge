@@ -145,6 +145,7 @@ class WatchService:
         self._path = Path(chains_path) if chains_path else Path("data") / "watch_chains.json"
         self._load()
         self.sender = None                    # async callable(text) - set by bot_service / tests
+        self.events: list[tuple] = []         # structured heads-ups for the group bot
 
     # -- chains: which gates a real signal passes, per strategy ------------------
     def _load(self) -> None:
@@ -249,6 +250,7 @@ class WatchService:
             key = f"hu:{lv['direction']}:{round(float(lv['level']), 2)}"
             if self._allow(st, key, HEADSUP_COOLDOWN_S, now):
                 st.headsup = {"direction": lv["direction"], "level": float(lv["level"]), "cross": cross, "sent": now}
+                self.events.append(("headsup", strategy_id, slot_id, symbol, dict(lv, cross=cross)))
                 where = (f"price {_fmt(price)} is already {'above' if cross == 'above' else 'below'} it"
                          if gap <= 0 else f"price {_fmt(price)}, {gap / atr:.1f} ATR away")
                 stop = f" · stop ~{_fmt(float(lv['stop']))}" if lv.get("stop") else ""
@@ -264,6 +266,7 @@ class WatchService:
                 why = ("its window closed or the setup changed" if not still
                        else f"price moved away ({_fmt(price)}, {gap / atr:.1f} ATR from the trigger)")
                 out.append(f"↩️ *Setup withdrawn*: {sym} {h['direction']} ({sid}{acct}) - {why}. No trade.")
+                self.events.append(("withdrawn", strategy_id, slot_id, symbol, h))
                 st.headsup = None
 
         # 2. generic near signal
@@ -279,6 +282,17 @@ class WatchService:
 
     async def after_bar(self, **kw) -> None:
         texts = self.evaluate(**kw)
+        evs, self.events = self.events, []
+        if evs:
+            try:
+                from backend.groups import feeds as _gfeeds
+                for kind, sid, slot, sym, lv in evs:
+                    if kind == "headsup":
+                        _gfeeds.headsup(sid, slot, sym, lv)
+                    else:
+                        _gfeeds.headsup_withdrawn(slot)
+            except Exception as e:            # noqa: BLE001
+                logger.debug(f"[WATCH] group feed: {e}")
         if not texts or self.sender is None:
             return
         for t in texts:

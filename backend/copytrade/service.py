@@ -195,6 +195,12 @@ class CopyTradeService:
         sig.actions = list(sig.actions or [])
         logger.info(f"[COPYTRADE] {ch.title or ch.chat_id} #{msg_id} {parsed.kind} -> {sig.status}: {sig.detail}")
         await self._notify_signal(s, sig, ch, rules)
+        try:
+            from backend.groups import feeds as _gfeeds
+            if _gfeeds.active() and sig.status not in ("DRY_RUN",):
+                _gfeeds.copier_message(sig, ch, await self._all_orders(s, sig.id) if sig.kind == "OPEN" else [])
+        except Exception:  # noqa: BLE001 - group posts never break copying
+            pass
         return {"status": sig.status, "detail": sig.detail, "signal_id": sig.id, "kind": parsed.kind,
                 "parsed": pd, "actions": sig.actions}
 
@@ -789,6 +795,11 @@ class CopyTradeService:
                             nets.append(c["net"])
                 total = round(sum(nets), 2) if nets else None
             notify.alerts.post(notify.round_message(ch.title if ch else str(root.chat_id), root, lines, total))
+            try:
+                from backend.groups import feeds as _gfeeds
+                _gfeeds.copier_round(root, rows, snap, closed)
+            except Exception:  # noqa: BLE001
+                pass
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[COPYTRADE] order alert failed: {e}")
 

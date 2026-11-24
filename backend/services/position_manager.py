@@ -492,6 +492,12 @@ class PositionManager:
                         if pos.mt5_ticket not in self._notified_closes:
                             self._notified_closes.add(pos.mt5_ticket)
                             try:
+                                from backend.groups import feeds as _gfeeds
+                                _gfeeds.strategy_leg_closed(trade, pos, reason if 'reason' in locals() else "CLOSED",
+                                                            float(exit_deal.price) if exit_deal is not None else None)
+                            except Exception:  # noqa: BLE001
+                                pass
+                            try:
                                 import asyncio
 
                                 from backend.services.telegram import telegram_service
@@ -812,6 +818,11 @@ class PositionManager:
                 if st.be_applied and not lp.be_applied:
                     lp.be_applied = True
                     changed = True
+                    try:
+                        from backend.groups import feeds as _gfeeds
+                        _gfeeds.strategy_breakeven(trade)
+                    except Exception:  # noqa: BLE001
+                        pass
                 if st.trail_applied and not getattr(lp, "trail_activated", False):
                     lp.trail_activated = True
                     changed = True

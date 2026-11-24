@@ -561,6 +561,26 @@ export const kronos = {
 
 // ── Copy trading (Telegram signal channels) ────────────────────────────────
 const CT = '/copytrade';
+const GR = '/api/groups';
+export const groupsApi = {
+  status: () => api.get(`${GR}/status`),
+  saveSettings: (patch) => api.put(`${GR}/settings`, { patch }),
+  patchGroup: (id, data) => api.patch(`${GR}/groups/${id}`, data),
+  sources: () => api.get(`${GR}/sources`),
+  addRoute: (data) => api.post(`${GR}/routes`, data),
+  patchRoute: (id, data) => api.patch(`${GR}/routes/${id}`, data),
+  deleteRoute: (id) => api.delete(`${GR}/routes/${id}`),
+  feed: () => api.get(`${GR}/feed`),
+  drafts: () => api.get(`${GR}/drafts`),
+  decideDraft: (id, act) => api.post(`${GR}/drafts/${id}/${act}`),
+  post: (data) => api.post(`${GR}/post`, data),
+  members: () => api.get(`${GR}/members`),
+  patchMember: (id, data) => api.patch(`${GR}/members/${id}`, data),
+  decideMember: (id, act) => api.post(`${GR}/members/${id}/${act}`),
+  clients: () => api.get(`${GR}/clients`),
+  patchClient: (id, data) => api.patch(`${GR}/clients/${id}`, data),
+};
+
 export const copytrade = {
   status: () => api.get(`${CT}/status`),
   saveSettings: (data) => api.put(`${CT}/settings`, data),

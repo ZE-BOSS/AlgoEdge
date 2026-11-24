@@ -60,6 +60,7 @@ async def init_db():
     import backend.mt5.cash_models  # noqa: F401 — same reason: the cash ledger
     import backend.rl.models  # noqa: F401 — agents, charters, proposals, adherence
     import backend.copytrade.models  # noqa: F401 — Telegram copy trading
+    import backend.groups.models  # noqa: F401 — signal groups (General / VIP / VVIP)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

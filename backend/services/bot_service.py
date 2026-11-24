@@ -1963,6 +1963,8 @@ class BotService:
                                         if db_positions and self.user_id:
                                             sig_id = await self._save_signal_state(signal, "EXECUTED", tp_levels=db_positions)
                                             signal_sync.publish(signal)
+                                            from backend.groups import feeds as _gfeeds
+                                            _gfeeds.strategy_opened(strategy_id, group_id, signal, db_positions)
                                             self._last_signal_time[_dedupe_key] = _sig_fp
                                             try:
                                                 import json
