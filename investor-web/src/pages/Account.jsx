@@ -183,6 +183,10 @@ export default function Account() {
     <Loaded q={me}>
       {({ investor: i, terms: t }) => (
         <div className="settings">
+          <Link to="/bot" className="card" style={{ display: 'block', textDecoration: 'none' }}>
+            <strong>Bot trading (VVIP)</strong>
+            <p className="muted small" style={{ margin: '4px 0 0' }}>Let our bot trade your own MT5 account, see backtests and order-flow levels.</p>
+          </Link>
           <section className="card profile-card">
             <div className="avatar big-avatar" aria-hidden="true">
               {String(i.name || '?').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')}

@@ -21,7 +21,7 @@ from backend.data.models import User
 from backend.groups import settings as S
 from backend.groups import templates as T
 from backend.groups.models import (
-    ClientAccount, GroupMember, GroupPost, GroupSignal, LLMDraft, Payment, SignalGroup, SignalRoute,
+    BacktestRequest, ClientAccount, GroupMember, GroupPost, GroupSignal, LLMDraft, Payment, SignalGroup, SignalRoute,
 )
 
 router = APIRouter(prefix="/api/groups", tags=["groups"])
@@ -269,7 +269,19 @@ async def member_decision(mid: int, act: str, _: User = Depends(require_admin)):
 async def clients(db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
     rows = (await db.execute(select(ClientAccount).order_by(desc(ClientAccount.created_at)))).scalars().all()
     pays = (await db.execute(select(Payment).order_by(desc(Payment.created_at)).limit(200))).scalars().all()
-    return {"clients": [_row(c, "mt5_password_encrypted") for c in rows], "payments": [_row(p, "raw") for p in pays]}
+    reqs = (await db.execute(select(BacktestRequest).order_by(desc(BacktestRequest.created_at)).limit(100))).scalars().all()
+    return {"clients": [_row(c, "mt5_password_encrypted") for c in rows], "payments": [_row(p, "raw") for p in pays],
+            "requests": [_row(r) for r in reqs]}
+
+
+@router.post("/backtest-requests/{rid}/{status}")
+async def close_backtest_request(rid: int, status: str, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+    r = await db.get(BacktestRequest, rid)
+    if r is None or status.upper() not in ("DONE", "DECLINED", "OPEN"):
+        raise HTTPException(404, "not found")
+    r.status = status.upper()
+    await db.commit()
+    return {"ok": True}
 
 
 class ClientPatch(BaseModel):

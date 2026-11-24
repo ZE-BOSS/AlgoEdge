@@ -1,0 +1,161 @@
+"""
+backend/orderflow/feed.py
+
+Streams CME gold and Nasdaq futures trades from Databento (GLBX.MDP3, trades
+schema) into one SessionProfile per market, replaying the session so far on
+start (the live API replays up to 24 hours). Every 15 seconds it writes a
+snapshot - the levels in futures prices and translated to the broker's CFD
+prices with the live basis - to the shared folder, where the admin API and
+Elite clients' portal read it.
+
+Runs only where ORDERFLOW=1 and DATABENTO_API_KEY are set (the live instance).
+
+Environment
+    DATABENTO_API_KEY   the key from the Databento portal
+    ORDERFLOW           "1" to run
+    ORDERFLOW_MAP       futures=CFD pairs, default "GC.v.0=XAUUSDm,NQ.v.0=USTECm"
+    ORDERFLOW_DIR       default /opt/algoedge/shared/orderflow
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import threading
+import time
+from pathlib import Path
+
+from backend.orderflow.profile import SessionProfile, session_start_utc, to_cfd
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+SPECS = {  # root -> (tick size, large-print threshold in contracts, display name)
+    "GC": (0.1, 20, "Gold futures (COMEX GC)"),
+    "MGC": (0.1, 100, "Micro gold futures"),
+    "NQ": (0.25, 15, "Nasdaq 100 futures (CME NQ)"),
+    "MNQ": (0.25, 150, "Micro Nasdaq futures"),
+    "ES": (0.25, 50, "S&P 500 futures (CME ES)"),
+}
+
+
+def out_dir() -> Path:
+    return Path(os.getenv("ORDERFLOW_DIR", "/opt/algoedge/shared/orderflow"))
+
+
+def pairs() -> dict[str, str]:
+    raw = os.getenv("ORDERFLOW_MAP", "GC.v.0=XAUUSDm,NQ.v.0=USTECm")
+    return {a.strip(): b.strip() for a, b in (p.split("=", 1) for p in raw.split(",") if "=" in p)}
+
+
+def read_snapshot() -> dict:
+    try:
+        return json.loads((out_dir() / "levels.json").read_text())
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+class OrderFlowFeed:
+    def __init__(self):
+        self.profiles: dict[str, SessionProfile] = {}
+        self.ids: dict[int, str] = {}          # instrument_id -> continuous symbol
+        self.thread: threading.Thread | None = None
+        self.task: asyncio.Task | None = None
+        self.error = ""
+        self.connected = False
+        self.lock = threading.Lock()
+        for sym in pairs():
+            root = sym.split(".")[0]
+            tick, big, _ = SPECS.get(root, (0.25, 50, root))
+            self.profiles[sym] = SessionProfile(symbol=sym, tick=tick, big_size=big)
+
+    @property
+    def enabled(self) -> bool:
+        return os.getenv("ORDERFLOW", "0") == "1" and bool(os.getenv("DATABENTO_API_KEY", "").strip())
+
+    # -- stream (a thread: the databento client blocks) ------------------------
+    def _run(self) -> None:
+        import databento as db
+        backoff = 5
+        while True:
+            try:
+                client = db.Live(key=os.getenv("DATABENTO_API_KEY"), reconnect_policy="reconnect")
+                client.subscribe(dataset="GLBX.MDP3", schema="trades", stype_in="continuous",
+                                 symbols=list(self.profiles), start=session_start_utc())
+                client.start()
+                self.connected, self.error, backoff = True, "", 5
+                logger.info(f"[ORDERFLOW] streaming {', '.join(self.profiles)} (session replay from the open)")
+                for rec in client:
+                    self.on_record(rec, db)
+                self.connected = False
+            except Exception as e:  # noqa: BLE001
+                self.connected = False
+                self.error = f"{type(e).__name__}: {e}"[:300]
+                logger.warning(f"[ORDERFLOW] stream stopped: {self.error}; retrying in {backoff}s")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 300)
+
+    def on_record(self, rec, db) -> None:
+        if isinstance(rec, db.SymbolMappingMsg):
+            sym = getattr(rec, "stype_in_symbol", "") or ""
+            if sym in self.profiles:
+                self.ids[rec.instrument_id] = sym
+            return
+        if not isinstance(rec, db.TradeMsg):
+            return
+        sym = self.ids.get(rec.instrument_id)
+        if sym is None and len(self.profiles) == 1:
+            sym = next(iter(self.profiles))
+        if sym is None:
+            return
+        side = str(getattr(rec.side, "value", rec.side) or "N")
+        with self.lock:
+            self.profiles[sym].add(rec.price / 1e9, float(rec.size), side, int(rec.ts_event))
+
+    # -- snapshots --------------------------------------------------------------
+    def snapshot(self, cfd_price=None) -> dict:
+        out = {"updated": time.time(), "connected": self.connected, "error": self.error, "markets": []}
+        with self.lock:
+            levels = {s: p.levels() for s, p in self.profiles.items()}
+        for sym, lv in levels.items():
+            cfd = pairs().get(sym, "")
+            root = sym.split(".")[0]
+            mid = cfd_price(cfd) if (cfd_price and cfd) else None
+            offset = round(lv["last"] - mid, 4) if (lv.get("last") is not None and mid) else None
+            out["markets"].append({"future": sym, "name": SPECS.get(root, (0, 0, root))[2], "cfd": cfd,
+                                   "basis": offset, "futures": lv, "cfd_levels": to_cfd(lv, offset)})
+        return out
+
+    async def _writer(self) -> None:
+        d = out_dir()
+        while True:
+            try:
+                snap = self.snapshot(_mt5_mid)
+                d.mkdir(parents=True, exist_ok=True)
+                tmp = d / ".levels.tmp"
+                tmp.write_text(json.dumps(snap, default=str))
+                os.replace(tmp, d / "levels.json")
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[ORDERFLOW] snapshot: {e}")
+            await asyncio.sleep(15)
+
+    async def start(self) -> None:
+        if not self.enabled or self.thread is not None:
+            return
+        self.thread = threading.Thread(target=self._run, name="orderflow", daemon=True)
+        self.thread.start()
+        self.task = asyncio.create_task(self._writer())
+
+
+def _mt5_mid(symbol: str) -> float | None:
+    try:
+        import MetaTrader5 as mt5
+        t = mt5.symbol_info_tick(symbol)
+        if t is None or not t.bid:
+            return None
+        return (float(t.bid) + float(t.ask)) / 2
+    except Exception:  # noqa: BLE001
+        return None
+
+
+orderflow_feed = OrderFlowFeed()

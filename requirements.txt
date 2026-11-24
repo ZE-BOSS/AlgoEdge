@@ -103,3 +103,4 @@ pytest-asyncio
 # ollama
 # SQLite Async Driver
 aiosqlite
+databento>=0.60

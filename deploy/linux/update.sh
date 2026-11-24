@@ -45,13 +45,27 @@ if [ -d /opt/algoedge/flip ]; then
     bash "$SRC/deploy/linux/add_instance.sh" flip 8003 18813 3
     NAMES="demo live flip"
 fi
+# VVIP client instances (deploy/linux/add_client.sh): every /opt/algoedge/client*
+# with an API service enabled, rebuilt with its own ports.
+for d in /opt/algoedge/client*; do
+    [ -f "$d/instance.env" ] || continue
+    n="$(basename "$d")"
+    systemctl is-enabled --quiet "algoedge-api@$n" 2>/dev/null || continue
+    ap="$(grep -E '^API_PORT=' "$d/instance.env" | cut -d= -f2)"
+    bp="$(grep -E '^BRIDGE_PORT=' "$d/instance.env" | cut -d= -f2)"
+    rd="$(grep -oE '/[0-9]+$' "$d/app/.env" | tr -d /)"
+    echo "== $n"
+    bash "$SRC/deploy/linux/add_instance.sh" "$n" "$ap" "$bp" "${rd:-4}" || echo "!! $n update failed"
+    NAMES="$NAMES $n"
+done
 
 # add_instance.sh copies the new bridge code into each Wine prefix but does not
 # restart the bridge. Restart it, then the API AFTER it, so the API attaches to
 # the fresh bridge at startup.
 # The API must not start before its bridge listens: if it does, it comes up in
 # mock mode (seen on live, 9 Nov). Wait up to 2 minutes for the port.
-bridge_port() { case "$1" in demo) echo 18811;; live) echo 18812;; flip) echo 18813;; esac; }
+bridge_port() { case "$1" in demo) echo 18811;; live) echo 18812;; flip) echo 18813;;
+    *) grep -E '^BRIDGE_PORT=' "/opt/algoedge/$1/instance.env" | cut -d= -f2;; esac; }
 for n in $NAMES; do
     systemctl restart "algoedge-bridge@$n"
     port=$(bridge_port "$n")

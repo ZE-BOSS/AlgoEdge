@@ -161,6 +161,8 @@ class ClientAccount(Base):
     instance = Column(String(40), default="")               # the server instance trading it, once provisioned
     state = Column(String(16), default="NEW")               # NEW / PROVISIONING / ACTIVE / PAUSED / STOPPED
     paused_reason = Column(String(200), default="")
+    live = Column(JSON, default=dict)                        # the client instance's last status (balance, equity, drawdown...)
+    guard_state = Column(String(16), default="")             # ACTIVE / DAY_STOP / DD_STOP / PAUSED, as the instance reports it
     terms_accepted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -180,4 +182,16 @@ class Payment(Base):
     period_days = Column(Integer, default=30)
     status = Column(String(12), default="PENDING")           # PENDING / PAID / FAILED
     raw = Column(JSON, default=dict)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class BacktestRequest(Base):
+    """A Pro / Elite client asking for a backtest (the admin runs it; saved runs show on the portal)."""
+    __tablename__ = "vvip_backtest_requests"
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    user_id = Column(String(36), nullable=False, index=True)
+    market = Column(String(40), default="")
+    months = Column(Integer, default=6)
+    note = Column(String(300), default="")
+    status = Column(String(12), default="OPEN")              # OPEN / DONE / DECLINED
     created_at = Column(DateTime, server_default=func.now())

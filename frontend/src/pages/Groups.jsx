@@ -109,7 +109,7 @@ export default function Groups() {
       {msg && <div className={`ct-note ${msg.ok ? 'ct-note--ok' : 'ct-note--err'}`} onClick={() => setMsg(null)}>{msg.text}</div>}
 
       <div className="ct-tabs">
-        {[['groups', 'Groups'], ['routes', 'Routes'], ['feed', 'Feed'], ['drafts', 'Drafts'], ['members', 'Members'], ['vvip', 'VVIP'], ['settings', 'Settings']].map(([k, l]) => (
+        {[['groups', 'Groups'], ['routes', 'Routes'], ['feed', 'Feed'], ['drafts', 'Drafts'], ['members', 'Members'], ['vvip', 'VVIP'], ['orderflow', 'Order flow'], ['settings', 'Settings']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'is-on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
@@ -120,6 +120,7 @@ export default function Groups() {
       {tab === 'drafts' && <DraftsTab act={act} />}
       {tab === 'members' && <MembersTab act={act} />}
       {tab === 'vvip' && <VvipTab act={act} />}
+      {tab === 'orderflow' && <OrderFlowTab />}
       {tab === 'settings' && d && <SettingsTab settings={d.settings} act={act} />}
     </div>
   );
@@ -329,25 +330,35 @@ function MembersTab({ act }) {
 function VvipTab({ act }) {
   const q = useQuery({ queryKey: qk('groups', 'clients'), queryFn: () => groupsApi.clients().then((r) => r.data) });
   const patch = useMutation(act(({ id, data }) => groupsApi.patchClient(id, data), 'Saved.'));
+  const close = useMutation(act(({ id, s }) => groupsApi.closeRequest(id, s), 'Updated.'));
   const [inst, setInst] = useState({});
   return (
     <>
       <div className="ct-note ct-note--warn">
-        VVIP accounts are traded by a terminal per client. To start one: run <code className="ct-mono">deploy/linux/add_instance.sh</code> for
-        the client on the server, then enter that instance here and set the account Active. Payments stay off until the Paystack key
-        is set on the server.
+        Each VVIP account gets its own terminal that copies live's trades at the client's risk. To start one, run on the server:{' '}
+        <code className="ct-mono">sudo bash /opt/algoedge/src/deploy/linux/add_client.sh ID</code> (ID from the table). It logs their MT5
+        in, copies live's strategies and starts trading. <code className="ct-mono">--remove ID</code> stops it. Payments stay off until the
+        Paystack key is set on the server.
       </div>
       <Card icon={<Bot size={16} />} title="Client accounts" sub="Risk is capped at 2% per trade, daily loss at 10%, drawdown stop at 30%, whatever is entered.">
         {!(q.data?.clients || []).length ? <p className="ct-empty">No VVIP clients yet.</p> : (
           <table className="ct-table">
-            <thead><tr><th>Account</th><th>Level</th><th>Risk</th><th>Limits</th><th>Instance</th><th>State</th></tr></thead>
+            <thead><tr><th>ID</th><th>Account</th><th>Level</th><th>Risk</th><th>Limits</th><th>Live</th><th>Instance</th><th>State</th></tr></thead>
             <tbody>
               {q.data.clients.map((c) => (
                 <tr key={c.id}>
+                  <td className="ct-mono ct-hint">{c.id}</td>
                   <td className="num">{c.mt5_login}<div className="ct-hint">{c.broker} · {c.mt5_server}</div></td>
                   <td>{c.level}</td>
                   <td className="num">{c.risk_pct}%</td>
                   <td className="ct-hint">day {c.daily_loss_pct}% · dd {c.max_dd_pct}%</td>
+                  <td>
+                    {c.live?.equity != null ? <>
+                      <span className="num">{Number(c.live.equity).toLocaleString()} {c.live.currency}</span>
+                      <div className="ct-hint">dd {c.live.drawdown_pct}% · today {c.live.day_pnl} · {c.live.open_positions} open</div>
+                    </> : <span className="ct-hint">-</span>}
+                    {c.guard_state && c.guard_state !== 'ACTIVE' && <div><Pill s="FAILED">{c.guard_state}</Pill></div>}
+                  </td>
                   <td>
                     <form style={{ display: 'flex', gap: 6 }} onSubmit={(e) => { e.preventDefault(); patch.mutate({ id: c.id, data: { instance: inst[c.id] ?? c.instance } }); }}>
                       <input className="ct-input ct-mono" style={{ width: 120 }} placeholder="client1" value={inst[c.id] ?? c.instance ?? ''} onChange={(e) => setInst({ ...inst, [c.id]: e.target.value })} />
@@ -366,6 +377,20 @@ function VvipTab({ act }) {
           </table>
         )}
       </Card>
+      <Card icon={<RefreshCw size={16} />} title="Backtest requests" sub="Pro and Elite clients see the newest saved backtest of each strategy live trades (names hidden). Run what they ask for, save it, then mark it done.">
+        {!(q.data?.requests || []).length ? <p className="ct-empty">No requests.</p> : (
+          <table className="ct-table">
+            <thead><tr><th>When</th><th>Market</th><th>Months</th><th>Note</th><th>Status</th><th /></tr></thead>
+            <tbody>{q.data.requests.map((r) => (
+              <tr key={r.id}><td className="ct-mono">{when(r.created_at)}</td><td>{r.market}</td><td className="num">{r.months}</td>
+                <td>{r.note}</td><td><Pill s={r.status === 'OPEN' ? 'PENDING' : 'SENT'}>{r.status}</Pill></td>
+                <td>{r.status === 'OPEN' && <>
+                  <button className="btn btn-sm btn-primary" onClick={() => close.mutate({ id: r.id, s: 'done' })}>Done</button>{' '}
+                  <button className="btn btn-sm btn-secondary" onClick={() => close.mutate({ id: r.id, s: 'declined' })}>Decline</button></>}</td></tr>
+            ))}</tbody>
+          </table>
+        )}
+      </Card>
       <Card icon={<CheckCircle2 size={16} />} title="Payments">
         {!(q.data?.payments || []).length ? <p className="ct-empty">No payments yet.</p> : (
           <table className="ct-table">
@@ -378,6 +403,47 @@ function VvipTab({ act }) {
         )}
       </Card>
     </>
+  );
+}
+
+function OrderFlowTab() {
+  const q = useQuery({ queryKey: qk('groups', 'orderflow'), queryFn: () => groupsApi.orderflow().then((r) => r.data), refetchInterval: 15000 });
+  const d = q.data;
+  const n = (v, k = 2) => (v == null ? '-' : Number(v).toLocaleString(undefined, { maximumFractionDigits: k }));
+  return (
+    <Card icon={<RefreshCw size={16} />} title="Order flow" sub="CME futures trades from Databento: session volume profile, delta and large prints, also in the broker's CFD prices. Elite clients see the CFD levels.">
+      {!d ? <p className="ct-empty">Loading…</p> : !d.enabled ? (
+        <div className="ct-note ct-note--warn">Off. On the server, add <code className="ct-mono">DATABENTO_API_KEY=…</code> and <code className="ct-mono">ORDERFLOW=1</code> to
+          {' '}<code className="ct-mono">/opt/algoedge/live/instance.env</code> and restart live.</div>
+      ) : (
+        <>
+          <div className="ct-status" style={{ marginBottom: 10 }}>
+            <Pill s={d.connected ? 'SENT' : 'FAILED'}>{d.connected ? 'Streaming' : 'Not connected'}</Pill>
+            {d.error && <span className="ct-pill ct-pill--red">{d.error.slice(0, 80)}</span>}
+          </div>
+          <table className="ct-table">
+            <thead><tr><th>Market</th><th>Last</th><th>POC</th><th>Value area</th><th>VWAP</th><th>Delta</th><th>30 min</th><th>Basis</th><th>Large prints</th></tr></thead>
+            <tbody>{(d.markets || []).map((m) => {
+              const f = m.futures || {}; const c = m.cfd_levels || {};
+              return (
+                <tr key={m.future}>
+                  <td>{m.name}<div className="ct-hint">{m.future} → {m.cfd} · {f.session}</div></td>
+                  <td className="num">{n(f.last)}<div className="ct-hint">{n(c.last)}</div></td>
+                  <td className="num">{n(f.poc)}<div className="ct-hint">{n(c.poc)}</div></td>
+                  <td className="num">{n(f.val)} – {n(f.vah)}<div className="ct-hint">{n(c.val)} – {n(c.vah)}</div></td>
+                  <td className="num">{n(f.vwap)}<div className="ct-hint">{n(c.vwap)}</div></td>
+                  <td className="num">{n(f.delta, 0)}</td>
+                  <td className="num">{n(f.delta_30m, 0)}</td>
+                  <td className="num">{n(m.basis)}</td>
+                  <td className="ct-hint">{(f.big_prints || []).slice(-4).reverse().map((b) => `${b.side} ${b.size}@${n(b.price)}`).join(', ')}</td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+          <p className="ct-hint">Top number: futures price. Below: the same level in the CFD's price (futures minus the basis).</p>
+        </>
+      )}
+    </Card>
   );
 }
 

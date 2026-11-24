@@ -17,7 +17,12 @@
 set -euo pipefail
 
 INST="${1:-}"
-case "$INST" in demo) PORT=18811;; live) PORT=18812;; flip) PORT=18813;; *) echo "usage: $0 demo|live|flip"; exit 1;; esac
+case "$INST" in
+    demo) PORT=18811;; live) PORT=18812;; flip) PORT=18813;;
+    "") echo "usage: $0 demo|live|flip|<instance>"; exit 1;;
+    *) PORT="$(grep -E '^BRIDGE_PORT=' "/opt/algoedge/$INST/instance.env" 2>/dev/null | cut -d= -f2)"
+       [ -n "$PORT" ] || { echo "no instance '$INST'"; exit 1; };;
+esac
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 PREFIX="/opt/algoedge/$INST/wine"
 # the install folder's Config (a /portable terminal) and any AppData data folder

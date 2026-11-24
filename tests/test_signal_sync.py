@@ -109,3 +109,23 @@ def test_cleanup_removes_old_own_files(tmp_path):
     p = demo.publish(_sig())
     os.utime(p, (time.time() - 3 * 86400,) * 2)
     assert demo.cleanup() == 1 and not p.exists()
+
+
+def test_follower_mirrors_leader_maps_symbols_and_never_publishes(tmp_path, monkeypatch):
+    live = SignalSync(self_name="live", peers=["demo"], root=tmp_path, grace_s=0.0, enabled=True)
+    monkeypatch.setenv("SIGNAL_SYNC_SELF", "client-7")
+    monkeypatch.setenv("SIGNAL_SYNC_PEERS", "live")
+    monkeypatch.setenv("SIGNAL_SYNC_FOLLOW", "1")
+    monkeypatch.setenv("SIGNAL_SYNC_SYMBOL_MAP", "XAUUSDm=XAUUSD")
+    monkeypatch.setenv("SIGNAL_SYNC_DIR", str(tmp_path))
+    client = SignalSync.from_env()
+    assert client.enabled and client.follow_only and client.grace_s == 1.0
+    assert client.publish(_sig(symbol="XAUUSD")) is None, "a follower never feeds anyone"
+    live.publish(_sig(symbol="XAUUSDm"))
+    rec_file = next((tmp_path / "live").glob("*.json"))
+    old = time.time() - 2
+    os.utime(rec_file, (old, old))
+    data = json.loads(rec_file.read_text()); data["executed_at"] = old; rec_file.write_text(json.dumps(data))
+    assert len(client.poll()) == 1
+    rec = client.take("VWAP_v1", "XAUUSD", "M5")
+    assert rec is not None and client.to_signal(rec).symbol == "XAUUSD"

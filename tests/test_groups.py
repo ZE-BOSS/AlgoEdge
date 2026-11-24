@@ -816,3 +816,143 @@ def test_vvip_portal_connect_pause_disconnect(env, monkeypatch):
         acc = (await _all(sf, ClientAccount))[0]
         assert acc.state == "STOPPED" and acc.mt5_password_encrypted == ""
     run(go())
+
+
+# ── VVIP client guard and live <-> client sync ────────────────────────────────
+
+def test_guard_daily_stop_resets_next_day_and_dd_stop_holds():
+    from backend.groups.client_guard import GuardState, evaluate
+    st = GuardState()
+    kw = dict(wanted="ACTIVE", daily_loss_pct=5, max_dd_pct=20)
+    evaluate(st, equity=1000, balance=1000, today="d1", **kw)
+    assert st.state == "ACTIVE" and st.peak == 1000 and st.day_start == 1000
+    evaluate(st, equity=940, balance=960, today="d1", **kw)
+    assert st.state == "DAY_STOP" and "daily loss" in st.reason
+    evaluate(st, equity=945, balance=945, today="d2", **kw)
+    assert st.state == "ACTIVE"
+    evaluate(st, equity=790, balance=800, today="d2", **kw)
+    assert st.state == "DD_STOP" and "drawdown" in st.reason
+    evaluate(st, equity=900, balance=900, today="d3", **kw)
+    assert st.state == "DD_STOP", "only the admin resumes after a drawdown stop"
+    evaluate(st, equity=900, balance=900, today="d3", **{**kw, "wanted": "PAUSED"})
+    assert st.state == "DD_STOP"
+
+
+def test_guard_pause_and_resume_by_request():
+    from backend.groups.client_guard import GuardState, evaluate
+    st = GuardState()
+    evaluate(st, equity=1000, balance=1000, today="d1", wanted="PAUSED", daily_loss_pct=5, max_dd_pct=20)
+    assert st.state == "PAUSED"
+    evaluate(st, equity=1000, balance=1000, today="d1", wanted="ACTIVE", daily_loss_pct=5, max_dd_pct=20)
+    assert st.state == "ACTIVE"
+
+
+def test_set_risk_overrides_every_slot():
+    from backend.groups.client_guard import set_risk
+    cfg = {"risk": {"risk_per_trade_pct": 0.5, "max_risk_hard_cap_pct": 5}, "instrument_slots": [
+        {"symbol": "XAUUSDm", "risk_per_trade_pct": 3.0, "risk": {"risk_per_trade_pct": 3.0, "max_risk_hard_cap_pct": 6}},
+        {"symbol": "USTECm"}]}
+    set_risk(cfg, 1.5, 4)
+    assert cfg["risk"] == {"risk_per_trade_pct": 1.5, "max_risk_hard_cap_pct": 2.0, "max_daily_drawdown_pct": 4.0}
+    assert all(sl["risk_per_trade_pct"] == 1.5 for sl in cfg["instrument_slots"])
+    assert cfg["instrument_slots"][0]["risk"] == {"risk_per_trade_pct": 1.5}
+
+
+def test_sync_clients_control_status_and_resume(env, tmp_path, monkeypatch):
+    from backend.groups.vvip import sync_clients
+    sf = env["sf"]
+    monkeypatch.setenv("VVIP_SHARED_DIR", str(tmp_path))
+    told = []
+
+    async def note(t):
+        told.append(t)
+
+    async def go():
+        async with sf() as s:
+            a = ClientAccount(mt5_login="555", instance="client1", state="ACTIVE", risk_pct=1.0, daily_loss_pct=5, max_dd_pct=20)
+            s.add(a)
+            await s.commit()
+        await sync_clients(sf, note)
+        ctl = json.loads((tmp_path / "client1.control.json").read_text())
+        assert ctl == {"state": "ACTIVE", "risk_pct": 1.0, "daily_loss_pct": 5.0, "max_dd_pct": 20.0}
+        (tmp_path / "client1.status.json").write_text(json.dumps({"ok": True, "state": "DD_STOP", "balance": 790,
+            "equity": 780, "drawdown_pct": 22.0, "reason": "drawdown stop: equity 22% below its peak"}))
+        await sync_clients(sf, note)
+        a = (await _all(sf, ClientAccount))[0]
+        assert a.state == "PAUSED" and a.guard_state == "DD_STOP" and a.live["equity"] == 780
+        assert told and "555" in told[0] and "drawdown" in told[0]
+        assert json.loads((tmp_path / "client1.control.json").read_text())["state"] == "PAUSED"
+        # the admin resumes it
+        async with sf() as s:
+            a = await s.get(ClientAccount, a.id)
+            a.state = "ACTIVE"
+            await s.commit()
+        await sync_clients(sf, note)
+        tok = json.loads((tmp_path / "client1.control.json").read_text()).get("resume_token")
+        assert tok
+        await sync_clients(sf, note)
+        assert json.loads((tmp_path / "client1.control.json").read_text())["resume_token"] == tok, "one resume"
+        (tmp_path / "client1.status.json").write_text(json.dumps({"ok": True, "state": "ACTIVE", "equity": 780}))
+        await sync_clients(sf, note)
+        assert "trading again" in told[-1]
+        a = (await _all(sf, ClientAccount))[0]
+        assert a.paused_reason == ""
+    run(go())
+
+
+def test_portal_pro_backtests_and_elite_orderflow(env, monkeypatch, tmp_path):
+    import httpx
+    from types import SimpleNamespace as NS
+    from fastapi import FastAPI
+    from backend.data.database import get_db
+    from backend.data.models import BacktestRun, BacktestTrade, User, UserConfigModel
+    from backend.groups import vvip
+    import backend.groups.bot as botmod
+    sf = env["sf"]
+    monkeypatch.setattr(botmod, "group_bot", env["bot"])
+    monkeypatch.setenv("ORDERFLOW_DIR", str(tmp_path))
+    app = FastAPI()
+    app.include_router(vvip.portal)
+
+    async def db():
+        async with sf() as s:
+            yield s
+    app.dependency_overrides[get_db] = db
+    app.dependency_overrides[vvip._investor] = lambda: NS(id="inv-9")
+    c = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
+
+    async def go():
+        async with sf() as s:
+            s.add(User(id="admin", email="a@x", password_hash="x", name="A", is_admin=True))
+            s.add(UserConfigModel(user_id="admin", config_json=json.dumps({"instrument_slots": [
+                {"strategy_id": "RQ_NYORB", "symbol": "XAUUSDm", "enabled": True},
+                {"strategy_id": "SECRET", "symbol": "XAUUSDm", "enabled": False}]})))
+            s.add(BacktestRun(id="r1", user_id="admin", strategy_id="RQ_NYORB", symbol="XAUUSDm",
+                              start_date=datetime(2025, 1, 1), end_date=datetime(2026, 1, 1), params_snapshot="{}",
+                              total_trades=3, win_rate=66.7, profit_factor=2.0, expectancy_r=0.67, max_drawdown_pct=4.0))
+            for i, r in enumerate((1.0, -1.0, 2.0)):
+                s.add(BacktestTrade(backtest_id="r1", symbol="XAUUSDm", exit_time=datetime(2025, 1 + i, 5), pnl_r=r))
+            m = GroupMember(telegram_id=9, user_id="inv-9", tier="VVIP", level="STARTER", status="ACTIVE")
+            s.add(m)
+            await s.commit()
+        assert (await c.get("/api/investor/vvip/backtests")).status_code == 403
+        async with sf() as s:
+            (await s.get(GroupMember, m.id)).level = "PRO"
+            await s.commit()
+        r = (await c.get("/api/investor/vvip/backtests")).json()
+        sysm = r["systems"]
+        assert len(sysm) == 1 and sysm[0]["label"] == "GOLD (XAUUSD) - system A" and sysm[0]["total_r"] == 2.0
+        assert sysm[0]["curve"] == [1.0, 0.0, 2.0] and sysm[0]["months"]["2025-03"] == 2.0
+        assert "RQ_NYORB" not in json.dumps(r) and "SECRET" not in json.dumps(r)
+        assert (await c.post("/api/investor/vvip/backtests/request", json={"market": "Gold", "months": 12})).json()["ok"]
+        assert "Gold" in env["api"].sent(ADMIN)[-1][2]
+        assert (await c.get("/api/investor/vvip/orderflow")).status_code == 403
+        async with sf() as s:
+            (await s.get(GroupMember, m.id)).level = "ELITE"
+            await s.commit()
+        (tmp_path / "levels.json").write_text(json.dumps({"updated": 1, "connected": True, "markets": [
+            {"name": "Gold futures", "cfd": "XAUUSDm", "future": "GC.v.0", "cfd_levels": {"poc": 2648.0},
+             "futures": {"delta": 120, "delta_30m": -5, "volume": 9000, "session": "2026-11-24"}}]}))
+        o = (await c.get("/api/investor/vvip/orderflow")).json()
+        assert o["live"] and o["markets"][0]["levels"]["poc"] == 2648.0 and "future" not in o["markets"][0]
+    run(go())

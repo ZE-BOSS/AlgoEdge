@@ -28,6 +28,13 @@ Environment:
     SIGNAL_SYNC_GRACE_S  wait this long after the peer's fill for this
                          instance's own strategy to fire first (default 8)
     SIGNAL_SYNC_MAX_AGE_S  ignore a peer signal older than this (default 240)
+    SIGNAL_SYNC_FOLLOW   "1": a follower account (a VVIP client's). It never
+                         trades its own strategies' signals and only mirrors its
+                         peers' executed trades, with its own sizing. Nothing it
+                         places is published, so the leader never copies it back.
+    SIGNAL_SYNC_SYMBOL_MAP  "XAUUSDm=XAUUSD,USTECm=USTEC": the leader's symbol
+                         names -> this account's, where the brokers name them
+                         differently.
 """
 
 from __future__ import annotations
@@ -69,6 +76,16 @@ def _json_safe(v: Any) -> Any:
         return str(v)
 
 
+def parse_symbol_map(text: str) -> dict[str, str]:
+    out = {}
+    for part in (text or "").split(","):
+        if "=" in part:
+            a, b = part.split("=", 1)
+            if a.strip() and b.strip():
+                out[a.strip()] = b.strip()
+    return out
+
+
 def bar_key(strategy_id: str, symbol: str, bar_time: float | None) -> tuple[str, str, int]:
     return (str(strategy_id), str(symbol), int(float(bar_time or 0)))
 
@@ -81,6 +98,8 @@ class SignalSync:
     grace_s: float = 8.0
     max_age_s: float = 240.0
     enabled: bool = False
+    follow_only: bool = False
+    symbol_map: dict[str, str] = field(default_factory=dict)
     # (strategy, symbol, bar) this instance's own strategies produced a signal for
     _local: dict[tuple[str, str, int], float] = field(default_factory=dict)
     # (strategy, symbol, bar) already taken from the peer or decided against
@@ -96,9 +115,11 @@ class SignalSync:
         enabled = os.getenv("SIGNAL_SYNC", "1") != "0" and bool(name) and bool(peers)
         return cls(self_name=name, peers=[p for p in peers if p != name],
                    root=Path(os.getenv("SIGNAL_SYNC_DIR", "/opt/algoedge/shared/signal_sync")),
-                   grace_s=float(os.getenv("SIGNAL_SYNC_GRACE_S", "8")),
+                   grace_s=float(os.getenv("SIGNAL_SYNC_GRACE_S",
+                                           "1" if os.getenv("SIGNAL_SYNC_FOLLOW", "0") == "1" else "8")),
                    max_age_s=float(os.getenv("SIGNAL_SYNC_MAX_AGE_S", "240")),
-                   enabled=enabled)
+                   enabled=enabled, follow_only=os.getenv("SIGNAL_SYNC_FOLLOW", "0") == "1",
+                   symbol_map=parse_symbol_map(os.getenv("SIGNAL_SYNC_SYMBOL_MAP", "")))
 
     # -- this instance's own signals -------------------------------------------------
     def note_local(self, strategy_id: str, symbol: str, bar_time: float | None) -> None:
@@ -110,7 +131,7 @@ class SignalSync:
 
     def publish(self, signal: Any) -> Path | None:
         """Write an executed signal for the peers. Sync-placed trades are not re-published."""
-        if not self.enabled:
+        if not self.enabled or self.follow_only:
             return None
         meta = dict(getattr(signal, "metadata", None) or {})
         if meta.get("synced_from"):
@@ -159,6 +180,8 @@ class SignalSync:
                     rec = json.loads(f.read_text())
                 except (OSError, ValueError):
                     continue
+                if self.symbol_map and rec.get("symbol") in self.symbol_map:
+                    rec["symbol"] = self.symbol_map[rec["symbol"]]
                 k = bar_key(rec.get("strategy_id"), rec.get("symbol"), rec.get("bar_time"))
                 if k in self._consumed or k in self._local:
                     continue

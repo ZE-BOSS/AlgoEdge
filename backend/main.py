@@ -240,6 +240,22 @@ async def lifespan(app: FastAPI):
         from backend.copytrade.notify import daily_report_loop
         daily_report_task = asyncio.create_task(daily_report_loop())
 
+    # Exchange order flow (Databento): only where ORDERFLOW=1 and the key are set.
+    if os.getenv("ALGOEDGE_AUDIT") != "1":
+        try:
+            from backend.orderflow.feed import orderflow_feed
+            await orderflow_feed.start()
+        except Exception as e:
+            logger.warning(f"Order flow not started: {e}")
+
+    # A VVIP client's own instance: start its bot and enforce its limits.
+    if os.getenv("ALGOEDGE_AUDIT") != "1" and os.getenv("VVIP_CLIENT", "").strip():
+        try:
+            from backend.groups.client_guard import start_if_client
+            await start_if_client()
+        except Exception as e:
+            logger.warning(f"VVIP client guard not started: {e}")
+
     # Signal groups bot (General / VIP / VVIP). Only where GROUP_BOT_TOKEN is
     # set - the live instance - and never on an audit copy.
     if os.getenv("ALGOEDGE_AUDIT") != "1" and os.getenv("GROUP_BOT_TOKEN", "").strip():
@@ -387,6 +403,8 @@ from backend.groups import vvip as _vvip                    # noqa: E402
 app.include_router(_groups_routes.router)     # signal groups admin
 app.include_router(_vvip.portal)              # VVIP, investor audience
 app.include_router(_vvip.payments)            # Paystack webhook (off until keyed)
+from backend.api.routes import orderflow as _orderflow_routes   # noqa: E402
+app.include_router(_orderflow_routes.router)  # order-flow levels (Databento)
 app.include_router(kronos.router)            # Kronos forecasts: jobs in their own process
 
 

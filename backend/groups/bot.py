@@ -88,7 +88,8 @@ class GroupBot:
         group_router.admin_notify = self.notify_admins
         self.tasks = [asyncio.create_task(self._guard(n, f)) for n, f in (
             ("updates", self._updates_loop), ("outbox", self._outbox_loop),
-            ("scheduler", self._scheduler_loop), ("maintenance", self._maintenance_loop))]
+            ("scheduler", self._scheduler_loop), ("maintenance", self._maintenance_loop),
+            ("vvip", self._vvip_loop))]
         logger.info("[GROUPBOT] started")
 
     async def stop(self) -> None:
@@ -621,6 +622,12 @@ class GroupBot:
             n = await self._queue_for_groups(kind, text)
             return f"Posted to {n} group(s)"
         return "Skipped"
+
+    async def _vvip_loop(self) -> None:
+        from backend.groups.vvip import sync_clients
+        while self.running:
+            await sync_clients(self.sf, self.notify_admins)
+            await asyncio.sleep(60)
 
     # ── maintenance: expiry and content alerts ────────────────────────────────
     async def _maintenance_loop(self) -> None:

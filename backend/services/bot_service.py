@@ -1481,6 +1481,10 @@ class BotService:
                                             instance=_instance_name(), warming=bool(_fed.primed))
                                 except Exception as _we:  # noqa: BLE001 - alerts must never stop trading
                                     logger.debug(f"[WATCH] {strategy_id}: {_we}")
+                            if signal is not None and signal_sync.enabled and signal_sync.follow_only:
+                                # A follower (VVIP client) account trades only what its leader traded.
+                                logger.debug(f"[SYNC] [{symbol}] {strategy_id}: own signal not traded (follower account)")
+                                signal = None
                             if signal is not None:
                                 signal_sync.note_local(strategy_id, symbol, signal.timestamp)
                             elif signal_sync.enabled:

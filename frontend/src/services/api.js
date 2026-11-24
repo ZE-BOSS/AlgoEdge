@@ -579,6 +579,8 @@ export const groupsApi = {
   decideMember: (id, act) => api.post(`${GR}/members/${id}/${act}`),
   clients: () => api.get(`${GR}/clients`),
   patchClient: (id, data) => api.patch(`${GR}/clients/${id}`, data),
+  closeRequest: (id, status) => api.post(`${GR}/backtest-requests/${id}/${status}`),
+  orderflow: () => api.get('/api/orderflow/levels'),
 };
 
 export const copytrade = {

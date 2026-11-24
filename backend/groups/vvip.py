@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.data.database import get_db
 from backend.groups import settings as S
-from backend.groups.models import ClientAccount, GroupMember, Payment, SignalGroup
+from backend.groups.models import BacktestRequest, ClientAccount, GroupMember, Payment, SignalGroup
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -108,6 +108,7 @@ async def me(db: AsyncSession = Depends(get_db), inv=Depends(_investor)):
             "prices": cfg.get("vvip_levels"), "period_days": cfg.get("vvip_period_days"), "terms": TERMS,
             "account": None if acc is None else {
                 "broker": acc.broker, "mt5_login": acc.mt5_login, "mt5_server": acc.mt5_server, "state": acc.state,
+                "live": acc.live or {}, "guard_state": acc.guard_state or "",
                 "risk_pct": acc.risk_pct, "daily_loss_pct": acc.daily_loss_pct, "max_dd_pct": acc.max_dd_pct,
                 "paused_reason": acc.paused_reason}}
 
@@ -168,12 +169,195 @@ async def client_settings(body: ClientSettingsIn, db: AsyncSession = Depends(get
     return {"ok": True, "state": acc.state, "risk_pct": acc.risk_pct}
 
 
+async def leader_pairs(db) -> list[tuple[str, str]]:
+    """(strategy, symbol) of every enabled slot in this (the leader's) admin config: what clients trade."""
+    from backend.data.models import User, UserConfigModel
+    rows = (await db.execute(select(UserConfigModel.config_json).join(User, User.id == UserConfigModel.user_id)
+                             .where(User.is_admin.is_(True)))).scalars().all()
+    out: list[tuple[str, str]] = []
+    for raw in rows:
+        try:
+            for sl in json.loads(raw or "{}").get("instrument_slots") or []:
+                k = (str(sl.get("strategy_id") or ""), str(sl.get("symbol") or ""))
+                if sl.get("enabled", True) and all(k) and k not in out:
+                    out.append(k)
+        except ValueError:
+            continue
+    return out
+
+
+def _curve(rs: list[float], points: int = 60) -> list[float]:
+    acc, out = 0.0, []
+    for r in rs:
+        acc += r
+        out.append(round(acc, 2))
+    if len(out) <= points:
+        return out
+    step = len(out) / points
+    return [out[min(len(out) - 1, int(i * step))] for i in range(points)] + [out[-1]]
+
+
+async def backtest_summaries(db, pairs: list[tuple[str, str]]) -> list[dict]:
+    """The newest saved backtest for each pair, as client-safe numbers: no strategy names, no parameters."""
+    from backend.data.models import BacktestRun, BacktestTrade
+    from backend.groups import templates as T
+    out = []
+    per_market: dict[str, int] = {}
+    for strat, sym in sorted(pairs):
+        run = (await db.execute(select(BacktestRun).where(BacktestRun.strategy_id == strat, BacktestRun.symbol == sym)
+                                .order_by(BacktestRun.created_at.desc()).limit(1))).scalars().first()
+        if run is None:
+            continue
+        trades = (await db.execute(select(BacktestTrade.exit_time, BacktestTrade.pnl_r).where(
+            BacktestTrade.backtest_id == run.id).order_by(BacktestTrade.exit_time))).all()
+        rs = [float(r or 0) for _, r in trades]
+        months: dict[str, float] = {}
+        for t, r in trades:
+            if t is not None:
+                k = t.strftime("%Y-%m")
+                months[k] = round(months.get(k, 0.0) + float(r or 0), 2)
+        market = T.name(sym)
+        per_market[market] = per_market.get(market, 0) + 1
+        out.append({
+            "label": f"{market} - system {chr(64 + per_market[market])}", "market": market,
+            "from": run.start_date.date().isoformat() if run.start_date else None,
+            "to": run.end_date.date().isoformat() if run.end_date else None,
+            "trades": run.total_trades or len(rs), "win_rate": run.win_rate, "profit_factor": run.profit_factor,
+            "expectancy_r": run.expectancy_r, "max_drawdown_pct": run.max_drawdown_pct,
+            "total_r": round(sum(rs), 2), "curve": _curve(rs), "months": months,
+            "tested_on": run.created_at.date().isoformat() if run.created_at else None})
+    return out
+
+
+@portal.get("/backtests")
+async def my_backtests(db: AsyncSession = Depends(get_db), inv=Depends(_investor)):
+    mem = await _member(db, inv.id)
+    level = mem.level if mem and mem.status == "ACTIVE" and mem.tier == "VVIP" else ""
+    if not can(level, "backtest"):
+        raise HTTPException(403, "backtests come with the Pro and Elite plans")
+    reqs = (await db.execute(select(BacktestRequest).where(BacktestRequest.user_id == str(inv.id))
+                             .order_by(BacktestRequest.created_at.desc()).limit(20))).scalars().all()
+    return {"systems": await backtest_summaries(db, await leader_pairs(db)),
+            "requests": [{"market": r.market, "months": r.months, "note": r.note, "status": r.status,
+                          "created_at": r.created_at.isoformat() if r.created_at else None} for r in reqs]}
+
+
+@portal.get("/orderflow")
+async def my_orderflow(db: AsyncSession = Depends(get_db), inv=Depends(_investor)):
+    """Elite: today's exchange order-flow levels for gold and Nasdaq, in your broker's prices."""
+    mem = await _member(db, inv.id)
+    level = mem.level if mem and mem.status == "ACTIVE" and mem.tier == "VVIP" else ""
+    if not can(level, "orderflow"):
+        raise HTTPException(403, "order-flow data comes with the Elite plan")
+    from backend.orderflow.feed import read_snapshot
+    snap = read_snapshot()
+    markets = []
+    for m in snap.get("markets") or []:
+        f = m.get("futures") or {}
+        markets.append({"name": m.get("name"), "cfd": m.get("cfd"), "levels": m.get("cfd_levels") or {},
+                        "delta": f.get("delta"), "delta_30m": f.get("delta_30m"), "volume": f.get("volume"),
+                        "session": f.get("session"), "updated": f.get("updated")})
+    return {"updated": snap.get("updated"), "live": bool(snap.get("connected")), "markets": markets}
+
+
+class BacktestAsk(BaseModel):
+    market: str
+    months: int = 6
+    note: str = ""
+
+
+@portal.post("/backtests/request")
+async def request_backtest(body: BacktestAsk, db: AsyncSession = Depends(get_db), inv=Depends(_investor)):
+    mem = await _member(db, inv.id)
+    level = mem.level if mem and mem.status == "ACTIVE" and mem.tier == "VVIP" else ""
+    if not can(level, "backtest"):
+        raise HTTPException(403, "backtests come with the Pro and Elite plans")
+    open_n = len((await db.execute(select(BacktestRequest.id).where(
+        BacktestRequest.user_id == str(inv.id), BacktestRequest.status == "OPEN"))).all())
+    if open_n >= 3:
+        raise HTTPException(429, "you already have 3 requests waiting")
+    r = BacktestRequest(user_id=str(inv.id), market=body.market[:40], months=max(1, min(36, int(body.months))),
+                        note=body.note[:300])
+    db.add(r)
+    await db.commit()
+    await _notify(f"📊 VVIP backtest request ({level}) from {mem.name or mem.username or inv.id}: "
+                  f"{r.market}, last {r.months} months. {r.note}".strip())
+    return {"ok": True}
+
+
 async def _notify(text: str) -> None:
     try:
         from backend.groups.bot import group_bot
         await group_bot.notify_admins(text)
     except Exception:  # noqa: BLE001
         pass
+
+
+# ── live <-> client instances (client_guard.py runs in each) ─────────────────
+
+def _shared():
+    from pathlib import Path
+    return Path(os.getenv("VVIP_SHARED_DIR", "/opt/algoedge/shared/vvip"))
+
+
+async def sync_clients(session_factory=None, notify=None) -> list[str]:
+    """Write each provisioned client's control file and read back its status.
+    Returns the notices sent (a stop firing, trading resuming)."""
+    from backend.data.database import async_session
+    sf = session_factory or async_session
+    root = _shared()
+    notices: list[str] = []
+    async with sf() as s:
+        accs = (await s.execute(select(ClientAccount).where(ClientAccount.instance != ""))).scalars().all()
+        for a in accs:
+            st_file = root / f"{a.instance}.status.json"
+            status = {}
+            try:
+                status = json.loads(st_file.read_text())
+            except Exception:  # noqa: BLE001
+                pass
+            prev_guard = a.guard_state or ""
+            if status.get("ok"):
+                a.live = {k: status.get(k) for k in ("balance", "equity", "currency", "peak", "drawdown_pct",
+                                                     "day_pnl", "open_positions", "bot_running", "updated")}
+                a.guard_state = status.get("state") or ""
+                if a.guard_state != prev_guard:
+                    if a.guard_state in ("DD_STOP", "DAY_STOP"):
+                        if a.guard_state == "DD_STOP":
+                            a.state = "PAUSED"
+                        a.paused_reason = (status.get("reason") or "")[:200]
+                        notices.append(f"⛔ VVIP client {a.mt5_login}: {a.paused_reason}. Open trades keep their stops.")
+                    elif a.guard_state == "ACTIVE" and prev_guard in ("DD_STOP", "DAY_STOP"):
+                        a.paused_reason = ""
+                        notices.append(f"▶️ VVIP client {a.mt5_login}: trading again.")
+            want = a.state if a.state in ("ACTIVE", "PAUSED", "STOPPED") else "PAUSED"
+            ctl = {"state": want, "risk_pct": a.risk_pct, "daily_loss_pct": a.daily_loss_pct, "max_dd_pct": a.max_dd_pct}
+            if want == "ACTIVE" and a.guard_state == "DD_STOP":
+                ctl["resume_token"] = f"{a.id}:{int(datetime.utcnow().timestamp())}"
+            try:
+                root.mkdir(parents=True, exist_ok=True)
+                f = root / f"{a.instance}.control.json"
+                old = {}
+                try:
+                    old = json.loads(f.read_text())
+                except Exception:  # noqa: BLE001
+                    pass
+                if ctl.get("resume_token") and old.get("resume_token") and old.get("state") == "ACTIVE":
+                    ctl["resume_token"] = old["resume_token"]       # one resume per admin decision
+                if ctl != old:
+                    tmp = root / f".{a.instance}.control.tmp"
+                    tmp.write_text(json.dumps(ctl))
+                    os.replace(tmp, f)
+            except OSError as e:
+                logger.warning(f"[VVIP] control write for {a.instance} failed: {e}")
+        await s.commit()
+    for n in notices:
+        if notify is not None:
+            try:
+                await notify(n)
+            except Exception:  # noqa: BLE001
+                pass
+    return notices
 
 
 # ── payments ──────────────────────────────────────────────────────────────────
