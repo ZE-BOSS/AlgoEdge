@@ -47,6 +47,8 @@ async def find(channel: str):
         rows = (await s.execute(select(CopyTradeChannel))).scalars().all()
     want = channel.lower().lstrip("@")
     hit = [r for r in rows if want in (r.title or "").lower() or want == (r.username or "").lower()]
+    if not want and rows:
+        return str(rows[0].user_id), rows[0]
     if not hit:
         raise SystemExit("channel not found; have: " + ", ".join(r.title for r in rows))
     return str(hit[0].user_id), hit[0]
@@ -62,7 +64,8 @@ def call(port, method, path, uid, body=None, timeout=600):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--channel", required=True)
+    ap.add_argument("--channel", default="")
+    ap.add_argument("--dialogs", action="store_true", help="list the Telegram account's groups/channels, newest joined first")
     ap.add_argument("--days", type=int, default=90)
     ap.add_argument("--balance", type=float, default=10000.0)
     ap.add_argument("--risk", type=float, default=1.0)
@@ -73,6 +76,14 @@ def main() -> int:
     ap.add_argument("--out")
     a = ap.parse_args()
 
+    if a.dialogs:
+        uid, _ = asyncio.run(find(""))
+        ds = call(a.port, "GET", "/api/copytrade/dialogs", uid)
+        ds = ds.get("dialogs", ds) if isinstance(ds, dict) else ds
+        for d in sorted(ds, key=lambda d: str(d.get("joined") or ""), reverse=True)[:40]:
+            print(f"{str(d.get('joined') or '')[:16]:16s} {'ADDED ' if d.get('added') or d.get('watched') else '      '}"
+                  f"{d.get('chat_id')}  {(d.get('title') or '')[:40]:40s} @{d.get('username') or '-'}")
+        return 0
     uid, ch = asyncio.run(find(a.channel))
     print(f"channel: {ch.title}  id {ch.id}  @{ch.username or 'private'}  copying={'on' if ch.enabled else 'off'}  rules={ch.rules or {}}")
     if a.range:
