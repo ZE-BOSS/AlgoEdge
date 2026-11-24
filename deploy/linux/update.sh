@@ -8,7 +8,7 @@
 #
 # It fetches the branch (default dev), then re-runs add_instance.sh for demo
 # and live - which keeps each instance's .env, database and MT5 login and
-# restarts only its API - and rebuilds the admin site and the landing page.
+# restarts only its API - and rebuilds the admin site, the investor app and the landing page.
 # Usage with another branch:  ... | bash -s -- <branch>
 set -euo pipefail
 
@@ -94,6 +94,15 @@ if [ "$NODE_MAJOR" -ge 20 ]; then
         VITE_DEFAULT_BACKEND_URL="$API_URL" npm run build --silent
     )
     rsync -a --delete "$SRC/frontend/dist/" /var/www/admin/
+    # the investor app (app.alphavantiqcapital.com), same API
+    if [ -d "$SRC/investor-web" ]; then
+        (
+            cd "$SRC/investor-web"
+            npm ci --no-audit --no-fund --loglevel=error
+            VITE_API_URL="$API_URL" npm run build --silent
+        ) && mkdir -p /var/www/app && rsync -a --delete "$SRC/investor-web/dist/" /var/www/app/ \
+          || echo "!! investor app build failed - app.alphavantiqcapital.com left as it was"
+    fi
 else
     echo "!! Node $(node -v 2>/dev/null || echo missing) is too old for the admin site build (needs 20+)."
     echo "   The APIs and the landing page are updated; the admin site was left as it was."
