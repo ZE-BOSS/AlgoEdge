@@ -417,7 +417,8 @@ def main() -> int:
                       f"{r.get('R', 0):+5.2f}  {','.join(map(str, sorted(set(r.get('tps', []))))) or '-':8} {sg.get('reported', 'TP' + str(sg['reported_tp']))}"
                       f"  {r.get('reason','')}")
     if a.json:
-        Path(a.json).write_text(json.dumps({k: [{kk: vv for kk, vv in r.items() if kk != 'legs'} for r in v]
+        Path(a.json).write_text(json.dumps({k: [{**{kk: vv for kk, vv in r.items() if kk != 'legs'}, "t": sg["t"]}
+                                                for sg, r in zip(sigs, v)]
                                             for k, v in out.items()}, default=float))
     return 0
 
