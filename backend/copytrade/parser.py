@@ -375,18 +375,20 @@ def parse_message(text: str) -> ParsedSignal:
     side, otype = _side_and_type(up)
     sl = _sl(up)
     tps, tp_open = _tps(up)
-    # A VIP teaser: a target label left blank ("Tp" with no number, the target
-    # withheld) next to a sales line ("JOIN VIP GROUP", "ONLY 30 PEOPLE
-    # ALLOWED"). Copied on 24 Nov 2026 from XAUUSD PROFIT TRADER as a real
-    # signal. A sales footer on its own does not count: real signals carry them.
-    if side and not tps and not tp_open and _TP_LABEL.search(up) and _PROMO.search(up):
-        p = ParsedSignal()
-        p.notes.append("VIP teaser: the target is withheld behind a sales line - not copied")
-        return p
     # An OPEN names a side and at least a stop or a target; otherwise it is a
     # follow-up (or chat).
     if side and (sl is not None or tps) and not re.search(
             r"\b(CLOS\w*|CANCEL\w*|ADJUST\w* (BUY|SELL)|HIT|SMASHED)\b|^\s*OVER\s*\$", up):
+        # A VIP teaser: a target label left blank ("Tp" with no number, the
+        # target withheld) next to a sales line ("JOIN VIP GROUP", "ONLY 30
+        # PEOPLE ALLOWED"). Copied on 24 Nov 2026 from XAUUSD PROFIT TRADER as
+        # a real signal. A sales footer on its own does not count: real signals
+        # carry them. Only would-be OPENs are checked, so "TP1 hit, join VIP"
+        # stays a follow-up.
+        if not tps and not tp_open and _TP_LABEL.search(up) and _PROMO.search(up):
+            p = ParsedSignal()
+            p.notes.append("VIP teaser: the target is withheld behind a sales line - not copied")
+            return p
         p = ParsedSignal(kind="OPEN", symbol=symbol, side=side, order_type=otype, sl=sl, tps=tps, tp_open=tp_open,
                          add_on=bool(re.match(r"^\W*ADD(ING)?\s+(MORE\s+)?(BUY|SELL)", up)))
         p.entry, p.entry_low, p.entry_high = _entry(up, side)
