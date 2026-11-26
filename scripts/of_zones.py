@@ -325,13 +325,20 @@ CONFLUENCES = {
 }
 
 
-def evaluate(cand: pd.DataFrame) -> dict:
+def evaluate(cand: pd.DataFrame, confluences: dict | None = None, targets: list | None = None) -> dict:
     out: dict = {"candidates": int(len(cand))}
     if cand.empty:
         return out
     train = (cand["entry_t"] < SPLIT).values
     test = ~train
-    feats = {k: f(cand).fillna(False).values.astype(bool) for k, f in CONFLUENCES.items()}
+    confluences = confluences or CONFLUENCES
+    TARGETS = targets or globals()["TARGETS"]  # noqa: N806
+    feats = {}
+    for k, f in confluences.items():
+        try:
+            feats[k] = pd.Series(f(cand)).fillna(False).values.astype(bool)
+        except KeyError:
+            continue
     allm = np.ones(len(cand), bool)
 
     def run(mask, target):
@@ -343,7 +350,7 @@ def evaluate(cand: pd.DataFrame) -> dict:
     # 2) each confluence alone on top of "touch a zone"
     out["alone"] = {}
     for name, m in feats.items():
-        out["alone"][name] = {k: dict(zip(("train", "test"), run(m, k))) for k in ("r1_5", "r2", "zone")}
+        out["alone"][name] = {k: dict(zip(("train", "test"), run(m, k))) for k in TARGETS if k != "r1"}
     # 3) greedy forward selection on TRAIN net R (target chosen too), then judged on test
     best = {"mask": allm, "names": [], "target": "r2", "net": -1e9}
     for k in TARGETS:
