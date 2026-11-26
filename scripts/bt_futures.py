@@ -100,6 +100,17 @@ async def run_one(strategy: str, market: str, m1: pd.DataFrame, start: str, end:
     bt.intrabar = {symbol: IntrabarResolver(m1.reset_index(drop=True))}
     res = bt.run(df, signals, 10000, by_tf.get("M15", df), by_tf.get("M5", df), engine, None, by_tf.get("H1"))
     out = []
+    mt = m1["time"].values.astype("int64")
+    mh, ml = m1["high"].values.astype(float), m1["low"].values.astype(float)
+
+    def epoch(v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return int(v)
+        return int(pd.Timestamp(v).tz_localize(None).value // 1_000_000_000) if pd.Timestamp(v).tzinfo is None \
+            else int(pd.Timestamp(v).value // 1_000_000_000)
+
     for t in res.get("trades", []):
         e, x = float(t.get("entry_price") or 0), float(t.get("exit_price") or 0)
         stop = float(t.get("initial_stop_loss") or t.get("original_sl") or t.get("stop_loss") or 0)
@@ -107,6 +118,15 @@ async def run_one(strategy: str, market: str, m1: pd.DataFrame, start: str, end:
         risk = abs(e - stop)
         if risk <= 0:
             continue
+        a_, b_ = epoch(t.get("entry_time")), epoch(t.get("exit_time"))
+        mfe = mae = None
+        if a_ is not None and b_ is not None:
+            i, j = np.searchsorted(mt, a_), np.searchsorted(mt, b_, side="right")
+            if j > i:
+                hi, lo = mh[i:j].max(), ml[i:j].min()
+                mfe = ((hi - e) if side == 1 else (e - lo)) / risk
+                mae = ((e - lo) if side == 1 else (hi - e)) / risk
+        t["mfe_r"], t["mae_r"] = mfe, mae
         out.append({"entry_time": t.get("entry_time"), "exit_time": t.get("exit_time"), "side": side, "entry": e,
                     "exit": x, "stop": stop, "risk_pts": risk, "exit_reason": t.get("exit_reason"),
                     "r_gross": (x - e) * side / risk, "r": (x - e) * side / risk - cost_pts / risk,
