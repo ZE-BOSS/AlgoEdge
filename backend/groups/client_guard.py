@@ -160,6 +160,9 @@ class Guard:
             "drawdown_pct": round((self.st.peak - float(acc.equity)) / self.st.peak * 100, 2) if self.st.peak else 0.0,
             "day_pnl": round(float(acc.equity) - self.st.day_start, 2) if self.st.day_start else 0.0,
             "open_positions": len(positions), "bot_running": bool(bot_service.running),
+            "positions": [{"ticket": int(x.ticket), "symbol": x.symbol, "side": "BUY" if int(x.type) == 0 else "SELL",
+                           "volume": float(x.volume), "price": float(x.price_open), "sl": float(x.sl or 0),
+                           "tp": float(x.tp or 0), "profit": float(x.profit)} for x in positions],
             "state": self.st.state, "reason": self.st.reason, "changed": prev != self.st.state})
 
     async def apply_risk(self, ctl: dict) -> None:

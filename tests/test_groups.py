@@ -947,15 +947,12 @@ def test_portal_pro_backtests_and_elite_orderflow(env, monkeypatch, tmp_path):
         assert "RQ_NYORB" not in json.dumps(r) and "SECRET" not in json.dumps(r)
         assert (await c.post("/api/investor/vvip/backtests/request", json={"market": "Gold", "months": 12})).json()["ok"]
         assert "Gold" in env["api"].sent(ADMIN)[-1][2]
-        assert (await c.get("/api/investor/vvip/orderflow")).status_code == 403
         async with sf() as s:
             (await s.get(GroupMember, m.id)).level = "ELITE"
             await s.commit()
-        (tmp_path / "levels.json").write_text(json.dumps({"updated": 1, "connected": True, "markets": [
-            {"name": "Gold futures", "cfd": "XAUUSDm", "future": "GC.v.0", "cfd_levels": {"poc": 2648.0},
-             "futures": {"delta": 120, "delta_30m": -5, "volume": 9000, "session": "2026-11-24"}}]}))
-        o = (await c.get("/api/investor/vvip/orderflow")).json()
-        assert o["live"] and o["markets"][0]["levels"]["poc"] == 2648.0 and "future" not in o["markets"][0]
+        me = (await c.get("/api/investor/vvip/me")).json()
+        assert me["features"]["orderflow"]                          # trades the order-flow strategies...
+        assert (await c.get("/api/investor/vvip/orderflow")).status_code == 404   # ...but never sees the levels
     run(go())
 
 
@@ -996,4 +993,37 @@ def test_api_create_group_through_the_telegram_account(env, client, monkeypatch)
         assert calls == [("AlphaEdge VIP", "zemirah_bot", False)]
         env["bot"].username = ""
         assert (await client.post("/api/groups/create", json={"title": "x", "tier": "VIP"})).status_code == 409
+    run(go())
+
+
+
+def test_vvip_client_gets_trade_alerts(env, tmp_path, monkeypatch):
+    from backend.groups.vvip import sync_clients
+    sf = env["sf"]
+    monkeypatch.setenv("VVIP_SHARED_DIR", str(tmp_path))
+    sent = []
+
+    async def to_client(tg, text):
+        sent.append((tg, text))
+
+    async def go():
+        async with sf() as s:
+            mem = GroupMember(telegram_id=5150, tier="VVIP", level="STARTER", status="ACTIVE")
+            s.add(mem)
+            await s.commit()
+            s.add(ClientAccount(mt5_login="9", instance="client9", state="ACTIVE", member_id=mem.id))
+            await s.commit()
+        pos = {"ticket": 77, "symbol": "XAUUSD", "side": "BUY", "volume": 0.05, "price": 2650.5, "sl": 2640.0,
+               "tp": 2670.0, "profit": 12.5}
+        st = tmp_path / "client9.status.json"
+        st.write_text(json.dumps({"ok": True, "state": "ACTIVE", "currency": "USD", "positions": [pos]}))
+        await sync_clients(sf, None, to_client)
+        assert sent == [], "positions already open when alerts start are not announced"
+        st.write_text(json.dumps({"ok": True, "state": "ACTIVE", "currency": "USD",
+                                  "positions": [pos, dict(pos, ticket=78, side="SELL", profit=0)]}))
+        await sync_clients(sf, None, to_client)
+        assert len(sent) == 1 and sent[0][0] == 5150 and "New trade" in sent[0][1] and "SELL" in sent[0][1]
+        st.write_text(json.dumps({"ok": True, "state": "ACTIVE", "currency": "USD", "positions": [pos]}))
+        await sync_clients(sf, None, to_client)
+        assert "Trade closed" in sent[-1][1] and "SELL" in sent[-1][1]
     run(go())

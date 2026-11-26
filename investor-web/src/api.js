@@ -118,7 +118,6 @@ export const api = {
   vvipSettings: (body) => call('/vvip/settings', { method: 'PATCH', body }),
   vvipBacktests: () => call('/vvip/backtests'),
   vvipAskBacktest: (body) => call('/vvip/backtests/request', { method: 'POST', body }),
-  vvipOrderflow: () => call('/vvip/orderflow'),
   // Public, so not under BASE (which is /api/investor). Says whether a code is
   // ours and what joining through it costs - never who owns it.
   referralCheck: async (code) => {

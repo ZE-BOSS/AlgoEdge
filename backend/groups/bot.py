@@ -646,10 +646,13 @@ class GroupBot:
             return f"Posted to {n} group(s)"
         return "Skipped"
 
+    async def _client_alert(self, telegram_id: int, text: str) -> None:
+        await self.api.send(int(telegram_id), text)
+
     async def _vvip_loop(self) -> None:
         from backend.groups.vvip import sync_clients
         while self.running:
-            await sync_clients(self.sf, self.notify_admins)
+            await sync_clients(self.sf, self.notify_admins, self._client_alert)
             await asyncio.sleep(60)
 
     # ── maintenance: expiry and content alerts ────────────────────────────────

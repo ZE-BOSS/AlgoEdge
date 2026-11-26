@@ -36,9 +36,9 @@ function Plans({ d }) {
         you can pause or disconnect at any time.
       </p>
       <ul className="plain-list">
-        <li><strong>Starter, ${p.STARTER}</strong>: live trading on your account</li>
+        <li><strong>Starter, ${p.STARTER}</strong>: live trading on your account, with a Telegram alert on every trade</li>
         <li><strong>Pro, ${p.PRO}</strong>: plus backtesting</li>
-        <li><strong>Elite, ${p.ELITE}</strong>: plus order-flow data</li>
+        <li><strong>Elite, ${p.ELITE}</strong>: plus strategies that read live exchange order flow</li>
       </ul>
       <p className="muted small">Each plan runs for {d.period_days} days. To join, message the admin through our Telegram bot.</p>
     </Card>
@@ -128,37 +128,6 @@ function Backtests() {
   );
 }
 
-function OrderFlow() {
-  const q = useLoad(api.vvipOrderflow);
-  return (
-    <Card title="Order flow (exchange data)">
-      <Loaded q={q}>
-        {(d) => (
-          <div className="stack">
-            {!d.live && <p className="muted small">The exchange feed is not connected right now; levels may be old.</p>}
-            {d.markets.length === 0 && <p className="muted">No order-flow data yet.</p>}
-            {d.markets.map((m) => (
-              <div key={m.cfd}>
-                <p><strong>{m.name}</strong> <span className="muted small">in {m.cfd} prices · session {m.session}</span></p>
-                <p className="small">
-                  Most traded price (POC) <strong>{num(m.levels.poc)}</strong> · value area {num(m.levels.val)} – {num(m.levels.vah)} · VWAP {num(m.levels.vwap)}
-                </p>
-                <p className="small">
-                  Buyers vs sellers today: <strong className={m.delta >= 0 ? 'good' : 'bad'}>{m.delta >= 0 ? '+' : ''}{num(m.delta, 0)}</strong> contracts
-                  {' '}(last 30 min {m.delta_30m >= 0 ? '+' : ''}{num(m.delta_30m, 0)})
-                </p>
-                {m.levels.prev && <p className="muted small">Yesterday: POC {num(m.levels.prev.poc)} · value {num(m.levels.prev.val)} – {num(m.levels.prev.vah)} · high {num(m.levels.prev.high)} · low {num(m.levels.prev.low)}</p>}
-                {(m.levels.big_prints || []).length > 0 && (
-                  <p className="muted small">Large trades: {m.levels.big_prints.slice(-5).reverse().map((b) => `${b.side} ${b.size} @ ${num(b.price)}`).join(' · ')}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </Loaded>
-    </Card>
-  );
-}
 
 function Connected({ d, reload }) {
   const a = d.account;
@@ -198,7 +167,10 @@ function Connected({ d, reload }) {
         </form>
       </Card>
       {d.features?.backtest ? <Backtests /> : <Card title="Backtests"><p className="muted">Backtests come with Pro and Elite.</p></Card>}
-      {d.features?.orderflow ? <OrderFlow /> : <Card title="Order flow"><p className="muted">Exchange order-flow levels come with Elite.</p></Card>}
+      <Card title="Trade alerts">
+        <p className="muted">Our Telegram bot messages you each time a trade opens or closes on your account.
+          {d.features?.orderflow ? ' Your Elite plan trades the strategies that also read live exchange order flow.' : ''}</p>
+      </Card>
     </>
   );
 }

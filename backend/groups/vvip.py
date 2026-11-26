@@ -105,6 +105,8 @@ async def me(db: AsyncSession = Depends(get_db), inv=Depends(_investor)):
     level = (mem.level if mem and mem.status == "ACTIVE" and mem.tier == "VVIP" else "") or ""
     return {"level": level, "expires_at": mem.expires_at.isoformat() if mem and mem.expires_at else None,
             "features": {f: can(level, f) for f in ("live", "backtest", "orderflow")},
+            # orderflow = the account trades the order-flow-filtered strategies; the levels themselves are
+            # never shown to clients (Databento live data is licensed for personal use)
             "prices": cfg.get("vvip_levels"), "period_days": cfg.get("vvip_period_days"), "terms": TERMS,
             "account": None if acc is None else {
                 "broker": acc.broker, "mt5_login": acc.mt5_login, "mt5_server": acc.mt5_server, "state": acc.state,
@@ -242,24 +244,6 @@ async def my_backtests(db: AsyncSession = Depends(get_db), inv=Depends(_investor
                           "created_at": r.created_at.isoformat() if r.created_at else None} for r in reqs]}
 
 
-@portal.get("/orderflow")
-async def my_orderflow(db: AsyncSession = Depends(get_db), inv=Depends(_investor)):
-    """Elite: today's exchange order-flow levels for gold and Nasdaq, in your broker's prices."""
-    mem = await _member(db, inv.id)
-    level = mem.level if mem and mem.status == "ACTIVE" and mem.tier == "VVIP" else ""
-    if not can(level, "orderflow"):
-        raise HTTPException(403, "order-flow data comes with the Elite plan")
-    from backend.orderflow.feed import read_snapshot
-    snap = read_snapshot()
-    markets = []
-    for m in snap.get("markets") or []:
-        f = m.get("futures") or {}
-        markets.append({"name": m.get("name"), "cfd": m.get("cfd"), "levels": m.get("cfd_levels") or {},
-                        "delta": f.get("delta"), "delta_30m": f.get("delta_30m"), "volume": f.get("volume"),
-                        "session": f.get("session"), "updated": f.get("updated")})
-    return {"updated": snap.get("updated"), "live": bool(snap.get("connected")), "markets": markets}
-
-
 class BacktestAsk(BaseModel):
     market: str
     months: int = 6
@@ -300,13 +284,33 @@ def _shared():
     return Path(os.getenv("VVIP_SHARED_DIR", "/opt/algoedge/shared/vvip"))
 
 
-async def sync_clients(session_factory=None, notify=None) -> list[str]:
+def trade_alerts(prev: list[dict], now: list[dict], currency: str = "") -> list[str]:
+    """Telegram texts for the client: trades that opened and trades that closed since the last status."""
+    from backend.groups import templates as T
+    old = {int(p["ticket"]): p for p in prev or []}
+    new = {int(p["ticket"]): p for p in now or []}
+    out = []
+    for t, p in new.items():
+        if t not in old:
+            out.append(f"🔔 <b>New trade on your account</b>\n{p['side']} {T.e(T.name(p['symbol']))} {p['volume']:g} lot"
+                       f" @ {T.px(p['price'])}\nStop {T.px(p['sl']) if p['sl'] else '-'}"
+                       f" · Target {T.px(p['tp']) if p['tp'] else '-'}")
+    for t, p in old.items():
+        if t not in new:
+            pl = float(p.get("profit") or 0)
+            out.append(f"{'✅' if pl >= 0 else '❌'} <b>Trade closed</b>: {p['side']} {T.e(T.name(p['symbol']))} "
+                       f"{'+' if pl >= 0 else ''}{pl:,.2f} {currency} (last price seen before it closed)")
+    return out
+
+
+async def sync_clients(session_factory=None, notify=None, notify_client=None) -> list[str]:
     """Write each provisioned client's control file and read back its status.
     Returns the notices sent (a stop firing, trading resuming)."""
     from backend.data.database import async_session
     sf = session_factory or async_session
     root = _shared()
     notices: list[str] = []
+    client_msgs: list[tuple[int, str]] = []
     async with sf() as s:
         accs = (await s.execute(select(ClientAccount).where(ClientAccount.instance != ""))).scalars().all()
         for a in accs:
@@ -317,9 +321,17 @@ async def sync_clients(session_factory=None, notify=None) -> list[str]:
             except Exception:  # noqa: BLE001
                 pass
             prev_guard = a.guard_state or ""
+            if status.get("ok") and notify_client is not None and a.member_id and "positions" in status \
+                    and "positions" in (a.live or {}):
+                mem = await s.get(GroupMember, a.member_id)
+                for text in trade_alerts((a.live or {}).get("positions"), status.get("positions"),
+                                         status.get("currency") or ""):
+                    if mem is not None and mem.telegram_id:
+                        client_msgs.append((mem.telegram_id, text))
             if status.get("ok"):
                 a.live = {k: status.get(k) for k in ("balance", "equity", "currency", "peak", "drawdown_pct",
-                                                     "day_pnl", "open_positions", "bot_running", "updated")}
+                                                     "day_pnl", "open_positions", "bot_running", "updated",
+                                                     "positions")}
                 a.guard_state = status.get("state") or ""
                 if a.guard_state != prev_guard:
                     if a.guard_state in ("DD_STOP", "DAY_STOP"):
@@ -357,6 +369,11 @@ async def sync_clients(session_factory=None, notify=None) -> list[str]:
                 await notify(n)
             except Exception:  # noqa: BLE001
                 pass
+    for tg, text in client_msgs:
+        try:
+            await notify_client(tg, text)
+        except Exception:  # noqa: BLE001
+            pass
     return notices
 
 
