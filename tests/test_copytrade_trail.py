@@ -40,7 +40,7 @@ def test_breakeven_after_tp1_when_fill_and_tp_happen_between_checks(env):  # noq
     _set_rules(env, zone_entry="layer", be_after_tp=1, be_offset_pct=2, cancel_pending_after_tp=1)
     env.fake.bid, env.fake.ask = 2352.8, 2353.0
     r = _run(env.service.handle_message("u1", env.ch, 70,
-                                        "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2352\nTP: 2354\nTP: 2356\nTP: open"))
+                                        "Gold buy 2350 - 2346\nSL: 2340\nTP: 2352\nTP: 2354\nTP: 2356\nTP: open"))
     assert r["status"] == "EXECUTED", r
     t1, t2, t3 = (o.ticket for o in _orders(env)[:3])
     _tp_out(env, t1)                      # filled at 2350 and closed at TP1 2352 between two checks
@@ -108,7 +108,7 @@ def test_ladder_follows_price_through_targets_without_legs(env):  # noqa: F811
 def test_first_fill_takes_the_rest_of_the_zone_at_market(env):  # noqa: F811
     _set_rules(env, zone_entry="layer", on_first_fill="market")
     env.fake.bid, env.fake.ask = 2352.8, 2353.0
-    _run(env.service.handle_message("u1", env.ch, 74, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    _run(env.service.handle_message("u1", env.ch, 74, "Gold buy 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
     legs = _orders(env)
     assert all(o.status == "PENDING" for o in legs)
     _fill(env, legs[0].ticket, 2350.0)
@@ -172,7 +172,7 @@ def test_default_symbol(env):  # noqa: F811
 def test_first_fill_adds_market_legs_and_keeps_the_limits(env):  # noqa: F811
     _set_rules(env, zone_entry="layer", on_first_fill="market_add", cancel_pending_after_tp=1)
     env.fake.bid, env.fake.ask = 2352.8, 2353.0
-    _run(env.service.handle_message("u1", env.ch, 76, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    _run(env.service.handle_message("u1", env.ch, 76, "Gold buy 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
     legs = _orders(env)
     _fill(env, legs[0].ticket, 2350.0)
     env.fake.bid, env.fake.ask = 2350.6, 2350.8
@@ -197,7 +197,7 @@ def test_first_fill_adds_market_legs_and_keeps_the_limits(env):  # noqa: F811
 def test_first_fill_add_skipped_once_price_is_at_tp1(env):  # noqa: F811
     _set_rules(env, zone_entry="layer", on_first_fill="market_add")
     env.fake.bid, env.fake.ask = 2352.8, 2353.0
-    _run(env.service.handle_message("u1", env.ch, 77, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    _run(env.service.handle_message("u1", env.ch, 77, "Gold buy 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
     legs = _orders(env)
     _fill(env, legs[0].ticket, 2350.0)
     env.fake.bid, env.fake.ask = 2355.4, 2355.6                   # already at TP1 when we notice the fill
@@ -231,7 +231,7 @@ def test_mt5_disconnect_does_not_close_live_legs(env):  # noqa: F811
     marked CLOSED while it was still live, so nothing managed it afterwards."""
     _set_rules(env, zone_entry="layer", be_after_tp=1, cancel_pending_after_tp=1)
     env.fake.bid, env.fake.ask = 2349.8, 2350.0
-    _run(env.service.handle_message("u1", env.ch, 80, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2352\nTP: 2354\nTP: 2356"))
+    _run(env.service.handle_message("u1", env.ch, 80, "Gold buy 2350 - 2346\nSL: 2340\nTP: 2352\nTP: 2354\nTP: 2356"))
     before = {o.id: o.status for o in _orders(env)}
     env.fake.down = True
     for _ in range(3):
@@ -258,7 +258,7 @@ def test_market_add_when_first_leg_went_in_at_market(env):  # noqa: F811
     old first-fill test waited for a LIMIT to turn OPEN and never fired."""
     _set_rules(env, zone_entry="layer", on_first_fill="market_add", cancel_pending_after_tp=1)
     env.fake.bid, env.fake.ask = 2349.0, 2349.2                     # inside 2350 - 2346
-    _run(env.service.handle_message("u1", env.ch, 82, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    _run(env.service.handle_message("u1", env.ch, 82, "Gold buy 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
     legs = _orders(env)
     assert legs[0].kind == "MARKET" and legs[0].status == "OPEN"
     pending = [o for o in legs if o.status == "PENDING"]
@@ -275,7 +275,7 @@ def test_market_add_when_first_leg_went_in_at_market(env):  # noqa: F811
 def test_first_fill_market_mode_converts_limits_when_leg1_was_market(env):  # noqa: F811
     _set_rules(env, zone_entry="layer", on_first_fill="market")
     env.fake.bid, env.fake.ask = 2349.0, 2349.2
-    _run(env.service.handle_message("u1", env.ch, 83, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    _run(env.service.handle_message("u1", env.ch, 83, "Gold buy 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
     _run(env.service.monitor_once())
     rows = _orders(env)
     assert not any(o.status == "PENDING" for o in rows)
@@ -287,7 +287,7 @@ def test_limit_already_at_the_price_is_taken_at_market(env):  # noqa: F811
     Invalid price" and the leg was lost - no position, no market add for it."""
     _set_rules(env, zone_entry="layer")
     env.fake.bid, env.fake.ask = 2348.0, 2348.2                      # leg 2's limit is 2348
-    _run(env.service.handle_message("u1", env.ch, 84, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    _run(env.service.handle_message("u1", env.ch, 84, "Gold buy 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
     legs = {o.leg: o for o in _orders(env)}
     assert legs[2].kind == "MARKET" and legs[2].status == "OPEN" and "taken at market" in legs[2].detail
     assert legs[3].kind == "LIMIT" and legs[3].status == "PENDING"            # deeper one still waits
@@ -297,7 +297,7 @@ def test_refused_limit_retried_at_market_when_price_reached_it(env):  # noqa: F8
     _set_rules(env, zone_entry="layer")
     env.fake.bid, env.fake.ask = 2349.8, 2350.0
     env.fake.refuse_pending_then_ask = 2347.9                         # price fell through 2348 as we sent it
-    _run(env.service.handle_message("u1", env.ch, 85, "Gold buy now 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
+    _run(env.service.handle_message("u1", env.ch, 85, "Gold buy 2350 - 2346\nSL: 2340\nTP: 2355\nTP: 2360\nTP: 2365"))
     legs = {o.leg: o for o in _orders(env)}
     assert legs[2].kind == "MARKET" and legs[2].status == "OPEN" and "refused" in legs[2].detail
     assert not any(o.status == "FAILED" for o in legs.values())

@@ -388,7 +388,9 @@ const RULES = [
   ['Entries', [
     ['zone_entry', 'Entry zones', 'select', 'Layer = limit orders spread through the zone; first fill takes TP1, deepest takes the last TP.', [['layer', 'Layer limit orders'], ['market', 'One entry now']]],
     ['market_tolerance_pct', 'Market entry tolerance', 'num', 'How far past the written entry a market signal is still taken.', '%'],
-    ['chase_rule', 'If price ran past the entry', 'select', null, [['limit', 'Wait with a limit'], ['skip', 'Skip'], ['market', 'Enter anyway']]],
+    ['chase_rule', 'If price ran past the entry', 'select', 'Only for small misses: anything later is skipped by the rule below.', [['market', 'Enter anyway'], ['skip', 'Skip'], ['limit', 'Wait with a limit']]],
+    ['late_skip_frac', 'Too late after', 'num', 'Skip a market call once price has covered this share of the way from the entry to TP1 (0.35 = 35%). Stops recaps and late posts becoming orders. 0 = off.'],
+    ['late_skip_zones', 'Treat late zones as recaps too', 'bool', 'Turn on for a channel that re-posts its VIP trades (QAS VIP SIGNAL). Leave off for channels that post zones ahead of time on purpose (Gold Trader Sunny).'],
     ['skip_if_tp1_passed', 'Skip if price is beyond TP1', 'bool'],
     ['on_first_fill', 'When the first zone order fills', 'select', 'A quick tap of the zone often fills only the first order. Market: cancel the deeper orders and take their volume now. Also at market: take it now and keep the limits too (more size if they fill later; they are cancelled at TP1).', [['keep', 'Keep the rest waiting'], ['market', 'Take the rest at market (cancel the limits)'], ['market_add', 'Also take the rest at market (limits stay until TP1)']]],
     ['pending_expiry_hours', 'Cancel unfilled orders after', 'num', '0 = never.', 'h'],

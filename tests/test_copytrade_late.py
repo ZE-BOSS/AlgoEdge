@@ -1,0 +1,62 @@
+"""Late posts and recaps (26 Nov 2026): real messages that were turned into limit orders."""
+from backend.copytrade.parser import parse_message
+from backend.copytrade.rules import build_open_plan, merge_rules
+
+GOLD = {"point": 0.01, "tick_size": 0.01, "tick_value": 1.0, "volume_min": 0.01, "volume_step": 0.01,
+        "volume_max": 100, "digits": 2, "stops_level": 0}
+VIP_SIG = "XAUUSD SELL 3612\n\nTP 3609\nTP 3606\nTP 3603\nTP 3600\nTP 3597\nTP 3594\nTP 3591\nTP 3588\n\nSL. 3630"
+QAS = ("QAS VIP SIGNAL\n\nVolatility 75 (1s) Index - M15\n\nBUY\n\nENTRY ZONE: 3830.00 - 3838.00\n\n"
+       "TP1: 3867.48\nTP2: 3904.24\nTP3: 3941.00\n\nSTOP LOSS: 3790.00")
+PROFIT = "#XAUUSD BUY NOW 3544-40\n\nTP 3548\nTP 3552\nTP 3556\nTP 3560\nTP 3564 OPEN\n\nSL 3530"
+SUNNY = "Buy Gold 4487 - 4495Stop Loss 4483TP1 4497TP2 4499TP3 4501TP4 Open (4504/4507/4512/4518)"
+
+
+def plan(text, bid, ask, **over):
+    return build_open_plan(parse_message(text).to_dict(), {"bid": bid, "ask": ask}, GOLD, 10_000,
+                           merge_rules(over), "XAUUSD")
+
+
+def test_market_call_on_time_is_market():
+    p = plan(VIP_SIG, 3612.2, 3612.4)
+    assert p.ok and p.order_type == "MARKET"
+
+
+def test_market_call_slightly_late_is_market_not_a_limit():
+    p = plan(VIP_SIG, 3611.6, 3611.8)                 # 0.4 of the 3.0 to TP1 = 13%
+    assert p.ok and p.order_type == "MARKET"
+    assert all(l.get("kind", "MARKET") == "MARKET" for l in p.legs)
+
+
+def test_market_call_too_late_is_skipped_not_waited_for():
+    p = plan(VIP_SIG, 3610.6, 3610.8)                 # 1.4 of 3.0 = 47% of the way to TP1
+    assert not p.ok and "too late" in p.reason
+
+
+def test_explicit_limit_still_waits():
+    p = plan("XAUUSD SELL LIMIT 3612\nTP 3609\nTP 3606\nSL 3630", 3605.0, 3605.2)
+    assert p.ok and p.order_type == "LIMIT" and p.entry == 3612
+
+
+def test_old_channel_setting_limit_no_longer_catches_late_posts():
+    p = plan(VIP_SIG, 3610.6, 3610.8, chase_rule="limit")
+    assert not p.ok and "too late" in p.reason
+
+
+def test_buy_now_zone_after_it_ran_is_skipped():
+    assert parse_message(PROFIT).now
+    p = plan(PROFIT, 3547.0, 3547.3)                  # 3.3 past 3544 of the 4.0 to TP1
+    assert not p.ok and "too late" in p.reason
+    assert plan(PROFIT, 3542.0, 3542.3).ok             # inside the zone: taken
+
+
+def test_recap_zone_skipped_where_the_channel_turns_it_on():
+    assert plan(QAS, 3860.0, 3860.5).ok                # default: a zone may be posted ahead on purpose
+    p = plan(QAS, 3860.0, 3860.5, late_skip_zones=True)
+    assert not p.ok and "too late" in p.reason
+    assert plan(QAS, 3835.0, 3835.5, late_skip_zones=True).ok
+
+
+def test_zones_posted_ahead_still_layer_by_default():
+    p = plan(SUNNY, 4505.0, 4505.3)
+    assert p.ok and p.order_type == "LAYER"
+    assert not parse_message(SUNNY).now

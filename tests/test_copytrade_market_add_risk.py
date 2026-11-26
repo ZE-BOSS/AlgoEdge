@@ -9,7 +9,7 @@ from backend.copytrade.rules import build_open_plan, loss_per_lot, merge_rules
 
 GOLD = {"point": 0.01, "tick_size": 0.01, "tick_value": 1.0, "volume_min": 0.01, "volume_step": 0.01,
         "volume_max": 100, "digits": 2, "stops_level": 0, "trade_mode": 4}
-SIG = parse_message("Gold buy now 4059.6 - 4055 SL: 4051 TP: 4062 TP: 4064 TP: 4066").to_dict()
+SIG = parse_message("Gold buy 4059.6 - 4055 SL: 4051 TP: 4062 TP: 4064 TP: 4066").to_dict()
 QUOTE = {"bid": 4061.0, "ask": 4061.3}          # above the zone: every leg is a limit
 
 
@@ -59,8 +59,8 @@ def test_sl_fraction_tightens_and_keeps_dollar_risk():
 
 
 def test_sl_fraction_inside_zone_collapses_to_near_edge():
-    sig = parse_message("Gold buy now 4059.6 - 4055 SL: 4051 TP: 4062 TP: 4064").to_dict()
-    p = build_open_plan(sig, QUOTE, GOLD, 10_000, merge_rules({"risk_pct": 1.0, "sl_fraction": 0.5}), "XAUUSD")
+    sig = parse_message("Gold buy 4059.6 - 4055 SL: 4051 TP: 4062 TP: 4064").to_dict()
+    p = build_open_plan(sig, QUOTE, GOLD, 10_000, merge_rules({"risk_pct": 1.0, "sl_fraction": 0.5, "late_skip_frac": 0}), "XAUUSD")
     assert p.ok and abs(p.sl - 4055.3) < 1e-6 and p.order_type != "LAYER"
     assert any("near edge" in n for n in p.notes)
 

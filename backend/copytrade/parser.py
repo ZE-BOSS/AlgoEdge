@@ -88,6 +88,7 @@ class ParsedSignal:
     applies_to: str = "reply_or_last"        # reply_or_last / symbol / all
     also_breakeven: bool = False             # CLOSE that also says "and set breakeven" ("closed half & set BE")
     add_on: bool = False                     # OPEN that adds to the running trade: "ADD MORE BUY 4198 / NEW SL 4190"
+    now: bool = False                        # "BUY NOW", "SELL MARKET", "INSTANT", "CMP": enter at once, not a zone to wait for
     confidence: float = 0.0
     notes: list[str] = field(default_factory=list)
 
@@ -392,6 +393,7 @@ def parse_message(text: str) -> ParsedSignal:
         p = ParsedSignal(kind="OPEN", symbol=symbol, side=side, order_type=otype, sl=sl, tps=tps, tp_open=tp_open,
                          add_on=bool(re.match(r"^\W*ADD(ING)?\s+(MORE\s+)?(BUY|SELL)", up)))
         p.entry, p.entry_low, p.entry_high = _entry(up, side)
+        p.now = otype == "MARKET" and bool(re.search(r"\b(?:BUY|SELL)\s*(?:NOW|MARKET|INSTANT\w*)\b|\bCMP\b|\b(?:ENTER|ENTRY)\s*NOW\b", up))
         if otype == "MARKET" and p.entry is None:
             p.notes.append("market entry, no price written")
         p.confidence = 0.4 + 0.2 * bool(symbol) + 0.2 * (sl is not None) + 0.2 * bool(tps)

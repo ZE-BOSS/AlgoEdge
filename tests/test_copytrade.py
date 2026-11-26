@@ -95,12 +95,20 @@ def test_plan_market_inside_zone_risk_split():
     assert p.risk_dollars <= 100.0
 
 
-def test_plan_price_ran_away_waits_with_limit():
+def test_plan_price_ran_away_is_skipped_as_late_not_waited_for():
+    # "BUY NOW 2350-2347", TP1 2355: 1.2 past (24% of the way) is taken at market; 4.2 past (84%) is a late
+    # post or a recap (26 Nov 2026) and skipped - no limit order left behind either way
     r = merge_rules({"zone_entry": "market"})
-    p = build_open_plan(_sig(), {"bid": 2354.0, "ask": 2354.2}, GOLD, 10_000, r, "XAUUSD")
+    p = build_open_plan(_sig(now=True), {"bid": 2351.0, "ask": 2351.2}, GOLD, 10_000, r, "XAUUSD")
+    assert p.ok and p.order_type == "MARKET"
+    p = build_open_plan(_sig(now=True), {"bid": 2354.0, "ask": 2354.2}, GOLD, 10_000, r, "XAUUSD")
+    assert not p.ok and "too late" in p.reason
+    # with the late check off, the chase rules still work as before
+    p = build_open_plan(_sig(), {"bid": 2354.0, "ask": 2354.2}, GOLD, 10_000,
+                        merge_rules({"zone_entry": "market", "late_skip_frac": 0, "chase_rule": "limit"}), "XAUUSD")
     assert p.ok and p.order_type == "LIMIT" and p.entry == 2350.0
     p2 = build_open_plan(_sig(), {"bid": 2354.0, "ask": 2354.2}, GOLD, 10_000,
-                         merge_rules({"chase_rule": "skip", "zone_entry": "market"}), "XAUUSD")
+                         merge_rules({"chase_rule": "skip", "zone_entry": "market", "late_skip_frac": 0}), "XAUUSD")
     assert not p2.ok and "ran past" in p2.reason
 
 

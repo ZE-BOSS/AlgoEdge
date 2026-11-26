@@ -34,7 +34,14 @@ DEFAULT_RULES: dict[str, Any] = {
     "zone_entry": "layer",        # an entry ZONE: layer = limit orders spread through it (first fill -> TP1,
                                   # deepest -> last TP; already-reached levels fill at market); market = one entry now
     "market_tolerance_pct": 0.15, # a market signal is taken at market while price is within this % of the written entry
-    "chase_rule": "limit",        # price ran past the entry: limit = wait at the entry with a limit order, skip, market
+    "chase_rule": "market",       # a MARKET signal whose price ran past the entry (but less than late_skip_frac
+                                  # of the way to TP1): market = take it now, limit = wait at the entry, skip
+    "late_skip_frac": 0.35,       # price already covered this share of the way from the written entry to TP1:
+                                  # the post is late or a recap - skip it whatever chase_rule says (0 = off).
+                                  # A late fill turns TP1 into a coin-flip with breakeven right behind it.
+                                  # Applies to single-price market calls and to zones written "BUY NOW 3544-40";
+    "late_skip_zones": False,     # ...and to every zone when on (a channel that re-posts its VIP trades as
+                                  # recaps). Off by default: some channels post zones ahead of time on purpose.
     "skip_if_tp1_passed": True,   # do not enter if price is already beyond TP1
     "pending_expiry_hours": 24,   # cancel limit/stop orders that have not filled after this long (0 = never)
     # missing numbers
@@ -273,6 +280,11 @@ def _build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: 
     lo, hi = sig.get("entry_low"), sig.get("entry_high")
     tol = float(rules.get("market_tolerance_pct") or 0) / 100.0
 
+    late = _late(sig, mkt, s, rules, want)
+    if late:
+        p.reason = late
+        return p
+
     if (rules.get("zone_entry", "layer") == "layer" and want in ("MARKET", "LIMIT")
             and lo is not None and hi is not None and float(hi) > float(lo)):
         return _layer_plan(p, sig, mkt, s, float(lo), float(hi), spec, balance, rules)
@@ -288,7 +300,7 @@ def _build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: 
             if (mkt - limit_price) * s <= 0:
                 p.order_type, p.entry = "MARKET", mkt
             else:
-                rule = rules.get("chase_rule", "limit")
+                rule = rules.get("chase_rule", "market")
                 if rule == "skip":
                     p.reason = f"price {mkt} ran past the entry {edge} by more than {tol*100:.2f}%"
                     return p
@@ -461,6 +473,36 @@ def _size_legs(p: OpenPlan, entries: list[float], targets: list, sl: float, spec
         n -= 1
     p.reason = f"risk budget is below the minimum lot {vmin}"
     return False
+
+
+def _late(sig: dict, mkt: float, s: int, rules: dict, want: str) -> str:
+    """A market call (no LIMIT / STOP written) that price has already carried a good
+    part of the way to TP1: a late post or a results recap ("QAS VIP SIGNAL"
+    re-posted in a free channel after it ran). Returns why it is skipped, or ""."""
+    frac = float(rules.get("late_skip_frac", 0.35) or 0)
+    if frac <= 0 or want != "MARKET":
+        return ""
+    lo, hi, entry = sig.get("entry_low"), sig.get("entry_high"), sig.get("entry")
+    if lo is not None and hi is not None and float(hi) > float(lo):
+        if not (sig.get("now") or rules.get("late_skip_zones")):
+            return ""                                       # a zone to wait for, posted ahead of time
+        edge = float(hi) if s == 1 else float(lo)          # the worst written entry
+    elif entry is not None:
+        edge = float(entry)
+    else:
+        return ""
+    tps = [float(t) for t in (sig.get("tps") or []) if (float(t) - edge) * s > 0]
+    if not tps:
+        return ""
+    tp1 = min(tps, key=lambda t: (t - edge) * s)
+    ran = (mkt - edge) * s
+    if ran <= 0:
+        return ""
+    share = ran / ((tp1 - edge) * s)
+    if share >= frac:
+        return (f"too late: price {mkt:g} already covered {share:.0%} of the way from the entry {edge:g} to TP1 {tp1:g} "
+                f"(a late post or a recap) - not taken")
+    return ""
 
 
 def _layer_plan(p: OpenPlan, sig: dict, mkt: float, s: int, lo: float, hi: float, spec: dict,
