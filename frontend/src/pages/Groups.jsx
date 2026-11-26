@@ -89,8 +89,9 @@ export default function Groups() {
           <p>The group bot posts signals from the strategies and copy channels you route to each group, follows every
             trade to its result, and runs the VIP join chat. Members never see where a signal came from.</p>
           <div className="ct-status">
-            {status.isLoading ? <Pill s="QUEUED">Loading…</Pill> : !bot.configured
-              ? <Pill s="FAILED">No bot token on this server</Pill>
+            {status.isLoading ? <Pill s="QUEUED">Loading…</Pill> : status.isError
+              ? <Pill s="FAILED">Could not load: {apiError(status.error)}</Pill> : !bot.configured
+              ? <Pill s="FAILED">The group bot runs on the Live server - switch to Live (bottom left)</Pill>
               : <Pill s={bot.running ? 'SENT' : 'FAILED'}>{bot.running ? `@${bot.username || 'bot'} running` : 'Bot stopped'}</Pill>}
             {d && <Pill s="QUEUED">{d.queued} queued</Pill>}
             {d?.failed_24h > 0 && <Pill s="FAILED">{d.failed_24h} failed today</Pill>}

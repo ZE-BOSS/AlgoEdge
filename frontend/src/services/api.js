@@ -561,7 +561,7 @@ export const kronos = {
 
 // ── Copy trading (Telegram signal channels) ────────────────────────────────
 const CT = '/copytrade';
-const GR = '/api/groups';
+const GR = '/groups';
 export const groupsApi = {
   status: () => api.get(`${GR}/status`),
   saveSettings: (patch) => api.put(`${GR}/settings`, { patch }),
@@ -580,7 +580,7 @@ export const groupsApi = {
   clients: () => api.get(`${GR}/clients`),
   patchClient: (id, data) => api.patch(`${GR}/clients/${id}`, data),
   closeRequest: (id, status) => api.post(`${GR}/backtest-requests/${id}/${status}`),
-  orderflow: () => api.get('/api/orderflow/levels'),
+  orderflow: () => api.get('/orderflow/levels'),
 };
 
 export const copytrade = {
