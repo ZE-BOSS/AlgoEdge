@@ -222,18 +222,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
         "evidence": "roboquant.dev template NQ Precision Bot, NQ 1m preset: SL 2.2x / TP 0.3x ATR(14), "
                     "8-min time close. Claimed +1,377%, 94% win, DD 32.8%, PF 2.48 (fixed 6 NQ).",
     },
-    "RQ_NYORB_v1": {
-        "tp_count": 1, "tp1_rr": 0.4, "min_rr": 0.4,
-        "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
-        "evidence": "roboquant.dev template NY Open Range Breakout, MNQ 15m preset: stop 0.4x ATR(14), "
-                    "target 0.4R, RVOL>=1.0, ATR 0.10-0.60% of price. Claimed +1,909%, 74% win, DD 42.1%, PF 1.22.",
-    },
-    "RQ_CrazyORB_v1": {
-        "tp_count": 1, "tp1_rr": 0.35, "min_rr": 0.35,
-        "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
-        "evidence": "roboquant.dev template Crazy ORB, NQ 15m preset: 09:15-09:30 range, stop 1x ATR(14), "
-                    "target 0.35R, 2 trades/day. Claimed +594%, 81.3% win, DD 19.0%, PF 1.57.",
-    },
     "RQ_TMeanReversion_v1": {
         "tp_count": 1, "tp1_rr": 40.0,
         "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
@@ -247,16 +235,6 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
                     "long only, 1% stop. Claimed +1,116%, 24.9% win, DD 55.5%, PF 1.32.",
     },
     # ── roboquant.dev templates, ported 2026-10-20 (strategy_roboquant/engine_more.py) ──
-    "RQ_FlashTriggerORB_v1": {
-        "tp_count": 1, "tp1_rr": 3.0, "min_rr": 3.0,
-        "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
-        "evidence": "roboquant.dev template The Flash Trigger ORB, MNQ 15m preset: 14:30 UTC candle, close beyond it, stop at the far side, 3R, trail 25 pts after 70. Claimed +195%, 61.6% win, DD 11.1%, PF 1.36.",
-    },
-    "RQ_ScarfaceORB_v1": {
-        "tp_count": 1, "tp1_rr": 2.0, "min_rr": 2.0,
-        "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
-        "evidence": "roboquant.dev template Scarface ORB, MNQ 1m preset: 5-min range, breakout/retest/momentum candle, 1.4x ATR(14) stop, 2R. Claimed +48.4%, 41.5% win, DD 7.7%, PF 1.35.",
-    },
     "RQ_IVB_v1": {
         "tp_count": 1, "tp1_rr": 1.3333, "min_rr": 1.3333,
         "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",

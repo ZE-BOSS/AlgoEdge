@@ -229,33 +229,15 @@ def test_sigma_watch_bands_are_the_ones_the_next_bar_is_judged_against():
     assert checked >= 6
 
 
-def test_nyorb_watch_gives_the_range_until_the_trade_is_taken():
-    days = pd.bdate_range("2026-03-02", periods=3)
-    times = pd.DatetimeIndex([pd.Timestamp(d) + pd.Timedelta(minutes=m) for d in days for m in range(0, 24 * 60, 15)])
-    et = times.tz_localize("UTC").tz_convert(ET)
-    hhmm = et.hour * 100 + et.minute
-    p = np.full(len(times), 100.0)
-    h, lo = p + 0.2, p - 0.2
-    last = et.normalize() == et.normalize()[-1]
-    k930 = np.flatnonzero(last & (hhmm == 930))[0]
-    h[k930], lo[k930] = 101.0, 99.0                          # the opening range bar
-    f = _bars(times, p, h, lo, p.copy())
-    eng = get_strategy("RQ_NYORB_v1")(UserConfigV2())
-    assert eng.watch("NDX100", "M15", f.iloc[:k930]) == []   # range not set yet
-    lv = {x["direction"]: x["level"] for x in eng.watch("NDX100", "M15", f.iloc[:k930 + 3])}
-    assert lv == {"BUY": 101.0, "SELL": 99.0}
-
 
 def test_tap_and_watch_change_no_signal_bar_by_bar():
     """Same strategy, same bars: with the tap attached and watch() called after
     every bar (as live does), every bar's signal is identical to a plain run."""
     times, o, close = _sigma_frame(7)
     f = _bars(times, o, np.maximum(o, close) + 0.05, np.minimum(o, close) - 0.05, close)
-    for sid, tf in (("RQ_SigmaBreakout_v1", "M30"), ("RQ_NYORB_v1", "M30")):
+    for sid, tf in (("RQ_SigmaBreakout_v1", "M30"),):
         plain = get_strategy(sid)(UserConfigV2())
         live = get_strategy(sid)(UserConfigV2())
-        if sid == "RQ_NYORB_v1":
-            plain.params.timeframe = live.params.timeframe = "M30"
         attach_tap(live)
         n_sig = 0
         for i in range(60, len(f)):

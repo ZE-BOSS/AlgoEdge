@@ -25,7 +25,7 @@ from backend.strategies.registry import get_strategy
 ET = ZoneInfo("America/New_York")
 
 PORTS = [
-    ("RQ_FlashTriggerORB_v1", "M15"), ("RQ_ScarfaceORB_v1", "M1"), ("RQ_IVB_v1", "M5"),
+    ("RQ_IVB_v1", "M5"),
     ("RQ_GigaORB_v1", "M15"), ("RQ_SigmaBreakout_v1", "M30"), ("RQ_DailyVWAP_v1", "M1"),
     ("RQ_FridayRevisit_v1", "M5"), ("RQ_M30ORB_v1", "M5"), ("RQ_SRSweep_v1", "M5"),
 ]
@@ -84,6 +84,15 @@ def test_live_and_backtest_paths_give_the_same_signals(sid, tf):
     assert all(d in ("BUY", "SELL") for _, d, _, _ in bt)
 
 
+def test_removed_strategies_are_gone():
+    from backend.strategies.registry import list_strategies
+    gone = {"RQ_NYORB_v1", "RQ_CrazyORB_v1", "RQ_FlashTriggerORB_v1", "RQ_ScarfaceORB_v1"}
+    assert not gone & set(list_strategies())
+    # configs saved while they existed still load
+    UserConfigV2.from_dict({"rq_ny_orb": {"timeframe": "M15"}, "rq_scarface_orb": {}, "rq_crazy_orb": {},
+                            "rq_flash_trigger_orb": {}})
+
+
 def test_the_ports_are_wired_end_to_end():
     from backend.api.routes.backtest import STRATEGY_PARAM_SECTION
     from backend.strategies.strategy_defaults import STRATEGY_DEFAULTS
@@ -110,23 +119,6 @@ def _flat_m15(day: str, n_days: int = 4):
     idx = pd.date_range(f"{day} 00:00", periods=n_days * 96, freq="15min")
     p = np.full(len(idx), 100.0)
     return idx, p.copy(), p + 0.2, p - 0.2, p.copy()
-
-
-def test_flash_trigger_trades_the_first_close_beyond_the_1430_utc_candle():
-    idx, o, h, lo, c = _flat_m15("2026-03-02")
-    k = idx.get_loc(pd.Timestamp("2026-03-05 14:30"))
-    h[k], lo[k] = 101.0, 99.0                        # the targeted candle
-    c[k + 2], h[k + 2] = 101.5, 101.6                # first close above it
-    f = _bars(idx, o, h, lo, c)
-    eng = get_strategy("RQ_FlashTriggerORB_v1")(UserConfigV2())
-    assert asyncio.run(eng.on_bar("NDX100", "M15", f.iloc[:k + 2])) is None
-    s = asyncio.run(eng.on_bar("NDX100", "M15", f.iloc[:k + 3]))
-    assert s is not None and s.direction == "BUY"
-    assert s.stop_loss == pytest.approx(99.0)
-    assert (s.take_profit - s.entry_price) == pytest.approx(3.0 * (s.entry_price - 99.0))
-    c[k + 3], h[k + 3] = 101.7, 101.8
-    f = _bars(idx, o, h, lo, c)
-    assert asyncio.run(eng.on_bar("NDX100", "M15", f.iloc[:k + 4])) is None, "one trade per range"
 
 
 def test_sigma_breakout_flips_and_flattens_at_the_close():

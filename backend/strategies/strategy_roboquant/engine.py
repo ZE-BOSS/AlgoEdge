@@ -1,12 +1,10 @@
 """
 backend/strategies/strategy_roboquant/engine.py
 
-Five strategies replicated from roboquant.dev's template library, read from
+Strategies replicated from roboquant.dev's template library, read from
 their source on 2026-10-19 (see research/roboquant/REPLICATION-2026-10-19.md):
 
     RQ_NQPrecision_v1      NQ Precision Bot                    M1
-    RQ_NYORB_v1            NY Open Range Breakout              M15
-    RQ_CrazyORB_v1         Crazy ORB                           M15
     RQ_TMeanReversion_v1   T-Mean Reversion                    H1
     RQ_CharlesMonger_v1    Charles Monger Investment Strategy  H1
 
@@ -40,7 +38,7 @@ from backend.strategies.base_strategy import BaseStrategy, TradeAction, TradeSig
 from backend.strategies.registry import register_strategy
 from backend.strategies.strategy_roboquant import common as c
 from backend.strategies.strategy_roboquant.params import (
-    RQCharlesMongerParams, RQCrazyORBParams, RQNQPrecisionParams, RQNYORBParams,
+    RQCharlesMongerParams, RQNQPrecisionParams,
     RQTMeanReversionParams,
 )
 
@@ -165,231 +163,9 @@ class RQNQPrecision(_RQBase):
         return None
 
 
-# ── NY Open Range Breakout ───────────────────────────────────────────────────
-
-
-@register_strategy("RQ_NYORB_v1")
-class RQNYORB(_RQBase):
-    strategy_id = "RQ_NYORB_v1"
-    PARAMS_ATTR = "rq_ny_orb"
-    PARAMS_CLS = RQNYORBParams
-    WINDOW = 300
-    OR_START = 930
-
-    def _entry_at(self, j, hi, lo, close, atr, vol, k0):
-        """The entry the strategy takes on bar j, or None (filters as upstream)."""
-        p = self.params
-        long_sig = p.allow_long and close[j] > hi
-        short_sig = p.allow_short and close[j] < lo
-        if not (long_sig or short_sig):
-            return None
-        if p.use_rvol:
-            prev = vol[max(0, j - p.rvol_period):j]
-            if not len(prev) or prev.mean() <= 0 or vol[j] < p.min_rvol * prev.mean():
-                return ("blocked", "rvol")
-        a = atr[j]
-        if p.use_atr_regime:
-            pct = a / close[j] * 100.0 if np.isfinite(a) and close[j] > 0 else 0.0
-            if not (p.min_atr_pct <= pct <= p.max_atr_pct):
-                return ("blocked", "atr_pct")
-        if not np.isfinite(a) or a <= 0:
-            return ("blocked", "atr")
-        dist = p.atr_stop_mult * a
-        if p.max_stop_pts > 0 and dist > p.max_stop_pts:
-            return ("blocked", "stop_cap")
-        return ("BUY" if long_sig else "SELL", dist)
-
-    async def on_bar(self, symbol, timeframe, candles):
-        p = self.params
-        if not self._start(symbol, timeframe, candles, 40):
-            return None
-        t = c.epochs(candles)
-        day, hhmm = c.et_parts(t)
-        i = len(t) - 1
-        if hhmm[i] >= p.flat_hhmm or hhmm[i] >= p.cutoff_hhmm:
-            return None
-        today = np.where((day == day[i]) & (hhmm >= self.OR_START))[0]
-        if len(today) <= p.range_bars or i < today[p.range_bars - 1]:
-            return None
-        rb = today[:p.range_bars]
-        if i <= rb[-1]:
-            return None
-        hi = float(candles["high"].to_numpy()[rb].max())
-        lo = float(candles["low"].to_numpy()[rb].min())
-        if hi <= lo:
-            return None
-        close = candles["close"].to_numpy(dtype=float)
-        atr = c.atr_series(candles["high"].to_numpy(), candles["low"].to_numpy(), close, p.atr_period)
-        vol = c.volume(candles)
-        # One trade per day: replay today's earlier post-range bars.
-        for j in today[today > rb[-1]]:
-            if j == i:
-                break
-            if hhmm[j] >= p.cutoff_hhmm:
-                return None
-            e = self._entry_at(j, hi, lo, close, atr, vol, rb[-1])
-            if e is not None and e[0] != "blocked":
-                return None                            # already traded today
-        e = self._entry_at(i, hi, lo, close, atr, vol, rb[-1])
-        if not self.gate("breakout", e is not None, "close inside the opening range"):
-            return None
-        if not self.gate("filters", e[0] != "blocked", f"blocked by {e[1] if e else ''}"):
-            return None
-        direction, dist = e
-        s = 1 if direction == "BUY" else -1
-        entry = close[i]
-        return self._signal(symbol, timeframe, candles, direction, entry,
-                            entry - s * dist, entry + s * p.rr_target * dist,
-                            or_high=hi, or_low=lo, atr=float(atr[i]))
-
-    def watch(self, symbol, timeframe, candles):
-        """The opening-range levels a close must clear, once the range is set
-        and while today's one trade is still unused (pre-signal alerts)."""
-        p = self.params
-        if timeframe != p.timeframe or candles is None or len(candles) < 40:
-            return []
-        t = c.epochs(candles)
-        day, hhmm = c.et_parts(t)
-        i = len(t) - 1
-        if hhmm[i] >= min(p.flat_hhmm, p.cutoff_hhmm):
-            return []
-        today = np.where((day == day[i]) & (hhmm >= self.OR_START))[0]
-        if len(today) < p.range_bars or i < today[p.range_bars - 1]:
-            return []
-        rb = today[:p.range_bars]
-        hi = float(candles["high"].to_numpy()[rb].max())
-        lo = float(candles["low"].to_numpy()[rb].min())
-        if hi <= lo:
-            return []
-        close = candles["close"].to_numpy(dtype=float)
-        atr = c.atr_series(candles["high"].to_numpy(), candles["low"].to_numpy(), close, p.atr_period)
-        vol = c.volume(candles)
-        for j in today[today > rb[-1]]:
-            e = self._entry_at(j, hi, lo, close, atr, vol, rb[-1])
-            if e is not None and e[0] != "blocked":
-                return []                               # today's trade is taken
-        a = float(atr[i]) if np.isfinite(atr[i]) else 0.0
-        out = []
-        if p.allow_long:
-            out.append({"direction": "BUY", "level": hi, "cross": "above",
-                        "stop": hi - p.atr_stop_mult * a if a else None, "note": f"opening range {lo:.2f}-{hi:.2f}"})
-        if p.allow_short:
-            out.append({"direction": "SELL", "level": lo, "cross": "below",
-                        "stop": lo + p.atr_stop_mult * a if a else None, "note": f"opening range {lo:.2f}-{hi:.2f}"})
-        return out
-
-    def on_position_bar(self, symbol, timeframe, candles, position):
-        if c.et_hhmm_one(c.epochs(candles)[-1]) >= self.params.flat_hhmm:
-            return self._close(position, "RQ_SESSION_FLAT")
-        return None
-
-
-# ── Crazy ORB ────────────────────────────────────────────────────────────────
-
-
-@register_strategy("RQ_CrazyORB_v1")
-class RQCrazyORB(_RQBase):
-    strategy_id = "RQ_CrazyORB_v1"
-    PARAMS_ATTR = "rq_crazy_orb"
-    PARAMS_CLS = RQCrazyORBParams
-    WINDOW = 300
-
-    async def on_bar(self, symbol, timeframe, candles):
-        p = self.params
-        if not self._start(symbol, timeframe, candles, 40):
-            return None
-        t = c.epochs(candles)
-        day, hhmm = c.et_parts(t)
-        i = len(t) - 1
-        if hhmm[i] >= p.flatten_hhmm or not (p.trade_start_hhmm <= hhmm[i] < p.trade_end_hhmm):
-            return None
-        today = day == day[i]
-        rng = np.where(today & (hhmm >= p.range_start_hhmm) & (hhmm < p.range_end_hhmm))[0]
-        if not self.gate("opening_range", len(rng) > 0, "no range bars today"):
-            return None
-        high = candles["high"].to_numpy(dtype=float)
-        low = candles["low"].to_numpy(dtype=float)
-        close = candles["close"].to_numpy(dtype=float)
-        hi, lo = float(high[rng].max()), float(low[rng].min())
-        atr = c.atr_series(high, low, close, p.atr_period)
-        # Replay the day: each side once, at most max_trades, and no entry while
-        # an earlier one is still open (SL/TP replayed from the bars).
-        long_used = short_used = False
-        trades = 0
-        open_until = -1          # bar index at which the open trade exits (or beyond i)
-        cands = np.where(today & (hhmm >= p.range_end_hhmm) & (hhmm >= p.trade_start_hhmm)
-                         & (hhmm < p.trade_end_hhmm))[0]
-        for j in cands:
-            if j > i:
-                break
-            if open_until > j or trades >= p.max_trades:
-                if j == i:
-                    return None
-                continue
-            a = atr[j]
-            want = None
-            if close[j] > hi and not long_used:
-                want = "BUY"
-            elif close[j] < lo and not short_used:
-                want = "SELL"
-            if want is None or not np.isfinite(a) or a <= 0:
-                if j == i:
-                    self.gate("breakout", False, "no unused-side close beyond the range")
-                    return None
-                continue
-            dist = p.atr_mult * a
-            s = 1 if want == "BUY" else -1
-            sl, tp = close[j] - s * dist, close[j] + s * p.rr * dist
-            if j == i:
-                return self._signal(symbol, timeframe, candles, want, close[j], sl, tp,
-                                    or_high=hi, or_low=lo, atr=float(a))
-            trades += 1
-            long_used |= want == "BUY"
-            short_used |= want == "SELL"
-            ex = c.simulate_exit(high, low, j + 1, i + 1, want == "BUY", sl, tp)
-            open_until = (ex if ex is not None else i + 1)
-        return None
-
-    def watch(self, symbol, timeframe, candles):
-        """Range levels for the sides not yet used today (pre-signal alerts).
-        Simpler than on_bar's replay: a side counts as used once a close beyond
-        it happened today, and nothing is offered while max_trades is reached."""
-        p = self.params
-        if timeframe != p.timeframe or candles is None or len(candles) < 40:
-            return []
-        t = c.epochs(candles)
-        day, hhmm = c.et_parts(t)
-        i = len(t) - 1
-        if hhmm[i] >= p.flatten_hhmm or hhmm[i] >= p.trade_end_hhmm or hhmm[i] < p.range_end_hhmm:
-            return []
-        today = day == day[i]
-        rng = np.where(today & (hhmm >= p.range_start_hhmm) & (hhmm < p.range_end_hhmm))[0]
-        if not len(rng):
-            return []
-        high = candles["high"].to_numpy(dtype=float)
-        low = candles["low"].to_numpy(dtype=float)
-        close = candles["close"].to_numpy(dtype=float)
-        hi, lo = float(high[rng].max()), float(low[rng].min())
-        after = np.where(today & (hhmm >= p.range_end_hhmm))[0]
-        long_used = bool((close[after] > hi).any())
-        short_used = bool((close[after] < lo).any())
-        if int(long_used) + int(short_used) >= p.max_trades:
-            return []
-        a = c.atr_series(high, low, close, p.atr_period)[i]
-        a = float(a) if np.isfinite(a) else 0.0
-        note = f"opening range {lo:.2f}-{hi:.2f}"
-        out = []
-        if not long_used:
-            out.append({"direction": "BUY", "level": hi, "cross": "above", "stop": hi - p.atr_mult * a if a else None, "note": note})
-        if not short_used:
-            out.append({"direction": "SELL", "level": lo, "cross": "below", "stop": lo + p.atr_mult * a if a else None, "note": note})
-        return out
-
-    def on_position_bar(self, symbol, timeframe, candles, position):
-        if c.et_hhmm_one(c.epochs(candles)[-1]) >= self.params.flatten_hhmm:
-            return self._close(position, "RQ_SESSION_FLAT")
-        return None
-
+# RQ_NYORB_v1 and RQ_CrazyORB_v1 were removed on 27 Nov 2026: they lost money on every market
+# tested, on Deriv and on CME futures (research_data/compare_all.json). Their params stay in
+# config_schema so saved configs still load.
 
 # ── T-Mean Reversion ─────────────────────────────────────────────────────────
 

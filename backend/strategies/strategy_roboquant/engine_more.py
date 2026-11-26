@@ -1,13 +1,11 @@
 """
 backend/strategies/strategy_roboquant/engine_more.py
 
-Nine more roboquant.dev templates (2026-10-20), each a line-for-line port of
+More roboquant.dev templates (2026-10-20), each a line-for-line port of
 the template's Rust `on_bar` through `replay.ReplayStrategy`. The source of
 every template is kept in research/roboquant/source/rs/, and each port names
 the upstream line it mirrors where the behaviour is not obvious.
 
-    RQ_FlashTriggerORB_v1   The Flash Trigger ORB              M15
-    RQ_ScarfaceORB_v1       Scarface ORB                       M1
     RQ_IVB_v1               IVB - Initial Volatility Breakout  M5
     RQ_GigaORB_v1           Giga ORB                           M15
     RQ_SigmaBreakout_v1     Sigma Breakout                     M30
@@ -33,10 +31,9 @@ import numpy as np
 import pandas as pd
 
 from backend.strategies.registry import register_strategy
-from backend.strategies.strategy_roboquant import common as c
 from backend.strategies.strategy_roboquant.params import (
-    RQDailyAnchoredVWAPParams, RQFlashTriggerORBParams, RQFridayRevisitParams, RQGigaORBParams,
-    RQIVBParams, RQM30ORBParams, RQScarfaceORBParams, RQSigmaBreakoutParams, RQSRSweepParams,
+    RQDailyAnchoredVWAPParams, RQFridayRevisitParams, RQGigaORBParams,
+    RQIVBParams, RQM30ORBParams, RQSigmaBreakoutParams, RQSRSweepParams,
 )
 from backend.strategies.strategy_roboquant.replay import (
     Bars, Ctx, ReplayStrategy, atr_fast, daily_asof, ema_fast,
@@ -90,167 +87,9 @@ class _DailyMixin:
         return daily_asof(self._d1_frame(getattr(self, "_symbol_now", "")), bars.t, value, n)
 
 
-# ── The Flash Trigger ORB ───────────────────────────────────────────────────
-
-
-@register_strategy("RQ_FlashTriggerORB_v1")
-class RQFlashTriggerORB(ReplayStrategy):
-    strategy_id = "RQ_FlashTriggerORB_v1"
-    PARAMS_ATTR = "rq_flash_trigger_orb"
-    PARAMS_CLS = RQFlashTriggerORBParams
-    WINDOW = 500
-    ANCHOR_DAYS = 3
-
-    def prepare(self, bars):
-        lt = pd.DatetimeIndex(pd.to_datetime(bars.t + self.params.utc_offset * 3600, unit="s"))
-        bars.ind["loc_day"] = np.asarray(lt.year * 10000 + lt.month * 100 + lt.day, dtype="int64")
-        bars.ind["loc_hhmm"] = np.asarray(lt.hour * 100 + lt.minute, dtype="int64")
-        bars.ind["loc_wd"] = np.asarray(lt.dayofweek + 1, dtype="int64")
-
-    def init_state(self):
-        return dict(session_date=0, utc_date=0, closed_for_day=False, range_active=False,
-                    traded=False, range_t=0, hi=0.0, lo=0.0)
-
-    def _day_allowed(self, wd: int) -> bool:
-        p = self.params
-        if not p.day_filter:
-            return True
-        return {1: p.trade_monday, 2: p.trade_tuesday, 3: p.trade_wednesday,
-                4: p.trade_thursday, 5: p.trade_friday}.get(int(wd), False)
-
-    def step(self, st, k, b, ctx):
-        p = self.params
-        ld, lh = int(b.ind["loc_day"][k]), int(b.ind["loc_hhmm"][k])
-        if ld != st["session_date"]:
-            st.update(session_date=ld, range_active=False, traded=False)
-        if int(b.utc_day[k]) != st["utc_date"]:
-            st.update(utc_date=int(b.utc_day[k]), closed_for_day=False)
-        if not st["closed_for_day"] and b.utc_hhmm[k] >= p.eod_close_hour * 100 + p.eod_close_minute:
-            if ctx.position():
-                ctx.close_position("RQ_EOD_FLAT")
-            st["closed_for_day"] = True
-        target = p.target_hour * 100 + p.target_minute
-        if not st["range_active"] and lh == target and self._day_allowed(b.ind["loc_wd"][k]):
-            st.update(hi=float(b.h[k]), lo=float(b.l[k]), range_active=True, traded=False, range_t=int(b.t[k]))
-            return
-        if not st["range_active"] or st["traded"] or b.t[k] <= st["range_t"] or ctx.position():
-            return
-        kw = (dict(trail_offset=p.trail_buffer_points, trail_activate=p.trail_activate_points)
-              if p.activate_trailing else {})
-        close = float(b.c[k])
-        if close > st["hi"]:
-            d = close - st["lo"]
-            if d > 0:
-                ctx.buy(st["lo"], close + d * p.risk_reward, range_high=st["hi"], range_low=st["lo"], **kw)
-                st["traded"] = True
-        elif close < st["lo"]:
-            d = st["hi"] - close
-            if d > 0:
-                ctx.sell(st["hi"], close - d * p.risk_reward, range_high=st["hi"], range_low=st["lo"], **kw)
-                st["traded"] = True
-
-
-# ── Scarface ORB ─────────────────────────────────────────────────────────────
-
-
-@register_strategy("RQ_ScarfaceORB_v1")
-class RQScarfaceORB(ReplayStrategy):
-    strategy_id = "RQ_ScarfaceORB_v1"
-    PARAMS_ATTR = "rq_scarface_orb"
-    PARAMS_CLS = RQScarfaceORBParams
-    # No session cut-off upstream: a day's setup stays live until the next
-    # 09:30, so the replay must reach back past yesterday's open.
-    WINDOW = 4600
-    ANCHOR_DAYS = 2
-
-    def prepare(self, bars):
-        bars.ind["atr"] = atr_fast(bars.h, bars.l, bars.c, self.params.atr_period)
-
-    def init_state(self):
-        return dict(n=0, in_or=False, or_open=0.0, or_bullish=False, candles=[], lines=False,
-                    brk=False, brk_n=0, retest=False, momentum=False, invalid=False, traded=False,
-                    bt=0.0, bt_low_green=0.0, has_bt=False, btl=0.0, bt_high_red=0.0, has_btl=False)
-
-    def step(self, st, k, b, ctx):
-        p = self.params
-        st["n"] += 1
-        hhmm = int(b.et_hhmm[k])
-        end_m = 9 * 60 + 30 + p.duration_minutes
-        start, end = 930, (end_m // 60) * 100 + end_m % 60
-        o, h, lo, cl = float(b.o[k]), float(b.h[k]), float(b.l[k]), float(b.c[k])
-        if start <= hhmm < end and not st["in_or"]:
-            st.update(lines=False, brk=False, retest=False, momentum=False, invalid=False, traded=False,
-                      brk_n=0, bt=0.0, btl=0.0, bt_low_green=0.0, bt_high_red=0.0, has_bt=False,
-                      has_btl=False, candles=[])
-            st.update(in_or=True, or_open=o)
-        if st["in_or"] and hhmm < end:
-            st["candles"].append((h, lo, cl, o))
-        if st["in_or"] and hhmm >= end:
-            st["in_or"] = False
-            # Upstream reads the close of the FIRST bar after the range here.
-            st["or_bullish"] = cl > st["or_open"]
-            if not st["lines"]:
-                st["lines"] = True
-                if st["candles"]:
-                    if st["or_bullish"]:
-                        bear = [x for x in st["candles"] if x[2] < x[3]]
-                        if bear:
-                            top = max(bear, key=lambda x: x[0])        # first max wins, as upstream's `>`
-                            for x in bear:
-                                if x[0] == top[0]:
-                                    top = x
-                                    break
-                            st.update(bt=top[0], bt_low_green=top[1], has_bt=True)
-                    else:
-                        bull = [x for x in st["candles"] if x[2] > x[3]]
-                        if bull:
-                            bot = min(bull, key=lambda x: x[1])
-                            for x in bull:
-                                if x[1] == bot[1]:
-                                    bot = x
-                                    break
-                            st.update(btl=bot[1], bt_high_red=bot[0], has_btl=True)
-        if not st["in_or"] and st["lines"] and not st["brk"]:
-            if st["or_bullish"] and st["has_bt"]:
-                if cl > o and cl > st["bt"]:
-                    st.update(brk=True, brk_n=st["n"])
-            elif not st["or_bullish"] and st["has_btl"]:
-                if cl < o and cl < st["btl"]:
-                    st.update(brk=True, brk_n=st["n"])
-        if not st["in_or"] and st["brk"] and not st["retest"] and st["n"] > st["brk_n"] + 1:
-            if st["or_bullish"] and st["has_bt"]:
-                if cl <= st["bt"] or lo <= st["bt"]:
-                    st["retest"] = True
-            elif not st["or_bullish"] and st["has_btl"]:
-                if cl >= st["btl"] or h >= st["btl"]:
-                    st["retest"] = True
-        if not st["in_or"] and st["retest"] and not st["momentum"] and not st["invalid"] and not st["traded"]:
-            top_wick = h - cl if cl > o else h - o
-            body = abs(cl - o)
-            bottom_wick = o - lo if cl > o else cl - lo
-            atr = b.ind["atr"][k]
-            atr = float(atr) if np.isfinite(atr) else 0.0
-            if st["or_bullish"] and st["has_bt"]:
-                if cl < o and cl < st["bt_low_green"]:
-                    st["invalid"] = True
-                if (body > 0 and cl > o and cl > st["bt"] and bottom_wick >= p.wick_body_ratio * body
-                        and top_wick <= bottom_wick / p.wick_ratio):
-                    st.update(momentum=True, traded=True)
-                    stop = cl - p.atr_multiplier * atr if (p.sl_mode == 1 and atr > 0) else lo - 0.25 * p.tick_size
-                    d = cl - stop
-                    if d > 0 and ctx.position() == 0:
-                        ctx.buy(stop, cl + p.rr_ratio * d, breakout_target=st["bt"])
-            elif not st["or_bullish"] and st["has_btl"]:
-                if cl > o and cl > st["bt_high_red"]:
-                    st["invalid"] = True
-                if (body > 0 and cl < o and cl < st["btl"] and top_wick >= p.wick_body_ratio * body
-                        and bottom_wick <= top_wick / p.wick_ratio):
-                    st.update(momentum=True, traded=True)
-                    stop = cl + p.atr_multiplier * atr if (p.sl_mode == 1 and atr > 0) else h + 0.25 * p.tick_size
-                    d = stop - cl
-                    if d > 0 and ctx.position() == 0:
-                        ctx.sell(stop, cl - p.rr_ratio * d, breakout_target=st["btl"])
-
+# RQ_FlashTriggerORB_v1 and RQ_ScarfaceORB_v1 were removed on 27 Nov 2026: they lost money on
+# Deriv and on CME futures (research_data/compare_all.json). Their params stay in config_schema
+# so saved configs still load.
 
 # ── IVB - Initial Volatility Breakout ───────────────────────────────────────
 

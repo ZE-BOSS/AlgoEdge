@@ -22,12 +22,8 @@ export const STRATEGY_OPTIONS = [
   ['KRONOS_v1', 'Kronos forecast (confident calls)', 'kronos_strategy'],
   // Replicated from roboquant.dev templates, 2026-10-19 (research/roboquant).
   ['RQ_NQPrecision_v1', 'NQ Precision Bot (roboquant)', 'rq_nq_precision'],
-  ['RQ_NYORB_v1', 'NY Open Range Breakout (roboquant)', 'rq_ny_orb'],
-  ['RQ_CrazyORB_v1', 'Crazy ORB (roboquant)', 'rq_crazy_orb'],
   ['RQ_TMeanReversion_v1', 'T-Mean Reversion (roboquant)', 'rq_t_mean_reversion'],
   ['RQ_CharlesMonger_v1', 'Charles Monger (roboquant)', 'rq_charles_monger'],
-  ['RQ_FlashTriggerORB_v1', 'Flash Trigger ORB (roboquant)', 'rq_flash_trigger_orb'],
-  ['RQ_ScarfaceORB_v1', 'Scarface ORB (roboquant)', 'rq_scarface_orb'],
   ['RQ_IVB_v1', 'IVB Initial Volatility Breakout (roboquant)', 'rq_ivb'],
   ['RQ_GigaORB_v1', 'Giga ORB (roboquant)', 'rq_giga_orb'],
   ['RQ_SigmaBreakout_v1', 'Sigma Breakout (roboquant)', 'rq_sigma_breakout'],
