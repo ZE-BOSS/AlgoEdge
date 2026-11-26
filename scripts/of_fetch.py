@@ -25,6 +25,8 @@ import pandas as pd
 
 MARKETS = {  # continuous symbol -> (name, large-trade threshold in contracts)
     "GC.v.0": ("gold", 20), "SI.v.0": ("silver", 10), "NQ.v.0": ("nasdaq", 15), "ES.v.0": ("sp500", 50),
+    "YM.v.0": ("us30", 10), "CL.v.0": ("oil", 20), "6E.v.0": ("eurusd", 50), "6B.v.0": ("gbpusd", 30),
+    "6J.v.0": ("usdjpy", 30),
 }
 DATASET = "GLBX.MDP3"
 
