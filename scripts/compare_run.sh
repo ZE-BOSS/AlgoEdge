@@ -8,5 +8,5 @@ curl -fsSL "https://raw.githubusercontent.com/ZE-BOSS/AlgoEdge/$SHA/scripts/bt_m
 cd /opt/algoedge/demo/app
 set -a; . /opt/algoedge/demo/instance.env; set +a   # app .env is read by the app itself (dotenv)
 PYTHONPATH=. nice -n 10 /opt/algoedge/demo/venv/bin/python "$D/bt_mt5_compare.py" \
-    --data "$D" --out "$D/compare.json" ${ONLY:+--only "$ONLY"} 2>&1 | grep -vE "Warning|warn\(" 
+    --data "$D" --out "$D/${OUT:-compare.json}" ${ONLY:+--only "$ONLY"} ${ALL:+--all} 2>&1 | grep -vE "Warning|warn\(" 
 echo COMPARE_RUN_DONE

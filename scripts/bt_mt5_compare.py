@@ -99,13 +99,23 @@ def main() -> int:
     ap.add_argument("--start", default="2026-01-01")
     ap.add_argument("--end", default="2026-11-26")
     ap.add_argument("--only", default="", help="comma list of market:strategy")
+    ap.add_argument("--all", action="store_true", help="every strategy x market in report.json")
     a = ap.parse_args()
     data = Path(a.data)
     report = {(r["market"], r["strategy"]): r for r in json.loads((data / "report.json").read_text())}
     flows: dict[str, pd.DataFrame] = {}
     rows = []
     only = {x for x in a.only.split(",") if x}
-    for market, strat, symbol in SHORTLIST:
+    sym_of = {"gold": "XAUUSD", "silver": "XAGUSD", "nasdaq": "US Tech 100", "sp500": "US SP 500"}
+    todo = SHORTLIST if not a.all else sorted({(m, st, sym_of[m]) for (m, st) in report if m in sym_of})
+    done = set()
+    if a.all and Path(a.out).exists():
+        prev = json.loads(Path(a.out).read_text())
+        rows = [r for r in prev if "error" not in r]
+        done = {(r["market"], r["strategy"]) for r in rows}
+    for market, strat, symbol in todo:
+        if (market, strat) in done:
+            continue
         if only and f"{market}:{strat}" not in only:
             continue
         t0 = time.time()
