@@ -7,6 +7,6 @@ SHA=${SHA:-dev}
 curl -fsSL "https://raw.githubusercontent.com/ZE-BOSS/AlgoEdge/$SHA/scripts/bt_mt5_compare.py" -o "$D/bt_mt5_compare.py"
 cd /opt/algoedge/demo/app
 set -a; . /opt/algoedge/demo/instance.env; . ./.env; set +a
-sudo -E -u algoedge env PYTHONPATH=. nice -n 10 /opt/algoedge/demo/venv/bin/python "$D/bt_mt5_compare.py" \
+PYTHONPATH=. nice -n 10 /opt/algoedge/demo/venv/bin/python "$D/bt_mt5_compare.py" \
     --data "$D" --out "$D/compare.json" ${ONLY:+--only "$ONLY"} 2>&1 | grep -vE "Warning|warn\(" 
 echo COMPARE_RUN_DONE
