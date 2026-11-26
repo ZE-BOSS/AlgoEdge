@@ -9,7 +9,34 @@ edge in futures bars plus order flow (gold VWAP + 6h CVD filter: +30R → better
 Jul–Nov). Deriv's CFD prices follow the futures with a moving basis and their own spread;
 the strategy should read the deeper market and only trade on Deriv.
 
-## Pieces
+## Result of the comparison (26 Nov, `research_data/compare.json`)
+
+Same strategies, same engine, Jan–Nov 2026, run on Deriv's MT5 prices with Deriv costs, with the
+Databento order-flow filter applied by time to the MT5 trades:
+
+| | futures | Deriv MT5 | MT5 + Databento filter (unseen Jul–Nov) |
+|---|---|---|---|
+| gold VWAP_v1 (cvd6h < 0.0113) | 88 tr, +30.2R, PF 1.57 | 86 tr, +27.3R, PF 1.60, DD 7.0R | 11.6R → 16.3R, PF 2.2, DD 3.9R |
+| nasdaq VWAP_v1 (no filter) | 44 tr, +14.6R, PF 1.63 | 46 tr, +26.4R, PF 2.21, DD 4.6R | — |
+| nasdaq SigmaBreakout (big30 < 4.99) | 167 tr, +7.5R | 169 tr, +5.4R, PF 1.45, DD 1.7R | 2.4R → 2.5R, DD 1.4R |
+| nasdaq M30ORB | +16.1R | **−3.0R** | — (futures-only edge: dropped) |
+| gold NQPrecision | +14.4R | 18 tr since 26 Aug only (MT5 M1 depth) | inconclusive |
+
+So the signals do not need futures candles: the edge is there on Deriv's own prices, and the
+order-flow filter still helps when applied to MT5-generated signals. **Phase 1 is therefore an
+order-flow gate on MT5-driven slots** (no candle feed, no basis translation). The futures candle
+feed below stays as phase 2, for strategies whose edge only exists on futures bars.
+
+## Phase 1: order-flow gate (build first)
+- `InstrumentSettings.of_filter = {"feature": "cvd6h", "op": "<", "threshold": 0.0113}`.
+- The live `OrderFlowFeed` keeps per-minute delta/volume/big-trade series for the mapped future
+  (`ORDERFLOW_MAP`); features computed exactly as `scripts/of_optimise.py` (minutes strictly before).
+- `BotService` checks the gate after the strategy signals, before risk/execution; a blocked
+  signal is logged with the feature value. Feed stale > 90 s → gate fails closed (no trade).
+- Shadow first: `of_filter.mode = "shadow"` logs what the gate would have blocked and trades
+  anyway; `"enforce"` blocks.
+
+## Phase 2 pieces (futures candles)
 
 1. **Candle feed** (`backend/orderflow/candles.py`, new)
    - Warm-up: Databento historical `ohlcv-1m` for `GC.v.0` / `NQ.v.0` (L0, included in the plan),
