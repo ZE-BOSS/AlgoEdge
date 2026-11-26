@@ -96,3 +96,10 @@ def test_breakeven_locks_at_least_one_dollar():
     assert be_lock(3564.0, "BUY", r, 0.03, spec) == 3564.34          # rounded outward: never under $1
     assert be_lock(3564.0, "BUY", merge_rules({"be_min_profit_usd": 0}), 0.01, spec) == 3564.0
     assert be_lock(3564.0, "BUY", r, 0.01, None) == 3564.0           # no spec: plain breakeven
+
+
+def test_tp_with_filler_dots_and_comma_decimals():
+    from backend.copytrade.parser import parse_message
+    p = parse_message("🏆 Crash 300   index - SELL 🏆\n✅ Entry: . 2251,894\n⛔ Stop Loss: 2272,843\n"
+                      "🎯 TP1: .. 2230,843\n🎯 TP2: ...")
+    assert (p.side, p.entry, p.sl, p.tps) == ("SELL", 2251.894, 2272.843, [2230.843])

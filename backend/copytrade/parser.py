@@ -163,8 +163,8 @@ def _sl(up: str) -> float | None:
 def _tps(up: str) -> tuple[list[float], bool]:
     found: dict[int, float] = {}
     # the index must be followed by a separator or a space before the price:
-    # "TP1 2355", "TP 2: 2360", "TP3=2370" - never "TP 14900" read as TP14 = 900
-    for m in re.finditer(r"\b(?:TP|T/P|TAKE\s*PROFIT|TARGET)\s*(\d{1,2})(?:\s*[:=@\-\).]\s*|\s+)" + NUM, up):
+    # "TP1 2355", "TP 2: 2360", "TP3=2370", "TP1: .. 2230,843" (filler dots) - never "TP 14900" read as TP14 = 900
+    for m in re.finditer(r"\b(?:TP|T/P|TAKE\s*PROFIT|TARGET)\s*(\d{1,2})(?:\s*[:=@\-\).](?:\s*\.{1,3}(?=\s))?\s*|\s+)" + NUM, up):
         k = int(m.group(1))
         if 1 <= k <= 20:
             found.setdefault(k, _num(m.group(2)))
