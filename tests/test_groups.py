@@ -1027,3 +1027,85 @@ def test_vvip_client_gets_trade_alerts(env, tmp_path, monkeypatch):
         await sync_clients(sf, None, to_client)
         assert "Trade closed" in sent[-1][1] and "SELL" in sent[-1][1]
     run(go())
+
+
+# ── USDT (TRC20) payments ─────────────────────────────────────────────────────
+
+ADDR = "TXYZabcdefghijkmnopqrstuvwxyz12345"
+
+
+def test_usdt_invoice_match_unmatched_and_expiry(env):
+    from backend.groups import usdt
+    sf, bot, api = env["sf"], env["bot"], env["api"]
+    told = []
+
+    async def note(t):
+        told.append(t)
+
+    async def go():
+        async with sf() as s:
+            await S.save(s, {"usdt_trc20_address": ADDR})
+            await s.commit()
+        frm = {"id": 6060, "first_name": "Uche"}
+        await bot.on_callback({"id": "c", "from": frm, "data": "join:vvip"})
+        btns = api.sent(6060)[-1][4]
+        assert btns[0][0]["callback_data"] == "join:pay_STARTER"
+        await bot.on_callback({"id": "c2", "from": frm, "data": "join:pay_PRO"})
+        msg = api.sent(6060)[-1][2]
+        inv = (await _all(sf, usdt.Invoice))[0]
+        assert 500 < inv.amount < 500.1 and f"{inv.amount:.4f}" in msg and ADDR in msg and "TRC20" in msg
+        async with sf() as s:
+            cfg = await S.load(s)
+        tx = [{"txid": "aa" * 32, "from": "Tsender", "amount": inv.amount, "ts": 1},
+              {"txid": "bb" * 32, "from": "Tother", "amount": 300.0, "ts": 2}]
+        await usdt.check_payments(sf, cfg, api, note, transfers=tx)
+        inv = (await _all(sf, usdt.Invoice))[0]
+        mem = [m for m in await _all(sf, GroupMember) if m.telegram_id == 6060][0]
+        assert inv.status == "PAID" and mem.tier == "VVIP" and mem.level == "PRO" and mem.status == "ACTIVE"
+        assert ("invite", VVIP_CHAT, f"VVIP {mem.id}") in api.calls and "Payment received" in api.sent(6060)[-1][2]
+        pays = {p.reference: p.status for p in await _all(sf, Payment)}
+        assert pays == {"aa" * 32: "PAID", "bb" * 32: "UNMATCHED"}
+        assert any("no matching invoice" in t for t in told) and any("VVIP PRO paid" in t for t in told)
+        # the same transfers again: nothing twice
+        n = len(told)
+        await usdt.check_payments(sf, cfg, api, note, transfers=tx)
+        assert len(told) == n
+        # an old open invoice expires
+        async with sf() as s:
+            s.add(usdt.Invoice(level="STARTER", amount=300.0042, address=ADDR, status="OPEN",
+                               expires_at=datetime.utcnow() - timedelta(hours=2)))
+            await s.commit()
+        await usdt.check_payments(sf, cfg, api, note, transfers=[])
+        assert sorted(i.status for i in await _all(sf, usdt.Invoice)) == ["EXPIRED", "PAID"]
+    run(go())
+
+
+def test_usdt_amounts_unique_and_address_required(env):
+    from backend.groups import usdt
+    sf = env["sf"]
+
+    async def go():
+        async with sf() as s:
+            cfg = await S.load(s)
+            try:
+                await usdt.new_invoice(s, cfg, None, None, "STARTER")
+                assert False
+            except ValueError as e:
+                assert "not set up" in str(e)
+            cfg["usdt_trc20_address"] = ADDR
+            amts = [(await usdt.new_invoice(s, cfg, None, None, "STARTER")).amount for _ in range(50)]
+            await s.commit()
+        assert len(set(amts)) == 50 and all(300 < a < 300.1 for a in amts)
+    run(go())
+
+
+def test_portal_telegram_link_ties_accounts(env, monkeypatch):
+    from backend.groups.vvip import investor_from_token, link_token
+    sf, bot = env["sf"], env["bot"]
+    inv_id = "0b5d2f3e-1c2a-4b5c-9d8e-7f6a5b4c3d2e"
+    tok = link_token(inv_id)
+    assert len(tok) <= 64 and tok.replace("_", "").isalnum() and investor_from_token(tok) == inv_id
+    assert investor_from_token(tok[:-1] + ("0" if tok[-1] != "0" else "1")) is None
+    run(bot.on_private({"from": {"id": 7070, "first_name": "Ada"}, "chat": {"type": "private"}, "text": f"/start {tok}"}))
+    mem = [m for m in run(_all(sf, GroupMember)) if m.telegram_id == 7070][0]
+    assert mem.user_id == inv_id and "VVIP" in env["api"].sent(7070)[-1][2]

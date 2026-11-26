@@ -89,7 +89,7 @@ class GroupBot:
         self.tasks = [asyncio.create_task(self._guard(n, f)) for n, f in (
             ("updates", self._updates_loop), ("outbox", self._outbox_loop),
             ("scheduler", self._scheduler_loop), ("maintenance", self._maintenance_loop),
-            ("vvip", self._vvip_loop))]
+            ("vvip", self._vvip_loop), ("usdt", self._usdt_loop))]
         logger.info("[GROUPBOT] started")
 
     async def stop(self) -> None:
@@ -260,6 +260,19 @@ class GroupBot:
         text = (m.get("text") or "").strip()
         async with self.sf() as s:
             cfg = await S.load(s)
+        if text.startswith("/start L"):
+            from backend.groups.vvip import investor_from_token
+            inv_id = investor_from_token(text.split(maxsplit=1)[1].strip())
+            if inv_id:
+                async with self.sf() as s:
+                    mem = (await s.execute(select(GroupMember).where(GroupMember.telegram_id == uid))).scalars().first()
+                    if mem is None:
+                        mem = GroupMember(telegram_id=uid, status="NEW")
+                        s.add(mem)
+                    mem.user_id = inv_id
+                    await s.commit()
+                await self.join_step(frm, "vvip", None)
+                return
         if text.startswith("/claim"):
             code = text.split(maxsplit=1)[1].strip().upper() if " " in text else ""
             if code and code == claim_code(self.api.token):
@@ -352,10 +365,19 @@ class GroupBot:
                 reply = ("<b>VVIP: our bot trades your own MT5 account</b>\n"
                          f"• Starter ${lv.get('STARTER', 300):,.0f}: live trading on your account\n"
                          f"• Pro ${lv.get('PRO', 500):,.0f}: plus backtesting\n"
-                         f"• Elite ${lv.get('ELITE', 1000):,.0f}: plus order-flow data\n"
-                         f"Price per {cfg['vvip_period_days']} days. Your money stays in your own account; you can pause any time.\n"
-                         f"Sign up: {T.e(cfg.get('portal_url', ''))} - or tap Talk to the admin.")
-                buttons = [[{"text": "Talk to the admin", "callback_data": "join:admin"}]]
+                         f"• Elite ${lv.get('ELITE', 1000):,.0f}: plus strategies that read live exchange order flow\n"
+                         f"Price per {cfg['vvip_period_days']} days, paid in USDT (TRC20). Your money stays in your own "
+                         f"account; you can pause any time. You get a message here on every trade.")
+                buttons = [[{"text": f"Pay {k.title()} ${v:,.0f}", "callback_data": f"join:pay_{k}"}] for k, v in lv.items()] \
+                    + [[{"text": "Talk to the admin", "callback_data": "join:admin"}]]
+            elif action and action.startswith("pay_"):
+                from backend.groups.usdt import invoice_text, new_invoice
+                try:
+                    inv = await new_invoice(s, cfg, mem, mem.user_id, action[4:])
+                    reply = invoice_text(inv, int(cfg.get("vvip_period_days") or 30))
+                except ValueError as e:
+                    reply = f"Sorry - {e}. Please tap Talk to the admin."
+                    buttons = [[{"text": "Talk to the admin", "callback_data": "join:admin"}]]
             elif action == "admin":
                 mem.step = "to_admin"
                 reply = "Type your message and I'll pass it to the admin. They'll answer you here."
@@ -645,6 +667,17 @@ class GroupBot:
             n = await self._queue_for_groups(kind, text)
             return f"Posted to {n} group(s)"
         return "Skipped"
+
+    async def _usdt_loop(self) -> None:
+        from backend.groups.usdt import check_payments
+        while self.running:
+            try:
+                async with self.sf() as s:
+                    cfg = await S.load(s)
+                await check_payments(self.sf, cfg, self.api, self.notify_admins)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[GROUPBOT] usdt check: {e}")
+            await asyncio.sleep(60)
 
     async def _client_alert(self, telegram_id: int, text: str) -> None:
         await self.api.send(int(telegram_id), text)

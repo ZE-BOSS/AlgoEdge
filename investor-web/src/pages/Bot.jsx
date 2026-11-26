@@ -27,6 +27,19 @@ export default function Bot() {
   );
 }
 
+function PayButton() {
+  const { busy, error, submit } = useSubmit(async () => {
+    const r = await api.vvipTelegram();
+    window.location.href = r.url;
+  });
+  return (
+    <form onSubmit={submit}>
+      <Problem error={error} />
+      <button className="btn" disabled={busy}>{busy ? 'Opening Telegram…' : 'Pay with USDT in Telegram'}</button>
+    </form>
+  );
+}
+
 function Plans({ d }) {
   const p = d.prices || {};
   return (
@@ -40,7 +53,9 @@ function Plans({ d }) {
         <li><strong>Pro, ${p.PRO}</strong>: plus backtesting</li>
         <li><strong>Elite, ${p.ELITE}</strong>: plus strategies that read live exchange order flow</li>
       </ul>
-      <p className="muted small">Each plan runs for {d.period_days} days. To join, message the admin through our Telegram bot.</p>
+      <p className="muted small">Each plan runs for {d.period_days} days, paid in USDT on the TRON (TRC20) network.
+        Payment happens in our Telegram bot, which also messages you on every trade.</p>
+      <PayButton />
     </Card>
   );
 }

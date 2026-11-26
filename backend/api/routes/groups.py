@@ -94,6 +94,11 @@ class SettingsIn(BaseModel):
 
 @router.put("/settings")
 async def put_settings(body: SettingsIn, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+    addr = str(body.patch.get("usdt_trc20_address") or "").strip()
+    if addr:
+        from backend.groups.usdt import valid_address
+        if not valid_address(addr):
+            raise HTTPException(400, "that is not a TRON address (34 characters starting with T)")
     out = await S.save(db, body.patch)
     await db.commit()
     return out

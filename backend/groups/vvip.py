@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.data.database import get_db
 from backend.groups import settings as S
-from backend.groups.models import BacktestRequest, ClientAccount, GroupMember, Payment, SignalGroup
+from backend.groups.models import BacktestRequest, ClientAccount, GroupMember, Invoice, Payment, SignalGroup
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -242,6 +242,42 @@ async def my_backtests(db: AsyncSession = Depends(get_db), inv=Depends(_investor
     return {"systems": await backtest_summaries(db, await leader_pairs(db)),
             "requests": [{"market": r.market, "months": r.months, "note": r.note, "status": r.status,
                           "created_at": r.created_at.isoformat() if r.created_at else None} for r in reqs]}
+
+
+def link_token(investor_id: str) -> str:
+    """Telegram /start parameter tying a Telegram user to a portal account (<= 64 chars, [A-Za-z0-9_])."""
+    from backend.api.deps import JWT_SECRET_KEY
+    raw = str(investor_id).replace("-", "")
+    mac = hmac.new(JWT_SECRET_KEY.encode(), ("tg:" + raw).encode(), hashlib.sha256).hexdigest()[:12]
+    return f"L{raw}_{mac}"
+
+
+def investor_from_token(tok: str) -> str | None:
+    if not tok.startswith("L") or "_" not in tok:
+        return None
+    raw, mac = tok[1:].split("_", 1)
+    if len(raw) != 32 or not hmac.compare_digest(link_token(raw)[-12:], mac):
+        return None
+    return f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
+
+
+@portal.get("/telegram")
+async def telegram_link(inv=Depends(_investor)):
+    """Pay and get alerts through the Telegram bot: this link opens it with the account tied to this portal login."""
+    from backend.groups.bot import group_bot
+    if not group_bot.username:
+        raise HTTPException(503, "the bot is not running right now - try again in a minute")
+    return {"url": f"https://t.me/{group_bot.username}?start={link_token(str(inv.id))}"}
+
+
+@portal.get("/invoice")
+async def last_invoice(db: AsyncSession = Depends(get_db), inv=Depends(_investor)):
+    x = (await db.execute(select(Invoice).where(Invoice.user_id == str(inv.id)).order_by(Invoice.created_at.desc())
+                          .limit(1))).scalars().first()
+    if x is None:
+        return None
+    return {"amount": f"{x.amount:.4f}", "address": x.address, "level": x.level, "status": x.status,
+            "expires_at": x.expires_at.isoformat() if x.expires_at else None, "txid": x.txid}
 
 
 class BacktestAsk(BaseModel):

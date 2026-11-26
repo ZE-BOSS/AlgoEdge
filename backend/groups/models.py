@@ -195,3 +195,20 @@ class BacktestRequest(Base):
     note = Column(String(300), default="")
     status = Column(String(12), default="OPEN")              # OPEN / DONE / DECLINED
     created_at = Column(DateTime, server_default=func.now())
+
+
+class Invoice(Base):
+    """A USDT (TRC20) payment request: a unique amount to the admin's address, valid for an hour."""
+    __tablename__ = "vvip_invoices"
+    id = Column(BigInteger, primary_key=True, default=generate_id)
+    member_id = Column(BigInteger, nullable=True, index=True)
+    user_id = Column(String(36), nullable=True)
+    telegram_id = Column(BigInteger, nullable=True)
+    level = Column(String(10), default="STARTER")
+    amount = Column(Float, nullable=False)
+    address = Column(String(64), default="")
+    status = Column(String(12), default="OPEN")              # OPEN / PAID / EXPIRED
+    txid = Column(String(80), nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    paid_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())

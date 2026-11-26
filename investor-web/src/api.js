@@ -116,6 +116,8 @@ export const api = {
   vvipMe: () => call('/vvip/me'),
   vvipConnect: (body) => call('/vvip/connect', { method: 'POST', body }),
   vvipSettings: (body) => call('/vvip/settings', { method: 'PATCH', body }),
+  vvipTelegram: () => call('/vvip/telegram'),
+  vvipInvoice: () => call('/vvip/invoice'),
   vvipBacktests: () => call('/vvip/backtests'),
   vvipAskBacktest: (body) => call('/vvip/backtests/request', { method: 'POST', body }),
   // Public, so not under BASE (which is /api/investor). Says whether a code is

@@ -495,6 +495,7 @@ function SettingsTab({ settings, act }) {
       vip_min_balance: Number(s.vip_min_balance), vip_months: Number(s.vip_months), vvip_period_days: Number(s.vvip_period_days),
       vvip_levels: Object.fromEntries(Object.entries(s.vvip_levels || {}).map(([k, v]) => [k, Number(v)])),
       admin_contact: s.admin_contact, portal_url: s.portal_url, llm_provider: s.llm_provider,
+      usdt_trc20_address: (s.usdt_trc20_address || '').trim(),
       admin_ids: s.admin_ids_text.split(/[\s,]+/).filter(Boolean).map(Number).filter(Boolean),
       affiliate_links: Object.fromEntries(pairs(s.links_text)),
       faq: pairs(s.faq_text).map(([q, a]) => ({ q, a })),
@@ -542,6 +543,9 @@ function SettingsTab({ settings, act }) {
             <Field key={k} label={`VVIP ${k} ($)`}><input className="ct-input" type="number" value={v} onChange={(e) => setS({ ...s, vvip_levels: { ...s.vvip_levels, [k]: e.target.value } })} /></Field>
           ))}
           <Field label="VVIP sign-up page"><input className="ct-input" value={s.portal_url || ''} onChange={set('portal_url')} /></Field>
+          <Field label="USDT (TRC20) receiving address" hint="VVIP payments go here. The address only - never a seed phrase or key.">
+            <input className="ct-input ct-mono" placeholder="T..." value={s.usdt_trc20_address || ''} onChange={set('usdt_trc20_address')} />
+          </Field>
         </div>
         <Field label="Partner links" hint="One per line: Exness = https://…"><textarea className="ct-textarea ct-mono" rows={3} value={s.links_text} onChange={set('links_text')} /></Field>
         <Field label="FAQ" hint="One per line: key words = answer. Answered when every key word is in a question."><textarea className="ct-textarea" rows={5} value={s.faq_text} onChange={set('faq_text')} /></Field>

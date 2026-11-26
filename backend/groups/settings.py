@@ -50,6 +50,7 @@ DEFAULTS: dict[str, Any] = {
     "vip_months": 1,
     "vvip_levels": {"STARTER": 300.0, "PRO": 500.0, "ELITE": 1000.0},
     "vvip_period_days": 30,
+    "usdt_trc20_address": "",           # VVIP payments: USDT on Tron, to this receiving address
     "admin_ids": [],                       # Telegram user ids allowed to command the bot
     "content_alerts": True,
     "admin_contact": "",                   # @username members are sent to for money / account questions
