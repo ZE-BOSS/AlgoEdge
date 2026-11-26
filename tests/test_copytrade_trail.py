@@ -7,6 +7,11 @@ from backend.copytrade.models import CopyTradeOrder, CopyTradeSettings
 from tests.test_copytrade import _run, env  # noqa: F401  (env is a fixture)
 
 
+def _locked(x):
+    """Breakeven stop at entry 2349 locking +$1 to +$1.00 move (0.01 lot = $1 per 1.00)."""
+    return x is not None and 2349.0 < x <= 2350.0 + 1e-9
+
+
 def _set_rules(env, **kw):  # noqa: F811
     async def go():
         async with env.Session() as s:
@@ -65,7 +70,7 @@ def test_refused_stop_is_retried_next_round(env):  # noqa: F811
     assert env.fake.positions[legs[1].ticket].sl == 2340
     env.fake.bid, env.fake.ask = 2351.0, 2351.2
     _run(env.service.monitor_once())
-    assert env.fake.positions[legs[1].ticket].sl == pytest.approx(2349.0)
+    assert _locked(env.fake.positions[legs[1].ticket].sl)
 
 
 def test_tp_ladder_trail(env):  # noqa: F811
@@ -77,7 +82,7 @@ def test_tp_ladder_trail(env):  # noqa: F811
     _tp_out(env, tk[0])
     env.fake.bid, env.fake.ask = 2355.5, 2355.7
     _run(env.service.monitor_once())
-    assert all(env.fake.positions[t].sl == pytest.approx(2349.0) for t in tk[1:])       # TP1 -> breakeven
+    assert all(_locked(env.fake.positions[t].sl) for t in tk[1:])       # TP1 -> breakeven
     _tp_out(env, tk[1])
     env.fake.bid, env.fake.ask = 2360.5, 2360.7
     _run(env.service.monitor_once())
@@ -98,7 +103,7 @@ def test_ladder_follows_price_through_targets_without_legs(env):  # noqa: F811
     t = _orders(env)[0].ticket
     env.fake.bid, env.fake.ask = 2356.0, 2356.2
     _run(env.service.monitor_once())
-    assert env.fake.positions[t].sl == pytest.approx(2349.0)
+    assert _locked(env.fake.positions[t].sl)
     env.fake.positions[t].tp = 0          # pretend its own TP was removed so it keeps running
     env.fake.bid, env.fake.ask = 2361.0, 2361.2
     _run(env.service.monitor_once())
@@ -133,7 +138,7 @@ def test_dry_run_ladder(env):  # noqa: F811
     env.fake.bid, env.fake.ask = 2355.5, 2355.7
     _run(env.service.monitor_once())
     legs = _orders(env)
-    assert legs[0].status == "CLOSED" and legs[1].sl == pytest.approx(2349.0)
+    assert legs[0].status == "CLOSED" and _locked(legs[1].sl)
 
 
 # ── groups, add-ons, default symbol ───────────────────────────────────────────

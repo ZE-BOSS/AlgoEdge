@@ -36,7 +36,7 @@ from sqlalchemy import desc, select
 from backend.copytrade import mt5ops, notify
 from backend.copytrade.models import CopyTradeChannel, CopyTradeOrder, CopyTradeSettings, CopyTradeSignal
 from backend.copytrade.parser import parse_message
-from backend.copytrade.rules import (breakeven_price, build_open_plan, legs_to_close, merge_rules, resolve_symbol,
+from backend.copytrade.rules import (be_lock, breakeven_price, build_open_plan, legs_to_close, merge_rules, resolve_symbol,
                                      pending_at_market, stop_fits, tighten_stop, trail_target)
 from backend.data.database import async_session
 from backend.utils.logger import get_logger
@@ -550,10 +550,13 @@ class CopyTradeService:
                 if not dry and not o.status.startswith("PAPER"):
                     pos = await mt5ops.get_position(o.ticket)
                     entry = pos.price_open if pos is not None else entry
-                tgt = breakeven_price(entry, side, rules)
+                tgt = be_lock(entry, side, rules, o.volume, spec_)
                 if q and o.status == "OPEN" and not stop_fits(tgt, side, q, spec_):
                     if stop_fits(float(entry), side, q, spec_):
-                        tgt = float(entry)          # the offset is past the price: plain breakeven
+                        # the +$ lock is past the price: plain breakeven now, lifted to the lock once it fits
+                        self._pending_be[o.id] = tgt
+                        acts.append(f"leg {o.leg}: +$ lock {tgt:g} is past the price - entry now, lock as soon as it fits")
+                        tgt = float(entry)
                     else:
                         # price is back behind the entry: the broker would refuse it. Set it as soon as it fits.
                         self._pending_be[o.id] = tgt
@@ -596,9 +599,10 @@ class CopyTradeService:
                 for oid, vol in plan:
                     await close(by_id[oid], vol)
                 if pd.get("also_breakeven") and rules.get("follow_breakeven", True):
+                    spec_ = await mt5ops.symbol_spec(root.symbol) if (root.symbol and not dry) else None
                     for o in positions:
                         if o.status in ("OPEN", "PAPER"):
-                            await set_sl(o, breakeven_price(o.entry, side, rules), "breakeven")
+                            await set_sl(o, be_lock(o.entry, side, rules, o.volume, spec_), "breakeven")
                     if rules.get("cancel_pending_on_be", True):
                         for o in pendings:
                             await cancel(o)
@@ -611,9 +615,10 @@ class CopyTradeService:
             idx = pd.get("tp_index")
             be_after = int(rules.get("be_after_tp") or 0)
             if idx and be_after and idx >= be_after:
+                spec_ = await mt5ops.symbol_spec(root.symbol) if (root.symbol and not dry) else None
                 for o in positions:
                     if o.leg > idx:
-                        await set_sl(o, breakeven_price(o.entry, side, rules), f"TP{idx} hit")
+                        await set_sl(o, be_lock(o.entry, side, rules, o.volume, spec_), f"TP{idx} hit")
         if all(o.status not in LIVE_ORDER for o in orders):
             root.status = "CLOSED"
         return changed
@@ -1078,6 +1083,10 @@ class CopyTradeService:
             entry = float(pos.price_open)
             cur = float(pos.sl or 0) or None
             tgt = trail_target(level, entry, side, tps, rules, ladder)
+            if tgt is not None:
+                lock = be_lock(entry, side, rules, getattr(pos, "volume", None) or r.volume, spec)   # never a stop under the +$ lock
+                if (lock - tgt) * s > 0:
+                    tgt = lock
             if tgt is None or (cur is not None and (tgt - cur) * s <= 1e-9):
                 continue
             if not stop_fits(tgt, side, q, spec):
@@ -1164,9 +1173,13 @@ class CopyTradeService:
                     k += 1
                 self._reached[root.id] = k
                 level = max(level, k)
+            spec_p = await mt5ops.symbol_spec(root.symbol) if level >= 1 else None
             for o in live:
                 if o.status == "PAPER" and level >= 1:
                     tgt = trail_target(level, o.entry, side, tps, rules, ladder)
+                    if tgt is not None:
+                        lock = be_lock(o.entry, side, rules, o.volume, spec_p)
+                        tgt = lock if (lock - tgt) * s_ > 0 else tgt
                     if tgt is not None and (o.sl is None or (tgt - o.sl) * s_ > 0) and (px_close - tgt) * s_ > 0:
                         o.sl = tgt
         if all(r.status not in LIVE_ORDER for r in rows):

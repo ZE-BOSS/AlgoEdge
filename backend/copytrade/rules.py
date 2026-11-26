@@ -56,6 +56,7 @@ DEFAULT_RULES: dict[str, Any] = {
     "follow_close": True,
     "follow_partial_close": True,
     "follow_cancel": True,
+    "be_min_profit_usd": 1.0,     # a breakeven stop locks at least this much profit per leg (0 = plain entry)
     "be_offset_pct": 0.0,         # breakeven = entry +/- this % (to cover spread/commission)
     "cancel_pending_on_be": True, # "risk free" means no risk left: a breakeven instruction also cancels the signal's unfilled orders
     "cancel_pending_after_tp": 1, # once TPn fills, cancel the signal's unfilled zone orders (0 = keep them)
@@ -587,6 +588,24 @@ def breakeven_price(entry: float, side: str, rules: dict) -> float:
     # on the wrong side of price, and the broker would refuse every one.
     off = min(max(float(rules.get("be_offset_pct") or 0), 0.0), MAX_BE_OFFSET_PCT) / 100.0
     return entry * (1 + off) if side == "BUY" else entry * (1 - off)
+
+
+def be_lock(entry: float, side: str, rules: dict, volume: float | None, spec: dict | None) -> float:
+    """The breakeven stop for one leg: the entry (plus be_offset_pct), moved on
+    until the leg locks at least be_min_profit_usd. Rounded outward to the tick,
+    so the lock is never under the minimum."""
+    base = breakeven_price(entry, side, rules)
+    usd = float(rules.get("be_min_profit_usd") or 0)
+    if usd <= 0 or not volume or not spec:
+        return base
+    per_unit = loss_per_lot(0.0, 1.0, spec) * float(volume)       # $ for a 1.0 price move
+    tick = float(spec.get("tick_size") or spec.get("point") or 0)
+    if per_unit <= 0 or tick <= 0:
+        return base
+    s = 1 if side == "BUY" else -1
+    ticks = math.ceil(round(usd / per_unit / tick, 6))
+    lock = round(float(entry) + s * ticks * tick, int(spec.get("digits") or 5))
+    return lock if (lock - base) * s > 0 else base
 
 
 def trail_target(level: int, entry: float, side: str, tps: list, rules: dict, ladder: bool) -> float | None:

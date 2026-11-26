@@ -84,3 +84,15 @@ def test_last_leg_gets_the_farthest_target():
     assert [l["tp"] for l in p.legs] == [3609.0, 3606.0, 3588.0]
     p = plan("XAUUSD SELL 3612\nTP OPEN\nSL 3630", 3612.2, 3612.4)   # no target number: R-multiple target
     assert p.ok and p.legs[-1]["tp"] is not None
+
+
+def test_breakeven_locks_at_least_one_dollar():
+    from backend.copytrade.rules import be_lock, merge_rules
+    spec = {"tick_size": 0.01, "tick_value": 1.0, "digits": 2}      # gold: 0.01 lot: $1 per 1.00 move
+    r = merge_rules({})
+    assert r["be_min_profit_usd"] == 1.0
+    assert be_lock(3564.0, "BUY", r, 0.01, spec) == 3565.0
+    assert be_lock(3564.0, "SELL", r, 0.02, spec) == 3563.5
+    assert be_lock(3564.0, "BUY", r, 0.03, spec) == 3564.34          # rounded outward: never under $1
+    assert be_lock(3564.0, "BUY", merge_rules({"be_min_profit_usd": 0}), 0.01, spec) == 3564.0
+    assert be_lock(3564.0, "BUY", r, 0.01, None) == 3564.0           # no spec: plain breakeven

@@ -24,6 +24,11 @@ GOLD = {"point": 0.01, "tick_size": 0.01, "tick_value": 1.0, "volume_min": 0.01,
 
 # ── parser ──────────────────────────────────────────────────────────────────
 
+def _locked(x):
+    """Breakeven stop at entry 2349 locking +$1 to +$1.00 move (0.01 lot = $1 per 1.00)."""
+    return x is not None and 2349.0 < x <= 2350.0 + 1e-9
+
+
 def test_parse_multi_tp_signal():
     p = parse_message("XAUUSD BUY NOW @ 2350-2347\nSL 2340\nTP1 2355\nTP2 2360\nTP3 2365\nTP4 2370\n"
                       "TP5 2375\nTP6 2380\nTP7 2385\nTP8 2390\nTP9 2395\nTP10 2400")
@@ -379,7 +384,7 @@ def test_open_then_breakeven_by_reply(env):
     r = _run(env.service.handle_message("u1", env.ch, 11, "move SL to entry", reply_to=10))
     assert r["status"] == "EXECUTED"
     mods = [c for c in env.fake.calls if c[0] == "modpos"]
-    assert len(mods) == 3 and all(c[2] == pytest.approx(2349.0) for c in mods)
+    assert len(mods) == 3 and all(_locked(c[2]) for c in mods)
 
 
 def test_breakeven_while_price_is_behind_entry_waits_until_it_fits(env):
@@ -390,7 +395,7 @@ def test_breakeven_while_price_is_behind_entry_waits_until_it_fits(env):
     assert all(p.sl == 2340 for p in env.fake.positions.values())
     env.fake.bid, env.fake.ask = 2350.0, 2350.2
     _run(env.service.monitor_once())
-    assert all(p.sl == pytest.approx(2349.0) for p in env.fake.positions.values())
+    assert all(_locked(p.sl) for p in env.fake.positions.values())
 
 
 def test_follow_up_without_reply_uses_latest_signal_and_widen_rule(env):
@@ -475,7 +480,7 @@ def test_close_half_and_breakeven_and_typo_stop(env):
     r = _run(env.service.handle_message("u1", env.ch, 91, "Closed half Profits & will set breakeven now for zero risk!!", reply_to=90))
     assert r["status"] == "EXECUTED"
     assert any(c[0] == "close" for c in env.fake.calls)
-    assert any(c[0] == "modpos" and c[2] == pytest.approx(2349.0) for c in env.fake.calls)
+    assert any(c[0] == "modpos" and _locked(c[2]) for c in env.fake.calls)
     n = len(env.fake.calls)
     r = _run(env.service.handle_message("u1", env.ch, 92, "Move SL to 2049", reply_to=90))     # typo for 2349
     assert "typo" in r["detail"] and len(env.fake.calls) == n
