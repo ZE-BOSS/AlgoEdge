@@ -103,6 +103,33 @@ def remap_entry(price: float | None, old: dict, new: dict) -> float | None:
     return round(float(price) + (b - a), 5)
 
 
+def edit_targets(all_orders: list, tps: list[float], side: str | None) -> list[tuple[Any, float]]:
+    """(order, new TP) for the legs an edited target list changes.
+
+    Leg n takes TP n; legs past the last target, and the signal's last leg,
+    take the farthest target - every signal's last leg rides to it. Legs with no
+    TP (posted "on entry" without targets, a TP-open leg) get one too; the
+    stacked add-ons at TP1 keep theirs (none, by design)."""
+    if not tps or not all_orders:
+        return []
+    s = 1 if side == "BUY" else -1
+    far = max(tps, key=lambda t: t * s)
+    legs = [o for o in all_orders if not str(o.detail or "").startswith("stack at TP1")]
+    if not legs:
+        return []
+    last = max(o.leg for o in legs)
+    out = []
+    for o in sorted(legs, key=lambda o: o.leg):
+        if o.status not in LIVE_ORDER:
+            continue
+        want = tps[o.leg - 1] if o.leg <= len(tps) else far
+        if o.leg == last:
+            want = far
+        if o.tp is None or abs(float(o.tp) - want) > 1e-9:
+            out.append((o, want))
+    return out
+
+
 def latency_breakdown(posted_at: datetime | None, received_at: float | None, t_lock: float, t_in: float,
                       t_done: float) -> dict:
     """Seconds spent in each step, from the provider pressing send to our
@@ -168,9 +195,14 @@ class CopyTradeService:
         parsed = parse_message(text)
         pd = parsed.to_dict()
 
+        # The message's current root: the newest non-edit row that was not replaced.
+        # An edit that was taken as the signal ("edited signal taken", "replaced")
+        # becomes the root and the old row is SUPERSEDED - without the order/filter
+        # the next edit found the SUPERSEDED row and said "not open".
         prior = (await s.execute(select(CopyTradeSignal).where(
             CopyTradeSignal.chat_id == ch.chat_id, CopyTradeSignal.msg_id == msg_id,
-            CopyTradeSignal.edited.is_(False)))).scalars().first()
+            CopyTradeSignal.edited.is_(False), CopyTradeSignal.status != "SUPERSEDED")
+            .order_by(desc(CopyTradeSignal.id)))).scalars().first()
         if prior is not None and not edited:
             return {"status": "IGNORED", "detail": "already handled", "signal_id": prior.id}
 
@@ -724,14 +756,14 @@ class CopyTradeService:
             if eff_old.get("sl") is not None and (new_sl - float(eff_old["sl"])) * sgn < 0:
                 acts.append("stop is further away than before: the $ risk of these lots went up")
 
-        # ── targets changed ──
-        new_tps = pd.get("tps") or []
-        if new_tps and new_tps != (old.get("tps") or []):
-            for o in orders:
-                if o.status in LIVE_ORDER and o.leg <= len(new_tps) and o.tp is not None \
-                        and o.tp != new_tps[o.leg - 1]:
-                    await self._apply("MOVE_TP", {"new_price": new_tps[o.leg - 1], "tp_index": o.leg},
-                                      prior, [o], rules, acts, dry)
+        # ── targets changed (or added to a signal posted without them) ──
+        new_tps = [float(t) for t in (pd.get("tps") or []) if t is not None]
+        old_tps = [float(t) for t in (old.get("tps") or []) if t is not None]
+        if new_tps and new_tps != old_tps:
+            live_ids = {o.id for o in orders}
+            for o, want in edit_targets(await self._all_orders(s, prior.id), new_tps, side):
+                if o.id in live_ids:
+                    await self._apply("MOVE_TP", {"new_price": want, "tp_index": o.leg}, prior, [o], rules, acts, dry)
         prior.parsed = pd
         self._finish_edit(sig, acts, dry)
 

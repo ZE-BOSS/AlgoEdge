@@ -591,6 +591,42 @@ def test_cosmetic_edit_changes_nothing(env):
     assert r["status"] == "IGNORED" and len(env.fake.calls) == n
 
 
+def test_second_edit_after_an_edit_was_taken(env):
+    """Skipped, then taken from its edit: a further edit must still reach the trade
+    (it used to find the SUPERSEDED row and say 'not open')."""
+    r = _run(env.service.handle_message("u1", env.ch, 87, "XAUUSD SELL\nSL 2300\nTP1 2340"))
+    assert r["status"] == "SKIPPED"
+    r = _run(env.service.handle_message("u1", env.ch, 87, "XAUUSD SELL\nSL 2360\nTP1 2340", edited=True))
+    assert r["status"] == "EXECUTED", r
+    r = _run(env.service.handle_message("u1", env.ch, 87, "XAUUSD SELL\nSL 2358\nTP1 2340", edited=True))
+    assert r["status"] == "EXECUTED", r
+    assert any(c[0] == "modpos" and c[2] == 2358 for c in env.fake.calls)
+
+
+def test_edit_adds_targets_to_a_signal_posted_without_them(env):
+    """Posted on entry with a stop only, targets edited in: every leg gets a TP,
+    the last one the farthest."""
+    r = _run(env.service.handle_message("u1", env.ch, 88, "XAUUSD BUY\nSL 2340"))
+    assert r["status"] == "EXECUTED", r
+    r = _run(env.service.handle_message("u1", env.ch, 88, "XAUUSD BUY\nSL 2340\nTP1 2355\nTP2 2360\nTP3 2365",
+                                        edited=True))
+    assert r["status"] == "EXECUTED", r
+    tps = [c[3] for c in env.fake.calls if c[0] == "modpos"]
+    assert tps and tps[-1] == 2365
+
+
+def test_edit_targets_helper():
+    class O:
+        def __init__(self, leg, tp, status="OPEN", detail=""):
+            self.leg, self.tp, self.status, self.detail, self.id = leg, tp, status, detail, leg
+    legs = [O(1, 2355.0), O(2, None), O(3, None, detail="stack at TP1: 0.02 lots")]
+    out = {o.leg: t for o, t in svc_mod.edit_targets(legs, [2356.0, 2360.0, 2370.0], "BUY")}
+    assert out == {1: 2356.0, 2: 2370.0}          # last real leg -> farthest, the stack keeps none
+    out = {o.leg: t for o, t in svc_mod.edit_targets([O(1, None), O(2, None), O(3, None), O(4, None)],
+                                                     [2340.0, 2330.0], "SELL")}
+    assert out == {1: 2340.0, 2: 2330.0, 3: 2330.0, 4: 2330.0}
+
+
 def test_added_lines_helper():
     assert svc_mod.added_lines("A\nSL 2340", "A\nSL 2340 ✅\nmove SL to entry") == ["move SL to entry"]
     assert svc_mod.remap_entry(2345.0, {"entry_low": 2340, "entry_high": 2350}, {"entry_low": 2330, "entry_high": 2340}) == 2335.0
