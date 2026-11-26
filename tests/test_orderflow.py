@@ -77,3 +77,19 @@ def test_feed_routes_records_by_symbol_mapping(monkeypatch, tmp_path):
     assert gc["basis"] == pytest.approx(22.1) and gc["cfd_levels"]["last"] == pytest.approx(2650.0)
     assert nq["futures"]["delta"] == -2 and nq["cfd"] == "USTECm"
     assert not f.enabled
+
+
+def test_reconnect_replay_does_not_double_count(monkeypatch):
+    db = pytest.importorskip("databento")
+    monkeypatch.setenv("ORDERFLOW_MAP", "GC.v.0=XAUUSDm")
+    from backend.orderflow.feed import OrderFlowFeed
+    f = OrderFlowFeed()
+    t0 = ns(2026, 11, 24, 15)
+    rec = db.TradeMsg(publisher_id=1, instrument_id=11, ts_event=t0, price=2672_100_000_000, size=3,
+                      action=db.Action.TRADE, side=db.Side.BID, depth=0, ts_recv=t0, flags=0)
+    f.on_record(rec, db)
+    f.profiles["GC.v.0"].prev = {"poc": 2600.0}
+    f.fresh_profiles()                                 # what a reconnect does before the replay
+    f.on_record(rec, db)
+    p = f.profiles["GC.v.0"]
+    assert p.vol == 3 and p.delta == 3 and p.prev == {"poc": 2600.0}

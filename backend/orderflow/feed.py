@@ -69,6 +69,14 @@ class OrderFlowFeed:
             tick, big, _ = SPECS.get(root, (0.25, 50, root))
             self.profiles[sym] = SessionProfile(symbol=sym, tick=tick, big_size=big)
 
+    def fresh_profiles(self) -> None:
+        with self.lock:
+            for sym, old in list(self.profiles.items()):
+                p = SessionProfile(symbol=sym, tick=old.tick, big_size=old.big_size)
+                p.prev = old.prev
+                self.profiles[sym] = p
+            self.ids.clear()
+
     @property
     def enabled(self) -> bool:
         return os.getenv("ORDERFLOW", "0") == "1" and bool(os.getenv("DATABENTO_API_KEY", "").strip())
@@ -82,10 +90,10 @@ class OrderFlowFeed:
                 client = db.Live(key=os.getenv("DATABENTO_API_KEY"), reconnect_policy="reconnect")
                 client.subscribe(dataset="GLBX.MDP3", schema="trades", stype_in="continuous",
                                  symbols=list(self.profiles), start=session_start_utc())
-                client.start()
+                self.fresh_profiles()                # the replay rebuilds the session: never count it twice
                 self.connected, self.error, backoff = True, "", 5
                 logger.info(f"[ORDERFLOW] streaming {', '.join(self.profiles)} (session replay from the open)")
-                for rec in client:
+                for rec in client:                   # iterating starts the stream (no client.start())
                     self.on_record(rec, db)
                 self.connected = False
             except Exception as e:  # noqa: BLE001
@@ -151,6 +159,9 @@ def _mt5_mid(symbol: str) -> float | None:
     try:
         import MetaTrader5 as mt5
         t = mt5.symbol_info_tick(symbol)
+        if t is None or not t.bid:
+            mt5.symbol_select(symbol, True)          # not in Market Watch yet
+            t = mt5.symbol_info_tick(symbol)
         if t is None or not t.bid:
             return None
         return (float(t.bid) + float(t.ask)) / 2
