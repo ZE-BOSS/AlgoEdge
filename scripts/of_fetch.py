@@ -49,6 +49,20 @@ def save(df: pd.DataFrame, path: Path) -> None:
         df.to_csv(path.with_suffix(".csv.gz"), index=False)
 
 
+def retry(fn, *args, tries: int = 6, **kw):
+    """Databento's gateway times out now and then (504): back off and try again."""
+    import time as _t
+    for i in range(tries):
+        try:
+            return fn(*args, **kw)
+        except Exception as e:  # noqa: BLE001
+            if i == tries - 1:
+                raise
+            wait = 10 * 2 ** i
+            print(f"   retry in {wait}s after {type(e).__name__}: {str(e)[:100]}", flush=True)
+            _t.sleep(wait)
+
+
 def minute_flow(trades: pd.DataFrame, big: int) -> pd.DataFrame:
     t = trades
     ts = pd.to_datetime(t["ts_event"] if "ts_event" in t.columns else t.index, utc=True)
@@ -84,9 +98,9 @@ def main() -> int:
     total = 0.0
     for s in syms:
         for schema in (["ohlcv-1m"] + ([] if a.no_trades else ["trades"])):
-            cost = c.metadata.get_cost(dataset=DATASET, symbols=[s], schema=schema, stype_in="continuous",
+            cost = retry(c.metadata.get_cost, dataset=DATASET, symbols=[s], schema=schema, stype_in="continuous",
                                        start=a.start, end=a.end)
-            size = c.metadata.get_billable_size(dataset=DATASET, symbols=[s], schema=schema, stype_in="continuous",
+            size = retry(c.metadata.get_billable_size, dataset=DATASET, symbols=[s], schema=schema, stype_in="continuous",
                                                 start=a.start, end=a.end)
             total += float(cost)
             print(f"cost {s:8s} {schema:9s} ${float(cost):9.2f}  {size / 1e9:6.2f} GB", flush=True)
@@ -104,8 +118,8 @@ def main() -> int:
         if have(f"{name}_m1") and (a.no_trades or have(f"{name}_of")):
             print(f"{name}: already fetched", flush=True)
             continue
-        bars = c.timeseries.get_range(dataset=DATASET, schema="ohlcv-1m", symbols=[s], stype_in="continuous",
-                                      start=a.bars_start, end=a.end).to_df().reset_index()
+        bars = retry(c.timeseries.get_range, dataset=DATASET, schema="ohlcv-1m", symbols=[s], stype_in="continuous",
+                     start=a.bars_start, end=a.end).to_df().reset_index()
         bars["time"] = (pd.to_datetime(bars["ts_event"], utc=True).astype("int64") // 1_000_000_000).astype("int64")
         bars = bars.rename(columns={"volume": "tick_volume"})
         bars["real_volume"] = bars["tick_volume"]
@@ -119,16 +133,20 @@ def main() -> int:
         d = datetime.fromisoformat(a.start)
         end = datetime.fromisoformat(a.end)
         while d < end:
-            d2 = min(d + timedelta(days=7), end)
+            d2 = min(d + timedelta(days=1), end)
             with tempfile.TemporaryDirectory() as td:
                 path = os.path.join(td, "week.dbn.zst")        # must not exist yet: databento won't overwrite
-                c.timeseries.get_range(dataset=DATASET, schema="trades", symbols=[s], stype_in="continuous",
-                                       start=d.isoformat(), end=d2.isoformat(), path=path)
+                if os.path.exists(path):
+                    os.remove(path)
+                retry(lambda: (os.path.exists(path) and os.remove(path),
+                               c.timeseries.get_range(dataset=DATASET, schema="trades", symbols=[s], stype_in="continuous",
+                                                      start=d.isoformat(), end=d2.isoformat(), path=path)))
                 store = db.DBNStore.from_file(path)
                 for chunk in store.to_df(count=2_000_000):
                     if len(chunk):
                         parts.append(minute_flow(chunk.reset_index(), big))
-            print(f"{name}: trades to {d2.date()}  ({sum(len(p) for p in parts)} minutes)", flush=True)
+            if d2.day == 1 or d2 >= end:
+                print(f"{name}: trades to {d2.date()}  ({sum(len(p) for p in parts)} minutes)", flush=True)
             d = d2
         flow = pd.concat(parts).groupby("time", as_index=False).sum(numeric_only=True)
         flow["delta"] = flow["buy"] - flow["sell"]
