@@ -100,6 +100,10 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     for s in syms:
         name, big = MARKETS[s]
+        have = lambda stem: (out / f"{stem}.parquet").exists() or (out / f"{stem}.csv.gz").exists()  # noqa: E731
+        if have(f"{name}_m1") and (a.no_trades or have(f"{name}_of")):
+            print(f"{name}: already fetched", flush=True)
+            continue
         bars = c.timeseries.get_range(dataset=DATASET, schema="ohlcv-1m", symbols=[s], stype_in="continuous",
                                       start=a.bars_start, end=a.end).to_df().reset_index()
         bars["time"] = (pd.to_datetime(bars["ts_event"], utc=True).astype("int64") // 1_000_000_000).astype("int64")
@@ -116,10 +120,11 @@ def main() -> int:
         end = datetime.fromisoformat(a.end)
         while d < end:
             d2 = min(d + timedelta(days=7), end)
-            with tempfile.NamedTemporaryFile(suffix=".dbn.zst") as tmp:
+            with tempfile.TemporaryDirectory() as td:
+                path = os.path.join(td, "week.dbn.zst")        # must not exist yet: databento won't overwrite
                 c.timeseries.get_range(dataset=DATASET, schema="trades", symbols=[s], stype_in="continuous",
-                                       start=d.isoformat(), end=d2.isoformat(), path=tmp.name)
-                store = db.DBNStore.from_file(tmp.name)
+                                       start=d.isoformat(), end=d2.isoformat(), path=path)
+                store = db.DBNStore.from_file(path)
                 for chunk in store.to_df(count=2_000_000):
                     if len(chunk):
                         parts.append(minute_flow(chunk.reset_index(), big))
