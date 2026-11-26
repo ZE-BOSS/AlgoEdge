@@ -682,7 +682,8 @@ def client(env, monkeypatch):
         async with env["sf"]() as s:
             yield s
     app.dependency_overrides[get_db] = db
-    app.dependency_overrides[require_admin] = lambda: object()
+    from types import SimpleNamespace
+    app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id="admin")
     c = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
     return c
 
@@ -975,3 +976,24 @@ def test_group_learned_from_first_message_and_tier_command(env):
     # a non-admin can't set it
     run(bot.on_group_message({"message_id": 7, "chat": chat, "from": {"id": 42}, "text": "/tier vip"}))
     assert [x for x in run(_all(sf, SignalGroup)) if x.chat_id == -100777][0].tier == "GENERAL"
+
+
+def test_api_create_group_through_the_telegram_account(env, client, monkeypatch):
+    from backend.copytrade import telegram_client as tc
+    calls = []
+
+    async def fake_create(uid, title, about, bot_username, broadcast):
+        calls.append((title, bot_username, broadcast))
+        return {"chat_id": -100555, "title": title, "bot_added": True, "invite_link": "https://t.me/+abc"}
+    monkeypatch.setattr(tc.telegram_manager, "create_group", fake_create)
+
+    async def go():
+        assert (await client.post("/api/groups/create", json={"title": "AlphaEdge VIP", "tier": "boss"})).status_code == 400
+        r = await client.post("/api/groups/create", json={"title": "AlphaEdge VIP", "tier": "vip"})
+        assert r.status_code == 200, r.text
+        j = r.json()
+        assert j["tier"] == "VIP" and j["can_post"] and not j["posting"] and j["invite_link"] == "https://t.me/+abc"
+        assert calls == [("AlphaEdge VIP", "zemirah_bot", False)]
+        env["bot"].username = ""
+        assert (await client.post("/api/groups/create", json={"title": "x", "tier": "VIP"})).status_code == 409
+    run(go())

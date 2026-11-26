@@ -40,7 +40,10 @@ try:
     from telethon import TelegramClient, events, utils
     from telethon.errors import PhoneCodeExpiredError, PhoneCodeInvalidError, SessionPasswordNeededError
     from telethon.sessions import StringSession
-    from telethon.tl.functions.channels import JoinChannelRequest
+    from telethon.tl.functions.channels import (CreateChannelRequest, EditAdminRequest, InviteToChannelRequest,
+                                                JoinChannelRequest)
+    from telethon.tl.functions.messages import ExportChatInviteRequest
+    from telethon.tl.types import ChatAdminRights
     from telethon.tl.functions.messages import CheckChatInviteRequest, ImportChatInviteRequest
     from telethon.tl.types import ChannelParticipantsAdmins
     HAS_TELETHON = True
@@ -231,6 +234,33 @@ class TelegramManager:
                 await c(JoinChannelRequest(chat))
         return {"chat_id": utils.get_peer_id(chat), "title": getattr(chat, "title", ""),
                 "username": getattr(chat, "username", None)}
+
+    async def create_group(self, user_id: str, title: str, about: str = "", bot_username: str = "",
+                           broadcast: bool = False) -> dict:
+        """Create a supergroup (or a broadcast channel) from the logged-in account, add the
+        group bot and make it an admin that can post, edit, delete, pin, invite and restrict."""
+        if not await self._connect_saved(user_id):
+            raise RuntimeError("not logged in to Telegram - log in on the Copy Trading page first")
+        c = self._uc(user_id).client
+        res = await c(CreateChannelRequest(title=title[:128], about=about[:255], megagroup=not broadcast,
+                                           broadcast=broadcast))
+        chat = res.chats[0]
+        out = {"chat_id": utils.get_peer_id(chat), "title": chat.title, "bot_added": False, "invite_link": None}
+        if bot_username:
+            bot = await c.get_entity(bot_username.lstrip("@"))
+            if not broadcast:
+                await c(InviteToChannelRequest(chat, [bot]))
+            rights = ChatAdminRights(post_messages=True, edit_messages=True, delete_messages=True, pin_messages=True,
+                                     invite_users=True, ban_users=True, change_info=False, add_admins=False,
+                                     manage_call=False, other=True)
+            await c(EditAdminRequest(chat, bot, rights, rank="bot"))
+            out["bot_added"] = True
+        try:
+            inv = await c(ExportChatInviteRequest(chat))
+            out["invite_link"] = getattr(inv, "link", None)
+        except Exception:  # noqa: BLE001
+            pass
+        return out
 
     async def history(self, user_id: str, chat_id: int, limit: int = 100) -> list[dict]:
         if not await self._connect_saved(user_id):

@@ -50,6 +50,44 @@ async def status(db: AsyncSession = Depends(get_db), _: User = Depends(require_a
             "settings": cfg, "queued": queued, "failed_24h": failed}
 
 
+class CreateGroupIn(BaseModel):
+    title: str
+    tier: str
+    about: str = ""
+    broadcast: bool = False
+
+
+@router.post("/create")
+async def create_group(body: CreateGroupIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
+    """Create a Telegram group with the account logged in on the Copy Trading page, add the
+    bot as admin and record it with its tier (posting stays off until you switch it on)."""
+    tier = body.tier.upper()
+    if tier not in ("GENERAL", "VIP", "VVIP"):
+        raise HTTPException(400, "tier must be GENERAL, VIP or VVIP")
+    if not body.title.strip():
+        raise HTTPException(400, "give the group a name")
+    from backend.groups.bot import group_bot
+    if not group_bot.username:
+        raise HTTPException(409, "the group bot is not running on this server - use the Live server")
+    from backend.copytrade.telegram_client import telegram_manager
+    try:
+        r = await telegram_manager.create_group(str(user.id), body.title.strip(), body.about, group_bot.username,
+                                                body.broadcast)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Telegram refused: {e}") from e
+    g = (await db.execute(select(SignalGroup).where(SignalGroup.chat_id == int(r["chat_id"])))).scalars().first()
+    if g is None:
+        g = SignalGroup(chat_id=int(r["chat_id"]))
+        db.add(g)
+    g.title, g.tier = r["title"], tier
+    g.chat_type = "channel" if body.broadcast else "supergroup"
+    if r.get("bot_added"):
+        g.bot_status, g.can_post, g.can_invite, g.can_delete = "administrator", True, True, True
+    await db.commit()
+    await db.refresh(g)
+    return {**_row(g), "invite_link": r.get("invite_link")}
+
+
 class SettingsIn(BaseModel):
     patch: dict
 

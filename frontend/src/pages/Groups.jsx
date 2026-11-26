@@ -133,7 +133,33 @@ function GroupsTab({ d, act }) {
   const [text, setText] = useState({});
   const post = useMutation(act(({ id, t }) => groupsApi.post({ group_id: Number(id), text: t }), 'Posted.'));
   const groups = d?.groups || [];
+  const [nf, setNf] = useState({ title: '', tier: 'VIP', broadcast: false });
+  const [made, setMade] = useState(null);
+  const create = useMutation(act((data) => groupsApi.createGroup(data), (r) => {
+    setMade(r);
+    return `Created "${r?.title}" with the bot as admin. Set posting on when its routes are ready.`;
+  }));
   return (
+    <>
+    <Card icon={<Plus size={16} />} title="Create a group" sub="Made with the Telegram account logged in on the Copy Trading page. The bot is added as admin and the group is recorded with its tier.">
+      <form style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'end' }}
+        onSubmit={(e) => { e.preventDefault(); create.mutate(nf); setNf({ ...nf, title: '' }); }}>
+        <Field label="Name"><input className="ct-input" required placeholder="AlphaEdge VIP" value={nf.title} onChange={(e) => setNf({ ...nf, title: e.target.value })} /></Field>
+        <Field label="Tier">
+          <select className="ct-select" value={nf.tier} onChange={(e) => setNf({ ...nf, tier: e.target.value })}>
+            {TIERS.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Type">
+          <select className="ct-select" value={nf.broadcast ? 'channel' : 'group'} onChange={(e) => setNf({ ...nf, broadcast: e.target.value === 'channel' })}>
+            <option value="group">Group (members can chat)</option>
+            <option value="channel">Channel (only you and the bot post)</option>
+          </select>
+        </Field>
+        <div className="ct-field"><button className="btn btn-primary" disabled={create.isPending}><Plus size={14} /> {create.isPending ? 'Creating…' : 'Create'}</button></div>
+      </form>
+      {made?.invite_link && <p className="ct-hint">Invite link for {made.title}: <span className="ct-mono">{made.invite_link}</span> (members of VIP and VVIP get their own one-use links from the bot).</p>}
+    </Card>
     <Card icon={<Users size={16} />} title="Groups" sub="Add the bot to a group as an admin and it appears here. New groups start with posting off.">
       {!groups.length ? <p className="ct-empty">No groups yet. In Telegram, add the bot to your group and make it an admin.</p> : (
         <table className="ct-table">
@@ -166,6 +192,7 @@ function GroupsTab({ d, act }) {
         </table>
       )}
     </Card>
+    </>
   );
 }
 

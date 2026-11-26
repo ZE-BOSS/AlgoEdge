@@ -566,6 +566,7 @@ export const groupsApi = {
   status: () => api.get(`${GR}/status`),
   saveSettings: (patch) => api.put(`${GR}/settings`, { patch }),
   patchGroup: (id, data) => api.patch(`${GR}/groups/${id}`, data),
+  createGroup: (data) => api.post(`${GR}/create`, data),
   sources: () => api.get(`${GR}/sources`),
   addRoute: (data) => api.post(`${GR}/routes`, data),
   patchRoute: (id, data) => api.patch(`${GR}/routes/${id}`, data),
