@@ -77,6 +77,7 @@ def main() -> int:
     ap.add_argument("--cost", action="store_true")
     ap.add_argument("--max-cost", type=float, default=5.0)
     ap.add_argument("--no-trades", action="store_true")
+    ap.add_argument("--bars-start", default="2025-10-01", help="candles start earlier so strategies have history")
     a = ap.parse_args()
     c = db.Historical(key())
     syms = [s for s in a.markets.split(",") if s]
@@ -100,7 +101,7 @@ def main() -> int:
     for s in syms:
         name, big = MARKETS[s]
         bars = c.timeseries.get_range(dataset=DATASET, schema="ohlcv-1m", symbols=[s], stype_in="continuous",
-                                      start=a.start, end=a.end).to_df().reset_index()
+                                      start=a.bars_start, end=a.end).to_df().reset_index()
         bars["time"] = (pd.to_datetime(bars["ts_event"], utc=True).astype("int64") // 1_000_000_000).astype("int64")
         bars = bars.rename(columns={"volume": "tick_volume"})
         bars["real_volume"] = bars["tick_volume"]
