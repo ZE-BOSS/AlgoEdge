@@ -431,8 +431,31 @@ class GroupBot:
             return
         async with self.sf() as s:
             cfg = await S.load(s)
+            known = (await s.execute(select(SignalGroup.id).where(SignalGroup.chat_id == chat_id))).first()
+        if not known:
+            # the "added to group" event can be lost (bot token replaced, updates consumed elsewhere):
+            # learn the group from its first message instead
+            try:
+                me = await self.api.chat_member(chat_id, self.bot_id)
+                await self.on_my_chat_member({"chat": m["chat"], "new_chat_member": me})
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[GROUPBOT] could not register chat {chat_id}: {e}")
         if text.startswith("/") and await self._is_admin_user(uid):
-            out = await self.admin_command(text.replace(f"@{self.username}", ""))
+            cmd = text.replace(f"@{self.username}", "").split()
+            if cmd[0].lower() == "/tier" and len(cmd) > 1 and cmd[1].upper() in ("GENERAL", "VIP", "VVIP"):
+                async with self.sf() as s:
+                    g = (await s.execute(select(SignalGroup).where(SignalGroup.chat_id == chat_id))).scalars().first()
+                    if g is not None:
+                        g.tier, g.posting = cmd[1].upper(), bool(g.can_post)
+                        await s.commit()
+                await self._dm(uid, f"{m['chat'].get('title')}: tier {cmd[1].upper()}, posting "
+                                    f"{'on' if g is not None and g.posting else 'off (the bot cannot post there yet)'}.")
+                try:
+                    await self.api.delete(chat_id, m["message_id"])
+                except Exception:  # noqa: BLE001
+                    pass
+                return
+            out = await self.admin_command(" ".join(cmd))
             await self._dm(uid, out)
             return
         if cfg.get("moderate") and (LINK_RE.search(text) or PHONE_RE.search(text) or DM_RE.search(text)):

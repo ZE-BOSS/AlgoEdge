@@ -956,3 +956,22 @@ def test_portal_pro_backtests_and_elite_orderflow(env, monkeypatch, tmp_path):
         o = (await c.get("/api/investor/vvip/orderflow")).json()
         assert o["live"] and o["markets"][0]["levels"]["poc"] == 2648.0 and "future" not in o["markets"][0]
     run(go())
+
+
+def test_group_learned_from_first_message_and_tier_command(env):
+    sf, bot, api = env["sf"], env["bot"], env["api"]
+
+    async def cm(chat_id, uid):
+        return {"status": "administrator", "can_invite_users": True, "can_delete_messages": True}
+    api.chat_member = cm
+    chat = {"id": -100777, "title": "AlphaEdge Collectives", "type": "supergroup"}
+    run(bot.on_group_message({"message_id": 5, "chat": chat, "from": {"id": 42}, "text": "hello all"}))
+    g = [x for x in run(_all(sf, SignalGroup)) if x.chat_id == -100777][0]
+    assert g.can_post and g.tier == "" and not g.posting
+    run(bot.on_group_message({"message_id": 6, "chat": chat, "from": {"id": ADMIN}, "text": "/tier general"}))
+    g = [x for x in run(_all(sf, SignalGroup)) if x.chat_id == -100777][0]
+    assert g.tier == "GENERAL" and g.posting
+    assert ("delete", -100777, 6) in api.calls and "tier GENERAL, posting on" in api.sent(ADMIN)[-1][2]
+    # a non-admin can't set it
+    run(bot.on_group_message({"message_id": 7, "chat": chat, "from": {"id": 42}, "text": "/tier vip"}))
+    assert [x for x in run(_all(sf, SignalGroup)) if x.chat_id == -100777][0].tier == "GENERAL"
