@@ -30,7 +30,7 @@ def test_market_call_slightly_late_is_market_not_a_limit():
 def test_market_call_too_late_is_skipped_not_waited_for():
     p = plan(VIP_SIG, 3610.6, 3610.8, late_skip_frac=0.35)   # 1.4 of 3.0 = 47% of the way to TP1
     assert not p.ok and "too late" in p.reason
-    p = plan(VIP_SIG, 3609.6, 3609.8)                 # default 0.8: 2.4 of 3.0 = 80% -> a recap
+    p = plan(VIP_SIG, 3608.8, 3609.0)                 # default 1.0: price already past TP1 3609 -> a recap
     assert not p.ok and "too late" in p.reason
 
 
@@ -40,20 +40,20 @@ def test_explicit_limit_still_waits():
 
 
 def test_old_channel_setting_limit_no_longer_catches_late_posts():
-    p = plan(VIP_SIG, 3609.4, 3609.6, chase_rule="limit")
+    p = plan(VIP_SIG, 3608.8, 3609.0, chase_rule="limit")
     assert not p.ok and "too late" in p.reason
 
 
 def test_buy_now_zone_after_it_ran_is_skipped():
     assert parse_message(PROFIT).now
-    p = plan(PROFIT, 3547.0, 3547.3)                  # 3.3 past 3544 of the 4.0 to TP1
+    p = plan(PROFIT, 3548.3, 3548.6)                  # past TP1 3548
     assert not p.ok and "too late" in p.reason
     assert plan(PROFIT, 3542.0, 3542.3).ok             # inside the zone: taken
 
 
 def test_recap_zone_skipped_where_the_channel_turns_it_on():
     assert plan(QAS, 3860.0, 3860.5).ok                # default: a zone may be posted ahead on purpose
-    p = plan(QAS, 3865.0, 3865.5, late_skip_zones=True)
+    p = plan(QAS, 3868.0, 3868.5, late_skip_zones=True)
     assert not p.ok and "too late" in p.reason
     assert plan(QAS, 3835.0, 3835.5, late_skip_zones=True).ok
 
@@ -69,3 +69,18 @@ def test_scalping_channels_small_miss_is_taken_by_default():
     # 26 Nov: XAUUSD VIP SIGNAL 38%, Xauusd Trader 40%, Free Volatility 37% of a $3-$10 TP1 were skipped at 0.35
     p = plan(VIP_SIG, 3610.6, 3610.8)                 # 47% of the way: still a market entry at the 0.8 default
     assert p.ok and p.order_type == "MARKET"
+
+
+
+def test_default_skips_only_past_tp1():
+    assert plan(VIP_SIG, 3609.3, 3609.5).ok               # 90% of the way: still taken
+    assert not plan(VIP_SIG, 3608.9, 3609.0).ok           # past TP1 3609: skipped
+
+
+def test_last_leg_gets_the_farthest_target():
+    p = plan(PROFIT, 3542.0, 3542.3)                     # TPs 3548..3564 + "OPEN"
+    assert p.ok and all(l["tp"] is not None for l in p.legs) and p.legs[-1]["tp"] == 3564.0
+    p = plan(VIP_SIG, 3612.2, 3612.4, max_legs=3)         # 8 TPs, 3 legs: last leg the farthest, 3588
+    assert [l["tp"] for l in p.legs] == [3609.0, 3606.0, 3588.0]
+    p = plan("XAUUSD SELL 3612\nTP OPEN\nSL 3630", 3612.2, 3612.4)   # no target number: R-multiple target
+    assert p.ok and p.legs[-1]["tp"] is not None

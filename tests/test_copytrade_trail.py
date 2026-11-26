@@ -209,7 +209,7 @@ def test_runner_leg_and_stack_at_tp1(env):  # noqa: F811
     _set_rules(env, trail_ladder=True, runner_leg=True, stack_at_tp1=1.0, max_legs=2, split_weights=[])
     _run(env.service.handle_message("u1", env.ch, 78, "XAUUSD BUY NOW\nSL 2340\nTP1 2355\nTP2 2360\nTP3 2365\nTP4 2370"))
     legs = _orders(env)
-    assert [o.tp for o in legs] == [2355.0, None]                     # the last leg runs
+    assert [o.tp for o in legs] == [2355.0, 2370.0]                   # the last leg: the farthest target (TP4)
     t1, t2 = legs[0].ticket, legs[1].ticket
     _tp_out(env, t1)
     env.fake.bid, env.fake.ask = 2355.5, 2355.7

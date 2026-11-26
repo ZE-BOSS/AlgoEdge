@@ -36,7 +36,7 @@ DEFAULT_RULES: dict[str, Any] = {
     "market_tolerance_pct": 0.15, # a market signal is taken at market while price is within this % of the written entry
     "chase_rule": "market",       # a MARKET signal whose price ran past the entry (but less than late_skip_frac
                                   # of the way to TP1): market = take it now, limit = wait at the entry, skip
-    "late_skip_frac": 0.8,        # price already covered this share of the way from the written entry to TP1:
+    "late_skip_frac": 1.0,        # price already covered this share of the way from the written entry to TP1:
                                   # the post is late or a recap - skip it whatever chase_rule says (0 = off).
                                   # A late fill turns TP1 into a coin-flip with breakeven right behind it.
                                   # Applies to single-price market calls and to zones written "BUY NOW 3544-40";
@@ -62,7 +62,7 @@ DEFAULT_RULES: dict[str, Any] = {
     "be_after_tp": 0,             # 0 = off; 1 = move the remaining legs to breakeven once TP1 fills; 2 = after TP2 ...
     "trail_ladder": False,        # trail every open leg as the signal's targets are reached: TP1 -> breakeven,
                                   # TP2 -> TP1, TP3 -> TP2 ... (stops only ever tighten)
-    "runner_leg": False,          # the last leg has no target: the TP ladder trail (or his close) ends it
+    "runner_leg": False,          # retired 26 Nov 2026: the last leg always targets the farthest TP in the signal
     "stack_at_tp1": 0.0,          # when TP1 is reached, add this multiple of the open volume at market, stop at
                                   # the first entry (it risks only the TP1 distance); 0 = off
     "on_first_fill": "keep",      # zone legs when the first one fills: keep (wait at their levels) /
@@ -251,10 +251,24 @@ def build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: d
     p = _build_open_plan(sig, quote, spec, balance, rules, broker_symbol)
     if tight_note:
         p.notes.insert(0, tight_note)
-    if p.ok and p.legs and rules.get("runner_leg"):
-        p.legs[-1]["tp"] = None
-        p.notes.append(f"leg {p.legs[-1]['leg']} is a runner: no target, the ladder trail closes it")
+    if p.ok and p.legs:
+        _last_leg_farthest(p, sig)
     return p
+
+
+def _last_leg_farthest(p: OpenPlan, sig: dict) -> None:
+    """Every signal's last leg carries a target: the farthest one in the message (26 Nov 2026 -
+    an "open" or runner leg without a target was left to luck). Earlier legs keep theirs."""
+    s = 1 if p.side == "BUY" else -1
+    ref = float(p.legs[-1].get("entry") or p.entry or 0)
+    cands = [float(t) for t in (sig.get("tps") or []) if t is not None and (float(t) - ref) * s > 0]
+    if not cands:
+        return
+    far = max(cands, key=lambda t: (t - ref) * s)
+    cur = p.legs[-1].get("tp")
+    if cur is None or (far - float(cur)) * s > 0:
+        p.legs[-1]["tp"] = far
+        p.notes.append(f"last leg targets the farthest TP in the signal: {far:g}")
 
 
 def _build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: dict,
@@ -358,8 +372,8 @@ def _build_open_plan(sig: dict, quote: dict, spec: dict, balance: float, rules: 
         p.notes.append(f"dropped targets already passed: {passed}")
     tps = tps[: int(rules.get("max_legs") or 10)]
     targets: list[float | None] = list(tps)
-    if sig.get("tp_open") and len(targets) < int(rules.get("max_legs") or 10):
-        targets.append(None)
+    if sig.get("tp_open") and tps and len(targets) < int(rules.get("max_legs") or 10):
+        targets.append(None)          # the "open" leg: given the farthest target in build_open_plan
     if not targets:
         rr = float(rules.get("missing_tp_rr") or 0)
         targets = [p.entry + s * rr * abs(p.entry - sl)] if rr > 0 else [None]
@@ -479,7 +493,7 @@ def _late(sig: dict, mkt: float, s: int, rules: dict, want: str) -> str:
     """A market call (no LIMIT / STOP written) that price has already carried a good
     part of the way to TP1: a late post or a results recap ("QAS VIP SIGNAL"
     re-posted in a free channel after it ran). Returns why it is skipped, or ""."""
-    frac = float(rules.get("late_skip_frac", 0.8) or 0)
+    frac = float(rules.get("late_skip_frac", 1.0) or 0)
     if frac <= 0 or want != "MARKET":
         return ""
     lo, hi, entry = sig.get("entry_low"), sig.get("entry_high"), sig.get("entry")
@@ -533,7 +547,7 @@ def _layer_plan(p: OpenPlan, sig: dict, mkt: float, s: int, lo: float, hi: float
     tps = [float(t) for t in (sig.get("tps") or []) if (float(t) - near) * s > 0]
     max_legs = int(rules.get("max_legs") or 10)
     targets: list = tps[:max_legs]
-    if sig.get("tp_open") and len(targets) < max_legs:
+    if sig.get("tp_open") and tps and len(targets) < max_legs:
         targets.append(None)
     if not targets:
         rr = float(rules.get("missing_tp_rr") or 0)

@@ -101,7 +101,8 @@ def test_plan_price_ran_away_is_skipped_as_late_not_waited_for():
     r = merge_rules({"zone_entry": "market"})
     p = build_open_plan(_sig(now=True), {"bid": 2351.0, "ask": 2351.2}, GOLD, 10_000, r, "XAUUSD")
     assert p.ok and p.order_type == "MARKET"
-    p = build_open_plan(_sig(now=True), {"bid": 2354.0, "ask": 2354.2}, GOLD, 10_000, r, "XAUUSD")
+    p = build_open_plan(_sig(now=True), {"bid": 2354.0, "ask": 2354.2}, GOLD, 10_000,
+                        merge_rules({"zone_entry": "market", "late_skip_frac": 0.8}), "XAUUSD")
     assert not p.ok and "too late" in p.reason
     # with the late check off, the chase rules still work as before
     p = build_open_plan(_sig(), {"bid": 2354.0, "ask": 2354.2}, GOLD, 10_000,
