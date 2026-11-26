@@ -6,7 +6,7 @@ via scripts/run_app_backtest.py), converts the trades to R (STATIC sizing: 1 R =
 start balance), applies the order-flow filter of_optimise.py chose on futures (features from
 the Databento flow at each MT5 entry time), and sets the result next to the futures run.
 
-    cd /opt/algoedge/demo/app && set -a && . ./instance.env && . ./.env && set +a && \
+    cd /opt/algoedge/demo/app && set -a && . ../instance.env && set +a && \
     PYTHONPATH=. venv/bin/python /opt/algoedge/research_data/bt_mt5_compare.py \
         --data /opt/algoedge/research_data --out /opt/algoedge/research_data/compare.json
 """
