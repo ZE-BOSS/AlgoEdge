@@ -36,7 +36,7 @@ DEFAULT_RULES: dict[str, Any] = {
     "market_tolerance_pct": 0.15, # a market signal is taken at market while price is within this % of the written entry
     "chase_rule": "market",       # a MARKET signal whose price ran past the entry (but less than late_skip_frac
                                   # of the way to TP1): market = take it now, limit = wait at the entry, skip
-    "late_skip_frac": 0.35,       # price already covered this share of the way from the written entry to TP1:
+    "late_skip_frac": 0.8,        # price already covered this share of the way from the written entry to TP1:
                                   # the post is late or a recap - skip it whatever chase_rule says (0 = off).
                                   # A late fill turns TP1 into a coin-flip with breakeven right behind it.
                                   # Applies to single-price market calls and to zones written "BUY NOW 3544-40";
@@ -479,7 +479,7 @@ def _late(sig: dict, mkt: float, s: int, rules: dict, want: str) -> str:
     """A market call (no LIMIT / STOP written) that price has already carried a good
     part of the way to TP1: a late post or a results recap ("QAS VIP SIGNAL"
     re-posted in a free channel after it ran). Returns why it is skipped, or ""."""
-    frac = float(rules.get("late_skip_frac", 0.35) or 0)
+    frac = float(rules.get("late_skip_frac", 0.8) or 0)
     if frac <= 0 or want != "MARKET":
         return ""
     lo, hi, entry = sig.get("entry_low"), sig.get("entry_high"), sig.get("entry")

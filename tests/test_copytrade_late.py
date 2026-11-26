@@ -28,7 +28,9 @@ def test_market_call_slightly_late_is_market_not_a_limit():
 
 
 def test_market_call_too_late_is_skipped_not_waited_for():
-    p = plan(VIP_SIG, 3610.6, 3610.8)                 # 1.4 of 3.0 = 47% of the way to TP1
+    p = plan(VIP_SIG, 3610.6, 3610.8, late_skip_frac=0.35)   # 1.4 of 3.0 = 47% of the way to TP1
+    assert not p.ok and "too late" in p.reason
+    p = plan(VIP_SIG, 3609.6, 3609.8)                 # default 0.8: 2.4 of 3.0 = 80% -> a recap
     assert not p.ok and "too late" in p.reason
 
 
@@ -38,7 +40,7 @@ def test_explicit_limit_still_waits():
 
 
 def test_old_channel_setting_limit_no_longer_catches_late_posts():
-    p = plan(VIP_SIG, 3610.6, 3610.8, chase_rule="limit")
+    p = plan(VIP_SIG, 3609.4, 3609.6, chase_rule="limit")
     assert not p.ok and "too late" in p.reason
 
 
@@ -51,7 +53,7 @@ def test_buy_now_zone_after_it_ran_is_skipped():
 
 def test_recap_zone_skipped_where_the_channel_turns_it_on():
     assert plan(QAS, 3860.0, 3860.5).ok                # default: a zone may be posted ahead on purpose
-    p = plan(QAS, 3860.0, 3860.5, late_skip_zones=True)
+    p = plan(QAS, 3865.0, 3865.5, late_skip_zones=True)
     assert not p.ok and "too late" in p.reason
     assert plan(QAS, 3835.0, 3835.5, late_skip_zones=True).ok
 
@@ -60,3 +62,10 @@ def test_zones_posted_ahead_still_layer_by_default():
     p = plan(SUNNY, 4505.0, 4505.3)
     assert p.ok and p.order_type == "LAYER"
     assert not parse_message(SUNNY).now
+
+
+
+def test_scalping_channels_small_miss_is_taken_by_default():
+    # 26 Nov: XAUUSD VIP SIGNAL 38%, Xauusd Trader 40%, Free Volatility 37% of a $3-$10 TP1 were skipped at 0.35
+    p = plan(VIP_SIG, 3610.6, 3610.8)                 # 47% of the way: still a market entry at the 0.8 default
+    assert p.ok and p.order_type == "MARKET"
