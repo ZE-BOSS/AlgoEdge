@@ -45,6 +45,15 @@ FLOW = {
     "approach_exhausted": lambda d: col(d, "appr_delta", -1) > 0,
     "absorb_or_flip": lambda d: col(d, "absorb") | col(d, "flip"),
     "absorb_and_flip": lambda d: col(d, "absorb") & col(d, "flip"),
+    # trend_of.py: flow with the trade on the signal bar / the last 12 bars, institutional size,
+    # and the top-of-book imbalance (when a bbo file was available)
+    "delta_with": lambda d: col(d, "delta_with"),
+    "cvd_with": lambda d: col(d, "cvd_with"),
+    "big_surge": lambda d: col(d, "big_surge"),
+    "big_surge_with": lambda d: col(d, "big_surge") & col(d, "big_with"),
+    "vol_surge": lambda d: col(d, "vol_surge"),
+    "delta_and_big_with": lambda d: col(d, "delta_with") & col(d, "big_with"),
+    "book_with": lambda d: col(d, "book_with"),
 }
 CONTEXT = {
     "no_context": lambda d: pd.Series(True, index=d.index),
@@ -59,6 +68,14 @@ CONTEXT = {
     "against_trend": lambda d: col(d, "trend", 0) < 0,
     "reversal": lambda d: col(d, "setup", "") == "reversal",
     "retest": lambda d: col(d, "setup", "") == "retest",
+    # trend_of.py
+    "break": lambda d: col(d, "setup", "") == "break",
+    "at_inst_node": lambda d: col(d, "at_node"),
+    "strong_inst_node": lambda d: col(d, "node_strength", 0) >= 4,
+    "vol_expanding": lambda d: col(d, "vol_expanding"),
+    "fib_trend": lambda d: col(d, "fib_trend"),
+    "retest_with_trend": lambda d: (col(d, "setup", "") == "retest") & (col(d, "trend", 0) > 0),
+    "break_with_trend": lambda d: (col(d, "setup", "") == "break") & (col(d, "trend", 0) > 0),
 }
 SESSION = {
     "all_day": lambda d: pd.Series(True, index=d.index),
@@ -98,8 +115,19 @@ def run_file(path: Path, min_n: int) -> dict:
     has_flow = "absorb" in d.columns
     flows = FLOW if has_flow else {"no_flow": FLOW["no_flow"]}
     masks = {}
+    need = {"at_inst_node": "at_node", "strong_inst_node": "node_strength", "vol_expanding": "vol_expanding",
+            "fib_trend": "fib_trend", "prev_day_level": "pd_level", "fresh_zone": "touch", "strong_zone": "kind",
+            "big_trades_in_zone": "zone_bigs", "origin_zone": "kind", "hvn_zone": "kind", "big_move_in": "big_move",
+            "with_trend": "trend", "against_trend": "trend", "reversal": "setup", "retest": "setup", "break": "setup",
+            "retest_with_trend": "setup", "break_with_trend": "setup", "book_with": "book_imb",
+            "delta_with": "delta_with", "cvd_with": "cvd_with", "big_surge": "big_surge",
+            "big_surge_with": "big_surge", "vol_surge": "vol_surge", "delta_and_big_with": "delta_with"}
     for grp in (CANDLE, flows, CONTEXT, SESSION):
         for k, f in grp.items():
+            if k in need and need[k] not in d.columns:
+                continue
+            if k == "book_with" and not d["book_imb"].notna().any():
+                continue
             try:
                 masks[k] = pd.Series(f(d)).fillna(False).values.astype(bool)
             except Exception:  # noqa: BLE001
