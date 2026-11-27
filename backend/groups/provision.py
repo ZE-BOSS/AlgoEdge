@@ -201,7 +201,9 @@ def configure(cid: str, name: str) -> None:
     # 1. log the client's terminal in (through this instance's own bridge)
     import backend  # noqa: F401  - installs this instance's MT5 bridge
     import MetaTrader5 as mt5
-    if not mt5.initialize():
+
+    from backend.mt5.executor import reinitialize
+    if not reinitialize(mt5):                      # pinned to this instance's terminal
         sys.exit(f"cannot reach the client's MT5 terminal: {mt5.last_error()}")
     pw = Fernet(key.encode()).decrypt(row["mt5_password_encrypted"].encode()).decode()
     ok = mt5.login(int(row["mt5_login"]), password=pw, server=row["mt5_server"])
