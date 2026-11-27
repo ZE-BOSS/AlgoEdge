@@ -141,10 +141,24 @@ def read_live(future: str, max_age_s: float | None = None) -> pd.DataFrame:
 
 
 def live_age(future: str) -> float | None:
+    """Seconds since the live file was last written (the flusher is alive)."""
     try:
         return time.time() - live_path(future).stat().st_mtime
     except OSError:
         return None
+
+
+def live_lag(future: str) -> float | None:
+    """Seconds between now and the END of the newest minute in the live file (the
+    stream is delivering). A file rewritten every few seconds can still hold only
+    the seed history - after a restart, while the session replay catches up, or
+    when the stream is down - and its age alone would pass that off as live."""
+    df = read_live(future)
+    if not len(df):
+        return None
+    last = df.index.max()
+    return time.time() - (last.timestamp() + 60.0) if last.tzinfo else \
+        time.time() - (last.tz_localize("UTC").timestamp() + 60.0)
 
 
 def read_range(future: str, start: datetime, end: datetime, live: bool = True) -> pd.DataFrame:

@@ -122,7 +122,7 @@ class LiveBars:
                 logger.debug(f"[MARKETDATA] live write {fut}: {e}")
 
     def run_flusher(self, stop: threading.Event | None = None) -> None:
-        last_backfill = 0.0
+        last_backfill = time.time() - 6 * 3600 + 900      # first run 15 min after start, not during the seed
         while not (stop and stop.is_set()):
             self.flush()
             if time.time() - last_backfill > 6 * 3600:      # the daily job, every 6 h

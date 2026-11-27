@@ -94,7 +94,9 @@ class OrderFlowFeed:
         import databento as db
         backoff = 5
         if not live_bars.seeded:
-            live_bars.seed_history()
+            # in the background: seeding 13 markets can take minutes when the
+            # historical API is slow, and the stream must not wait for it
+            threading.Thread(target=live_bars.seed_history, name="marketdata-seed", daemon=True).start()
         while True:
             try:
                 client = db.Live(key=os.getenv("DATABENTO_API_KEY"), reconnect_policy="reconnect")

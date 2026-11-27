@@ -25,8 +25,8 @@ Prices
 
 When it falls back to MT5 (returns None)
     * the symbol is not mapped, or MARKETDATA_SOURCE=mt5;
-    * a live request (count=...) and the streamed minutes are older than
-      LIVE_MAX_AGE_S, or the basis cannot be measured (orders would be placed at
+    * a live request (count=...) and the live file is older than LIVE_MAX_AGE_S
+      or its newest minute older than LIVE_MAX_LAG_S, or the basis cannot be measured (orders would be placed at
       the wrong level);
     * fewer than 80 % of the requested bars exist.
 """
@@ -46,7 +46,8 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 
 TF_MIN = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
-LIVE_MAX_AGE_S = 150
+LIVE_MAX_AGE_S = 150          # the live file must have been rewritten this recently ...
+LIVE_MAX_LAG_S = 600          # ... and hold a minute this recent (quiet FX nights have gaps)
 _warned: dict[str, float] = {}
 
 
@@ -202,9 +203,11 @@ async def _bars(inst: Instrument, symbol: str, tf: str, count, start, end) -> pd
     step = TF_MIN[tf]
     now = datetime.now(timezone.utc)
     if live:
-        if (age := store.live_age(inst.future)) is None or age > LIVE_MAX_AGE_S:
+        age, lag = store.live_age(inst.future), store.live_lag(inst.future)
+        if age is None or age > LIVE_MAX_AGE_S or lag is None or lag > LIVE_MAX_LAG_S:
             _warn(f"stale:{inst.future}", f"[MARKETDATA] {inst.future}: no fresh streamed minutes "
-                                          f"({'none' if age is None else f'{age:.0f}s old'}); {symbol} uses MT5 bars")
+                                          f"(file {'none' if age is None else f'{age:.0f}s old'}, newest minute "
+                                          f"{'none' if lag is None else f'{lag:.0f}s ago'}); {symbol} uses MT5 bars")
             return None
         e = now + timedelta(minutes=1)
         span = timedelta(minutes=int(count) * step * 1.6) + timedelta(days=4)

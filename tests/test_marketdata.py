@@ -206,3 +206,48 @@ def test_second_half_delta_and_prior_day_nodes_follow_the_research():
     assert pd.Timestamp("2026-03-03") in nodes and pd.Timestamp("2026-03-04") in nodes
     assert pd.Timestamp("2026-03-02") not in nodes                 # nothing before the first day
     assert all(any(abs(x - c) <= 0.3 for x in nodes[pd.Timestamp("2026-03-03")]) for c in (100.0, 104.0))
+
+
+def test_a_fresh_live_file_with_old_minutes_is_not_live(tmp_store, monkeypatch):
+    """After a restart the flusher rewrites the live file every few seconds while it
+    still holds only the seed history: that is not a live feed (27 Nov 2026)."""
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None).floor("1min")
+    old = _minutes(start=now - pd.Timedelta(minutes=1440 * 3 + 30), n=1440 * 3)   # ends ~30 min ago
+    store.write_live("GC.v.0", old)
+    assert store.live_age("GC.v.0") < 5
+    assert store.live_lag("GC.v.0") > 1500
+
+    async def some(symbol, tf, count=None, start=None, end=None):
+        f = source.resample(old, tf).reset_index(drop=True).iloc[-count:][["time", "close"]].copy()
+        return f
+    monkeypatch.setattr(source, "_mt5_bars", some)
+    assert _run(source.bars("XAUUSD", "M15", count=100)) is None
+    fresh = _minutes(start=now - pd.Timedelta(minutes=1440 * 3 - 1), n=1440 * 3)
+    store.write_live("GC.v.0", fresh)
+    assert store.live_lag("GC.v.0") < 120
+    assert _run(source.bars("XAUUSD", "M15", count=100)) is not None
+
+
+def test_the_stream_does_not_wait_for_the_seed(monkeypatch):
+    import sys
+    import types
+
+    from backend.marketdata.live import live_bars
+    from backend.orderflow import feed as fm
+    started = []
+    monkeypatch.setattr(live_bars, "seeded", False)
+    monkeypatch.setattr(live_bars, "seed_history", lambda: started.append("seed") or __import__("time").sleep(5))
+
+    class Boom(Exception):
+        pass
+
+    class FakeLive:
+        def __init__(self, *a, **k):
+            started.append("client")
+            raise Boom()
+    monkeypatch.setitem(sys.modules, "databento", types.SimpleNamespace(Live=FakeLive))
+    monkeypatch.setattr(fm.time, "sleep", lambda s: (_ for _ in ()).throw(KeyboardInterrupt()))
+    f = fm.OrderFlowFeed()
+    with pytest.raises(KeyboardInterrupt):
+        f._run()
+    assert "client" in started                    # subscribed at once, the seed runs beside it
