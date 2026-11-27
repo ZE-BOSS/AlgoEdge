@@ -144,6 +144,32 @@ def attach_nodes(bars_df: pd.DataFrame, m: pd.DataFrame) -> pd.DataFrame:
     return bars_df
 
 
+def with_forming_bar(fut: pd.DataFrame, now: datetime, step: int) -> pd.DataFrame:
+    """Live frames end with the bar still forming, as MT5's do - every caller drops
+    the last row as 'forming'. Minute bars only exist once something trades, so in
+    the first seconds of a bar the newest row is the bar that just CLOSED, and
+    dropping it would hide that bar until the first trade of the next one. A flat,
+    empty row for the current bar is added then (only right after the previous
+    bar, never across a gap such as a session break)."""
+    if not len(fut):
+        return fut
+    t = pd.Timestamp(now)
+    t = (t.tz_convert("UTC") if t.tzinfo else t.tz_localize("UTC")).tz_localize(None)
+    cur = t.normalize() if step >= 1440 else t.floor(f"{step}min")
+    last = fut.index[-1]
+    if last >= cur or last != cur - pd.Timedelta(minutes=step):
+        return fut
+    px = float(fut["close"].iloc[-1])
+    row = {k: 0.0 for k in fut.columns}
+    row.update(open=px, high=px, low=px, close=px, vwap=px)
+    row["time"] = int(cur.timestamp())
+    add = pd.DataFrame([row], index=pd.DatetimeIndex([cur]))
+    for k in ("tick_volume", "real_volume", "time"):
+        if k in add.columns:
+            add[k] = add[k].astype("int64")
+    return pd.concat([fut, add[fut.columns]])
+
+
 def basis_series(fut: pd.DataFrame, mt5: pd.DataFrame | None) -> tuple[pd.Series | None, str]:
     """Per bar: broker price - futures price, from matched closes."""
     if mt5 is None or not len(mt5) or not len(fut):
@@ -235,7 +261,10 @@ async def _bars(inst: Instrument, symbol: str, tf: str, count, start, end) -> pd
         return None
     if inst.inverse:
         m = invert(m)
-    fut = attach_nodes(resample(m, tf), m)
+    fut = resample(m, tf)
+    if live:
+        fut = with_forming_bar(fut, now, step)
+    fut = attach_nodes(fut, m)
     if live:
         # the bar still forming is not a closed bar - MT5's last bar is the forming
         # one too, so keep it (callers drop it as they do for MT5)

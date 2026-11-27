@@ -251,3 +251,19 @@ def test_the_stream_does_not_wait_for_the_seed(monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         f._run()
     assert "client" in started                    # subscribed at once, the seed runs beside it
+
+
+def test_live_frames_end_with_the_forming_bar():
+    from backend.marketdata.source import resample, with_forming_bar
+    idx = pd.date_range("2026-03-02 09:00", periods=15, freq="1min")       # 09:00-09:14: bars 09:00, 09:05, 09:10
+    m = pd.DataFrame({"open": 1.0, "high": 1.0, "low": 1.0, "close": np.arange(15.0), "volume": 1.0, "buy": 1.0,
+                      "sell": 0.0, "big_buy": 0.0, "big_sell": 0.0, "pv": 1.0}, index=idx)
+    f = resample(m, "M5")
+    now = datetime(2026, 3, 2, 9, 15, 3, tzinfo=timezone.utc)               # nothing traded in 09:15 yet
+    g = with_forming_bar(f, now, 5)
+    assert len(g) == len(f) + 1 and g.index[-1] == pd.Timestamp("2026-03-02 09:15")
+    assert g["close"].iloc[-1] == 14.0 and g["of_vol"].iloc[-1] == 0 and g["time"].iloc[-1] == int(g.index[-1].timestamp())
+    assert g.iloc[:-1].equals(f)                                             # the closed 09:10 bar survives the drop
+    later = datetime(2026, 3, 2, 9, 31, tzinfo=timezone.utc)                # a gap: no invented bar
+    assert len(with_forming_bar(f, later, 5)) == len(f)
+    assert len(with_forming_bar(f, datetime(2026, 3, 2, 9, 12, tzinfo=timezone.utc), 5)) == len(f)
