@@ -50,6 +50,11 @@ def main() -> int:
         if of is not None:
             of = of.drop_duplicates("time")
             of.index = pd.to_datetime(of["time"], unit="s")
+            if "pv" not in of.columns:
+                # older downloads kept the minute VWAP instead of price x volume
+                vol = of["vol"] if "vol" in of.columns else of["buy"] + of["sell"]
+                px = of["vwap"] if "vwap" in of.columns else m1["close"].reindex(of.index)
+                of["pv"] = px.astype(float) * vol.astype(float)
             df = df.join(of[["buy", "sell", "big_buy", "big_sell", "pv"]], how="left")
             # a day with flow rows: a minute without one had no trades -> 0; a day without
             # any (before the flow download began, or a failed day) stays NaN = "no flow data"
