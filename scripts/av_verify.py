@@ -45,6 +45,7 @@ PRESETS = [  # strategy, market, research (trades, win, PF)
 
 
 def broker_names() -> dict[str, str]:
+    import backend  # noqa: F401  (on Linux this installs the MT5 bridge as MetaTrader5)
     import MetaTrader5 as mt5
     mt5.initialize()
     out = {}
