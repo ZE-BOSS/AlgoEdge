@@ -144,6 +144,24 @@ def attach_nodes(bars_df: pd.DataFrame, m: pd.DataFrame) -> pd.DataFrame:
     return bars_df
 
 
+MIN_COVERAGE = 0.9
+
+
+def coverage(m: pd.DataFrame, start, end) -> float:
+    """Share of the weekdays in [start, end] that have minutes in `m` - a store that
+    only holds the last weeks of a market must not pass for a year of it."""
+    s = pd.Timestamp(start)
+    s = s.tz_convert("UTC").tz_localize(None) if s.tzinfo else s
+    e = pd.Timestamp(end)
+    e = e.tz_convert("UTC").tz_localize(None) if e.tzinfo else e
+    days = pd.date_range(s.normalize(), e.normalize(), freq="D")
+    want = days[days.dayofweek < 5]
+    if not len(want):
+        return 1.0
+    have = set(m.index.normalize())
+    return sum(d in have for d in want) / len(want)
+
+
 def with_forming_bar(fut: pd.DataFrame, now: datetime, step: int) -> pd.DataFrame:
     """Live frames end with the bar still forming, as MT5's do - every caller drops
     the last row as 'forming'. Minute bars only exist once something trades, so in
@@ -259,6 +277,14 @@ async def _bars(inst: Instrument, symbol: str, tf: str, count, start, end) -> pd
             m = await loop.run_in_executor(None, store.read_range, inst.future, s2, e)
     if not len(m):
         return None
+    if not live:
+        cov = coverage(m, pd.Timestamp(start), min(pd.Timestamp(end).tz_localize(None) if pd.Timestamp(end).tzinfo
+                                                   else pd.Timestamp(end), pd.Timestamp(now).tz_localize(None)))
+        if cov < MIN_COVERAGE:
+            _warn(f"cover:{inst.future}", f"[MARKETDATA] {inst.future}: the store holds {cov:.0%} of the weekdays "
+                                          f"asked for{'' if history.key() else ' (no DATABENTO_API_KEY here to fetch the rest)'}; "
+                                          f"{symbol} uses MT5 bars")
+            return None
     if inst.inverse:
         m = invert(m)
     fut = resample(m, tf)

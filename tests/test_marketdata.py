@@ -267,3 +267,15 @@ def test_live_frames_end_with_the_forming_bar():
     later = datetime(2026, 3, 2, 9, 31, tzinfo=timezone.utc)                # a gap: no invented bar
     assert len(with_forming_bar(f, later, 5)) == len(f)
     assert len(with_forming_bar(f, datetime(2026, 3, 2, 9, 12, tzinfo=timezone.utc), 5)) == len(f)
+
+
+def test_a_range_the_store_only_partly_holds_falls_back_to_mt5(tmp_store, monkeypatch):
+    """6A had only its last 30 days in the store: a January-November backtest must
+    not run silently on one month of it."""
+    from backend.marketdata import history
+    monkeypatch.setattr(history, "key", lambda: "")
+    m = _minutes(start=pd.Timestamp("2026-03-02"), n=1440 * 5)               # one week
+    for day, part in m.groupby(m.index.normalize()):
+        store.write_day("6E.v.0", day.date(), part)
+    assert _run(source.bars("EURUSD", "M15", start=datetime(2026, 1, 5), end=datetime(2026, 3, 6))) is None
+    assert source.coverage(m, pd.Timestamp("2026-03-02"), pd.Timestamp("2026-03-06")) == 1.0
