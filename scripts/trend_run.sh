@@ -6,9 +6,10 @@ D=/opt/algoedge/research_data
 PY=/opt/algoedge/demo/venv/bin/python
 SHA=${SHA:-dev}
 cd "$D"
-for f in trend_of.py of_zones.py combo_eval.py combo_summary.py; do
+for f in trend_of.py of_zones.py of_fetch.py bbo_fetch.py combo_eval.py combo_summary.py; do
   curl -fsSL "https://raw.githubusercontent.com/ZE-BOSS/AlgoEdge/$SHA/scripts/$f" -o "$D/$f"
 done
+[ -n "${SKIP_BBO:-}" ] || nice -n 10 $PY bbo_fetch.py --data "$D" --start 2026-01-01 --end 2026-11-26
 F=$(for m in gold nasdaq sp500 silver us30 oil eurusd gbpusd usdjpy; do [ -f "${m}_of.parquet" ] && echo $m; done | paste -sd,)
 S=${STRATS:-tb,rb,rr,ft,ti}
 # two workers: markets split in halves
