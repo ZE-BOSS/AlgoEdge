@@ -39,30 +39,33 @@ HVN_SLOTS = 6
 
 
 def hvn_by_day(bars) -> dict[int, list[float]]:
-    """Previous-UTC-day volume nodes per UTC day (YYYYMMDD), from bar VWAP x volume."""
+    """Fallback without a minute profile: each UTC day's volume nodes from bar VWAP x
+    volume, keyed (YYYYMMDD) by the NEXT calendar day, the day they are traded on."""
     out: dict[int, list[float]] = {}
-    days = np.unique(bars.utc_day)
     vw, vol = bars.ind["vwap"], bars.ind["of_vol"]
     vw = np.where(np.isfinite(vw), vw, (bars.h + bars.l + bars.c) / 3.0)
-    prev = None
-    for d in days:
-        if prev is not None:
-            m = (bars.utc_day == prev) & (vol > 0)
-            if m.sum() >= 12:
-                px, v = vw[m], vol[m]
-                step = max(float(np.median(px)) * 0.0004, 1e-9)
-                prof = pd.Series(v).groupby((pd.Series(px) / step).round() * step).sum().sort_index()
-                sm = prof.rolling(5, center=True, min_periods=1).mean().to_numpy()
-                idx = prof.index.to_numpy()
-                peaks = [float(idx[i]) for i in range(1, len(sm) - 1)
-                         if sm[i] >= sm[i - 1] and sm[i] >= sm[i + 1] and sm[i] >= 0.5 * sm.max()]
-                out[int(d)] = peaks[:HVN_SLOTS]
-        prev = d
+    for d in np.unique(bars.utc_day):
+        m = (bars.utc_day == d) & (vol > 0)
+        if m.sum() < 12:
+            continue
+        px, v = vw[m], vol[m]
+        step = max(float(np.median(px)) * 0.0004, 1e-9)
+        prof = pd.Series(v).groupby((pd.Series(px) / step).round() * step).sum().sort_index()
+        sm = prof.rolling(5, center=True, min_periods=1).mean().to_numpy()
+        idx = prof.index.to_numpy()
+        peaks = [float(idx[i]) for i in range(1, len(sm) - 1)
+                 if sm[i] >= sm[i - 1] and sm[i] >= sm[i + 1] and sm[i] >= 0.5 * sm.max()]
+        nxt = pd.Timestamp(str(int(d))) + pd.Timedelta(days=1)
+        out[int(nxt.strftime("%Y%m%d"))] = peaks[:HVN_SLOTS]
     return out
 
 
 def hvn_arrays(bars) -> dict[str, np.ndarray]:
-    """The nodes as per-bar columns hvn0..hvn5 (NaN = none), so window slices carry them."""
+    """The nodes as per-bar columns hvn0..hvn5 (NaN = none), so window slices carry them.
+    From the minute profile when the frame brought it (Databento: pd_hvn0..5, the
+    research's rule); otherwise from the bars' own VWAP x volume."""
+    if "pd_hvn0" in bars.ind:
+        return {f"hvn{i}": np.asarray(bars.ind[f"pd_hvn{i}"], dtype=float) for i in range(HVN_SLOTS)}
     per_day = hvn_by_day(bars)
     cols = {f"hvn{i}": np.full(len(bars), np.nan) for i in range(HVN_SLOTS)}
     for d, peaks in per_day.items():

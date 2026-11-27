@@ -80,8 +80,9 @@ def resample(m: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     m["delta"] = (m["buy"] - m["sell"]).where(has_flow)
     rule = "1D" if tf == 1440 else f"{tf}min"
     start = m.index.floor(rule) if tf < 1440 else m.index.normalize()
-    pos = (m.index - start) / pd.Timedelta(minutes=1)
-    m["delta_h2"] = m["delta"].where(pos >= tf / 2.0) if tf > 1 else m["delta"]
+    pos = (m.index - start).total_seconds() / 60.0
+    # the second half as the research counts it: minutes n//2 .. n-1 of an n-minute bar
+    m["delta_h2"] = m["delta"].where(pos >= tf // 2) if tf > 1 else m["delta"]
     m["vw_pv"] = m["pv"].where(has_flow, ((m["high"] + m["low"] + m["close"]) / 3.0) * m["volume"])
     g = m.groupby(start)
     out = pd.DataFrame({
@@ -99,6 +100,47 @@ def resample(m: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     out["real_volume"] = out["tick_volume"]
     out["time"] = (out.index.astype("int64") // 1_000_000_000).astype("int64")
     return out
+
+
+HVN_SLOTS = 6
+PRICE_COLS = ("open", "high", "low", "close", "vwap") + tuple(f"pd_hvn{i}" for i in range(HVN_SLOTS))
+
+
+def prior_day_nodes(m: pd.DataFrame) -> dict[pd.Timestamp, list[float]]:
+    """High-volume nodes of each UTC day's minute volume profile, keyed by the NEXT
+    calendar day (the day they are traded on): minute VWAP x volume binned at
+    0.04% of price, smoothed over 5 bins, local peaks at least half the top one,
+    the first six by price. Days with under 60 traded minutes have none."""
+    vol = m["volume"].astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        px = (m["pv"] / vol.replace(0, np.nan)).where(m["pv"].notna(),
+                                                     (m["high"] + m["low"] + m["close"]) / 3.0)
+    ok = (vol > 0) & px.notna()
+    out: dict[pd.Timestamp, list[float]] = {}
+    for day, idx in pd.Series(np.flatnonzero(ok.values)).groupby(m.index[ok.values].normalize()):
+        rows = idx.values
+        if len(rows) < 60:
+            continue
+        p, v = px.values[rows], vol.values[rows]
+        step = max(float(np.median(p)) * 0.0004, 1e-9)
+        prof = pd.Series(v).groupby(np.round(p / step) * step).sum().sort_index()
+        sm = prof.rolling(5, center=True, min_periods=1).mean().to_numpy()
+        peaks = [float(prof.index[i]) for i in range(1, len(sm) - 1)
+                 if sm[i] >= sm[i - 1] and sm[i] >= sm[i + 1] and sm[i] >= 0.5 * sm.max()]
+        out[pd.Timestamp(day) + pd.Timedelta(days=1)] = peaks[:HVN_SLOTS]
+    return out
+
+
+def attach_nodes(bars_df: pd.DataFrame, m: pd.DataFrame) -> pd.DataFrame:
+    """Columns pd_hvn0..5 on timeframe bars: the nodes of the previous UTC day (NaN = none)."""
+    nodes = prior_day_nodes(m)
+    cols = [f"pd_hvn{i}" for i in range(HVN_SLOTS)]
+    table = pd.DataFrame([(v + [np.nan] * HVN_SLOTS)[:HVN_SLOTS] for v in nodes.values()],
+                         index=pd.DatetimeIndex(list(nodes.keys())), columns=cols, dtype=float)
+    per_bar = table.reindex(bars_df.index.normalize())
+    for k in cols:
+        bars_df[k] = per_bar[k].to_numpy() if len(table) else np.nan
+    return bars_df
 
 
 def basis_series(fut: pd.DataFrame, mt5: pd.DataFrame | None) -> tuple[pd.Series | None, str]:
@@ -135,8 +177,9 @@ async def _mt5_bars(symbol: str, timeframe: str, count=None, start=None, end=Non
 
 def _apply_basis(df: pd.DataFrame, b: pd.Series) -> pd.DataFrame:
     out = df.copy()
-    for k in ("open", "high", "low", "close", "vwap"):
-        out[k] = out[k] + b.values
+    for k in PRICE_COLS:
+        if k in out.columns:
+            out[k] = out[k] + b.values
     return out
 
 
@@ -173,6 +216,7 @@ async def _bars(inst: Instrument, symbol: str, tf: str, count, start, end) -> pd
         if e.tzinfo is None:
             e = e.replace(tzinfo=timezone.utc)
         e = e + timedelta(minutes=step)               # the last requested bar's minutes
+    s = s - timedelta(days=1)                         # the prior day's minutes: volume nodes
     loop = asyncio.get_running_loop()
     if history.key():
         await loop.run_in_executor(None, history.ensure_ohlcv, inst, s, e)
@@ -188,7 +232,7 @@ async def _bars(inst: Instrument, symbol: str, tf: str, count, start, end) -> pd
         return None
     if inst.inverse:
         m = invert(m)
-    fut = resample(m, tf)
+    fut = attach_nodes(resample(m, tf), m)
     if live:
         # the bar still forming is not a closed bar - MT5's last bar is the forming
         # one too, so keep it (callers drop it as they do for MT5)
@@ -219,7 +263,7 @@ async def _bars(inst: Instrument, symbol: str, tf: str, count, start, end) -> pd
     else:
         out["spread"] = 0
     cols = ["time", "open", "high", "low", "close", "tick_volume", "spread", "real_volume",
-            "of_vol", "delta", "delta_h2", "big_buy", "big_sell", "vwap"]
+            "of_vol", "delta", "delta_h2", "big_buy", "big_sell", "vwap"] + [f"pd_hvn{i}" for i in range(HVN_SLOTS)]
     out = out[cols]
     out.attrs.update(source="databento", future=inst.future, basis=float(b.iloc[-1]), basis_from=how)
     return out

@@ -63,7 +63,7 @@ def test_resample_flow_columns():
     assert b["open"].iloc[0] == first["open"].iloc[0] and b["close"].iloc[0] == first["close"].iloc[-1]
     assert b["high"].iloc[0] == first["high"].max() and b["low"].iloc[0] == first["low"].min()
     assert b["delta"].iloc[0] == pytest.approx((first["buy"] - first["sell"]).sum())
-    h2 = first.iloc[8:]                                   # minutes 7.5+ of a 15-minute bar
+    h2 = first.iloc[7:]                                   # minutes 7..14: the research's len // 2
     assert b["delta_h2"].iloc[0] == pytest.approx((h2["buy"] - h2["sell"]).sum())
     assert b["vwap"].iloc[0] == pytest.approx(first["pv"].sum() / first["volume"].sum())
     assert b["time"].iloc[1] - b["time"].iloc[0] == 900
@@ -187,3 +187,22 @@ def test_datafetcher_uses_databento_first(tmp_store, monkeypatch):
     assert list(got["close"]) == [1.0, 2.0]
     got = _run(dfm.DataFetcher.get_data_range("XAUUSD", "M15", datetime(2026, 1, 1), datetime(2026, 1, 2)))
     assert len(got) == 2
+
+
+def test_second_half_delta_and_prior_day_nodes_follow_the_research():
+    from backend.marketdata.source import prior_day_nodes, resample
+    idx = pd.date_range("2026-03-02", periods=2 * 1440, freq="1min")
+    n = len(idx)
+    k = np.arange(n)
+    # two price clusters a day (100 and 104), each spread over a few bins
+    px = np.where(k % 1440 < 720, 100.0, 104.0) + 0.2 * np.sin(k / 7.0)
+    m = pd.DataFrame({"open": px, "high": px + 0.01, "low": px - 0.01, "close": px, "volume": 10.0,
+                      "buy": np.arange(n) % 15 * 1.0, "sell": 0.0, "big_buy": 0.0, "big_sell": 0.0,
+                      "pv": px * 10.0}, index=idx)
+    b = resample(m, "M15")
+    # minutes 7..14 of each 15-minute bar: 7+8+...+14 = 84
+    assert b["delta_h2"].iloc[0] == 84.0
+    nodes = prior_day_nodes(m)
+    assert pd.Timestamp("2026-03-03") in nodes and pd.Timestamp("2026-03-04") in nodes
+    assert pd.Timestamp("2026-03-02") not in nodes                 # nothing before the first day
+    assert all(any(abs(x - c) <= 0.3 for x in nodes[pd.Timestamp("2026-03-03")]) for c in (100.0, 104.0))

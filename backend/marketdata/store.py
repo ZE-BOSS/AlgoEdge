@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+_ONE_DAY = timedelta(days=1)
 COLS = ["open", "high", "low", "close", "volume", "buy", "sell", "big_buy", "big_sell", "pv"]
 FLOW = ["buy", "sell", "big_buy", "big_sell", "pv"]
 
@@ -156,7 +157,7 @@ def read_range(future: str, start: datetime, end: datetime, live: bool = True) -
         df = read_day(future, d.date())
         if len(df):
             parts.append(df)
-        d += pd.Timedelta(days=1)
+        d = d + _ONE_DAY
     days = pd.concat(parts) if parts else empty()
     lv = read_live(future) if live else empty()
     if not len(lv):

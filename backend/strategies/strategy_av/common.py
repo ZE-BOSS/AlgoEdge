@@ -28,6 +28,11 @@ def attach_flow(bars: Bars, candles: pd.DataFrame) -> None:
             bars.ind[k] = candles[k].to_numpy(dtype=float)
         else:
             bars.ind[k] = np.full(n, np.nan)
+    # the prior UTC day's volume nodes from the minute profile (marketdata/source.py);
+    # absent on MT5 bars, where the zone engine builds them from its own bars
+    if all(f"pd_hvn{i}" in candles.columns for i in range(6)) and len(candles) == n:
+        for i in range(6):
+            bars.ind[f"pd_hvn{i}"] = candles[f"pd_hvn{i}"].to_numpy(dtype=float)
     if not np.isfinite(bars.ind["of_vol"]).any():
         bars.ind["of_vol"] = np.asarray(bars.v, dtype=float)       # tick volume: the profile still works
 
@@ -158,6 +163,21 @@ class AVReplayBase(ReplayStrategy):
         bars.ind["vol_avg"] = pd.Series(vol).rolling(50).mean().to_numpy()
         big = bars.ind["big_buy"] + bars.ind["big_sell"]
         bars.ind["big_avg"] = pd.Series(big).rolling(50, min_periods=50).mean().to_numpy()
+
+    def on_sim_fill(self, ctx: Ctx) -> None:
+        """The app sets the target at metadata.rl_rr x the risk FROM ITS FILL
+        (risk/multi_tp.py), not from the signal bar's close: the simulation does
+        the same, so its 'flat or not' matches the account's."""
+        k = ctx.k
+        if k < 1:
+            return
+        o = ctx.orders.get(int(ctx.bars.t[k - 1])) or {}
+        rr = (o.get("meta") or {}).get("rl_rr")
+        p = ctx.pos
+        if rr and p.sl:
+            risk = (p.entry - p.sl) * p.side
+            if risk > 0:
+                p.tp = p.entry + p.side * float(rr) * risk
 
     def _time_stop(self, k: int, bars: Bars, ctx: Ctx) -> None:
         if ctx.position() and bars.t[k] - ctx.pos.entry_t >= self.params.max_hold_hours * 3600:
