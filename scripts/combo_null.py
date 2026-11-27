@@ -30,15 +30,17 @@ def main() -> int:
     ap.add_argument("files", nargs="+")
     ap.add_argument("--runs", type=int, default=3)
     ap.add_argument("--min-n", type=int, default=30)
+    ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--null-only", action="store_true", help="skip the real run (already known)")
     a = ap.parse_args()
     out = []
     for f in a.files:
-        real = ce.run_file(Path(f), a.min_n)
+        real = {"robust": []} if a.null_only else ce.run_file(Path(f), a.min_n)
         top = real["robust"][0] if real["robust"] else None
         line = {"file": Path(f).name, "real": top and top["score"], "real_pf": top and top["full"]["pf"], "null": []}
         d = pd.read_parquet(f)
         feat = [c for c in d.columns if not c.startswith(("r_", "x_")) and c not in KEEP]
-        rng = np.random.default_rng(7)
+        rng = np.random.default_rng(a.seed)
         for _ in range(a.runs):
             p = d.copy()
             perm = rng.permutation(len(p))
