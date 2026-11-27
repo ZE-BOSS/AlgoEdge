@@ -1,12 +1,16 @@
 """
 backend/orderflow/feed.py
 
-Streams CME gold and Nasdaq futures trades from Databento (GLBX.MDP3, trades
-schema) into one SessionProfile per market, replaying the session so far on
-start (the live API replays up to 24 hours). Every 15 seconds it writes a
-snapshot - the levels in futures prices and translated to the broker's CFD
-prices with the live basis - to the shared folder, where the admin API and
-Elite clients' portal read it.
+Streams CME futures trades from Databento (GLBX.MDP3, trades schema), replaying
+the session so far on start (the live API replays up to 24 hours):
+
+  * the ORDERFLOW_MAP markets into one SessionProfile each; every 15 seconds a
+    snapshot - the levels in futures prices and translated to the broker's CFD
+    prices with the live basis - goes to the shared folder, where the admin API
+    and Elite clients' portal read it;
+  * every market in marketdata/instruments.py into 1-minute bars with aggressor
+    flow (marketdata/live.py), published to the shared market-data store that
+    all instances' candles come from.
 
 Runs only where ORDERFLOW=1 and DATABENTO_API_KEY are set (the live instance).
 
@@ -25,6 +29,7 @@ import threading
 import time
 from pathlib import Path
 
+from backend.marketdata.live import live_bars
 from backend.orderflow.profile import SessionProfile, session_start_utc, to_cfd
 from backend.utils.logger import get_logger
 
@@ -82,17 +87,24 @@ class OrderFlowFeed:
         return os.getenv("ORDERFLOW", "0") == "1" and bool(os.getenv("DATABENTO_API_KEY", "").strip())
 
     # -- stream (a thread: the databento client blocks) ------------------------
+    def symbols(self) -> list[str]:
+        return sorted(set(self.profiles) | set(live_bars.futures()))
+
     def _run(self) -> None:
         import databento as db
         backoff = 5
+        if not live_bars.seeded:
+            live_bars.seed_history()
         while True:
             try:
                 client = db.Live(key=os.getenv("DATABENTO_API_KEY"), reconnect_policy="reconnect")
+                start = session_start_utc()
                 client.subscribe(dataset="GLBX.MDP3", schema="trades", stype_in="continuous",
-                                 symbols=list(self.profiles), start=session_start_utc())
+                                 symbols=self.symbols(), start=start)
                 self.fresh_profiles()                # the replay rebuilds the session: never count it twice
+                live_bars.replay_from(start)
                 self.connected, self.error, backoff = True, "", 5
-                logger.info(f"[ORDERFLOW] streaming {', '.join(self.profiles)} (session replay from the open)")
+                logger.info(f"[ORDERFLOW] streaming {', '.join(self.symbols())} (session replay from the open)")
                 for rec in client:                   # iterating starts the stream (no client.start())
                     self.on_record(rec, db)
                 self.connected = False
@@ -106,19 +118,22 @@ class OrderFlowFeed:
     def on_record(self, rec, db) -> None:
         if isinstance(rec, db.SymbolMappingMsg):
             sym = getattr(rec, "stype_in_symbol", "") or ""
-            if sym in self.profiles:
+            if sym in self.profiles or sym in live_bars.books:
                 self.ids[rec.instrument_id] = sym
             return
         if not isinstance(rec, db.TradeMsg):
             return
         sym = self.ids.get(rec.instrument_id)
-        if sym is None and len(self.profiles) == 1:
-            sym = next(iter(self.profiles))
+        if sym is None and len(self.profiles) == 1 and not self.ids:
+            sym = next(iter(self.profiles))          # one market and no mapping seen yet
         if sym is None:
             return
         side = str(getattr(rec.side, "value", rec.side) or "N")
-        with self.lock:
-            self.profiles[sym].add(rec.price / 1e9, float(rec.size), side, int(rec.ts_event))
+        px, size, ts = rec.price / 1e9, float(rec.size), int(rec.ts_event)
+        if sym in self.profiles:
+            with self.lock:
+                self.profiles[sym].add(px, size, side, ts)
+        live_bars.add(sym, px, size, side, ts)
 
     # -- snapshots --------------------------------------------------------------
     def snapshot(self, cfd_price=None) -> dict:
@@ -152,6 +167,7 @@ class OrderFlowFeed:
             return
         self.thread = threading.Thread(target=self._run, name="orderflow", daemon=True)
         self.thread.start()
+        threading.Thread(target=live_bars.run_flusher, name="marketdata-live", daemon=True).start()
         self.task = asyncio.create_task(self._writer())
 
 

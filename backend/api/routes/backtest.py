@@ -430,6 +430,11 @@ STRATEGY_PARAM_SECTION: dict[str, str] = {
     "RQ_SRSweep_v1": "rq_sr_sweep",
     "ZeroLossBoomCrash_v32": "zero_loss_boom_crash",
 }
+# AlphaVantiq research presets (strategies/strategy_av, 27 Nov 2026)
+from backend.strategies.strategy_av.level_pa import LEVEL_PRESETS as _AV_LEVEL  # noqa: E402
+from backend.strategies.strategy_av.zone_flow import ZONE_PRESETS as _AV_ZONE  # noqa: E402
+
+STRATEGY_PARAM_SECTION.update({sid: v[0] for sid, v in {**_AV_ZONE, **_AV_LEVEL}.items()})
 
 
 async def load_saved_strategy_blocks(user_id: str) -> dict:

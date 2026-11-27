@@ -20,9 +20,29 @@ from backend.strategies.strategy_roboquant.params import (
     RQNQPrecisionParams, RQNYORBParams, RQCrazyORBParams, RQTMeanReversionParams, RQCharlesMongerParams,
     RQFlashTriggerORBParams, RQScarfaceORBParams, RQIVBParams, RQGigaORBParams, RQSigmaBreakoutParams, QLIBSParams, QLDipBuyParams, RQDailyAnchoredVWAPParams, RQFridayRevisitParams, RQM30ORBParams, RQSRSweepParams,
 )
+from backend.strategies.strategy_av import params as _av
 from backend.strategies.strategy_trend.params import TrendBreakoutParams
 from backend.strategies.strategy_fib.params import FibTrendParams
 from backend.strategies.strategy_vwap.params import VWAPParams
+
+# AlphaVantiq research presets (strategies/strategy_av, 27 Nov 2026): config attribute -> params class
+AV_SECTIONS = {
+    "av_golden_engulf_flip": _av.AVGoldenEngulfFlipParams,
+    "av_golden_twin_absorb": _av.AVGoldenTwinAbsorbParams,
+    "av_nasdaq_rejection_flip": _av.AVNasdaqRejectionFlipParams,
+    "av_sp_fresh_doji": _av.AVSPFreshDojiParams,
+    "av_sp_twin_rejection": _av.AVSPTwinRejectionParams,
+    "av_silver_absorb_flip": _av.AVSilverAbsorbFlipParams,
+    "av_dow_big_trade_pin": _av.AVDowBigTradePinParams,
+    "av_dow_absorption_zone": _av.AVDowAbsorptionZoneParams,
+    "av_nasdaq_prev_day_doji": _av.AVNasdaqPrevDayDojiParams,
+    "av_dow_doji_retest": _av.AVDowDojiRetestParams,
+    "av_oil_trend_engulf": _av.AVOilTrendEngulfParams,
+    "av_oil_retest_doji": _av.AVOilRetestDojiParams,
+    "av_nikkei_trend_engulf": _av.AVNikkeiTrendEngulfParams,
+    "av_dax_retest_rejection": _av.AVDAXRetestRejectionParams,
+    "av_cable_liquidity_sweep": _av.AVCableLiquiditySweepParams,
+}
 # ─────────────────────────────────────────────────────────────────────────────
 # RISK MANAGEMENT PARAMETERS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1300,6 +1320,21 @@ class UserConfigV2(UserConfig):
     rq_m30_orb: RQM30ORBParams = field(default_factory=RQM30ORBParams)
     rq_sr_sweep: RQSRSweepParams = field(default_factory=RQSRSweepParams)
     zero_loss_boom_crash: ZeroLossBoomCrashParams = field(default_factory=ZeroLossBoomCrashParams)
+    av_golden_engulf_flip: _av.AVGoldenEngulfFlipParams = field(default_factory=_av.AVGoldenEngulfFlipParams)
+    av_golden_twin_absorb: _av.AVGoldenTwinAbsorbParams = field(default_factory=_av.AVGoldenTwinAbsorbParams)
+    av_nasdaq_rejection_flip: _av.AVNasdaqRejectionFlipParams = field(default_factory=_av.AVNasdaqRejectionFlipParams)
+    av_sp_fresh_doji: _av.AVSPFreshDojiParams = field(default_factory=_av.AVSPFreshDojiParams)
+    av_sp_twin_rejection: _av.AVSPTwinRejectionParams = field(default_factory=_av.AVSPTwinRejectionParams)
+    av_silver_absorb_flip: _av.AVSilverAbsorbFlipParams = field(default_factory=_av.AVSilverAbsorbFlipParams)
+    av_dow_big_trade_pin: _av.AVDowBigTradePinParams = field(default_factory=_av.AVDowBigTradePinParams)
+    av_dow_absorption_zone: _av.AVDowAbsorptionZoneParams = field(default_factory=_av.AVDowAbsorptionZoneParams)
+    av_nasdaq_prev_day_doji: _av.AVNasdaqPrevDayDojiParams = field(default_factory=_av.AVNasdaqPrevDayDojiParams)
+    av_dow_doji_retest: _av.AVDowDojiRetestParams = field(default_factory=_av.AVDowDojiRetestParams)
+    av_oil_trend_engulf: _av.AVOilTrendEngulfParams = field(default_factory=_av.AVOilTrendEngulfParams)
+    av_oil_retest_doji: _av.AVOilRetestDojiParams = field(default_factory=_av.AVOilRetestDojiParams)
+    av_nikkei_trend_engulf: _av.AVNikkeiTrendEngulfParams = field(default_factory=_av.AVNikkeiTrendEngulfParams)
+    av_dax_retest_rejection: _av.AVDAXRetestRejectionParams = field(default_factory=_av.AVDAXRetestRejectionParams)
+    av_cable_liquidity_sweep: _av.AVCableLiquiditySweepParams = field(default_factory=_av.AVCableLiquiditySweepParams)
     spike_resumption: SpikeResumptionParams = field(default_factory=SpikeResumptionParams)
     synth: SynthParams = field(default_factory=SynthParams)
     prop_firm: PropFirmParams = field(default_factory=PropFirmParams)
@@ -1332,6 +1367,7 @@ class UserConfigV2(UserConfig):
         rq_m30_orb_data = data.pop("rq_m30_orb", {})
         rq_sr_sweep_data = data.pop("rq_sr_sweep", {})
         zero_loss_boom_crash_data = data.pop("zero_loss_boom_crash", {})
+        av_data = {k: data.pop(k, None) or {} for k in AV_SECTIONS}
         trend_breakout_data = data.pop("trend_breakout", {})
         fib_trend_data = data.pop("fib_trend", {})
         spike_resumption_data = data.pop("spike_resumption", {})
@@ -1380,6 +1416,8 @@ class UserConfigV2(UserConfig):
         config.spike_resumption = SpikeResumptionParams(**filter_kwargs(SpikeResumptionParams, spike_resumption_data))
         config.synth = SynthParams(**filter_kwargs(SynthParams, synth_data))
         config.prop_firm = PropFirmParams(**filter_kwargs(PropFirmParams, prop_firm_data))
+        for k, pcls in AV_SECTIONS.items():
+            setattr(config, k, pcls(**filter_kwargs(pcls, av_data[k] if isinstance(av_data[k], dict) else {})))
         
 
         if instrument_data:
@@ -1477,6 +1515,9 @@ class UserConfigV2(UserConfig):
             self.rq_friday_revisit = RQFridayRevisitParams()
         if self.rq_m30_orb is None:
             self.rq_m30_orb = RQM30ORBParams()
+        for k, pcls in AV_SECTIONS.items():
+            if getattr(self, k, None) is None:
+                setattr(self, k, pcls())
         if self.rq_sr_sweep is None:
             self.rq_sr_sweep = RQSRSweepParams()
         if self.spike_resumption is None:

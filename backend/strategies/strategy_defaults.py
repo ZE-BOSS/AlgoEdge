@@ -381,6 +381,43 @@ STRATEGY_DEFAULTS: dict[str, dict[str, Any]] = {
     },
 }
 
+
+# ── AlphaVantiq research presets (strategies/strategy_av, 27 Nov 2026) ──────
+# Each signal carries its own target as metadata.rl_rr (an R multiple, or the
+# distance to the next zone/level), which the risk engine places as one TP; the
+# tp1_rr here is only the fallback. The research measured plain stop/target
+# exits, so no break-even and no trailing. min_rr 0.8: a zone/level target is
+# used only when it is at least 0.8R away (the research's rule).
+def _av_defaults() -> dict[str, dict[str, Any]]:
+    from backend.strategies.strategy_av import params as P
+    evidence = {
+        "AV_GoldenEngulfFlip_v1": (P.AVGoldenEngulfFlipParams, "gold M15 futures Jan-Nov 2026: 66 trades, 44% win, PF 2.28, DD 5.1R"),
+        "AV_GoldenTwinAbsorb_v1": (P.AVGoldenTwinAbsorbParams, "gold M5 futures: 132 trades, 63% win, PF 1.56, DD 5.9R"),
+        "AV_NasdaqRejectionFlip_v1": (P.AVNasdaqRejectionFlipParams, "Nasdaq M5 futures: 87 trades, 49% win, PF 2.03, DD 8.2R"),
+        "AV_SPFreshDoji_v1": (P.AVSPFreshDojiParams, "S&P M15 futures: 66 trades, 55% win, PF 1.64, DD 5.2R"),
+        "AV_SPTwinRejection_v1": (P.AVSPTwinRejectionParams, "S&P M15 futures: 85 trades, 49% win, PF 1.59, DD 6.2R"),
+        "AV_SilverAbsorbFlip_v1": (P.AVSilverAbsorbFlipParams, "silver M5 futures: 72 trades, 54% win, PF 1.89, DD 5.8R"),
+        "AV_DowBigTradePin_v1": (P.AVDowBigTradePinParams, "US30 M5 futures: 85 trades, 39% win, PF 1.74, DD 11.5R"),
+        "AV_DowAbsorptionZone_v1": (P.AVDowAbsorptionZoneParams, "US30 M15 futures: 92 trades, 53% win, PF 1.52, DD 5.2R"),
+        "AV_NasdaqPrevDayDoji_v1": (P.AVNasdaqPrevDayDojiParams, "Nasdaq M15 Deriv: 111 trades, 61% win, PF 1.45, DD 4.4R"),
+        "AV_DowDojiRetest_v1": (P.AVDowDojiRetestParams, "US30 M5 Deriv: 107 trades, 36% win, PF 1.51, DD 16.3R"),
+        "AV_OilTrendEngulf_v1": (P.AVOilTrendEngulfParams, "US oil M5 Deriv: 84 trades, 55% win, PF 1.87, DD 4.6R"),
+        "AV_OilRetestDoji_v1": (P.AVOilRetestDojiParams, "US oil M15 futures: 104 trades, 40% win, PF 1.62, DD 11.2R"),
+        "AV_NikkeiTrendEngulf_v1": (P.AVNikkeiTrendEngulfParams, "Japan 225 M15 Deriv: 60 trades, 63% win, PF 1.54, DD 3.3R"),
+        "AV_DAXRetestRejection_v1": (P.AVDAXRetestRejectionParams, "Germany 40 M15 Deriv: 128 trades, 37% win, PF 1.38, DD 10.5R"),
+        "AV_CableLiquiditySweep_v1": (P.AVCableLiquiditySweepParams, "GBP/USD M15 futures costs: 82 trades, 52% win, PF 1.67, DD 7.2R"),
+    }
+    r_of = {"r1": 1.0, "r1_5": 1.5, "r2": 2.0, "r3": 3.0}
+    out = {}
+    for sid, (pcls, ev) in evidence.items():
+        out[sid] = {"tp_count": 1, "tp1_rr": r_of.get(pcls().target, 2.0), "min_rr": 0.8,
+                    "be_mode": "NONE", "trail_method_tp1": "NONE", "trail_mode": "NONE",
+                    "evidence": f"AlphaVantiq research 27 Nov 2026 ({ev}); one target per signal (metadata.rl_rr)."}
+    return out
+
+
+STRATEGY_DEFAULTS.update(_av_defaults())
+
 SLOT_TP1_RR: dict[str, float] = {
     # DriftJumpAlpha — the only strategy profitable in aggregate
     "CRASH 1000 INDEX|DriftJumpAlpha_v1": 5.0,   # +$80,262  n=514  DD 37.0%

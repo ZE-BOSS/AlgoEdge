@@ -454,19 +454,32 @@ class DataFetcher:
         cls,
         symbol: str, 
         timeframe: str, 
-        count: int = 1000
+        count: int = 1000,
+        _mt5_only: bool = False,
     ) -> pd.DataFrame:
         """
         Fetch OHLCV data for given symbol and timeframe.
         Returns a normalized DataFrame or raises DataFetchError on failure.
+
+        Symbols with a CME future behind them (backend/marketdata) come from
+        Databento, translated to the broker's prices; MT5 is the fallback, and
+        the only source with _mt5_only=True (the basis measurement itself).
         """
         logger.debug(f"Fetching {count} candles for {symbol} on {timeframe}")
         
-        cache_key = f"{symbol}_{timeframe}_{count}"
+        cache_key = f"{symbol}_{timeframe}_{count}_{'mt5' if _mt5_only else 'auto'}"
         now = time.time()
         if cache_key in cls._cache and now - cls._cache_time.get(cache_key, 0) < cls.CACHE_DURATION:
             logger.debug(f"Returning cached data for {symbol} on {timeframe}")
             return cls._cache[cache_key].copy()
+
+        if not _mt5_only:
+            from backend.marketdata import source as _md
+            df = await _md.bars(symbol, timeframe, count=count)
+            if df is not None:
+                cls._cache[cache_key] = df
+                cls._cache_time[cache_key] = time.time()
+                return df.copy()
 
         if not mt5:
             error_msg = "MT5 terminal is not available on this system. Cannot fetch live/historical data."
@@ -520,13 +533,22 @@ class DataFetcher:
         symbol: str, 
         timeframe: str, 
         start: datetime, 
-        end: datetime
+        end: datetime,
+        _mt5_only: bool = False,
     ) -> pd.DataFrame:
         """
         Fetch OHLCV data for a specific date range (for backtesting).
         Returns a normalized DataFrame or raises DataFetchError on failure.
+        Databento first for mapped symbols (see get_historical_data).
         """
         logger.info(f"Fetching data range for {symbol} {timeframe}: {start} → {end}")
+        if not _mt5_only:
+            from backend.marketdata import source as _md
+            df = await _md.bars(symbol, timeframe, start=start, end=end)
+            if df is not None:
+                logger.info(f"Fetched {len(df)} {timeframe} candles for {symbol} from Databento "
+                            f"({df.attrs.get('future')}, basis {df.attrs.get('basis_from')})")
+                return df
         
         if not mt5:
             error_msg = "MT5 terminal is not available on this system. Cannot fetch live/historical data."

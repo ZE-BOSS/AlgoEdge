@@ -310,9 +310,7 @@ class ReplayStrategy(_RQBase):
         frame = (frames_by_tf or {}).get(self.params.timeframe)
         if frame is None or len(frame) < 60:
             return
-        bars = Bars.of(frame, self.TEMPLATE_MINUTES)
-        self.prepare(bars)
-        self._full[str(symbol)] = bars
+        self._full[str(symbol)] = self._make_bars(frame)
 
     def _window(self, symbol: str, candles: pd.DataFrame) -> Bars:
         full = self._full.get(str(symbol))
@@ -328,6 +326,11 @@ class ReplayStrategy(_RQBase):
                 b = int(np.searchsorted(full.t, t[-1], side="right"))
             if 0 <= a < b <= len(full.t) and (self.TEMPLATE_MINUTES > 1 or full.t[b - 1] == t[-1]):
                 return full.slice(a, b)
+        return self._make_bars(candles)
+
+    def _make_bars(self, candles: pd.DataFrame) -> Bars:
+        """Bars for the template, indicators prepared. Subclasses that need more
+        columns of the frame than OHLCV (order flow) attach them here."""
         bars = Bars.of(candles, self.TEMPLATE_MINUTES)
         self.prepare(bars)
         return bars

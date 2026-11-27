@@ -182,6 +182,8 @@ def build_full_schema() -> list[dict]:
         (SpikeResumptionParams, "spike_resumption"),
         (DriftJumpAlphaParams, "drift_jump_alpha"),
     ]
+    from backend.core.config_schema import AV_SECTIONS
+    groups += [(pcls, attr) for attr, pcls in AV_SECTIONS.items()]
     from backend.core.config_schema import SynthParams
     from backend.core.config_schema import BoomDriftJumpParams
 

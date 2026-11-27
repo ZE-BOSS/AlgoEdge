@@ -34,6 +34,8 @@ def _load_strategies():
         import backend.strategies.strategy_roboquant.engine_more  # noqa: F401  (nine more, 2026-10-20)
         import backend.strategies.strategy_roboquant.engine_quant  # noqa: F401  (quant lab, 2026-11-21)
         import backend.strategies.strategy_zero_loss.engine  # noqa: F401  (Zero Loss Boom & Crash v3.2, TradingView mirror)
+        import backend.strategies.strategy_av.zone_flow  # noqa: F401  (order-flow zone presets, 2026-11-27)
+        import backend.strategies.strategy_av.level_pa  # noqa: F401  (price-action level presets, 2026-11-27)
         _LOADED = True
 
 def register_strategy(name: str):
