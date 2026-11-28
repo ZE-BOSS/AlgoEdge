@@ -17,6 +17,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from backend.strategies.core.trail import to_epoch
 from backend.strategies.registry import register_strategy
 from backend.strategies.strategy_roboquant import common as c
 from backend.strategies.strategy_roboquant.engine import _RQBase
@@ -287,8 +288,7 @@ class QLDipBuy(_RQBase):
         entry = position.get("entry_time")
         if entry is None:
             return None
-        try:
-            ts = int(entry) if isinstance(entry, (int, float)) else int(pd.Timestamp(entry).timestamp())
-        except Exception:                               # noqa: BLE001
+        ts = to_epoch(entry)              # np.int64 from the portfolio backtester too
+        if ts is None:
             return None
         return int(c.et_parts(np.array([ts]))[0][0])

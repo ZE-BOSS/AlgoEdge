@@ -962,3 +962,58 @@ def test_a_run_inherits_the_saved_fill_model():
     src = inspect.getsource(bt)
     assert src.count("apply_saved_sim_settings(merged_risk_config,") == 2, \
         "the single run and the portfolio run must both inherit it"
+
+
+def _m1_bars(n=4500, seed=21, start=1.3000, scale=0.00008):
+    rng = np.random.default_rng(seed)
+    close = start + np.cumsum(rng.normal(0, scale, n))
+    open_ = np.r_[start, close[:-1]]
+    wick = np.abs(rng.normal(0, scale * 0.6, n))
+    t = T0 + 60 * np.arange(n)
+    return pd.DataFrame({"time": t, "open": open_, "high": np.maximum(open_, close) + wick,
+                         "low": np.minimum(open_, close) - wick, "close": close,
+                         "spread": np.zeros(n), "tick_volume": np.full(n, 100.0)})
+
+
+def test_a_slot_trades_the_same_beside_a_faster_timeframe_leg():
+    """28 Nov 2026: in a basket with a 1-minute leg, an M5/M15 leg's signals filled
+    on the M1 leg's next minute - before their own bar had closed - at the signal's
+    reference price. A leg must fill on its OWN next bar, as it does alone."""
+    a = _bars(seed=5)
+    sa = _signals(a, "EURUSD", "A_v1")
+    alone = _single(a, sa, BASE)
+    assert len(alone) >= 6
+    m1 = _m1_bars()
+    sm1 = _signals(m1, "GBPUSD", "B_v1", every=200)
+    res = _portfolio({"EURUSD|A_v1": a, "GBPUSD|B_v1": m1}, {"EURUSD|A_v1": sa, "GBPUSD|B_v1": sm1},
+                     {"EURUSD|A_v1": dict(BASE), "GBPUSD|B_v1": dict(BASE)})
+    assert _fingerprint(res["trades"], "EURUSD") == _fingerprint(alone)
+    # every EURUSD fill sits on an M5 bar open
+    assert all(int(t["entry_time"]) % 300 == 0 for t in res["trades"] if t["symbol"] == "EURUSD")
+
+
+def test_strategy_time_exits_read_numpy_entry_times_as_seconds():
+    """The portfolio backtester hands positions np.int64 entry times. Read through
+    pd.Timestamp they are NANOseconds - 1970 - and every time-stop strategy (AV,
+    RoboQuant, Kronos, RL) closed its positions on their first bar in a basket."""
+    from backend.core.config_schema import UserConfigV2
+    from backend.strategies.core.trail import to_epoch
+    from backend.strategies.registry import get_strategy
+    ts = 1_767_600_000
+    for v in (ts, np.int64(ts), np.float64(ts), ts * 1000, np.int64(ts) * 1_000_000_000, str(ts),
+              pd.Timestamp(ts, unit="s"), np.datetime64(ts, "s"), pd.Timestamp(ts, unit="s").isoformat()):
+        assert to_epoch(v) == ts, (type(v), v)
+    eng = get_strategy("AV_GoldenEngulfFlip_v1")(UserConfigV2())
+
+    class _B:
+        t = np.array([ts + 900, ts + 1800])
+    assert eng.forced_close(_B, 1, {"entry_time": np.int64(ts)}) is None
+    _B.t = np.array([ts + 25 * 3600])
+    assert eng.forced_close(_B, 0, {"entry_time": np.int64(ts)}) == "AV_TIME_STOP"
+
+
+def test_the_portfolio_route_stamps_the_bar_that_produced_the_signal():
+    from pathlib import Path
+    src = Path("backend/api/routes/backtest.py").read_text()
+    port = src[src.index("async def run_portfolio_backtest_endpoint"):]
+    assert "sig_time = int(_rep_t[i - 1])" in port

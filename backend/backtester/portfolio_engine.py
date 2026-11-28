@@ -439,6 +439,7 @@ class PortfolioBacktestEngine(CostModelMixin):
         
         all_signals.sort(key=lambda x: float(x.get("time", float("inf"))))
         signal_idx = 0
+        _deferred_sigs: list = []
         
         breach_days = set()
         
@@ -867,12 +868,26 @@ class PortfolioBacktestEngine(CostModelMixin):
                     self.open_positions.remove(p)
 
             # 3. Process new signals
-            while signal_idx < len(all_signals):
-                sig = all_signals[signal_idx]
-                sig_time = float(sig.get("time", float("inf")))
-                if sig_time >= current_timestamp:
-                    break
+            # A signal is stamped with the bar that PRODUCED it and fills on its
+            # OWN series' next bar, as in engine.py. The global timeline is the
+            # union of every leg's bar times, so in a basket that mixes
+            # timeframes the first tick after the signal bar can belong to
+            # another leg (an M1 leg's 04:46 after an M15 bar stamped 04:30):
+            # filling there booked the signal before its bar had closed, at the
+            # signal's own reference price. Such a signal waits for a tick on
+            # which its series has a bar.
+            _due = _deferred_sigs
+            _deferred_sigs = []
+            while (signal_idx < len(all_signals)
+                   and float(all_signals[signal_idx].get("time", float("inf"))) < current_timestamp):
+                _due.append(all_signals[signal_idx])
                 signal_idx += 1
+            for sig in _due:
+                sig_time = float(sig.get("time", float("inf")))
+                _own = symbol_cache.get(sig.get("_cache_key", sig.get("symbol")))
+                if _own is not None and current_time not in _own["bars"]:
+                    _deferred_sigs.append(sig)
+                    continue
                 self.rejection_funnel["raw_signals"] += 1  # [P1.11] the census
 
                 symbol = sig.get("symbol")
@@ -911,14 +926,13 @@ class PortfolioBacktestEngine(CostModelMixin):
                     # independent entry cadences.
                     min_bars = int(_slot_cfg.get("min_bars_between_entries", 0) or 0)
                     if min_bars > 0:
-                        # `_tl_i` indexes the GLOBAL timeline (the union of every
-                        # leg's bar times). On a single shared timeframe that is
-                        # one step per bar, which is what the setting means; on a
-                        # mixed-timeframe portfolio it is a conservative
-                        # over-count, and erring toward fewer entries is the
-                        # right direction for a throttle.
+                        # Counted in the SLOT's own bars, as engine.py counts
+                        # them. The global timeline's index (`_tl_i`) steps on
+                        # every leg's bars, so in a mixed-timeframe basket it
+                        # let a slow leg re-enter after a fraction of its bars.
                         last_bar = self._last_entry_bar_by_slot.get(cache_key)
-                        if last_bar is not None and (_tl_i - last_bar) < min_bars:
+                        _bar_no = symbol_cache.get(cache_key, {}).get("pos_index", {}).get(current_time, _tl_i)
+                        if last_bar is not None and (_bar_no - last_bar) < min_bars:
                             self._record_blocked(sig, current_time_dt, "min_bars_between_entries")
                             continue
 
@@ -1198,7 +1212,8 @@ class PortfolioBacktestEngine(CostModelMixin):
 
                 # [P1.6] Stamp the slot's last entry bar once per signal, not
                 # per TP leg — a 3-TP signal is one entry, not three.
-                self._last_entry_bar_by_slot[cache_key] = _tl_i
+                self._last_entry_bar_by_slot[cache_key] = symbol_cache.get(cache_key, {}).get(
+                    "pos_index", {}).get(current_time, _tl_i)
 
             # Item 3.5: record floating equity once per timestamp, INSIDE the
             # `for current_time in global_timeline:` loop. Previously this

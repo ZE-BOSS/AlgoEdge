@@ -45,11 +45,22 @@ from backend.strategies.core.daily_atr import epoch_seconds
 
 
 def to_epoch(value: Any) -> int | None:
-    """A position's `entry_time` as UTC epoch seconds, whatever shape it arrives in."""
+    """A position's `entry_time` as UTC epoch seconds, whatever shape it arrives in:
+    python or NUMPY numbers (the portfolio backtester's timeline hands out np.int64,
+    which is not an `int` - `pd.Timestamp(np.int64)` would read it as NANOseconds,
+    i.e. 1970), seconds / milliseconds / nanoseconds, datetimes, numpy datetime64,
+    ISO strings."""
     if value is None:
         return None
     if isinstance(value, (int, float, np.integer, np.floating)):
-        return int(value)
+        v = float(value)
+        if abs(v) > 1e14:
+            v /= 1e9          # nanoseconds
+        elif abs(v) > 1e11:
+            v /= 1e3          # milliseconds
+        return int(v)
+    if isinstance(value, str) and value.replace(".", "", 1).isdigit():
+        return to_epoch(float(value))
     try:
         return int(pd.Timestamp(value).timestamp())   # naive values are UTC
     except (TypeError, ValueError):

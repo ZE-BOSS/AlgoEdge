@@ -34,6 +34,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from backend.strategies.core.trail import to_epoch
 from backend.strategies.base_strategy import BaseStrategy, TradeAction, TradeSignal
 from backend.strategies.registry import register_strategy
 from backend.strategies.strategy_roboquant import common as c
@@ -95,9 +96,8 @@ class _RQBase(BaseStrategy):
         entry = position.get("entry_time")
         if entry is None:
             return None
-        try:
-            ts = int(entry) if isinstance(entry, (int, float)) else int(pd.Timestamp(entry).timestamp())
-        except Exception:                               # noqa: BLE001
+        ts = to_epoch(entry)              # np.int64 from the portfolio backtester too
+        if ts is None:
             return None
         return int((c.epochs(candles) >= ts).sum()) - 1
 
@@ -215,11 +215,8 @@ class RQTMeanReversion(_RQBase):
         p = self.params
         idx = pd.DatetimeIndex(pd.to_datetime(c.epochs(candles), unit="s"))
         entry = position.get("entry_time")
-        try:
-            e = (pd.Timestamp(int(float(entry)), unit="s") if isinstance(entry, (int, float, str)) and str(entry).replace(".", "", 1).isdigit()
-                 else pd.Timestamp(entry).tz_localize(None) if entry is not None else None)
-        except Exception:                               # noqa: BLE001
-            e = None
+        ts = to_epoch(entry)              # np.int64 from the portfolio backtester too
+        e = pd.Timestamp(ts, unit="s") if ts is not None else None
         hit = ((idx.dayofweek + 1) == p.exit_day) & (idx.hour == p.exit_hour) & (idx.minute >= p.exit_minute)
         if e is not None:
             hit &= idx > e

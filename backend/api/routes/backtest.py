@@ -2367,7 +2367,12 @@ async def run_portfolio_backtest_endpoint(
                     sig = await _feed.step(i)
 
                     if sig and not is_warmup:
-                        sig_time = int(current_time.astype('datetime64[s]').astype(int)) if hasattr(current_time, 'astype') else int(current_time)
+                        # The bar that PRODUCED the signal (i-1), as the single-symbol
+                        # route stamps it ([P6.1]): the engine fills on the first bar of
+                        # this leg whose open is after it, i.e. bar i's open, the price
+                        # live gets. Stamping bar i made every portfolio entry one bar
+                        # later than the same slot run alone.
+                        sig_time = int(_rep_t[i - 1])
                         # [12.5/12.6/12.8] Stamp slot_id onto the signal's own
                         # metadata so risk/engine.py's slot-aware checks and
                         # CircuitBreaker.position_opened(slot_id=...) resolve

@@ -29,6 +29,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from backend.strategies.core.trail import to_epoch
 from backend.strategies.base_strategy import BaseStrategy, TradeAction, TradeSignal
 from backend.strategies.core.daily_atr import last_epoch
 from backend.strategies.registry import register_strategy
@@ -133,9 +134,8 @@ class KronosStrategy(BaseStrategy):
         entry = position.get("entry_time")
         if entry is None or candles is None or not len(candles):
             return None
-        try:
-            ts = int(entry) if isinstance(entry, (int, float)) else int(pd.Timestamp(entry).timestamp())
-        except Exception:                               # noqa: BLE001
+        ts = to_epoch(entry)              # np.int64 from the portfolio backtester too
+        if ts is None:
             return None
         times = (candles["time"].to_numpy(dtype="int64") if "time" in candles.columns
                  else pd.DatetimeIndex(candles.index).as_unit("s").asi8)

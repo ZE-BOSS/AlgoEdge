@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from backend.strategies.core.trail import to_epoch
 from backend.strategies.strategy_roboquant.replay import Bars, Ctx, ReplayStrategy
 
 R_OF = {"r1": 1.0, "r1_5": 1.5, "r2": 2.0, "r3": 3.0}
@@ -187,8 +188,7 @@ class AVReplayBase(ReplayStrategy):
         entry = position.get("entry_time")
         if entry is None:
             return None
-        try:
-            ts = int(entry) if isinstance(entry, (int, float)) else int(pd.Timestamp(entry).timestamp())
-        except Exception:  # noqa: BLE001
+        ts = to_epoch(entry)              # np.int64 from the portfolio backtester too
+        if ts is None:
             return None
         return "AV_TIME_STOP" if bars.t[k] - ts >= self.params.max_hold_hours * 3600 else None
