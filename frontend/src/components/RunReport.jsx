@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
-  Filter, Gauge, LogOut, Ban, Receipt, ChevronDown, ChevronRight, Info,
+  Filter, Gauge, LogOut, Ban, Receipt, ChevronDown, ChevronRight, Info, Activity,
 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
 import AnalyzeButton from './AnalyzeButton';
+import { streakProfile, streaksBy } from '../utils/summaryEngine';
 
 /**
  * <RunReport> — tasks 7.12 through 7.17, as one component shared by backtest
@@ -493,6 +495,86 @@ function BlockedTimeline({ blocked, trades }) {
 
 /* ── Shell ──────────────────────────────────────────────────────────────── */
 
+/**
+ * Winning and losing streaks: how many in a row the run (and each strategy x
+ * symbol in it) won or lost, in the order trades closed. The longest losing
+ * streak is what a risk setting has to survive: at r% per trade, L losses in a
+ * row cost about 1-(1-r)^L of the account.
+ */
+function Streaks({ trades }) {
+  const all = useMemo(() => streakProfile(trades), [trades]);
+  const groups = useMemo(() => streaksBy(trades), [trades]);
+  const seq = useMemo(() => all.runs.map((r, i) => ({
+    i: i + 1, v: r.type === 'W' ? r.length : -r.length, type: r.type,
+    when: String(r.end).slice(0, 10), pnl: r.pnl,
+  })), [all]);
+  const dist = useMemo(() => {
+    const n = Math.max(all.maxWin, all.maxLoss, 1);
+    return Array.from({ length: n }, (_, k) => ({
+      len: k + 1, W: all.dist.W[k + 1] || 0, L: all.dist.L[k + 1] || 0,
+    }));
+  }, [all]);
+  if (!all.trades) return <div style={{ fontSize: '0.75rem', color: GREY }}>No closed trades.</div>;
+  const cost = (r) => `${((1 - (1 - r / 100) ** all.maxLoss) * 100).toFixed(1)}%`;
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 10 }}>
+        <Metric label="Longest winning streak" value={all.maxWin} tone={GREEN} n={all.trades} />
+        <Metric label="Longest losing streak" value={all.maxLoss} tone={RED} n={all.trades}
+          formula={`At 1% risk per trade it costs ${cost(1)} of the account, at 2% ${cost(2)}, at 5% ${cost(5)}.`} />
+        <Metric label="Average streak (W / L)" value={`${all.avgWin.toFixed(1)} / ${all.avgLoss.toFixed(1)}`} n={all.runs.length} />
+        <Metric label="Now" value={all.current.type ? `${all.current.length} ${all.current.type === 'W' ? 'wins' : 'losses'}` : '-'} />
+      </div>
+      <div style={{ fontSize: '0.7rem', color: GREY, marginBottom: 4 }}>Every streak in order (up = wins in a row, down = losses in a row)</div>
+      <ResponsiveContainer width="100%" height={150}>
+        <BarChart data={seq} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+          <XAxis dataKey="i" hide />
+          <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+          <ReferenceLine y={0} stroke="#475569" />
+          <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }}
+            formatter={(v, _n, p) => [`${Math.abs(v)} ${v > 0 ? 'wins' : 'losses'} in a row (${p.payload.pnl >= 0 ? '+' : ''}${p.payload.pnl.toFixed(2)})`, `ended ${p.payload.when}`]}
+            labelFormatter={() => ''} />
+          <Bar dataKey="v" isAnimationActive={false}>
+            {seq.map(d => <Cell key={d.i} fill={d.v > 0 ? '#10b981' : '#ef4444'} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      <div style={{ fontSize: '0.7rem', color: GREY, margin: '10px 0 4px' }}>How often each streak length happened</div>
+      <ResponsiveContainer width="100%" height={130}>
+        <BarChart data={dist} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+          <XAxis dataKey="len" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+          <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+          <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }}
+            labelFormatter={l => `${l} in a row`} />
+          <Bar dataKey="W" name="winning streaks" fill="#10b981" isAnimationActive={false} />
+          <Bar dataKey="L" name="losing streaks" fill="#ef4444" isAnimationActive={false} />
+        </BarChart>
+      </ResponsiveContainer>
+      {groups.length > 1 && (
+        <table style={{ width: '100%', fontSize: '0.75rem', marginTop: 10, borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ color: GREY, textAlign: 'right' }}>
+              <th style={{ textAlign: 'left' }}>Strategy · symbol</th><th>Trades</th><th>Longest W</th><th>Longest L</th><th>Avg W / L</th><th>Now</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map(g => (
+              <tr key={g.key} style={{ textAlign: 'right', borderTop: '1px solid var(--border, #1e293b)' }}>
+                <td style={{ textAlign: 'left' }}>{g.key}</td>
+                <td>{g.trades}</td>
+                <td style={{ color: GREEN }}>{g.maxWin}</td>
+                <td style={{ color: RED }}>{g.maxLoss}</td>
+                <td>{g.avgWin.toFixed(1)} / {g.avgLoss.toFixed(1)}</td>
+                <td>{g.current.type ? `${g.current.length}${g.current.type}` : '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 export default function RunReport({ result, backtestId = null }) {
   if (!result) return null;
 
@@ -517,6 +599,11 @@ export default function RunReport({ result, backtestId = null }) {
           />
         </div>
       </div>
+
+      <Panel title="Winning and losing streaks" icon={Activity}
+             hint="Wins and losses in a row, in the order trades closed - for the whole run and for each strategy on each symbol.">
+        <Streaks trades={trades} />
+      </Panel>
 
       <Panel title="Signal funnel" icon={Filter}
              hint="Evaluated → strategy-approved → risk-approved → filled → closed, with the gate that removed each drop.">

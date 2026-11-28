@@ -640,3 +640,59 @@ export function computePeriodSymbolMatrix(bucketsMap, initialBalance = 10000, si
   // Return descending order (newest first)
   return matrix.reverse();
 }
+
+/**
+ * Winning and losing streaks, in the order trades CLOSED (as the equity curve).
+ * A trade is a win if it made money, a loss if it lost money; a break-even trade
+ * ends both kinds of streak. Returns:
+ *   maxWin / maxLoss    the longest of each
+ *   current             { type: 'W' | 'L' | null, length } at the end of the run
+ *   avgWin / avgLoss    mean length of the streaks of each kind
+ *   runs                every streak in order: { type, length, pnl, start, end }
+ *   dist                { W: {length: count}, L: {length: count} }
+ */
+export function streakProfile(trades) {
+  const byExit = [...(trades || [])]
+    .filter(t => t && t.exit_time != null)
+    .sort((a, b) => new Date(a.exit_time) - new Date(b.exit_time));
+  const runs = [];
+  let cur = null;
+  for (const t of byExit) {
+    const p = Number(t.pnl) || 0;
+    const type = p > 0 ? 'W' : p < 0 ? 'L' : null;
+    if (!type) { cur = null; continue; }
+    if (cur && cur.type === type) {
+      cur.length += 1;
+      cur.pnl += p;
+      cur.end = t.exit_time;
+    } else {
+      cur = { type, length: 1, pnl: p, start: t.exit_time, end: t.exit_time };
+      runs.push(cur);
+    }
+  }
+  const of = k => runs.filter(r => r.type === k);
+  const mean = a => (a.length ? a.reduce((s, r) => s + r.length, 0) / a.length : 0);
+  const dist = { W: {}, L: {} };
+  runs.forEach((r) => { dist[r.type][r.length] = (dist[r.type][r.length] || 0) + 1; });
+  const last = byExit.length ? byExit[byExit.length - 1] : null;
+  const lastP = last ? Number(last.pnl) || 0 : 0;
+  return {
+    maxWin: Math.max(0, ...of('W').map(r => r.length)),
+    maxLoss: Math.max(0, ...of('L').map(r => r.length)),
+    current: lastP !== 0 && runs.length ? { type: runs[runs.length - 1].type, length: runs[runs.length - 1].length } : { type: null, length: 0 },
+    avgWin: mean(of('W')),
+    avgLoss: mean(of('L')),
+    runs,
+    dist,
+    trades: byExit.length,
+  };
+}
+
+/** streakProfile per group (default: strategy + symbol), largest losing streak first. */
+export function streaksBy(trades, keyFn = t => `${t.strategy_id || t.strategy || '?'} · ${t.symbol || '?'}`) {
+  const groups = {};
+  (trades || []).forEach((t) => { (groups[keyFn(t)] = groups[keyFn(t)] || []).push(t); });
+  return Object.entries(groups)
+    .map(([key, ts]) => ({ key, ...streakProfile(ts) }))
+    .sort((a, b) => b.maxLoss - a.maxLoss || a.key.localeCompare(b.key));
+}
