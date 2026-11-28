@@ -5,6 +5,7 @@ import { getConfig, updateConfig, getParameterSchema } from '../../services/api'
 import { invalidateConfigDependents } from '../../utils/invalidate';
 import { useConnectionStore, useAuthStore } from '../../store';
 import SlotEditor from '../../components/SlotEditor';
+import SlotTransfer from '../../components/SlotTransfer';
 import SymbolPicker from '../../components/SymbolPicker';
 import { useSymbolOptions } from '../../hooks/useSymbolOptions';
 import { getStrategyDefaults } from '../../services/api';
@@ -223,6 +224,7 @@ export default function StrategySettings() {
   };
 
   const slots = useMemo(() => config.instrument_slots || [], [config.instrument_slots]);
+  const savedSlots = useMemo(() => remoteConfig?.config?.instrument_slots || [], [remoteConfig]);
 
   // Everything that writes slots goes through here, so `symbols` (which
   // /bot/start reads) and the legacy `instrument_settings` projection can never
@@ -399,6 +401,13 @@ export default function StrategySettings() {
             <Plus size={13} /> Add slot
           </button>
         </div>
+
+        {/* demo -> live: the SAVED slots, with their own parameters and risk */}
+        <SlotTransfer
+          slots={savedSlots}
+          dirty={JSON.stringify(savedSlots) !== JSON.stringify(slots)}
+          onImported={commitSlots}
+        />
       </div>
 
       <button className="btn btn-primary" style={{ justifySelf: 'start' }} onClick={handleSave} disabled={mutation.isPending}>

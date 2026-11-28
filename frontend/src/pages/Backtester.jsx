@@ -39,6 +39,7 @@ import { useSymbolOptions } from '../hooks/useSymbolOptions';
 import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Shield, Terminal, LayoutDashboard, PlusCircle, Download } from 'lucide-react';
 import { getParameterSchema, runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, getLatestResultSummary, getLatestResultTrades, getBacktestSummary, getBacktestTrades, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts, getStrategyDefaults, updateConfig } from '../services/api';
 import { invalidateConfigDependents } from '../utils/invalidate';
+import { mergeSlots, slotsPayload } from '../utils/slotTransfer';
 import TradeChart from '../components/TradeChart';
 import BacktestReplay from '../components/BacktestReplay';
 import RunReport from '../components/RunReport';
@@ -1881,41 +1882,21 @@ export default function Backtester() {
   // trading on its own. Slots that are not in the rows are left alone.
   const [slotSaveMsg, setSlotSaveMsg] = useState('');
   const saveRowsAsSlots = async () => {
-    const existing = userCfg?.config?.instrument_slots || [];
-    const next = existing.map(sl => ({ ...sl }));
-    let updated = 0;
-    let added = 0;
-    const newId = () => (crypto?.randomUUID?.() || Math.random().toString(16).slice(2).padEnd(12, '0'))
-      .replace(/-/g, '').slice(0, 12);
-    portfolioSymbols.forEach(item => {
+    const rows = portfolioSymbols.map(item => {
       const row = portfolioRowSlot(item);
-      const patch = {
-        strategy_params: row.strategy_params || {},
-        risk: row.risk || {},
-        use_measured_params: row.use_measured_params,
-        ...(item.tp1_rr != null ? { tp1_rr: item.tp1_rr } : {}),
-      };
-      const k = next.findIndex(sl => String(sl.symbol || '').toUpperCase() === String(row.symbol || '').toUpperCase()
-        && sl.strategy_id === row.strategy_id);
-      if (k >= 0) {
-        next[k] = { ...next[k], ...patch };
-        updated += 1;
-      } else {
-        next.push({ slot_id: newId(), symbol: row.symbol, strategy_id: row.strategy_id, enabled: false, ...patch });
-        added += 1;
-      }
+      return { ...row, ...(item.tp1_rr != null ? { tp1_rr: item.tp1_rr } : {}) };
     });
+    // One rule set for every slot copy (utils/slotTransfer.js): existing pairings
+    // take the settings and keep their switch, new ones arrive switched OFF.
+    const { next, updated, added } = mergeSlots(userCfg?.config?.instrument_slots || [], rows);
     const ok = window.confirm(
       `Save these ${portfolioSymbols.length} rows to your slots in Settings?\n\n`
       + `${updated} existing slot(s) take these parameters and risk settings - if a slot is enabled, the bot trades them from now on.\n`
       + `${added} new slot(s) are added switched OFF; turn them on in Settings > Strategy to trade them.\n\n`
       + 'Slots that are not in these rows are not changed.');
     if (!ok) return;
-    const enabled = next.filter(sl => sl.enabled !== false);
-    const symbols = [...new Set(enabled.map(sl => sl.symbol))];
-    const legacy = symbols.map(sym => ({ symbol: sym, strategy_id: enabled.find(sl => sl.symbol === sym).strategy_id, enabled: true }));
     try {
-      await updateConfig({ config: { instrument_slots: next, instrument_settings: legacy, symbols } });
+      await updateConfig({ config: slotsPayload(next) });
       invalidateConfigDependents(queryClient);
       // The rows now ARE their slots: read them from Settings from here on.
       setPortfolioSymbols(rows => rows.map(r => ({ symbol: r.symbol, strategy_id: r.strategy_id, tp1_rr: r.tp1_rr })));
