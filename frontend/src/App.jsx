@@ -39,6 +39,7 @@ import Login from './pages/Login';
 import './index.css';
 
 // Code-split heavy pages (PERF-4 fix)
+import UpdateBanner from './components/UpdateBanner';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Journal = lazy(() => import('./pages/Journal'));
 const Backtester = lazy(() => import('./pages/Backtester'));
@@ -189,6 +190,7 @@ function AppContent() {
         background: serverColour, zIndex: 100000, pointerEvents: 'none',
       }} />
       <GlobalLoader />
+      <UpdateBanner />
       <button className="nav-open" aria-label={isNavOpen ? 'Close navigation' : 'Open navigation'}
               aria-expanded={isNavOpen} onClick={() => setNavOpenAt(v => (v === pathname ? null : pathname))}>
         {isNavOpen ? <X size={18} /> : <Menu size={18} />}
