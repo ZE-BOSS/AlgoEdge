@@ -1492,19 +1492,23 @@ export default function Backtester() {
       setEvents([]);
       setBtError(null);
       return runPortfolioBacktest({
-        symbols: portfolioSymbols.map(s => ({
-          symbol: s.symbol,
-          strategy_id: s.strategy_id,
-          // The row's own strategy parameters (not a global block any more).
-          strategy_params: s.strategy_params ?? (slotStrategyParams(findLiveSlot(userCfg?.config, s.symbol, s.strategy_id)) || {}),
-          use_measured_params: s.use_measured_params !== false,
-          // [17.1] null = inherit the portfolio-wide tp1_rr. Sent only when the
-          // row actually sets one, matching the backend's "None = inherit".
-          tp1_rr: s.tp1_rr ?? null,
-          // [per-slot] each row runs on its own risk engine, under its slot's
-          // own settings — no limit is shared between rows.
-          risk: s.risk ?? slotRiskFor(s.symbol, s.strategy_id),
-        })),
+        symbols: portfolioSymbols.map(s => {
+          // The row as the editor shows it: the slot saved in Settings for this
+          // symbol + strategy, unless this row was edited for that same pairing.
+          const row = portfolioRowSlot(s);
+          return {
+            symbol: row.symbol,
+            strategy_id: row.strategy_id,
+            strategy_params: row.strategy_params,
+            use_measured_params: row.use_measured_params,
+            // [17.1] null = inherit the portfolio-wide tp1_rr. Sent only when the
+            // row actually sets one, matching the backend's "None = inherit".
+            tp1_rr: s.tp1_rr ?? null,
+            // [per-slot] each row runs on its own risk engine, under its slot's
+            // own settings — no limit is shared between rows.
+            risk: row.risk,
+          };
+        }),
         start_date: form.start_date || undefined,
         end_date: form.end_date || undefined,
         candle_count: form.candle_count,
@@ -1845,7 +1849,33 @@ export default function Backtester() {
   // and the callback under it read it at render, so declaring them earlier threw
   // "Cannot access 'userCfg' before initialization" and blanked the page.
   // The risk saved for this pairing in Settings — what a slot editor starts from.
-  const slotRiskFor = (symbol, strategyId) => slotRiskOf(findLiveSlot(userCfg?.config, symbol, strategyId));
+
+  // A portfolio row as it trades: the slot saved in Settings for its symbol +
+  // strategy, unless the row was edited FOR THAT PAIRING (slot_key). Rows used to
+  // keep `risk: {}` / `strategy_params: {}` once the editor had been opened, and
+  // `{} ?? saved` is `{}`: every such row ran on the portfolio-wide 5% and the
+  // shared defaults instead of the per-asset, per-strategy settings saved for it
+  // (28 Nov 2026). Rows saved by older builds carry no slot_key, so they too
+  // start from the saved slot again.
+  const portfolioRowSlot = (item) => {
+    const saved = findLiveSlot(userCfg?.config, item.symbol, item.strategy_id);
+    const nonEmpty = (o) => !!o && Object.keys(o).length > 0;
+    // Rows saved before slot_key existed: settings the user actually set stay
+    // theirs; an empty block means "never set" and falls back to the saved slot.
+    const edited = item.slot_key === `${item.symbol}::${item.strategy_id}`
+      || (item.slot_key === undefined && (nonEmpty(item.risk) || nonEmpty(item.strategy_params)));
+    return {
+      symbol: item.symbol,
+      strategy_id: item.strategy_id,
+      strategy_params: (edited && nonEmpty(item.strategy_params) ? item.strategy_params : undefined)
+        ?? (slotStrategyParams(saved) || {}),
+      risk: (edited ? item.risk : undefined) ?? slotRiskOf(saved),
+      use_measured_params: (edited ? item.use_measured_params : undefined) ?? (saved?.use_measured_params !== false),
+    };
+  };
+  const savedSlotRows = () => (userCfg?.config?.instrument_slots || [])
+    .filter(sl => sl && sl.symbol && sl.strategy_id && sl.enabled !== false)
+    .map(sl => ({ symbol: sl.symbol, strategy_id: sl.strategy_id }));
 
   // Which exit rules a run follows, decided the way live decides it: the saved
   // Settings switch when the run is following the slot's live risk, and only
@@ -2314,7 +2344,11 @@ export default function Backtester() {
                 showSymbol={false}
                 collapsible
                 defaultOpen={false}
-                onChange={next => setForm(prev => ({
+                onChange={next => setForm(prev => (next.strategy_id !== prev.strategy_id ? {
+                  // A new strategy starts from the slot saved for it; this
+                  // strategy's edits do not carry over to the next one.
+                  ...prev, strategy_id: next.strategy_id, slot_key: undefined,
+                } : {
                   ...prev,
                   strategy_id: next.strategy_id,
                   slot_key: `${prev.symbol}::${next.strategy_id}`,
@@ -2328,19 +2362,18 @@ export default function Backtester() {
             <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 12, background: 'var(--bg-secondary)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Portfolio Symbols ({portfolioSymbols.length})</span>
-                <button className="btn btn-sm btn-ghost" onClick={addPortfolioSymbol}><PlusCircle size={14} style={{ marginRight: 4 }} /> Add</button>
+                <span style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn btn-sm btn-ghost" disabled={!savedSlotRows().length}
+                    title="Replace the rows with the slots saved in Settings, each with its own parameters and risk"
+                    onClick={() => setPortfolioSymbols(savedSlotRows())}>Use my saved slots</button>
+                  <button className="btn btn-sm btn-ghost" onClick={addPortfolioSymbol}><PlusCircle size={14} style={{ marginRight: 4 }} /> Add</button>
+                </span>
               </div>
               <div className="slot-list">
                 {portfolioSymbols.map((item, idx) => (
                   <SlotEditor
                     key={idx}
-                    slot={{
-                      symbol: item.symbol,
-                      strategy_id: item.strategy_id,
-                      strategy_params: item.strategy_params || {},
-                      risk: item.risk || {},
-                      use_measured_params: item.use_measured_params !== false,
-                    }}
+                    slot={portfolioRowSlot(item)}
                     schema={schema}
                     accountRisk={userCfg?.config?.risk}
                     strategyDefaults={userCfg?.config?.[STRATEGY_GROUP[item.strategy_id]] || {}}
@@ -2350,14 +2383,21 @@ export default function Backtester() {
                     showEnabled={false}
                     collapsible
                     defaultOpen={false}
-                    onChange={next => setPortfolioSymbols(rows => rows.map((r, i) => (i === idx ? {
-                      ...r,
-                      symbol: next.symbol,
-                      strategy_id: next.strategy_id,
-                      strategy_params: next.strategy_params || {},
-                      risk: next.risk || {},
-                      use_measured_params: next.use_measured_params !== false,
-                    } : r)))}
+                    onChange={next => setPortfolioSymbols(rows => rows.map((r, i) => {
+                      if (i !== idx) return r;
+                      // A new symbol or strategy starts from the slot saved for the
+                      // NEW pairing; the old pairing's edits do not carry over.
+                      if (next.symbol !== r.symbol || next.strategy_id !== r.strategy_id) {
+                        return { symbol: next.symbol, strategy_id: next.strategy_id, tp1_rr: r.tp1_rr };
+                      }
+                      return {
+                        ...r,
+                        slot_key: `${next.symbol}::${next.strategy_id}`,
+                        strategy_params: next.strategy_params || {},
+                        risk: next.risk || {},
+                        use_measured_params: next.use_measured_params !== false,
+                      };
+                    }))}
                     onRemove={portfolioSymbols.length > 1 ? () => removePortfolioSymbol(idx) : undefined}
                     onDuplicate={() => setPortfolioSymbols(rows => [...rows, { ...rows[idx] }])}
                   />

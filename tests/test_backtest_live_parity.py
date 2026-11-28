@@ -201,9 +201,17 @@ def test_backtester_runs_the_saved_slots_parameters_not_form_defaults():
     # no params rather than the wrong strategy's).
     assert "(singleSlot.strategy_params || {})" in js
     assert "slot_risk: singleSlot.risk || {}," in js
-    # every portfolio row carries its own parameters and its own risk
-    assert "strategy_params: s.strategy_params ??" in js
-    assert "risk: s.risk ?? slotRiskFor(s.symbol, s.strategy_id)," in js
+    # every portfolio row carries its own parameters and its own risk: the slot
+    # saved for its pairing unless the row was edited for that same pairing. A row
+    # holding `risk: {}` after the editor had been opened used to beat the saved
+    # slot (`{} ?? saved` is `{}`) and run on the portfolio-wide risk (28 Nov 2026).
+    assert "const row = portfolioRowSlot(s);" in js
+    assert "risk: row.risk," in js and "strategy_params: row.strategy_params," in js
+    assert "const edited = item.slot_key === `${item.symbol}::${item.strategy_id}`" in js
+    assert "item.slot_key === undefined && (nonEmpty(item.risk) || nonEmpty(item.strategy_params))" in js
+    assert "risk: (edited ? item.risk : undefined) ?? slotRiskOf(saved)," in js
+    assert "slot={portfolioRowSlot(item)}" in js
+    assert "Use my saved slots" in js
     # the global blocks must not come back: they were shared by every symbol
     for block in ("apa", "vwap", "orb", "drift_jump_alpha", "boom_drift_jump"):
         assert f"merged.{block} = " not in js,             f"{block} is a per-slot parameter now — a global block would be shared by every symbol again"
