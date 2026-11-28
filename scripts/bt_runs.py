@@ -29,7 +29,8 @@ def _p(run) -> dict:
 
 def _kind(run) -> str:
     p = _p(run)
-    if p.get("portfolio") or p.get("is_portfolio") or p.get("slots") or "," in (run.symbol or ""):
+    if p.get("portfolio") or p.get("is_portfolio") or p.get("slots") or "," in (run.symbol or "") \
+            or not (run.symbol or "").strip():
         return "PORT"
     return "single"
 
@@ -100,8 +101,9 @@ async def main() -> int:
     if any(p is None for p in pick):
         print("unknown id(s):", [i for i, p in zip(a.ids, pick) if p is None])
         return 1
-    pick = await load(ids=[p.id for p in pick])
-    pick.sort(key=lambda r: [p.id for p in pick].index(r.id))
+    order = [p.id for p in pick]
+    pick = await load(ids=order)
+    pick.sort(key=lambda r: order.index(r.id))
     if a.cmd == "show":
         for r in pick:
             p = _p(r)
