@@ -49,7 +49,7 @@ async def main() -> int:
         for r in runs[:12]:
             q = B._p(r)
             print(f"{r.id[:8]} {r.created_at:%m-%d %H:%M} risk {q.get('risk_per_trade_pct')}% maxDD {r.max_drawdown_pct}% "
-                  f"trades {len(r.trades)} | {(r.title or '')[:40]}")
+                  f"tr {r.total_trades} | {(r.title or '')[:40]}")
         return 0
     r0 = next((r for r in runs if r.id.startswith(sys.argv[1])), None) if len(sys.argv) > 1 else runs[0]
     run = (await B.load(ids=[r0.id]))[0]
