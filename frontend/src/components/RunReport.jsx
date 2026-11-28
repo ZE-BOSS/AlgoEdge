@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
 import AnalyzeButton from './AnalyzeButton';
-import { streakProfile, streaksBy } from '../utils/summaryEngine';
+import { streakProfile, streaksBy, drawdownSpan, streakR, exitMs, tradeStrategy } from '../utils/summaryEngine';
 
 /**
  * <RunReport> — tasks 7.12 through 7.17, as one component shared by backtest
@@ -496,81 +496,256 @@ function BlockedTimeline({ blocked, trades }) {
 /* ── Shell ──────────────────────────────────────────────────────────────── */
 
 /**
- * Winning and losing streaks: how many in a row the run (and each strategy x
- * symbol in it) won or lost, in the order trades closed. The longest losing
- * streak is what a risk setting has to survive: at r% per trade, L losses in a
- * row cost about 1-(1-r)^L of the account.
+ * Winning and losing streaks, with the scope they are counted over made
+ * explicit and every number traceable to the trades behind it.
  */
-function Streaks({ trades }) {
-  const all = useMemo(() => streakProfile(trades), [trades]);
-  const groups = useMemo(() => streaksBy(trades), [trades]);
+const SCOPES = [
+  { id: 'pair', label: 'Strategy · symbol', key: t => `${tradeStrategy(t)} · ${t.symbol || '?'}` },
+  { id: 'symbol', label: 'Symbol', key: t => t.symbol || '?' },
+  { id: 'strategy', label: 'Strategy', key: t => tradeStrategy(t) },
+];
+const fmtDay = v => { const ms = exitMs({ exit_time: v }); return ms ? new Date(ms).toISOString().slice(0, 10) : '-'; };
+const fmtWhen = v => { const ms = exitMs({ exit_time: v }); return ms ? new Date(ms).toISOString().slice(5, 16).replace('T', ' ') : '-'; };
+const sgn = (v, d = 2) => (v == null || !Number.isFinite(v) ? '-' : `${v >= 0 ? '+' : ''}${v.toFixed(d)}`);
+const money = v => (v == null || !Number.isFinite(Number(v)) ? '-' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 }));
+const th = { padding: '4px 6px', fontWeight: 500, whiteSpace: 'nowrap' };
+const td = { padding: '3px 6px', whiteSpace: 'nowrap' };
+
+function StreakTrades({ run }) {
+  if (!run) return null;
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ color: GREY, textAlign: 'right' }}>
+            <th style={{ ...th, textAlign: 'left' }}>#</th><th style={{ ...th, textAlign: 'left' }}>Closed</th>
+            <th style={{ ...th, textAlign: 'left' }}>Strategy</th><th style={{ ...th, textAlign: 'left' }}>Symbol</th>
+            <th style={{ ...th, textAlign: 'left' }}>Side</th><th style={{ ...th, textAlign: 'left' }}>Exit</th>
+            <th style={th}>R</th><th style={th}>P&amp;L</th><th style={th}>Balance after</th>
+          </tr>
+        </thead>
+        <tbody>
+          {run.items.map((t, i) => (
+            <tr key={t.group_id || t.id || i} style={{ textAlign: 'right', borderTop: '1px solid var(--border, #1e293b)' }}>
+              <td style={{ ...td, textAlign: 'left', color: GREY }}>{i + 1}</td>
+              <td style={{ ...td, textAlign: 'left' }}>{fmtWhen(t.exit_time)}</td>
+              <td style={{ ...td, textAlign: 'left' }}>{tradeStrategy(t)}</td>
+              <td style={{ ...td, textAlign: 'left' }}>{t.symbol}</td>
+              <td style={{ ...td, textAlign: 'left' }}>{t.direction || t.side || ''}</td>
+              <td style={{ ...td, textAlign: 'left', color: GREY }}>{t.exit_reason || ''}</td>
+              <td style={{ ...td, color: (streakR(t) ?? 0) < 0 ? RED : GREEN }}>{sgn(streakR(t))}</td>
+              <td style={{ ...td, color: (t.pnl || 0) < 0 ? RED : GREEN }}>{sgn(Number(t.pnl), 0)}</td>
+              <td style={td}>{money(t.balance_after)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function StreakCard({ title, run, tone, risk, children }) {
+  const full = run && risk ? (1 - (1 - risk / 100) ** run.length) * 100 : null;
+  return (
+    <div style={{ flex: '1 1 240px', border: '1px solid var(--border, #1e293b)', borderRadius: 6, padding: '8px 10px' }}>
+      <div style={{ fontSize: '0.7rem', color: GREY }}>{title}</div>
+      {run ? (
+        <>
+          <div style={{ fontSize: '1.3rem', fontWeight: 600, color: tone }}>{run.length} trades in a row</div>
+          <div style={{ fontSize: '0.74rem', lineHeight: 1.5 }}>
+            <b style={{ color: tone }}>{sgn(run.r)}R</b>
+            {run.pct != null && <> · <b style={{ color: tone }}>{sgn(run.pct, 1)}%</b> of the account ({money(run.startBal)} → {money(run.startBal + run.pnl)})</>}
+            <br /><span style={{ color: GREY }}>{fmtDay(run.start)} → {fmtDay(run.end)}</span>
+            {full != null && run.type === 'L' && (
+              <><br /><span style={{ color: GREY }}>{run.length} full −1R stops at {risk}% would be −{full.toFixed(1)}%</span></>
+            )}
+          </div>
+        </>
+      ) : <div style={{ fontSize: '0.8rem', color: GREY }}>none</div>}
+      {children}
+    </div>
+  );
+}
+
+function Streaks({ trades, risk }) {
+  const [view, setView] = useState('all'); // 'all' or `${scope}::${key}`
+  const [scope, setScope] = useState('pair');
+  const [sort, setSort] = useState({ col: 'maxLoss', dir: -1 });
+  const [open, setOpen] = useState('L');
+  const options = useMemo(() => SCOPES.map(sc => ({
+    ...sc, keys: Array.from(new Set((trades || []).map(sc.key))).sort(),
+  })), [trades]);
+  const picked = useMemo(() => {
+    if (view === 'all') return trades || [];
+    const [sid, key] = view.split('::');
+    const sc = SCOPES.find(x => x.id === sid);
+    return (trades || []).filter(t => sc.key(t) === key);
+  }, [trades, view]);
+  const all = useMemo(() => streakProfile(picked), [picked]);
+  const dd = useMemo(() => (view === 'all' ? drawdownSpan(trades || []) : null), [trades, view]);
+  const groups = useMemo(() => {
+    const sc = SCOPES.find(x => x.id === scope);
+    const rows = streaksBy(trades, sc.key).map(g => ({
+      ...g,
+      lossR: g.worstLoss?.r ?? 0,
+      lossPct: g.worstLoss?.pct ?? 0,
+      winRate: g.trades ? (g.runs.filter(x => x.type === 'W').reduce((a, x) => a + x.length, 0) / g.trades) * 100 : 0,
+    }));
+    const v = r => (typeof r[sort.col] === 'string' ? r[sort.col] : Number(r[sort.col]) || 0);
+    return rows.sort((x, y) => (v(x) > v(y) ? 1 : v(x) < v(y) ? -1 : 0) * sort.dir);
+  }, [trades, scope, sort]);
   const seq = useMemo(() => all.runs.map((r, i) => ({
-    i: i + 1, v: r.type === 'W' ? r.length : -r.length, type: r.type,
-    when: String(r.end).slice(0, 10), pnl: r.pnl,
+    i: i + 1, v: r.type === 'W' ? r.length : -r.length, when: fmtDay(r.end), r: r.r, pct: r.pct,
   })), [all]);
   const dist = useMemo(() => {
     const n = Math.max(all.maxWin, all.maxLoss, 1);
-    return Array.from({ length: n }, (_, k) => ({
-      len: k + 1, W: all.dist.W[k + 1] || 0, L: all.dist.L[k + 1] || 0,
-    }));
+    return Array.from({ length: n }, (_, k) => ({ len: k + 1, W: all.dist.W[k + 1] || 0, L: all.dist.L[k + 1] || 0 }));
   }, [all]);
-  if (!all.trades) return <div style={{ fontSize: '0.75rem', color: GREY }}>No closed trades.</div>;
-  const cost = (r) => `${((1 - (1 - r / 100) ** all.maxLoss) * 100).toFixed(1)}%`;
+  if (!(trades || []).length) return <div style={{ fontSize: '0.75rem', color: GREY }}>No closed trades.</div>;
+
+  const scopeLabel = view === 'all' ? 'all trades together' : view.split('::')[1];
+  const lossesUnderHalfR = (all.worstLoss?.items || []).filter(t => (streakR(t) ?? -1) > -0.5).length;
+  const head = (col, label, left) => (
+    <th style={{ ...th, textAlign: left ? 'left' : 'right', cursor: 'pointer', color: sort.col === col ? '#e2e8f0' : GREY }}
+        onClick={() => setSort(s => ({ col, dir: s.col === col ? -s.dir : (left ? 1 : -1) }))}>
+      {label}{sort.col === col ? (sort.dir > 0 ? ' ▲' : ' ▼') : ''}
+    </th>
+  );
+  const sel = { background: 'var(--bg-input, #0f172a)', color: 'inherit', border: '1px solid var(--border, #334155)', borderRadius: 4, fontSize: '0.75rem', padding: '3px 6px' };
+
   return (
     <div>
-      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 10 }}>
-        <Metric label="Longest winning streak" value={all.maxWin} tone={GREEN} n={all.trades} />
-        <Metric label="Longest losing streak" value={all.maxLoss} tone={RED} n={all.trades}
-          formula={`At 1% risk per trade it costs ${cost(1)} of the account, at 2% ${cost(2)}, at 5% ${cost(5)}.`} />
-        <Metric label="Average streak (W / L)" value={`${all.avgWin.toFixed(1)} / ${all.avgLoss.toFixed(1)}`} n={all.runs.length} />
-        <Metric label="Now" value={all.current.type ? `${all.current.length} ${all.current.type === 'W' ? 'wins' : 'losses'}` : '-'} />
+      <div style={{ fontSize: '0.72rem', color: GREY, lineHeight: 1.55, marginBottom: 10, padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 4 }}>
+        <b style={{ color: '#e2e8f0' }}>How it is counted.</b> The trades in the chosen scope are lined up in the order they <i>closed</i>.
+        Any trade that closed below zero is a loss – a −0.1R time exit counts the same as a −1R stop – and a trade at exactly 0 ends the streak.
+        So a streak is a count of trades, not of risk: each card shows what the streak really cost in R and in % of the account.
+        Max drawdown is a different thing: the deepest fall from a balance peak, with wins mixed in, so it can be bigger than any single streak.
       </div>
-      <div style={{ fontSize: '0.7rem', color: GREY, marginBottom: 4 }}>Every streak in order (up = wins in a row, down = losses in a row)</div>
-      <ResponsiveContainer width="100%" height={150}>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10, fontSize: '0.75rem' }}>
+        <span style={{ color: GREY }}>Count streaks over</span>
+        <select value={view} onChange={e => setView(e.target.value)} style={sel}>
+          <option value="all">All trades together ({(trades || []).length})</option>
+          {options.map(sc => (
+            <optgroup key={sc.id} label={`One ${sc.label.toLowerCase()}`}>
+              {sc.keys.map(k => <option key={k} value={`${sc.id}::${k}`}>{k}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        {view !== 'all' && <button type="button" onClick={() => setView('all')} style={{ ...sel, cursor: 'pointer' }}>Back to all</button>}
+        <span style={{ color: GREY }}>{all.trades} trades · now {all.current.type ? `${all.current.length} ${all.current.type === 'W' ? 'wins' : 'losses'} in a row` : '-'}</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+        <StreakCard title={`Longest losing streak – ${scopeLabel}`} run={all.worstLoss} tone={RED} risk={risk}>
+          {all.worstLoss && (
+            <button type="button" onClick={() => setOpen(o => (o === 'L' ? null : 'L'))} style={{ ...sel, marginTop: 6, cursor: 'pointer' }}>
+              {open === 'L' ? 'Hide' : 'Show'} the {all.worstLoss.length} trades
+            </button>
+          )}
+        </StreakCard>
+        <StreakCard title={`Longest winning streak – ${scopeLabel}`} run={all.bestWin} tone={GREEN}>
+          {all.bestWin && (
+            <button type="button" onClick={() => setOpen(o => (o === 'W' ? null : 'W'))} style={{ ...sel, marginTop: 6, cursor: 'pointer' }}>
+              {open === 'W' ? 'Hide' : 'Show'} the {all.bestWin.length} trades
+            </button>
+          )}
+        </StreakCard>
+        {dd && dd.items.length > 0 && (
+          <div style={{ flex: '1 1 240px', border: '1px solid var(--border, #1e293b)', borderRadius: 6, padding: '8px 10px' }}>
+            <div style={{ fontSize: '0.7rem', color: GREY }}>Max drawdown (closed-trade balance)</div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 600, color: RED }}>−{dd.pct.toFixed(1)}%</div>
+            <div style={{ fontSize: '0.74rem', lineHeight: 1.5 }}>
+              {dd.items.length} trades: <b style={{ color: RED }}>{dd.losses} losses</b> and <b style={{ color: GREEN }}>{dd.wins} wins</b> mixed, {sgn(dd.r)}R
+              <br />{money(dd.peakBal)} → {money(dd.troughBal)}
+              <br /><span style={{ color: GREY }}>{fmtDay(dd.start)} → {fmtDay(dd.end)}</span>
+            </div>
+            <button type="button" onClick={() => setOpen(o => (o === 'D' ? null : 'D'))} style={{ ...sel, marginTop: 6, cursor: 'pointer' }}>
+              {open === 'D' ? 'Hide' : 'Show'} the {dd.items.length} trades
+            </button>
+          </div>
+        )}
+      </div>
+      {open === 'L' && all.worstLoss && (
+        <div style={{ marginBottom: 10 }}>
+          {lossesUnderHalfR > 0 && (
+            <div style={{ fontSize: '0.7rem', color: GREY, margin: '2px 0 4px' }}>
+              {lossesUnderHalfR} of these {all.worstLoss.length} lost less than 0.5R (time, session or trailing exits) – that is why the streak cost less than {all.worstLoss.length} full stops.
+            </div>
+          )}
+          <StreakTrades run={all.worstLoss} />
+        </div>
+      )}
+      {open === 'W' && all.bestWin && <div style={{ marginBottom: 10 }}><StreakTrades run={all.bestWin} /></div>}
+      {open === 'D' && dd && <div style={{ marginBottom: 10 }}><StreakTrades run={dd} /></div>}
+
+      <div style={{ fontSize: '0.7rem', color: GREY, margin: '6px 0 4px' }}>Every streak in order – {scopeLabel} (up = wins in a row, down = losses in a row)</div>
+      <ResponsiveContainer width="100%" height={140}>
         <BarChart data={seq} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
           <XAxis dataKey="i" hide />
           <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
           <ReferenceLine y={0} stroke="#475569" />
           <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }}
-            formatter={(v, _n, p) => [`${Math.abs(v)} ${v > 0 ? 'wins' : 'losses'} in a row (${p.payload.pnl >= 0 ? '+' : ''}${p.payload.pnl.toFixed(2)})`, `ended ${p.payload.when}`]}
+            formatter={(v, _n, p) => [`${Math.abs(v)} ${v > 0 ? 'wins' : 'losses'} in a row: ${sgn(p.payload.r)}R${p.payload.pct != null ? `, ${sgn(p.payload.pct, 1)}% of the account` : ''}`, `ended ${p.payload.when}`]}
             labelFormatter={() => ''} />
           <Bar dataKey="v" isAnimationActive={false}>
             {seq.map(d => <Cell key={d.i} fill={d.v > 0 ? '#10b981' : '#ef4444'} />)}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-      <div style={{ fontSize: '0.7rem', color: GREY, margin: '10px 0 4px' }}>How often each streak length happened</div>
-      <ResponsiveContainer width="100%" height={130}>
+      <div style={{ fontSize: '0.7rem', color: GREY, margin: '8px 0 4px' }}>How often each streak length happened – {scopeLabel}</div>
+      <ResponsiveContainer width="100%" height={120}>
         <BarChart data={dist} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
           <XAxis dataKey="len" tick={{ fontSize: 10, fill: '#94a3b8' }} />
           <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-          <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }}
-            labelFormatter={l => `${l} in a row`} />
+          <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }} labelFormatter={l => `${l} in a row`} />
           <Bar dataKey="W" name="winning streaks" fill="#10b981" isAnimationActive={false} />
           <Bar dataKey="L" name="losing streaks" fill="#ef4444" isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
-      {groups.length > 1 && (
-        <table style={{ width: '100%', fontSize: '0.75rem', marginTop: 10, borderCollapse: 'collapse' }}>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0 4px', fontSize: '0.75rem', flexWrap: 'wrap' }}>
+        <b>Each one on its own</b>
+        <span style={{ color: GREY }}>– streaks counted inside one</span>
+        <select value={scope} onChange={e => setScope(e.target.value)} style={sel}>
+          {SCOPES.map(sc => <option key={sc.id} value={sc.id}>{sc.label.toLowerCase()}</option>)}
+        </select>
+        <span style={{ color: GREY }}>at a time. Click a column to sort, a row to look at it above.</span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', fontSize: '0.74rem', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ color: GREY, textAlign: 'right' }}>
-              <th style={{ textAlign: 'left' }}>Strategy · symbol</th><th>Trades</th><th>Longest W</th><th>Longest L</th><th>Avg W / L</th><th>Now</th>
+            <tr style={{ textAlign: 'right' }}>
+              {head('key', SCOPES.find(x => x.id === scope).label, true)}
+              {head('trades', 'Trades')}{head('winRate', 'Win %')}
+              {head('maxLoss', 'Longest L')}{head('lossR', 'R lost in it')}{head('lossPct', '% of account')}
+              {head('maxWin', 'Longest W')}<th style={{ ...th, color: GREY }}>When (longest L)</th><th style={{ ...th, color: GREY }}>Now</th>
             </tr>
           </thead>
           <tbody>
-            {groups.map(g => (
-              <tr key={g.key} style={{ textAlign: 'right', borderTop: '1px solid var(--border, #1e293b)' }}>
-                <td style={{ textAlign: 'left' }}>{g.key}</td>
-                <td>{g.trades}</td>
-                <td style={{ color: GREEN }}>{g.maxWin}</td>
-                <td style={{ color: RED }}>{g.maxLoss}</td>
-                <td>{g.avgWin.toFixed(1)} / {g.avgLoss.toFixed(1)}</td>
-                <td>{g.current.type ? `${g.current.length}${g.current.type}` : '-'}</td>
-              </tr>
-            ))}
+            {groups.map(g => {
+              const v = `${scope}::${g.key}`;
+              return (
+                <tr key={g.key} onClick={() => { setView(v); setOpen('L'); }}
+                    style={{ textAlign: 'right', borderTop: '1px solid var(--border, #1e293b)', cursor: 'pointer', background: view === v ? 'rgba(59,130,246,0.12)' : undefined }}>
+                  <td style={{ ...td, textAlign: 'left' }}>{g.key}</td>
+                  <td style={td}>{g.trades}</td>
+                  <td style={td}>{g.winRate.toFixed(0)}%</td>
+                  <td style={{ ...td, color: RED, fontWeight: 600 }}>{g.maxLoss}</td>
+                  <td style={{ ...td, color: RED }}>{sgn(g.lossR)}</td>
+                  <td style={{ ...td, color: RED }}>{g.worstLoss?.pct != null ? `${sgn(g.lossPct, 1)}%` : '-'}</td>
+                  <td style={{ ...td, color: GREEN, fontWeight: 600 }}>{g.maxWin}</td>
+                  <td style={{ ...td, color: GREY }}>{g.worstLoss ? `${fmtDay(g.worstLoss.start)} → ${fmtDay(g.worstLoss.end)}` : '-'}</td>
+                  <td style={td}>{g.current.type ? `${g.current.length}${g.current.type}` : '-'}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
-      )}
+      </div>
+      <div style={{ fontSize: '0.68rem', color: GREY, marginTop: 4 }}>
+        "% of account" is that streak's P&amp;L over the balance just before its first trade closed – the hit those trades alone caused; other slots kept trading in between.
+      </div>
     </div>
   );
 }
@@ -601,8 +776,8 @@ export default function RunReport({ result, backtestId = null }) {
       </div>
 
       <Panel title="Winning and losing streaks" icon={Activity}
-             hint="Wins and losses in a row, in the order trades closed - for the whole run and for each strategy on each symbol.">
-        <Streaks trades={trades} />
+             hint="Wins and losses in a row, in the order trades closed. Pick the scope: all trades together, or one strategy, symbol or strategy on a symbol.">
+        <Streaks trades={trades} risk={target} />
       </Panel>
 
       <Panel title="Signal funnel" icon={Filter}

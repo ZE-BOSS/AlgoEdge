@@ -641,44 +641,94 @@ export function computePeriodSymbolMatrix(bucketsMap, initialBalance = 10000, si
   return matrix.reverse();
 }
 
+/** A trade's result in R: cash P&L over cash risked (pnl_r), else the price-based realized_rr. */
+export function streakR(t) {
+  const v = t?.pnl_r ?? t?.realized_rr;
+  return v == null || !Number.isFinite(Number(v)) ? null : Number(v);
+}
+
+/** Exit time in ms whether it arrives as ISO text, epoch seconds or epoch ms. */
+export function exitMs(t) {
+  const v = t?.exit_time;
+  if (v == null || v === '') return null;
+  if (typeof v === 'number' || /^\d+(\.\d+)?$/.test(String(v))) {
+    const n = Number(v);
+    return n > 1e14 ? n / 1e6 : n > 1e11 ? n : n * 1000;
+  }
+  const ms = Date.parse(v);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+const byExitOrder = trades => [...(trades || [])]
+  .map(t => [exitMs(t), t]).filter(([ms]) => ms != null)
+  .sort((a, b) => a[0] - b[0]).map(([, t]) => t);
+
 /**
  * Winning and losing streaks, in the order trades CLOSED (as the equity curve).
- * A trade is a win if it made money, a loss if it lost money; a break-even trade
- * ends both kinds of streak. Returns:
- *   maxWin / maxLoss    the longest of each
- *   current             { type: 'W' | 'L' | null, length } at the end of the run
- *   avgWin / avgLoss    mean length of the streaks of each kind
- *   runs                every streak in order: { type, length, pnl, start, end }
- *   dist                { W: {length: count}, L: {length: count} }
+ *
+ * How a streak is counted:
+ *   - over the trades handed in (the whole run, or one strategy / symbol),
+ *     one after another in the order they closed;
+ *   - a WIN is any trade that closed above zero, a LOSS any trade that closed
+ *     below zero - a -0.1R session exit counts as a loss exactly like a -1R stop;
+ *   - a break-even trade (exactly 0) ends both kinds of streak.
+ * So "7 losses in a row" is 7 losing trades, not 7 x your risk: each streak also
+ * carries its total R and, when `startBalance` is given, what it did to the
+ * account (running balance just before its first trade closed -> after its last).
+ *
+ * Returns maxWin / maxLoss (lengths), worstLoss / bestWin (the streak objects),
+ * current, avgWin / avgLoss, runs (every streak in order), dist, trades.
  */
-export function streakProfile(trades) {
-  const byExit = [...(trades || [])]
-    .filter(t => t && t.exit_time != null)
-    .sort((a, b) => new Date(a.exit_time) - new Date(b.exit_time));
+export function streakProfile(trades, startBalance = null) {
+  const byExit = byExitOrder(trades);
   const runs = [];
   let cur = null;
+  let bal = startBalance != null ? Number(startBalance) : null;
   for (const t of byExit) {
     const p = Number(t.pnl) || 0;
+    // the account right after this close: the engine's own balance_after when
+    // it is there (exact, concurrent trades included), else a running total
+    const after = Number.isFinite(Number(t.balance_after)) && t.balance_after != null
+      ? Number(t.balance_after) : bal != null ? bal + p : null;
+    const before = after != null ? after - p : null;
+    bal = after;
     const type = p > 0 ? 'W' : p < 0 ? 'L' : null;
     if (!type) { cur = null; continue; }
+    const r = streakR(t);
     if (cur && cur.type === type) {
       cur.length += 1;
       cur.pnl += p;
+      cur.r += r ?? 0;
       cur.end = t.exit_time;
+      cur.endBal = bal;
+      cur.items.push(t);
     } else {
-      cur = { type, length: 1, pnl: p, start: t.exit_time, end: t.exit_time };
+      cur = { type, length: 1, pnl: p, r: r ?? 0, start: t.exit_time, end: t.exit_time,
+              startBal: before, endBal: bal, items: [t] };
       runs.push(cur);
     }
   }
-  const of = k => runs.filter(r => r.type === k);
-  const mean = a => (a.length ? a.reduce((s, r) => s + r.length, 0) / a.length : 0);
+  // what the streak did to the account: its P&L over the balance just before
+  // its first trade closed (for the whole run this is start -> end balance)
+  runs.forEach((x) => {
+    x.pct = x.startBal ? (x.pnl / x.startBal) * 100 : null;
+  });
+  const of = k => runs.filter(x => x.type === k);
+  const mean = a => (a.length ? a.reduce((s2, x) => s2 + x.length, 0) / a.length : 0);
+  // the longest; among equally long ones, the costliest (losses) / best (wins)
+  const pick = (k) => of(k).reduce((b, x) => (!b || x.length > b.length
+    || (x.length === b.length && (k === 'L' ? x.r < b.r : x.r > b.r)) ? x : b), null);
   const dist = { W: {}, L: {} };
-  runs.forEach((r) => { dist[r.type][r.length] = (dist[r.type][r.length] || 0) + 1; });
+  runs.forEach((x) => { dist[x.type][x.length] = (dist[x.type][x.length] || 0) + 1; });
   const last = byExit.length ? byExit[byExit.length - 1] : null;
   const lastP = last ? Number(last.pnl) || 0 : 0;
+  const worstLoss = pick('L');
+  const bestWin = pick('W');
   return {
-    maxWin: Math.max(0, ...of('W').map(r => r.length)),
-    maxLoss: Math.max(0, ...of('L').map(r => r.length)),
+    maxWin: bestWin ? bestWin.length : 0,
+    maxLoss: worstLoss ? worstLoss.length : 0,
+    worstLoss,
+    bestWin,
     current: lastP !== 0 && runs.length ? { type: runs[runs.length - 1].type, length: runs[runs.length - 1].length } : { type: null, length: 0 },
     avgWin: mean(of('W')),
     avgLoss: mean(of('L')),
@@ -688,11 +738,48 @@ export function streakProfile(trades) {
   };
 }
 
-/** streakProfile per group (default: strategy + symbol), largest losing streak first. */
-export function streaksBy(trades, keyFn = t => `${t.strategy_id || t.strategy || '?'} · ${t.symbol || '?'}`) {
+/**
+ * The deepest peak-to-trough fall of the running balance (trades in close
+ * order), with what happened inside it: a drawdown is not one losing streak -
+ * wins in between only slow it down - which is why it can be larger than the
+ * longest streak's loss.
+ */
+export function drawdownSpan(trades, startBalance = null) {
+  const byExit = byExitOrder(trades);
+  const f = byExit[0];
+  let bal = startBalance != null ? Number(startBalance)
+    : f && f.balance_after != null ? Number(f.balance_after) - (Number(f.pnl) || 0) : 0;
+  let peak = bal;
+  let peakIdx = -1;
+  let best = { pct: 0, from: 0, to: -1, peakBal: bal, troughBal: bal };
+  byExit.forEach((t, i) => {
+    bal = t.balance_after != null && Number.isFinite(Number(t.balance_after))
+      ? Number(t.balance_after) : bal + (Number(t.pnl) || 0);
+    if (bal > peak) { peak = bal; peakIdx = i; }
+    const d = peak > 0 ? (1 - bal / peak) * 100 : 0;
+    if (d > best.pct) best = { pct: d, from: peakIdx + 1, to: i, peakBal: peak, troughBal: bal };
+  });
+  const items = best.to >= best.from ? byExit.slice(best.from, best.to + 1) : [];
+  return {
+    pct: best.pct,
+    items,
+    losses: items.filter(t => (Number(t.pnl) || 0) < 0).length,
+    wins: items.filter(t => (Number(t.pnl) || 0) > 0).length,
+    r: items.reduce((s2, t) => s2 + (streakR(t) ?? 0), 0),
+    start: items[0]?.exit_time,
+    end: items[items.length - 1]?.exit_time,
+    peakBal: best.peakBal,
+    troughBal: best.troughBal,
+  };
+}
+
+export const tradeStrategy = t => t.strategy_id || t.strategy || '?';
+
+/** streakProfile per strategy x symbol (default), longest losing streak first. */
+export function streaksBy(trades, keyFn = t => `${tradeStrategy(t)} · ${t.symbol || '?'}`) {
   const groups = {};
   (trades || []).forEach((t) => { (groups[keyFn(t)] = groups[keyFn(t)] || []).push(t); });
   return Object.entries(groups)
-    .map(([key, ts]) => ({ key, ...streakProfile(ts) }))
-    .sort((a, b) => b.maxLoss - a.maxLoss || a.key.localeCompare(b.key));
+    .map(([key, ts]) => ({ key, strategy: tradeStrategy(ts[0]), symbol: ts[0].symbol, ...streakProfile(ts) }))
+    .sort((a, b) => b.maxLoss - a.maxLoss || (a.worstLoss?.r ?? 0) - (b.worstLoss?.r ?? 0) || a.key.localeCompare(b.key));
 }
