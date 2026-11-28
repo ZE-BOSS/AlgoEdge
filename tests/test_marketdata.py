@@ -279,3 +279,22 @@ def test_a_range_the_store_only_partly_holds_falls_back_to_mt5(tmp_store, monkey
         store.write_day("6E.v.0", day.date(), part)
     assert _run(source.bars("EURUSD", "M15", start=datetime(2026, 1, 5), end=datetime(2026, 3, 6))) is None
     assert source.coverage(m, pd.Timestamp("2026-03-02"), pd.Timestamp("2026-03-06")) == 1.0
+
+
+def test_status_reports_the_feeds_and_what_served_each_symbol(tmp_store, monkeypatch):
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None).floor("1min")
+    store.write_live("GC.v.0", _minutes(start=now - pd.Timedelta(minutes=1440 * 3 - 1), n=1440 * 3))
+    source.SERVED.clear()
+
+    async def mt5(symbol, tf, count=None, start=None, end=None):
+        f = source.resample(_minutes(start=now - pd.Timedelta(minutes=1440 * 3 - 1), n=1440 * 3), tf)
+        return f.reset_index(drop=True).iloc[-count:][["time", "close"]].copy()
+    monkeypatch.setattr(source, "_mt5_bars", mt5)
+    _run(source.bars("XAUUSD", "M15", count=100))
+    st = source.status()
+    gc = next(f for f in st["feeds"] if f["future"] == "GC.v.0")
+    assert gc["live_ok"] and gc["newest_minute_s_ago"] < 120
+    nq = next(f for f in st["feeds"] if f["future"] == "NQ.v.0")
+    assert not nq["live_ok"]
+    served = {(s["symbol"], s["mode"]): s["source"] for s in st["served"]}
+    assert served.get(("XAUUSD", "live")) in ("databento", "mt5")

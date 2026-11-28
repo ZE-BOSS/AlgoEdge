@@ -466,3 +466,13 @@ async def account_reset(
     )
     logger.warning(f"[RESET] {current_user.email}: {removed}")
     return {"ok": True, "live_login": live_login, "removed": removed}
+
+
+@router.get("/marketdata/status")
+async def marketdata_status(current_user: User = Depends(get_current_user)):
+    """Is Databento really what the bots and the backtester read? Per CME future:
+    whether the live stream is current and how much history is stored; per broker
+    symbol: which source (Databento or the MT5 fallback) served its last live and
+    backtest request. No prices: the Databento licence is for this account's own use."""
+    from backend.marketdata import source
+    return source.status()

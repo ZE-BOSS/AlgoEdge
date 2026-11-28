@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import MarketDataCard from '../../components/MarketDataCard';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Server, Save, Loader2, Check, Wifi, WifiOff, Trash2, Shield, Eye, EyeOff, MessageSquare, RefreshCw, Search, AlertTriangle } from 'lucide-react';
 import { getBrokerStatus, saveBrokerStandard, testBrokerConnection, removeBrokerStandard, testMt5Entry, testMt5Close, testMt5Breakeven, testMt5Trail, getConfig, updateConfig, getInstrumentResolution, getTelegramStatus, sendTelegramTest, getAccountState, resetAccountState } from '../../services/api';
@@ -755,6 +756,7 @@ export default function BrokerSettings() {
         </div>
       </div>
       
+      <MarketDataCard />
       <InstrumentResolutionCard />
       <AccountStateCard />
       <TelegramSettingsCard />

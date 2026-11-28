@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 
 from backend.marketdata import history, store
-from backend.marketdata.instruments import Instrument, mapped
+from backend.marketdata.instruments import Instrument, enabled, mapped
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -228,6 +228,21 @@ def _apply_basis(df: pd.DataFrame, b: pd.Series) -> pd.DataFrame:
     return out
 
 
+# What the last request for each broker symbol was served from, live and
+# backtest separately - for /api/system/marketdata (is Databento really in use?).
+SERVED: dict[str, dict] = {}
+
+
+def _served(symbol: str, tf: str, live: bool, df, inst) -> None:
+    SERVED[f"{symbol}|{'live' if live else 'range'}"] = {
+        "symbol": symbol, "timeframe": tf, "mode": "live" if live else "backtest",
+        "source": "databento" if df is not None else "mt5",
+        "future": inst.future if inst else None,
+        "basis_from": (df.attrs.get("basis_from") if df is not None else None),
+        "at": int(time.time()),
+    }
+
+
 async def bars(symbol: str, timeframe: str, count: int | None = None,
                start: datetime | None = None, end: datetime | None = None) -> pd.DataFrame | None:
     inst = mapped(symbol)
@@ -235,11 +250,40 @@ async def bars(symbol: str, timeframe: str, count: int | None = None,
     if inst is None or tf not in TF_MIN:
         return None
     try:
-        return await _bars(inst, symbol, tf, count, start, end)
+        df = await _bars(inst, symbol, tf, count, start, end)
     except Exception as e:  # noqa: BLE001
         _warn(f"err:{symbol}:{tf}", f"[MARKETDATA] {symbol} {tf}: Databento bars failed, using MT5 "
                                     f"({type(e).__name__}: {e})")
-        return None
+        df = None
+    _served(symbol, tf, count is not None, df, inst)
+    return df
+
+
+def status() -> dict:
+    """Per future: is the live stream current, how much history is stored; and per
+    broker symbol: which source served its last live and backtest request."""
+    from backend.marketdata.instruments import INSTRUMENTS
+    now = time.time()
+    feeds = []
+    for key, inst in INSTRUMENTS.items():
+        age, lag = store.live_age(inst.future), store.live_lag(inst.future)
+        days = store.days_present(inst.future) if hasattr(store, "days_present") else []
+        feeds.append({
+            "market": key, "future": inst.future, "name": inst.name,
+            "live_file_age_s": None if age is None else round(age),
+            "newest_minute_s_ago": None if lag is None else round(lag),
+            "live_ok": bool(age is not None and age <= LIVE_MAX_AGE_S and lag is not None and lag <= LIVE_MAX_LAG_S),
+            "stored_days": len(days),
+            "first_day": str(min(days)) if days else None,
+            "last_day": str(max(days)) if days else None,
+        })
+    served = sorted(SERVED.values(), key=lambda x: (x["symbol"], x["mode"]))
+    for s in served:
+        s["seconds_ago"] = round(now - s["at"])
+    import os
+    excl = sorted(x.strip() for x in os.getenv("MARKETDATA_EXCLUDE", "").split(",") if x.strip())
+    return {"enabled": enabled(), "excluded": excl, "feeds": feeds, "served": served,
+            "key_present": bool(history.key()), "live_max_lag_s": LIVE_MAX_LAG_S}
 
 
 async def _bars(inst: Instrument, symbol: str, tf: str, count, start, end) -> pd.DataFrame | None:

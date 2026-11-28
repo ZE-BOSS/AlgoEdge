@@ -221,6 +221,7 @@ export const updateConfig = (config) => api.put('/config', config);
 // The same, on a named server (Settings -> copy slots to live). The request
 // carries that server's own token; see the interceptor above.
 export const getConfigOn = (serverId) => api.get('/config', { serverId });
+export const getMarketDataStatus = () => api.get('/marketdata/status');
 export const updateConfigOn = (serverId, config) => api.put('/config', config, { serverId });
 
 // ── Charts ──────────────────────────────────────────────────────────────────
