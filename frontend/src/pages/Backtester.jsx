@@ -37,7 +37,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import SymbolPicker from '../components/SymbolPicker';
 import { useSymbolOptions } from '../hooks/useSymbolOptions';
 import { FlaskConical, Play, Trash2, Eye, Save, X, ChevronDown, ChevronRight, Loader2, Shield, Terminal, LayoutDashboard, PlusCircle, Download } from 'lucide-react';
-import { getParameterSchema, runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, getLatestResultSummary, getLatestResultTrades, getBacktestSummary, getBacktestTrades, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts, getStrategyDefaults } from '../services/api';
+import { getParameterSchema, runBacktest, runPortfolioBacktest, getBacktests, deleteBacktest, saveBacktest, getBotLogs, getConfig, getBacktestStatus, getLatestBacktestResult, getLatestResultSummary, getLatestResultTrades, getBacktestSummary, getBacktestTrades, stopBacktest, getSavedTradeChart, getUnsavedTradeChart, getSymbolCosts, getStrategyDefaults, updateConfig } from '../services/api';
+import { invalidateConfigDependents } from '../utils/invalidate';
 import TradeChart from '../components/TradeChart';
 import BacktestReplay from '../components/BacktestReplay';
 import RunReport from '../components/RunReport';
@@ -1873,6 +1874,57 @@ export default function Backtester() {
       use_measured_params: (edited ? item.use_measured_params : undefined) ?? (saved?.use_measured_params !== false),
     };
   };
+  // Save the portfolio rows as the slots in Settings - the slots live trades and
+  // both backtesters start from. A row whose symbol + strategy already has a slot
+  // updates that slot's parameters and risk (its on/off switch is kept); a new
+  // pairing is added switched OFF, so saving a backtest never starts live
+  // trading on its own. Slots that are not in the rows are left alone.
+  const [slotSaveMsg, setSlotSaveMsg] = useState('');
+  const saveRowsAsSlots = async () => {
+    const existing = userCfg?.config?.instrument_slots || [];
+    const next = existing.map(sl => ({ ...sl }));
+    let updated = 0;
+    let added = 0;
+    const newId = () => (crypto?.randomUUID?.() || Math.random().toString(16).slice(2).padEnd(12, '0'))
+      .replace(/-/g, '').slice(0, 12);
+    portfolioSymbols.forEach(item => {
+      const row = portfolioRowSlot(item);
+      const patch = {
+        strategy_params: row.strategy_params || {},
+        risk: row.risk || {},
+        use_measured_params: row.use_measured_params,
+        ...(item.tp1_rr != null ? { tp1_rr: item.tp1_rr } : {}),
+      };
+      const k = next.findIndex(sl => String(sl.symbol || '').toUpperCase() === String(row.symbol || '').toUpperCase()
+        && sl.strategy_id === row.strategy_id);
+      if (k >= 0) {
+        next[k] = { ...next[k], ...patch };
+        updated += 1;
+      } else {
+        next.push({ slot_id: newId(), symbol: row.symbol, strategy_id: row.strategy_id, enabled: false, ...patch });
+        added += 1;
+      }
+    });
+    const ok = window.confirm(
+      `Save these ${portfolioSymbols.length} rows to your slots in Settings?\n\n`
+      + `${updated} existing slot(s) take these parameters and risk settings - if a slot is enabled, the bot trades them from now on.\n`
+      + `${added} new slot(s) are added switched OFF; turn them on in Settings > Strategy to trade them.\n\n`
+      + 'Slots that are not in these rows are not changed.');
+    if (!ok) return;
+    const enabled = next.filter(sl => sl.enabled !== false);
+    const symbols = [...new Set(enabled.map(sl => sl.symbol))];
+    const legacy = symbols.map(sym => ({ symbol: sym, strategy_id: enabled.find(sl => sl.symbol === sym).strategy_id, enabled: true }));
+    try {
+      await updateConfig({ config: { instrument_slots: next, instrument_settings: legacy, symbols } });
+      invalidateConfigDependents(queryClient);
+      // The rows now ARE their slots: read them from Settings from here on.
+      setPortfolioSymbols(rows => rows.map(r => ({ symbol: r.symbol, strategy_id: r.strategy_id, tp1_rr: r.tp1_rr })));
+      setSlotSaveMsg(`Saved: ${updated} slot(s) updated, ${added} added (off).`);
+    } catch (e) {
+      setSlotSaveMsg(`Not saved: ${e?.response?.data?.detail || e?.message || e}`);
+    }
+    setTimeout(() => setSlotSaveMsg(''), 8000);
+  };
   const savedSlotRows = () => (userCfg?.config?.instrument_slots || [])
     .filter(sl => sl && sl.symbol && sl.strategy_id && sl.enabled !== false)
     .map(sl => ({ symbol: sl.symbol, strategy_id: sl.strategy_id }));
@@ -2366,6 +2418,9 @@ export default function Backtester() {
                   <button className="btn btn-sm btn-ghost" disabled={!savedSlotRows().length}
                     title="Replace the rows with the slots saved in Settings, each with its own parameters and risk"
                     onClick={() => setPortfolioSymbols(savedSlotRows())}>Use my saved slots</button>
+                  <button className="btn btn-sm btn-ghost" disabled={!portfolioSymbols.length || !userCfg?.config}
+                    title="Save every row's parameters and risk to the matching slot in Settings (new pairings are added switched off)"
+                    onClick={saveRowsAsSlots}><Save size={14} style={{ marginRight: 4 }} /> Save rows as my slots</button>
                   <button className="btn btn-sm btn-ghost" onClick={addPortfolioSymbol}><PlusCircle size={14} style={{ marginRight: 4 }} /> Add</button>
                 </span>
               </div>
@@ -2403,6 +2458,11 @@ export default function Backtester() {
                   />
                 ))}
               </div>
+              {slotSaveMsg && (
+                <p style={{ fontSize: '0.8rem', marginTop: 8, color: slotSaveMsg.startsWith('Saved') ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)' }}>
+                  {slotSaveMsg}
+                </p>
+              )}
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 12 }}>
                 Every row is its own slot: its own strategy parameters, its own risk engine and its
                 own limits. Nothing a row sets can use up or trip another row&apos;s budget. Rows

@@ -212,6 +212,10 @@ def test_backtester_runs_the_saved_slots_parameters_not_form_defaults():
     assert "risk: (edited ? item.risk : undefined) ?? slotRiskOf(saved)," in js
     assert "slot={portfolioRowSlot(item)}" in js
     assert "Use my saved slots" in js
+    # rows can be saved back as slots; a NEW pairing never starts trading by itself
+    assert "Save rows as my slots" in js
+    assert "symbol: row.symbol, strategy_id: row.strategy_id, enabled: false, ...patch" in js
+    assert "window.confirm(" in js
     # the global blocks must not come back: they were shared by every symbol
     for block in ("apa", "vwap", "orb", "drift_jump_alpha", "boom_drift_jump"):
         assert f"merged.{block} = " not in js,             f"{block} is a per-slot parameter now — a global block would be shared by every symbol again"
