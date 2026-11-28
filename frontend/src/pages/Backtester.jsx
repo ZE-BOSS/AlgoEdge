@@ -1489,6 +1489,9 @@ export default function Backtester() {
 
   const portfolioMutation = useMutation({
     mutationFn: () => {
+      // The account-level risk comes from Settings (runForm, below), as it does
+      // for a single run - not from values this page remembered on a first visit.
+      const form = runForm;
       cancelResultLoad();
       applyFreshResult(null);
       setEvents([]);
@@ -1968,6 +1971,16 @@ export default function Backtester() {
     return merged;
   }, []);
 
+  // The form a run is built from: this page's own fields (dates, balance, costs,
+  // prop-firm mode) plus the account-level risk SAVED IN SETTINGS. The page has
+  // no input for risk per trade, the hard cap, drawdown limits or the sizing
+  // basis, so the values it remembered from a first visit used to be sent
+  // instead: Settings said 10%, a portfolio run went out at 5% with a 5.5% cap
+  // (28 Nov 2026). A row's own risk (its slot) still overrides this per row.
+  const runForm = userCfg?.config
+    ? { ...withLiveConfig(form, userCfg.config), prop_firm: form.prop_firm }
+    : form;
+
   // Seed from the live settings on a FIRST visit only, so a first backtest runs
   // what the bot runs. Afterwards the Backtester keeps its own saved settings:
   // this used to run on every mount and replaced whatever the user had set with
@@ -2137,7 +2150,7 @@ export default function Backtester() {
       // slot's own values (slot_risk) are layered on top by the backend.
       const acct = userCfg?.config?.risk || {};
       const payload = {
-        ...form,
+        ...runForm,
         risk_per_trade_pct: acct.risk_per_trade_pct ?? form.risk_per_trade_pct,
         max_risk_hard_cap_pct: acct.max_risk_hard_cap_pct ?? form.max_risk_hard_cap_pct,
         min_rr: acct.min_rr ?? form.min_rr,
@@ -2267,20 +2280,20 @@ export default function Backtester() {
 
   const riskWarnings = useMemo(() => {
     const w = [];
-    if (form.risk_per_trade_pct > form.max_risk_hard_cap_pct) {
-      w.push(`Risk Per Trade (${form.risk_per_trade_pct}%) > Max Risk Hard Cap (${form.max_risk_hard_cap_pct}%). Trades will be capped.`);
+    if (runForm.risk_per_trade_pct > runForm.max_risk_hard_cap_pct) {
+      w.push(`Risk Per Trade (${runForm.risk_per_trade_pct}%) > Max Risk Hard Cap (${runForm.max_risk_hard_cap_pct}%). Trades will be capped.`);
     }
-    if (form.max_daily_drawdown_pct < form.max_risk_hard_cap_pct) {
-      w.push(`Max Daily Drawdown (${form.max_daily_drawdown_pct}%) < Max Risk Hard Cap (${form.max_risk_hard_cap_pct}%). This may cause immediate daily halts.`);
+    if (runForm.max_daily_drawdown_pct < runForm.max_risk_hard_cap_pct) {
+      w.push(`Max Daily Drawdown (${runForm.max_daily_drawdown_pct}%) < Max Risk Hard Cap (${runForm.max_risk_hard_cap_pct}%). This may cause immediate daily halts.`);
     }
     if (form.prop_firm?.account_mode === 'prop_firm') {
       const mode = form.prop_firm.challenge_type;
       const target = form.target_profit_enabled ? form.max_daily_profit : null;
-      if (mode === '1-step' && form.max_daily_drawdown_pct > 4.0) w.push('1-Step Challenge Max Daily DD > 4.0% may violate generic trailing DD rules.');
-      if (mode === '2-step' && form.max_daily_drawdown_pct > 5.0) w.push('2-Step Challenge Max Daily DD > 5.0% may violate generic static DD rules.');
+      if (mode === '1-step' && runForm.max_daily_drawdown_pct > 4.0) w.push('1-Step Challenge Max Daily DD > 4.0% may violate generic trailing DD rules.');
+      if (mode === '2-step' && runForm.max_daily_drawdown_pct > 5.0) w.push('2-Step Challenge Max Daily DD > 5.0% may violate generic static DD rules.');
     }
     return w;
-  }, [form]);
+  }, [form, runForm]);
 
   return (<>
     <div className="page-header"><h2><FlaskConical size={22} style={{ display: 'inline', marginRight: 8 }} />Backtester</h2><p>Test strategies with independent risk parameters</p></div>
@@ -2466,7 +2479,11 @@ export default function Backtester() {
               to the account defaults on Settings > Risk, exactly as live resolves it. */}
           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
             Risk, targets, break-even and trailing come from the slot{activeTab === 'single' ? ' above' : ' on each row'};
-            anything it does not set uses the account defaults in Settings &gt; Risk.
+            anything it does not set uses the account defaults in Settings &gt; Risk
+            {userCfg?.config?.risk ? (
+              <>: <b style={{ color: 'var(--text-primary)' }}>{runForm.risk_per_trade_pct}% per trade</b>, hard cap {runForm.max_risk_hard_cap_pct}%,
+                sizing {runForm.sizing_basis}, daily drawdown limit {runForm.max_daily_drawdown_pct}%.</>
+            ) : <span style={{ color: 'var(--yellow)' }}> (not loaded - sign in to this server to use them).</span>}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
